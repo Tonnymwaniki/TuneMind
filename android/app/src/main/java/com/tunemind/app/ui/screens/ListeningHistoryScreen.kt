@@ -182,7 +182,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(filtered, key = { it.canonicalTrackId }) { track ->
+                items(filtered, key = { it.entryId }) { track ->
                     val appName = track.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Music"
                     val appColor = when {
                         track.sourcePackage?.contains("spotify") == true -> Color(0xFF1DB954)
@@ -257,15 +257,16 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                     }
 
                                     Text(
-                                        text = "${track.appearanceCount} plays",
+                                        text = "${track.distinctAppearanceCount} plays",
                                         fontSize = 10.sp,
                                         fontFamily = FontFamily.Monospace,
                                         color = Color(0xFF64748B)
                                     )
 
-                                    if (track.lastObservedAppearanceAtMs > 0) {
+                                    val lastMs = track.lastObservedAppearanceAtMs
+                                    if (lastMs != null && lastMs > 0) {
                                         Text(
-                                            text = fmt.format(Date(track.lastObservedAppearanceAtMs)),
+                                            text = fmt.format(Date(lastMs)),
                                             fontSize = 10.sp,
                                             color = Color(0xFF64748B)
                                         )
@@ -276,18 +277,18 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                             // Satiety delta indicator
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = if (track.appearanceCount > 4) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
+                                color = if (track.distinctAppearanceCount > 4) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
                                 border = androidx.compose.foundation.BorderStroke(
                                     1.dp,
-                                    if (track.appearanceCount > 4) Color(0xFFEF4444).copy(alpha = 0.3f) else Color(0xFF10B981).copy(alpha = 0.3f)
+                                    if (track.distinctAppearanceCount > 4) Color(0xFFEF4444).copy(alpha = 0.3f) else Color(0xFF10B981).copy(alpha = 0.3f)
                                 )
                             ) {
                                 Text(
-                                    text = if (track.appearanceCount > 4) "+0.72 Vel" else "+0.28 Vel",
+                                    text = if (track.distinctAppearanceCount > 4) "+0.72 Vel" else "+0.28 Vel",
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (track.appearanceCount > 4) Color(0xFFF87171) else Color(0xFF34D399),
+                                    color = if (track.distinctAppearanceCount > 4) Color(0xFFF87171) else Color(0xFF34D399),
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                 )
                             }

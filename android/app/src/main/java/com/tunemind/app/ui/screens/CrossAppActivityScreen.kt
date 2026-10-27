@@ -46,16 +46,16 @@ fun CrossAppActivityScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by vm.crossAppState.collectAsState()
-    var isNotificationAccessGranted by remember { mutableStateOf(NotificationAccess.isGranted(context)) }
+    var isNotificationAccessGranted by remember { mutableStateOf<Boolean>(NotificationAccess.isEnabled(context)) }
     var testBroadcastingStatus by remember { mutableStateOf<String?>(null) }
     var localBufferedCount by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
         vm.refreshCrossAppData()
-        isNotificationAccessGranted = NotificationAccess.isGranted(context)
+        isNotificationAccessGranted = NotificationAccess.isEnabled(context)
         withContext(Dispatchers.IO) {
             val db = TuneMindDatabase.getInstance(context)
-            localBufferedCount = db.eventQueueDao().count()
+            localBufferedCount = db.eventQueueDao().unsyncedCount()
         }
     }
 
@@ -280,21 +280,21 @@ fun CrossAppActivityScreen(
                             val now = System.currentTimeMillis()
                             val eventId = UUID.randomUUID().toString()
                             val payload = """
-                                {"event_id":"$eventId","media_source":"com.spotify.music","event_type":"TRACK_STARTED","occurred_at":"$now","track":{"title":"Espresso","artist":"Sabrina Carpenter","album":"Short n' Sweet","duration_seconds":175,"bpm":104}}
+                                {"event_id":"$eventId","media_source":"com.spotify.music","event_type":"METADATA_CHANGED","occurred_at":"$now","track":{"title":"Espresso","artist":"Sabrina Carpenter","album":"Short n' Sweet","duration_seconds":175,"bpm":104}}
                             """.trimIndent()
                             db.eventQueueDao().insert(
                                 EventQueueEntity(
                                     eventId = eventId,
-                                    mediaSource = "com.spotify.music",
-                                    eventType = ObservationEventType.TRACK_STARTED.name,
                                     payloadJson = payload,
-                                    occurredAt = now
+                                    synced = false,
+                                    eventTimeMs = now,
+                                    savedAtMs = now
                                 )
                             )
                             SyncScheduler.schedule(context)
                             withContext(Dispatchers.Main) {
                                 testBroadcastingStatus = "Broadcasted test track 'Espresso' & triggered sync!"
-                                localBufferedCount = db.eventQueueDao().count()
+                                localBufferedCount = db.eventQueueDao().unsyncedCount()
                             }
                         }
                     },
