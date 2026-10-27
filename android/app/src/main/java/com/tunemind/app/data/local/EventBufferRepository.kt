@@ -29,6 +29,6 @@ class EventBufferRepository(private val dao: EventQueueDao) {
     suspend fun clear() = dao.clearAll()
 
     companion object {
-        const val MAX_OBSERVATIONS = 500
+        const val MAX_OBSERVATIONS = 10_000
     }
 }
