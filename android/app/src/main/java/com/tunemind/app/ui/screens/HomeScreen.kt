@@ -87,6 +87,12 @@ fun HomeScreen(
         ?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
     val isLiveObserved = nowPlaying != null || latestRealTrack != null
 
+    LaunchedEffect(Unit) {
+        vm.rebindListener()
+    }
+
+    val isListenerBound = com.tunemind.app.service.TuneMindListenerService.isConnected
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -95,6 +101,34 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!isListenerBound) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF451A03).copy(alpha = 0.6f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Android Listener Disconnected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
+                        Text("Tap Rebind or toggle Notification Access in Settings.", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                    }
+                    Button(
+                        onClick = { vm.rebindListener() },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color(0xFF020617)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("Rebind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         // Top Live Audio Session Pill
         Row(
             modifier = Modifier.fillMaxWidth(),

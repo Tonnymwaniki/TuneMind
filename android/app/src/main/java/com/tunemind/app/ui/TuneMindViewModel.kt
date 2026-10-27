@@ -376,6 +376,18 @@ class TuneMindViewModel : ViewModel() {
     fun skipPrev() {
         com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
     }
+
+    fun rebindListener() {
+        val ctx = AppHolder.context ?: return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            try {
+                android.service.notification.NotificationListenerService.requestRebind(
+                    android.content.ComponentName(ctx, com.tunemind.app.service.TuneMindListenerService::class.java)
+                )
+            } catch (_: Exception) {}
+        }
+        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
+    }
 }
 
 object AppHolder {

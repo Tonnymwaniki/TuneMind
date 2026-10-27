@@ -91,6 +91,19 @@ class MediaSessionObserver(
         controllers.values.firstOrNull()?.controller?.transportControls?.skipToPrevious()
     }
 
+    fun refreshSessions() {
+        if (!started) {
+            start()
+            return
+        }
+        try {
+            val active = manager.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
+            reconcile(active)
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshSessions error: ${e.message}")
+        }
+    }
+
     fun stop() {
         if (!started && controllers.isEmpty()) return
         started = false
