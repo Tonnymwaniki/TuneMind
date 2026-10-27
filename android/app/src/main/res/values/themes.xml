@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TuneMind" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/tunemind_accent</item>
+        <item name="colorPrimaryVariant">@color/tunemind_accent_dim</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/tunemind_cyan</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:colorBackground">@color/tunemind_bg</item>
+        <item name="colorSurface">@color/tunemind_surface_l1</item>
+        <item name="colorOnSurface">@color/tunemind_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/tunemind_text_secondary</item>
+        <item name="android:statusBarColor">@color/tunemind_bg</item>
+        <item name="android:navigationBarColor">@color/tunemind_bg</item>
+    </style>
+
+    <style name="Widget.TuneMind.Card" parent="Widget.MaterialComponents.CardView">
+        <item name="cardBackgroundColor">@color/tunemind_card</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeColor">@color/tunemind_card_border</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="contentPadding">0dp</item>
+    </style>
+
+    <style name="Widget.TuneMind.Card.Interactive" parent="Widget.TuneMind.Card">
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+    </style>
+
+    <style name="Widget.TuneMind.Button" parent="Widget.MaterialComponents.Button">
+        <item name="backgroundTint">@color/tunemind_accent</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textFontWeight">600</item>
+    </style>
+
+    <style name="Widget.TuneMind.Button.Outline" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="strokeColor">@color/tunemind_card_border</item>
+        <item name="android:textColor">@color/tunemind_text_secondary</item>
+        <item name="cornerRadius">12dp</item>
+    </style>
+
+    <style name="Widget.TuneMind.Tab" parent="Widget.MaterialComponents.TabLayout">
+        <item name="tabTextColor">@color/tunemind_text_muted</item>
+        <item name="tabSelectedTextColor">@color/tunemind_accent</item>
+        <item name="tabIndicatorColor">@color/tunemind_accent</item>
+        <item name="tabIndicatorHeight">2dp</item>
+        <item name="tabBackground">@color/tunemind_surface_l1</item>
+    </style>
+
+    <style name="Widget.TuneMind.Chip" parent="Widget.MaterialComponents.Chip.Choice">
+        <item name="chipBackgroundColor">@color/tunemind_surface_l1</item>
+        <item name="chipStrokeColor">@color/tunemind_card_border</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="android:textColor">@color/tunemind_text_secondary</item>
+        <item name="chipCornerRadius">8dp</item>
+    </style>
+
+    <style name="Text.TuneMind.Headline" parent="TextAppearance.MaterialComponents.Headline6">
+        <item name="android:textColor">@color/tunemind_text_primary</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <style name="Text.TuneMind.Metric" parent="TextAppearance.MaterialComponents.Headline4">
+        <item name="android:textColor">@color/tunemind_text_primary</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <style name="Text.TuneMind.Label" parent="TextAppearance.MaterialComponents.Caption">
+        <item name="android:textColor">@color/tunemind_text_muted</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:textAllCaps">true</item>
+    </style>
+
+    <style name="Text.TuneMind.Body" parent="TextAppearance.MaterialComponents.Body2">
+        <item name="android:textColor">@color/tunemind_text_secondary</item>
+        <item name="android:lineHeight">20sp</item>
+    </style>
+</resources>

@@ -1,0 +1,50 @@
+# ─── Android ───────────────────────────────────────────────────────────────
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+android/**/*.apk
+android/**/*.ap_
+android/**/*.aab
+android/.idea/
+android/captures/
+android/app/release/
+
+# ─── Node.js / Backend ─────────────────────────────────────────────────────
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/*.js.map
+
+# ─── Environment / secrets ─────────────────────────────────────────────────
+*.env
+*.env.local
+.env.*
+!.env.example
+!backend/.env.example
+
+# ─── Local databases / signing material ────────────────────────────────────
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.jks
+*.keystore
+
+# ─── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── IDEs ──────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*~
+
+# Java heap dumps
+*.hprof

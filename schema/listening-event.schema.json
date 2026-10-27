@@ -1,0 +1,160 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tunemind.app/schema/listening-event/1.0",
+  "title": "ListeningEvent",
+  "description": "A raw, directly observed playback state change recorded by the Android application. No inferences are stored here.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "userId",
+    "sessionId",
+    "deviceId",
+    "schemaVersion",
+    "eventType",
+    "occurredAt",
+    "mediaSource",
+    "playback"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4, device-generated. Uniquely identifies this event."
+    },
+    "userId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifies the user. Set by the application after authentication is implemented."
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Groups observations within one continuous TuneMind listener session (from onListenerConnected to onListenerDisconnected)."
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Anonymised stable device identifier. Not a hardware ID."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version. Increment when breaking changes are made to this schema."
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "PLAYBACK_STATE_CHANGED",
+        "METADATA_CHANGED",
+        "SESSION_CREATED",
+        "SESSION_DESTROYED",
+        "OBSERVATION_STARTED",
+        "OBSERVATION_STOPPED"
+      ],
+      "description": "The type of raw observation. These are what the MediaController.Callback directly reports — not inferred concepts like SKIP or PAUSE."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp from the device wall clock (System.currentTimeMillis). May have clock skew relative to server time."
+    },
+    "receivedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Server-side receipt timestamp. Set by the backend, not the client. Used to detect and measure device clock skew."
+    },
+    "mediaSource": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Package name of the media application whose session was observed (e.g. 'com.spotify.music'). Never assumed to be a specific application."
+    },
+    "track": {
+      "type": ["object", "null"],
+      "description": "Track metadata at the time of this observation. Null if the media source does not expose it.",
+      "additionalProperties": false,
+      "properties": {
+        "trackId": {
+          "type": ["string", "null"],
+          "description": "Source-app-specific track identifier, if exposed via MediaMetadata."
+        },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Track title from MediaMetadata.METADATA_KEY_TITLE."
+        },
+        "artist": {
+          "type": ["string", "null"],
+          "description": "Artist name from MediaMetadata.METADATA_KEY_ARTIST."
+        },
+        "album": {
+          "type": ["string", "null"],
+          "description": "Album name from MediaMetadata.METADATA_KEY_ALBUM."
+        },
+        "durationMs": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Reported track duration in milliseconds from MediaMetadata.METADATA_KEY_DURATION. Null or 0 if not exposed."
+        }
+      }
+    },
+    "playback": {
+      "type": "object",
+      "description": "Playback state at the exact moment of this observation.",
+      "required": ["isPlaying"],
+      "additionalProperties": false,
+      "properties": {
+        "positionMs": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Last reported playback position in milliseconds from PlaybackState.getPosition(). Null when unavailable. This is NOT a live continuously-updated value."
+        },
+        "elapsedRealtimeMs": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Value of SystemClock.elapsedRealtime() at the moment this observation was recorded. Null when unavailable. Used with positionMs and playbackSpeed to estimate the true playback position at any subsequent time."
+        },
+        "isPlaying": {
+          "type": "boolean",
+          "description": "True if the PlaybackState indicates active playback (STATE_PLAYING)."
+        },
+        "playbackSpeed": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Playback speed from PlaybackState.getPlaybackSpeed(). Null when unavailable. 1.0 = normal speed."
+        },
+        "playbackStateCode": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Raw Android PlaybackState.STATE_* integer (0=NONE, 1=STOPPED, 2=PAUSED, 3=PLAYING). Null when unavailable. Preserved alongside the derived isPlaying boolean."
+        }
+      }
+    },
+    "previousTrack": {
+      "type": ["object", "null"],
+      "description": "For METADATA_CHANGED events only: a snapshot of the previous track state at the moment the track changed. Null for all other event types. Used by the backend to estimate completion percentage without the device performing any inference.",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": ["string", "null"]
+        },
+        "artist": {
+          "type": ["string", "null"]
+        },
+        "durationMs": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "positionMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Last reported position of the previous track at the moment it was abandoned."
+        },
+        "elapsedRealtimeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "SystemClock.elapsedRealtime() at abandonment. Use with positionMs and playback speed to estimate completion."
+        }
+      }
+    }
+  }
+}

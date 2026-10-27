@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/tunemind_bg">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:padding="16dp" android:clipToPadding="false"
+        app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Song Fatigue Research" />
+                    <TextView style="@style/Text.TuneMind.Body" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="Song fatigue is not currently detected by TuneMind. This screen shows what would be required to assess it.\n\nCurrent evidence: recurrence signals and temporal dynamics track how often tracks appear. A declining signal does not prove fatigue — it may reflect changed listening habits, observation gaps, or other factors." />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Requirements for Fatigue Detection" />
+                    <TextView style="@style/Text.TuneMind.Body" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="• Validated fatigue model\n• Sufficient longitudinal data per track\n• Controlled listening conditions\n• User-reported fatigue labels for calibration\n• Ability to distinguish genuine fatigue from observation gaps\n\nNone of these are currently implemented." />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card.Interactive"
+                android:id="@+id/card_profile" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="View Current Evidence" />
+                    <TextView style="@style/Text.TuneMind.Body" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" android:text="Explore recurrence signals and temporal dynamics in Music Profile." />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>

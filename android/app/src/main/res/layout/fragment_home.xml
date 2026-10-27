@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/tunemind_bg">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:padding="16dp" android:clipToPadding="false"
+        app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:paddingBottom="16dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="TuneMind" android:textSize="12sp"
+                    android:textColor="@color/tunemind_text_muted"
+                    android:textAllCaps="true" android:letterSpacing="0.12" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Listening Intelligence" android:textSize="22sp"
+                    android:textColor="@color/tunemind_text_primary"
+                    android:fontFamily="sans-serif-medium" />
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Listening Overview" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp" android:orientation="horizontal">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:orientation="vertical" android:gravity="center">
+                            <TextView android:id="@+id/tv_identified" style="@style/Text.TuneMind.Metric"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="--" android:textColor="@color/tunemind_accent" />
+                            <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp" android:text="Tracks" />
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:orientation="vertical" android:gravity="center">
+                            <TextView android:id="@+id/tv_appearances" style="@style/Text.TuneMind.Metric"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="--" android:textColor="@color/tunemind_cyan" />
+                            <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp" android:text="Appearances" />
+                        </LinearLayout>
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:orientation="vertical" android:gravity="center">
+                            <TextView android:id="@+id/tv_recurring" style="@style/Text.TuneMind.Metric"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="--" android:textColor="@color/tunemind_green" />
+                            <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp" android:text="Recurring" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card.Interactive"
+                android:id="@+id/card_recent" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Recent Activity" />
+                    <TextView android:id="@+id/tv_recent" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:textColor="@color/tunemind_text_secondary"
+                        android:textSize="13sp" android:lineHeight="20sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card.Interactive"
+                android:id="@+id/card_coverage" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Observation Coverage" />
+                    <TextView android:id="@+id/tv_coverage" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:textColor="@color/tunemind_text_secondary"
+                        android:textSize="13sp" android:lineHeight="18sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView style="@style/Widget.TuneMind.Card.Interactive"
+                android:id="@+id/card_study" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:padding="16dp">
+                    <TextView style="@style/Text.TuneMind.Label" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="7-Day Study" />
+                    <TextView android:id="@+id/tv_study" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:textColor="@color/tunemind_text_secondary" android:textSize="13sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tunemind.app/schema/raw-listening-observation/1.0",
+  "title": "Raw Listening Observation v1",
+  "description": "Local Android capture record. This is not the backend ingestion payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "eventId", "observerSessionId", "eventType", "eventTimeMs",
+    "savedAtMs", "sourcePackage", "trackTitle", "trackArtist", "trackAlbum",
+    "trackId", "durationMs", "playbackStateCode", "positionMs", "playbackSpeed",
+    "positionUpdateElapsedRealtimeMs"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "eventId": { "type": "string", "format": "uuid", "description": "Random UUID assigned to one accepted local observation." },
+    "observerSessionId": { "type": "string", "format": "uuid", "description": "Random per-listener-connection grouping identifier; not a user or device ID." },
+    "eventType": {
+      "type": "string",
+      "enum": ["PLAYBACK_STATE_CHANGED", "METADATA_CHANGED", "SESSION_CREATED", "SESSION_DESTROYED", "OBSERVATION_STARTED", "OBSERVATION_STOPPED"]
+    },
+    "eventTimeMs": { "type": "integer", "description": "Device wall-clock milliseconds sampled when TuneMind accepts the callback." },
+    "savedAtMs": { "type": ["integer", "null"], "description": "Device wall-clock milliseconds sampled by the local repository before insertion; null before saving." },
+    "sourcePackage": { "type": ["string", "null"], "description": "Package name reported by MediaController." },
+    "trackTitle": { "type": ["string", "null"], "description": "Directly reported MediaMetadata title." },
+    "trackArtist": { "type": ["string", "null"], "description": "Directly reported MediaMetadata artist." },
+    "trackAlbum": { "type": ["string", "null"], "description": "Directly reported MediaMetadata album." },
+    "trackId": { "type": ["string", "null"], "description": "Directly reported MediaMetadata media ID; provider-specific." },
+    "durationMs": { "type": ["integer", "null"], "description": "Directly reported nonnegative MediaMetadata duration in milliseconds." },
+    "playbackStateCode": { "type": ["integer", "null"], "description": "Raw Android PlaybackState.STATE_* integer; null when PlaybackState is unavailable." },
+    "positionMs": { "type": ["integer", "null"], "description": "Last position reported in PlaybackState; not continuously updated or estimated." },
+    "playbackSpeed": { "type": ["number", "null"], "description": "Finite speed reported by PlaybackState." },
+    "positionUpdateElapsedRealtimeMs": { "type": ["integer", "null"], "description": "Source-reported PlaybackState.lastPositionUpdateTime on Android elapsed-realtime clock; not TuneMind callback time." }
+  }
+}

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TuneMind</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_history">History</string>
+    <string name="nav_patterns">Patterns</string>
+    <string name="nav_study">Study</string>
+    <string name="home_title">TuneMind</string>
+    <string name="home_subtitle">Understand how your listening patterns change over time</string>
+    <string name="home_listening_overview">Listening Overview</string>
+    <string name="home_identified_tracks">Identified tracks</string>
+    <string name="home_distinct_appearances">Distinct appearances</string>
+    <string name="home_recurring_identities">Recurring identities</string>
+    <string name="home_recent_tracks">Recently observed</string>
+    <string name="home_no_data">No listening data yet. Enable Notification Access and play music from a supported app.</string>
+    <string name="home_study_preview">Study</string>
+    <string name="home_study_not_started">Your listening study hasn\'t started yet.</string>
+    <string name="home_study_ready">A 7-day study will analyze how your listening patterns evolve.</string>
+    <string name="home_evidence_quality">Data Quality</string>
+    <string name="history_title">Listening History</string>
+    <string name="history_empty">No identified tracks yet. Listening data will appear here after playback is observed.</string>
+    <string name="patterns_title">Listening Patterns</string>
+    <string name="patterns_empty">Pattern analysis will appear here after enough listening data is collected.</string>
+    <string name="patterns_disclaimer">These metrics describe recorded observations. They do not measure preference, attention, or fatigue.</string>
+    <string name="study_title">7-Day Study</string>
+    <string name="study_not_started">Your 7-day listening study hasn\'t started yet.</string>
+    <string name="study_description">A study tracks how your listening patterns evolve over a week. Start when you\'re ready.</string>
+    <string name="settings_title">Settings</string>
+    <string name="debug_title">Developer Tools</string>
+    <string name="notification_access">Notification Access</string>
+    <string name="notification_access_description">TuneMind needs notification access to observe media playback.</string>
+    <string name="grant_access">Grant Access</string>
+    <string name="listener_status">Listener</string>
+    <string name="listener_connected">Connected</string>
+    <string name="listener_disconnected">Not connected</string>
+</resources>

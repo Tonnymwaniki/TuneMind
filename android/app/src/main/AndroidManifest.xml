@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        TuneMind is a passive observer of media sessions from other applications.
+        It does NOT play audio itself.
+
+        Permissions declared here are for the observer role only.
+        NotificationListenerService binding is granted by the user through
+        Settings → Notification Access — it cannot be requested programmatically.
+    -->
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TuneMind"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.TuneMind"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.debug.DebugActivity"
+            android:exported="false"
+            android:theme="@style/Theme.TuneMind" />
+
+        <!--
+            TuneMindListenerService: NotificationListenerService
+            The system binds this service when the user grants Notification Access.
+            It is NOT started by our code — lifecycle is controlled by the Android
+            notification framework.
+
+            Observes media sessions only while the user grants Notification Access.
+        -->
+        <service
+            android:name=".service.TuneMindListenerService"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>
