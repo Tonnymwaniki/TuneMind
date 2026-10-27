@@ -34,11 +34,15 @@ class TuneMindListenerService : NotificationListenerService() {
             serviceScope.launch {
                 SyncScheduler.schedule(this@TuneMindListenerService)
             }
-            // Also store in experiment storage if an experiment is active
+            // Ensure 7-day study is active and store observation with zero loss
             serviceScope.launch {
-                val exp = experimentRepo.getExperiment()
-                if (exp != null && exp.status == ExperimentStatus.ACTIVE.name) {
-                    val windowEnd = exp.endDateMs ?: return@launch
+                var exp = experimentRepo.getExperiment()
+                if (exp == null || exp.status == ExperimentStatus.NOT_STARTED.name) {
+                    exp = experimentRepo.start(this@TuneMindListenerService)
+                    Log.i(TAG, "Auto-started 7-day listening study from today: ${exp.experimentId}")
+                }
+                if (exp.status == ExperimentStatus.ACTIVE.name) {
+                    val windowEnd = exp.endDateMs ?: (System.currentTimeMillis() + 7L * 86_400_000L)
                     if (observation.eventTimeMs > 0L && observation.eventTimeMs <= windowEnd) {
                         experimentRepo.recordObservation(observation, exp.experimentId)
                     }

@@ -450,6 +450,96 @@ fun HomeScreen(
             }
         }
 
+        // Live 7-Day Neuro-Acoustic Study Tracker
+        val studyState by vm.studyState.collectAsState()
+        val elapsedDays = studyState.startDateMs?.let { start ->
+            val elapsed = System.currentTimeMillis() - start
+            (elapsed / 86_400_000f).coerceIn(0f, 7f)
+        } ?: 0f
+        val currentDayNumber = (elapsedDays + 1).toInt().coerceAtMost(7)
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth().clickable { onOpenStudy() }
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(PrimaryViolet.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.DateRange, contentDescription = null, tint = PrimaryVioletBright, modifier = Modifier.size(20.dp))
+                        }
+                        Column {
+                            Text(
+                                text = "7-DAY NEURO STUDY ACTIVE",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = PrimaryVioletBright,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Day $currentDayNumber of 7 Continuous Capture",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1E293B)
+                    ) {
+                        Text(
+                            text = "${studyState.observationCount} Events",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentCyanBright,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                LinearProgressIndicator(
+                    progress = { (currentDayNumber / 7f).coerceIn(0.14f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                    color = PrimaryViolet,
+                    trackColor = Color(0xFF1E293B)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Storing raw playback timestamps into local Room DB",
+                        fontSize = 10.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text(
+                        text = "Study Details →",
+                        fontSize = 11.sp,
+                        color = AccentCyanBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
         // High Satiety Velocity (Impending Fatigue list)
         Row(
             modifier = Modifier.fillMaxWidth(),
