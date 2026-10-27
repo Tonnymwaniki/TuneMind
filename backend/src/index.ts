@@ -13,8 +13,8 @@ import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 
 const app = express();
-const PORT = process.env['PORT'] ? parseInt(process.env['PORT'], 10) : 3000;
-const HOST = process.env['HOST'] ?? '127.0.0.1';
+const PORT = 3000;
+const HOST = '0.0.0.0';
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '1mb' }));

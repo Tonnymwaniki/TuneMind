@@ -1,0 +1,8 @@
+{
+  "name": "TuneMind",
+  "description": "Personal music intelligence platform that learns how an individual listener interacts with music over time, monitoring song fatigue, satiety, auditory anchors, and circadian receptivity.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
