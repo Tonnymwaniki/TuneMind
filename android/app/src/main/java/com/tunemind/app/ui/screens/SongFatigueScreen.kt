@@ -281,7 +281,7 @@ fun SongFatigueScreen(
                             Button(
                                 onClick = {
                                     watchlistTracks = watchlistTracks.filter { it.id != track.id }
-                                    restingTracks = restingTracks + track.copy(cooldownDaysRemaining = 5)
+                                    restingTracks = restingTracks + track.copy(cooldownDaysRemaining = 5f)
                                     snackbarMessage = "Quarantined '${track.title}' to Cooldown Vault for 5 days."
                                 },
                                 shape = RoundedCornerShape(8.dp),
@@ -345,10 +345,10 @@ fun SongFatigueScreen(
                             }
 
                             // Receptor Recovery Progress
-                            val recoveryProgress = 1f - (track.cooldownDaysRemaining.toFloat() / 7f)
+                            val recoveryProgress = 1f - (track.cooldownDaysRemaining / 7f)
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("Receptor Recovery ($e^-0.18t)", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
+                                    Text("Receptor Recovery (e^-0.18t)", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
                                     Text("${(recoveryProgress * 100).toInt()}% restored", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = AccentGreen)
                                 }
                                 LinearProgressIndicator(
@@ -406,7 +406,7 @@ fun SongFatigueScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(cleanser.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 Text("${cleanser.artist} • ${cleanser.genre}", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                                Text(cleanser.effect, fontSize = 11.sp, color = AccentCyanBright)
+                                Text(cleanser.fatigueCategory, fontSize = 11.sp, color = AccentCyanBright)
                             }
 
                             Surface(
