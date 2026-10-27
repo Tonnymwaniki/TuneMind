@@ -6,7 +6,6 @@
     <!--
         TuneMind is a passive observer of media sessions from other applications.
         It does NOT play audio itself.
-
         Permissions declared here are for the observer role only.
         NotificationListenerService binding is granted by the user through
         Settings → Notification Access — it cannot be requested programmatically.
@@ -34,16 +33,21 @@
         </activity>
 
         <activity
-            android:name=".ui.debug.DebugActivity"
-            android:exported="false"
-            android:theme="@style/Theme.TuneMind" />
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.TuneMind"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!--
             TuneMindListenerService: NotificationListenerService
             The system binds this service when the user grants Notification Access.
             It is NOT started by our code — lifecycle is controlled by the Android
             notification framework.
-
             Observes media sessions only while the user grants Notification Access.
         -->
         <service

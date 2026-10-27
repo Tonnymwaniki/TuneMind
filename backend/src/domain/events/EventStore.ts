@@ -1,9 +1,13 @@
 /**
- * EventStore — In-memory persistence for accepted ListeningEvents.
+ * EventStore — Persistent In-memory + File Storage for accepted ListeningEvents.
  *
  * Implements the full EventStore contract without requiring native C++ SQLite binaries.
+ * Writes durably to disk so that real music played on the phone is saved across server restarts.
  * Preserves idempotency, event ordering, and development analytics queries.
  */
+
+import fs from 'fs';
+import path from 'path';
 
 export interface StoredEvent {
   event_id: string;
@@ -19,15 +23,57 @@ export interface StoredEvent {
   ingested_at: string;
 }
 
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'tunemind_events.json');
+
 export class EventStore {
   private static events: StoredEvent[] = [];
   private static eventIdSet = new Set<string>();
+  private static initialized = false;
   private readonly dbPath: string;
 
   constructor(dbPath?: string) {
-    this.dbPath = dbPath ?? ':memory:';
+    this.dbPath = dbPath ?? DATA_FILE;
+    if (!EventStore.initialized) {
+      EventStore.initialized = true;
+      this.initStorage();
+    }
+  }
+
+  private initStorage(): void {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      if (fs.existsSync(DATA_FILE)) {
+        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          EventStore.events = parsed;
+          EventStore.eventIdSet = new Set(parsed.map(e => e.event_id));
+          console.log(`[EventStore] Restored ${parsed.length} persistent events from ${DATA_FILE}`);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[EventStore] Could not load persisted data:', err);
+    }
+
     if (EventStore.events.length === 0) {
       this.seedInitialEvents();
+      this.persistToDisk();
+    }
+  }
+
+  private persistToDisk(): void {
+    try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      fs.writeFileSync(DATA_FILE, JSON.stringify(EventStore.events, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[EventStore] Error persisting events to disk:', err);
     }
   }
 
@@ -186,6 +232,7 @@ export class EventStore {
 
     EventStore.eventIdSet.add(eventId);
     EventStore.events.push(event);
+    this.persistToDisk();
     return true;
   }
 
@@ -282,6 +329,7 @@ export class EventStore {
   clear(): void {
     EventStore.events = [];
     EventStore.eventIdSet.clear();
+    this.persistToDisk();
   }
 
   getDbPath(): string {
@@ -289,6 +337,6 @@ export class EventStore {
   }
 
   close(): void {
-    // In-memory noop
+    this.persistToDisk();
   }
 }

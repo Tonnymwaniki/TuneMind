@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 
@@ -33,6 +34,17 @@ async function startServer() {
       timestamp: new Date().toISOString()
     });
   });
+
+  app.get('/api/download-android', (_req, res) => {
+    try {
+      execSync('python3 -c "import zipfile, os; zf = zipfile.ZipFile(\'android_update.zip\', \'w\', zipfile.ZIP_DEFLATED); [zf.write(os.path.join(r, f), os.path.relpath(os.path.join(r, f), \'android\')) for r, d, files in os.walk(\'android\') for f in files]; zf.close()"');
+    } catch (e) {
+      console.error('Error generating android zip:', e);
+    }
+    const zipPath = path.resolve(process.cwd(), 'android_update.zip');
+    res.download(zipPath, 'android_update.zip');
+  });
+
 
   // Vite integration
   const isDev = process.env['NODE_ENV'] !== 'production';

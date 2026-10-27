@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="tunemind_bg">#FF0B0F19</color>
-    <color name="tunemind_surface_l1">#FF111726</color>
-    <color name="tunemind_surface_l2">#FF161F36</color>
-    <color name="tunemind_card">#FF111726</color>
-    <color name="tunemind_card_border">#1AFFFFFF</color>
-    <color name="tunemind_card_border_active">#408B5CF6</color>
+    <color name="tunemind_bg">#FF020617</color>
+    <color name="tunemind_surface_l1">#FF0F172A</color>
+    <color name="tunemind_surface_l2">#FF1E293B</color>
+    <color name="tunemind_card">#FF0F172A</color>
+    <color name="tunemind_card_border">#FF1E293B</color>
+    <color name="tunemind_card_border_active">#4006B6D4</color>
+
     <color name="tunemind_accent">#FF8B5CF6</color>
     <color name="tunemind_accent_dim">#FF7C3AED</color>
     <color name="tunemind_cyan">#FF06B6D4</color>
@@ -13,11 +14,13 @@
     <color name="tunemind_amber">#FFF59E0B</color>
     <color name="tunemind_green">#FF10B981</color>
     <color name="tunemind_red">#FFEF4444</color>
-    <color name="tunemind_text_primary">#FFDFE2F1</color>
-    <color name="tunemind_text_secondary">#FFCBC3D7</color>
-    <color name="tunemind_text_muted">#FF958EA0</color>
-    <color name="tunemind_text_dim">#FF494454</color>
-    <color name="tunemind_divider">#FF1E2140</color>
+
+    <color name="tunemind_text_primary">#FFF8FAFC</color>
+    <color name="tunemind_text_secondary">#FF94A3B8</color>
+    <color name="tunemind_text_muted">#FF64748B</color>
+    <color name="tunemind_text_dim">#FF334155</color>
+    <color name="tunemind_divider">#FF1E293B</color>
+
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
 </resources>

@@ -9,7 +9,7 @@ import com.tunemind.app.navigation.TuneMindAppNavigation
 import com.tunemind.app.ui.AppHolder
 import com.tunemind.app.ui.theme.TuneMindTheme
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppHolder.context = applicationContext

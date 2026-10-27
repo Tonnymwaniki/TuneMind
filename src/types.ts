@@ -55,6 +55,20 @@ export interface AnalyticsSummary {
   notices: string[];
 }
 
+export interface StoredRawEvent {
+  event_id: string;
+  user_id: string;
+  session_id: string;
+  device_id: string;
+  schema_version: string;
+  event_type: string;
+  occurred_at: string;
+  received_at: string;
+  media_source: string;
+  payload_json: string;
+  ingested_at: string;
+}
+
 export interface ReconstructedEpisode {
   episodeId: string;
   reconstructionVersion: number;

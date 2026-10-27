@@ -18,7 +18,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "TUNEMIND_BASE_URL", "\"http://localhost:3000\"")
+        buildConfigField("String", "TUNEMIND_BASE_URL", "\"https://ais-dev-j7hrc5mfe5abbddivox3ii-740908901963.europe-west2.run.app\"")
     }
 
     buildTypes {

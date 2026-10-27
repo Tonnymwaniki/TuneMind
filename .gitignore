@@ -48,3 +48,8 @@ desktop.ini
 
 # Java heap dumps
 *.hprof
+node_modules/
+dist/
+android_update.zip
+data/
+*.log

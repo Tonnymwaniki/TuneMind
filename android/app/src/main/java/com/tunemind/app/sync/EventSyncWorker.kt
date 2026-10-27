@@ -195,6 +195,16 @@ object SyncConfig {
      *   Physical device    → http://<your-lan-ip>:3000
      */
     fun baseUrl(context: Context): String {
+        val prefUrl = try {
+            val prefs = context.getSharedPreferences("tunemind_sync_prefs", Context.MODE_PRIVATE)
+            prefs.getString("tunemind_backend_url", null)
+        } catch (_: Exception) {
+            null
+        }
+        if (!prefUrl.isNullOrBlank()) {
+            return prefUrl.trim().removeSuffix("/")
+        }
+
         return try {
             val clazz = Class.forName("${context.packageName}.BuildConfig")
             val field = clazz.getField("TUNEMIND_BASE_URL")
@@ -204,7 +214,7 @@ object SyncConfig {
         }?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL
     }
 
-    private const val DEFAULT_BASE_URL = "http://10.0.2.2:3000"
+    private const val DEFAULT_BASE_URL = "https://ais-dev-j7hrc5mfe5abbddivox3ii-740908901963.europe-west2.run.app"
 }
 
 /**

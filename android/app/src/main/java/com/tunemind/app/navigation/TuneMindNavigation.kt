@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,17 +30,17 @@ import com.tunemind.app.ui.theme.*
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Home : Screen("home", "Home", Icons.Outlined.Home)
-    object Fatigue : Screen("fatigue", "Fatigue", Icons.Outlined.Speed)
-    object History : Screen("history", "History", Icons.Outlined.History)
-    object Profile : Screen("profile", "Profile", Icons.Outlined.Person)
+    object CrossApp : Screen("cross_app", "Ingest", Icons.Outlined.Smartphone)
+    object Fatigue : Screen("fatigue", "Fatigue", Icons.Outlined.LocalFireDepartment)
+    object CooldownManagement : Screen("cooldown_mgmt", "Cooldown", Icons.Outlined.AcUnit)
+    object History : Screen("history", "Sessions", Icons.Outlined.History)
 
-    // Deep-dive & Modal Routes
+    // Additional Deep-Dive and Utility Routes
+    object Profile : Screen("profile", "Profile", Icons.Outlined.Person)
     object SessionDetails : Screen("session_details", "Session", Icons.Outlined.GraphicEq)
     object SevenDayStudy : Screen("seven_day_study", "7-Day Study", Icons.Outlined.DateRange)
-    object CrossApp : Screen("cross_app", "Connected Apps", Icons.Outlined.Devices)
     object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)
     object WeeklyReport : Screen("weekly_report", "Receptive Horizon", Icons.Outlined.Insights)
-    object CooldownManagement : Screen("cooldown_mgmt", "Track Cooldown", Icons.Outlined.AcUnit)
     object ManualCooldown : Screen("manual_cooldown", "Add to Cooldown", Icons.Outlined.AddCircleOutline)
 }
 
@@ -49,7 +50,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
     val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
-        containerColor = Surface,
+        containerColor = Color(0xFF020617), // Slate-950
         topBar = {
             TuneMindTopAppBar(
                 currentRoute = currentRoute,
@@ -71,7 +72,6 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
         }
     ) { innerPadding ->
         val vm: TuneMindViewModel = viewModel()
-
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
@@ -86,10 +86,19 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                     onOpenStudy = { navController.navigate(Screen.SevenDayStudy.route) }
                 )
             }
+            composable(Screen.CrossApp.route) {
+                CrossAppActivityScreen(vm = vm, onBack = { navController.popBackStack() })
+            }
             composable(Screen.Fatigue.route) {
                 SongFatigueScreen(
                     onOpenCalibration = { navController.navigate(Screen.WeeklyReport.route) },
                     onOpenCooldown = { navController.navigate(Screen.CooldownManagement.route) }
+                )
+            }
+            composable(Screen.CooldownManagement.route) {
+                CooldownManagementScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddTrack = { navController.navigate(Screen.ManualCooldown.route) }
                 )
             }
             composable(Screen.History.route) {
@@ -104,9 +113,6 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             composable(Screen.SevenDayStudy.route) {
                 SevenDayStudyScreen(vm = vm, onBack = { navController.popBackStack() })
             }
-            composable(Screen.CrossApp.route) {
-                CrossAppActivityScreen(vm = vm, onBack = { navController.popBackStack() })
-            }
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
@@ -116,12 +122,6 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             }
             composable(Screen.WeeklyReport.route) {
                 WeeklyReportScreen(onBack = { navController.popBackStack() })
-            }
-            composable(Screen.CooldownManagement.route) {
-                CooldownManagementScreen(
-                    onBack = { navController.popBackStack() },
-                    onAddTrack = { navController.navigate(Screen.ManualCooldown.route) }
-                )
             }
             composable(Screen.ManualCooldown.route) {
                 ManualCooldownSelectionScreen(onBack = { navController.popBackStack() })
@@ -136,12 +136,19 @@ fun TuneMindTopAppBar(
     onNavigate: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    val isRootTab = currentRoute in listOf(Screen.Home.route, Screen.Fatigue.route, Screen.History.route, Screen.Profile.route)
+    val isRootTab = currentRoute in listOf(
+        Screen.Home.route,
+        Screen.CrossApp.route,
+        Screen.Fatigue.route,
+        Screen.CooldownManagement.route,
+        Screen.History.route
+    )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
+            .background(Color(0xFF020617))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -149,14 +156,14 @@ fun TuneMindTopAppBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (!isRootTab) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             } else {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(CircleShape)
-                        .background(SurfaceContainerHigh),
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF0F172A)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -167,52 +174,63 @@ fun TuneMindTopAppBar(
                     )
                 }
             }
+
             Spacer(modifier = Modifier.width(10.dp))
+
             Column {
-                Text(
-                    text = "TUNEMIND",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentCyan,
-                    letterSpacing = 1.5.sp
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "TUNEMIND",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan,
+                        letterSpacing = 1.5.sp
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(AccentGreen)
+                    )
+                }
                 Text(
                     text = when (currentRoute) {
                         Screen.Home.route -> "Home Dashboard"
+                        Screen.CrossApp.route -> "Phone Ingestion Hub"
                         Screen.Fatigue.route -> "Song Fatigue Lab"
-                        Screen.History.route -> "Listening History"
-                        Screen.Profile.route -> "Music Profile"
+                        Screen.CooldownManagement.route -> "Cooldown Vault"
+                        Screen.History.route -> "Acoustic Log"
+                        Screen.Profile.route -> "Sonic Genome"
                         Screen.SessionDetails.route -> "Session Breakdown"
                         Screen.SevenDayStudy.route -> "7-Day Study"
-                        Screen.CrossApp.route -> "Connected Daemons"
-                        Screen.Settings.route -> "Settings & Privacy"
+                        Screen.Settings.route -> "Settings & Sync"
                         Screen.WeeklyReport.route -> "Receptive Horizon"
-                        Screen.CooldownManagement.route -> "Satiation & Cooldown"
                         Screen.ManualCooldown.route -> "Manual Cooldown"
-                        else -> "Music Intelligence"
+                        else -> "Live Intelligence"
                     },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onNavigate(Screen.CrossApp.route) }) {
-                Icon(Icons.Default.Sensors, contentDescription = "Daemons", tint = TextSecondary)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(onClick = { onNavigate(Screen.SevenDayStudy.route) }) {
+                Icon(Icons.Default.DateRange, contentDescription = "Study", tint = Color(0xFF94A3B8))
             }
             IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
-                Icon(Icons.Default.NotificationsNone, contentDescription = "Alerts", tint = TextSecondary)
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8))
             }
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
-                    .background(PrimaryVioletDark),
+                    .background(PrimaryViolet),
                 contentAlignment = Alignment.Center
             ) {
-                Text("T", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("T", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     }
@@ -225,13 +243,14 @@ fun TuneMindBottomNavigationBar(
 ) {
     val items = listOf(
         Screen.Home,
+        Screen.CrossApp,
         Screen.Fatigue,
-        Screen.History,
-        Screen.Profile
+        Screen.CooldownManagement,
+        Screen.History
     )
 
     NavigationBar(
-        containerColor = SurfaceContainerLowest,
+        containerColor = Color(0xFF090D16),
         tonalElevation = 8.dp,
         modifier = Modifier.navigationBarsPadding()
     ) {
@@ -244,19 +263,20 @@ fun TuneMindBottomNavigationBar(
                     Icon(
                         screen.icon,
                         contentDescription = screen.title,
-                        tint = if (selected) AccentCyan else TextMuted
+                        tint = if (selected) AccentCyan else Color(0xFF64748B),
+                        modifier = Modifier.size(20.dp)
                     )
                 },
                 label = {
                     Text(
                         screen.title,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) TextPrimary else TextMuted
+                        color = if (selected) AccentCyanBright else Color(0xFF64748B)
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    indicatorColor = SurfaceContainerHigh
+                    indicatorColor = Color(0xFF1E293B)
                 )
             )
         }

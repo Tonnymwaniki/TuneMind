@@ -31,6 +31,9 @@ class TuneMindListenerService : NotificationListenerService() {
         stopEmitted.set(false)
         observer = MediaSessionObserver(this, serviceScope) { observation ->
             repository.record(observation)
+            serviceScope.launch {
+                SyncScheduler.schedule(this@TuneMindListenerService)
+            }
             // Also store in experiment storage if an experiment is active
             serviceScope.launch {
                 val exp = experimentRepo.getExperiment()

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Home,
   Flame,
@@ -27,14 +27,23 @@ import {
   ExternalLink,
   ChevronRight,
   Sliders,
-  Volume2
+  Volume2,
+  Smartphone,
+  Copy,
+  Check,
+  Code,
+  Download,
+  Trash2,
+  Eye,
+  Server
 } from 'lucide-react';
 
 import {
   TrackItem,
   AnalyticsSummary,
   ReconstructedEpisode,
-  DailyStudyTile
+  DailyStudyTile,
+  StoredRawEvent
 } from './types';
 
 import {
@@ -50,6 +59,7 @@ import {
 
 type TabType =
   | 'home'
+  | 'phone_hub'
   | 'fatigue'
   | 'cooldown'
   | 'history'
@@ -63,8 +73,9 @@ type TabType =
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
   const [isPlaying, setIsPlaying] = useState(true);
-  const [playbackProgress, setPlaybackProgress] = useState(45); // percentage
+  const [playbackProgress, setPlaybackProgress] = useState(45);
   const [currentTrack, setCurrentTrack] = useState<TrackItem>(initialNowPlaying);
+  const [isLiveFromPhone, setIsLiveFromPhone] = useState(false);
   const [highSatietyList, setHighSatietyList] = useState<TrackItem[]>(initialHighSatietyTracks);
   const [palateCleansers, setPalateCleansers] = useState<TrackItem[]>(initialPalateCleansers);
   const [studyTiles, setStudyTiles] = useState<DailyStudyTile[]>(studyDays);
@@ -72,17 +83,52 @@ export default function App() {
   const [showManualCooldownModal, setShowManualCooldownModal] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsSummary | null>(null);
   const [episodesData, setEpisodesData] = useState<ReconstructedEpisode[]>([]);
+  const [rawEventsList, setRawEventsList] = useState<StoredRawEvent[]>([]);
+  const [totalStoredEvents, setTotalStoredEvents] = useState<number>(0);
+  const [selectedRawEvent, setSelectedRawEvent] = useState<StoredRawEvent | null>(null);
   const [serverStatus, setServerStatus] = useState<'checking' | 'connected' | 'offline'>('checking');
   const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
+
+  // Custom Simulator Form Inputs
+  const [customTitle, setCustomTitle] = useState('Espresso');
+  const [customArtist, setCustomArtist] = useState('Sabrina Carpenter');
+  const [customApp, setCustomApp] = useState('com.spotify.music');
+  const [customBpm, setCustomBpm] = useState(104);
+
   const [connectedApps, setConnectedApps] = useState([
     { id: 'spotify', name: 'Spotify', pkg: 'com.spotify.music', connected: true, observations: 342, status: 'Streaming' },
     { id: 'ytmusic', name: 'YouTube Music', pkg: 'com.google.android.apps.youtube.music', connected: true, observations: 118, status: 'Streaming' },
     { id: 'applemusic', name: 'Apple Music', pkg: 'com.apple.android.music', connected: true, observations: 56, status: 'Idle' },
-    { id: 'soundcloud', name: 'SoundCloud', pkg: 'com.soundcloud.android', connected: false, observations: 0, status: 'Disconnected' }
+    { id: 'soundcloud', name: 'SoundCloud', pkg: 'com.soundcloud.android', connected: true, observations: 12, status: 'Streaming' },
+    { id: 'tidal', name: 'TIDAL', pkg: 'com.aspiro.tidal', connected: false, observations: 0, status: 'Disconnected' }
   ]);
 
-  // Fetch backend telemetry analytics on load
-  const fetchAnalytics = async () => {
+  const backendUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/v1/events` : 'http://localhost:3000/api/v1/events';
+
+  // Helper to map package name to human name
+  const getAppDisplayName = (pkg: string) => {
+    if (pkg.includes('spotify')) return 'Spotify';
+    if (pkg.includes('youtube') || pkg.includes('music.youtube')) return 'YouTube Music';
+    if (pkg.includes('apple')) return 'Apple Music';
+    if (pkg.includes('soundcloud')) return 'SoundCloud';
+    if (pkg.includes('tidal')) return 'TIDAL';
+    if (pkg.includes('deezer')) return 'Deezer';
+    return pkg;
+  };
+
+  // Helper to get app badge color
+  const getAppBadgeColor = (pkg: string) => {
+    if (pkg.includes('spotify')) return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+    if (pkg.includes('youtube')) return 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+    if (pkg.includes('apple')) return 'bg-pink-500/20 text-pink-300 border-pink-500/30';
+    if (pkg.includes('soundcloud')) return 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+    return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30';
+  };
+
+  // Fetch all backend telemetry analytics and raw event stream
+  const fetchBackendData = async () => {
     try {
       const healthRes = await fetch('/health');
       if (healthRes.ok) {
@@ -91,12 +137,60 @@ export default function App() {
         setServerStatus('offline');
       }
 
+      // Fetch raw events list (newest first)
+      const eventsRes = await fetch('/api/v1/events?limit=40');
+      if (eventsRes.ok) {
+        const data = await eventsRes.json();
+        if (data.events && Array.isArray(data.events)) {
+          setRawEventsList(data.events);
+          setTotalStoredEvents(data.total);
+
+          // Find the most recent playing event with track metadata to update Now Playing!
+          const latestTrackEvent = data.events.find((e: StoredRawEvent) => {
+            try {
+              const p = JSON.parse(e.payload_json);
+              return p.track && p.track.title;
+            } catch {
+              return false;
+            }
+          });
+
+          if (latestTrackEvent) {
+            try {
+              const p = JSON.parse(latestTrackEvent.payload_json);
+              if (p.track?.title) {
+                const isStillPlaying = p.playback?.isPlaying ?? (latestTrackEvent.event_type !== 'OBSERVATION_STOPPED');
+                setCurrentTrack((prev) => ({
+                  id: p.track.trackId || latestTrackEvent.event_id,
+                  title: p.track.title,
+                  artist: p.track.artist || 'Unknown Artist',
+                  albumCoverUrl: prev.title === p.track.title ? prev.albumCoverUrl : 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400',
+                  genre: p.track.album ? `${p.track.album}` : 'Acoustic Stream',
+                  bpm: prev.bpm || 118,
+                  durationSeconds: p.track.durationMs ? Math.round(p.track.durationMs / 1000) : 210,
+                  playCount: prev.playCount + 1,
+                  satietyScore: prev.satietyScore,
+                  fatigueCategory: prev.fatigueCategory,
+                  sourceApp: getAppDisplayName(latestTrackEvent.media_source)
+                }));
+                setIsPlaying(isStillPlaying);
+                setIsLiveFromPhone(true);
+              }
+            } catch (err) {
+              console.warn('Error parsing latest track payload:', err);
+            }
+          }
+        }
+      }
+
+      // Summary
       const summaryRes = await fetch('/api/v1/analytics/summary?userId=tunemind-dev');
       if (summaryRes.ok) {
         const data = await summaryRes.json();
         setAnalyticsData(data);
       }
 
+      // Reconstructed episodes
       const episodesRes = await fetch('/api/v1/analytics/episodes?userId=tunemind-dev');
       if (episodesRes.ok) {
         const data = await episodesRes.json();
@@ -110,11 +204,14 @@ export default function App() {
     }
   };
 
+  // Initial fetch and continuous live polling
   useEffect(() => {
-    fetchAnalytics();
+    fetchBackendData();
+    const interval = setInterval(fetchBackendData, 3500);
+    return () => clearInterval(interval);
   }, []);
 
-  // Playback timer ticker simulation
+  // Playback timer progress
   useEffect(() => {
     if (!isPlaying) return;
     const interval = setInterval(() => {
@@ -124,36 +221,39 @@ export default function App() {
   }, [isPlaying]);
 
   // Send real live event to backend
-  const sendLiveEvent = async (type: string, track: TrackItem) => {
+  const sendLiveEvent = async (
+    type: string,
+    track: { title: string; artist: string; album?: string; durationSeconds?: number },
+    mediaSource: string,
+    isPlayingState: boolean = true
+  ) => {
     try {
-      const eventId = 'evt-live-' + Math.random().toString(36).substring(2, 9);
+      const eventId = 'evt-phone-' + Math.random().toString(36).substring(2, 9);
       const payload = {
         events: [
           {
             eventId,
             userId: 'tunemind-dev',
-            sessionId: 'obs-sess-live-01',
+            sessionId: 'obs-sess-phone-live',
             deviceId: 'pixel-8-pro',
             schemaVersion: '1.0',
             eventType: type,
             occurredAt: new Date().toISOString(),
             receivedAt: new Date().toISOString(),
-            mediaSource: track.sourceApp === 'YT Music' ? 'com.google.android.apps.youtube.music' : 'com.spotify.music',
-            payload: {
-              playback: {
-                positionMs: Math.round((playbackProgress / 100) * track.durationSeconds * 1000),
-                elapsedRealtimeMs: Date.now(),
-                isPlaying: type !== 'OBSERVATION_STOPPED',
-                playbackSpeed: 1.0,
-                playbackStateCode: type === 'OBSERVATION_STOPPED' ? 2 : 3
-              },
-              track: {
-                trackId: track.id,
-                title: track.title,
-                artist: track.artist,
-                album: 'Live Session Stream',
-                durationMs: track.durationSeconds * 1000
-              }
+            mediaSource,
+            playback: {
+              positionMs: Math.round((playbackProgress / 100) * (track.durationSeconds || 200) * 1000),
+              elapsedRealtimeMs: Date.now(),
+              isPlaying: isPlayingState,
+              playbackSpeed: 1.0,
+              playbackStateCode: isPlayingState ? 3 : 2
+            },
+            track: {
+              trackId: 'trk-' + Math.random().toString(36).substring(2, 8),
+              title: track.title,
+              artist: track.artist,
+              album: track.album || 'Live Observed Album',
+              durationMs: (track.durationSeconds || 200) * 1000
             }
           }
         ]
@@ -166,9 +266,9 @@ export default function App() {
       });
 
       if (res.ok) {
-        setTelemetryMessage(`Accepted ${type} telemetry event for "${track.title}"`);
-        setTimeout(() => setTelemetryMessage(null), 3500);
-        fetchAnalytics();
+        setTelemetryMessage(`Stored live music event: "${track.title}" from ${getAppDisplayName(mediaSource)}`);
+        setTimeout(() => setTelemetryMessage(null), 4000);
+        fetchBackendData();
       }
     } catch (err) {
       console.error('Failed to post telemetry event:', err);
@@ -178,15 +278,19 @@ export default function App() {
   const handleTogglePlay = () => {
     const nextState = !isPlaying;
     setIsPlaying(nextState);
-    sendLiveEvent(nextState ? 'PLAYBACK_STATE_CHANGED' : 'OBSERVATION_STOPPED', currentTrack);
+    sendLiveEvent(
+      nextState ? 'PLAYBACK_STATE_CHANGED' : 'OBSERVATION_STOPPED',
+      currentTrack,
+      currentTrack.sourceApp === 'YouTube Music' ? 'com.google.android.apps.youtube.music' : 'com.spotify.music',
+      nextState
+    );
   };
 
   const handleSkipTrack = () => {
-    sendLiveEvent('PLAYBACK_STATE_CHANGED', currentTrack);
     const nextTrack = candidateCooldownTracks[Math.floor(Math.random() * candidateCooldownTracks.length)];
     setCurrentTrack(nextTrack);
     setPlaybackProgress(0);
-    sendLiveEvent('METADATA_CHANGED', nextTrack);
+    sendLiveEvent('METADATA_CHANGED', nextTrack, nextTrack.sourceApp === 'YT Music' ? 'com.google.android.apps.youtube.music' : 'com.spotify.music');
   };
 
   const handleAddToCooldown = (track: TrackItem) => {
@@ -217,13 +321,56 @@ export default function App() {
     );
   };
 
+  const copyEndpointUrl = () => {
+    navigator.clipboard.writeText(backendUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2500);
+  };
+
+  const copyCurlSample = () => {
+    const sample = `curl -X POST "${backendUrl}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "events": [
+      {
+        "eventId": "evt-${Date.now()}",
+        "userId": "tunemind-dev",
+        "sessionId": "session-phone-01",
+        "deviceId": "my-phone",
+        "schemaVersion": "1.0",
+        "eventType": "PLAYBACK_STATE_CHANGED",
+        "occurredAt": "${new Date().toISOString()}",
+        "mediaSource": "com.spotify.music",
+        "playback": { "isPlaying": true, "positionMs": 30000, "playbackSpeed": 1.0 },
+        "track": { "title": "Song From My Phone", "artist": "Artist Name", "album": "Album" }
+      }
+    ]
+  }'`;
+    navigator.clipboard.writeText(sample);
+    setCopiedCurl(true);
+    setTimeout(() => setCopiedCurl(false), 2500);
+  };
+
+  const handleClearDatabase = async () => {
+    if (window.confirm('Are you sure you want to purge all stored telemetry events from the database?')) {
+      try {
+        await fetch('/api/v1/events', { method: 'DELETE' });
+        setTelemetryMessage('All events purged from database.');
+        setTimeout(() => setTelemetryMessage(null), 3000);
+        fetchBackendData();
+      } catch (err) {
+        console.error('Failed to clear database:', err);
+      }
+    }
+  };
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Sidebar for Desktop Navigation */}
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/70 bg-slate-900/60 backdrop-blur-xl p-4 justify-between shrink-0">
         <div>
           {/* Logo & Platform Title */}
-          <div className="flex items-center gap-3 px-3 py-3 mb-6">
+          <div className="flex items-center gap-3 px-3 py-3 mb-5">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-fuchsia-500 p-[1.5px] shadow-lg shadow-cyan-500/20">
               <div className="h-full w-full bg-slate-950 rounded-[10px] flex items-center justify-center">
                 <Music2 className="h-5 w-5 text-cyan-400" />
@@ -254,6 +401,41 @@ export default function App() {
               Overview
             </button>
 
+            {/* Dedicated Phone & Live Stream Ingestion Hub */}
+            <button
+              onClick={() => setCurrentTab('phone_hub')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                currentTab === 'phone_hub'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/10'
+                  : 'text-emerald-400/90 hover:text-emerald-300 hover:bg-emerald-500/10'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Smartphone className="h-4 w-4 text-emerald-400 animate-pulse" />
+                Phone Ingest Hub
+              </div>
+              <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                Live
+              </span>
+            </button>
+
+            <button
+              onClick={() => setCurrentTab('history')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                currentTab === 'history'
+                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <History className="h-4 w-4 text-purple-400" />
+                Sessions
+              </div>
+              <span className="text-xs font-mono text-slate-500">
+                {episodesData.length}
+              </span>
+            </button>
+
             <button
               onClick={() => setCurrentTab('fatigue')}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
@@ -281,18 +463,6 @@ export default function App() {
             >
               <Snowflake className="h-4 w-4 text-cyan-400" />
               Cooldown Vault
-            </button>
-
-            <button
-              onClick={() => setCurrentTab('history')}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                currentTab === 'history'
-                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <History className="h-4 w-4" />
-              Reconstructed Sessions
             </button>
 
             <button
@@ -348,18 +518,12 @@ export default function App() {
         {/* Server status & Settings footer */}
         <div className="space-y-3 pt-4 border-t border-slate-800/60">
           <div className="px-3 py-2 rounded-xl bg-slate-950/70 border border-slate-800 text-xs flex items-center justify-between">
-            <span className="text-slate-400">Backend API</span>
-            <span
-              className={`flex items-center gap-1.5 font-medium ${
-                serverStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400'
-              }`}
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  serverStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-                }`}
-              ></span>
-              {serverStatus === 'connected' ? 'Port 3000 OK' : 'Checking'}
+            <span className="text-slate-400 flex items-center gap-1.5">
+              <Server className="h-3.5 w-3.5 text-cyan-400" />
+              Durable Store
+            </span>
+            <span className="font-mono text-cyan-300 font-bold">
+              {totalStoredEvents} events
             </span>
           </div>
 
@@ -372,7 +536,7 @@ export default function App() {
             }`}
           >
             <Settings className="h-4 w-4" />
-            Telemetry Settings
+            Backend Settings
           </button>
         </div>
       </aside>
@@ -392,7 +556,7 @@ export default function App() {
             </div>
             <div className="hidden md:block">
               <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">
-                Listening Pattern Intelligence
+                Personal Music Intelligence
               </span>
               <h2 className="text-lg font-bold text-slate-100 capitalize">
                 {currentTab.replace('_', ' ')}
@@ -402,17 +566,30 @@ export default function App() {
 
           <div className="flex items-center gap-3">
             {/* Live Observation Ticker */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs">
-              <Radio className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
-              <span className="text-slate-300 hidden sm:inline">Telemetry Active</span>
+            <div
+              onClick={() => setCurrentTab('phone_hub')}
+              className="cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs transition-colors"
+            >
+              <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
+              <span className="text-slate-300 hidden sm:inline">Phone Ingest Listening</span>
               <span className="text-slate-500">|</span>
-              <span className="text-slate-400 font-mono text-[11px]">
-                {analyticsData?.totalEvents ?? 28} raw events
+              <span className="text-cyan-300 font-mono text-[11px] font-bold">
+                {totalStoredEvents} stored
               </span>
             </div>
 
+            <a
+              href="/api/download-android"
+              download="android_update.zip"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition-all shadow-md shadow-cyan-500/20"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Download Android Code (ZIP)</span>
+              <span className="sm:hidden">Download</span>
+            </a>
+
             <button
-              onClick={() => fetchAnalytics()}
+              onClick={() => fetchBackendData()}
               title="Refresh telemetry"
               className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             >
@@ -423,18 +600,19 @@ export default function App() {
 
         {/* Telemetry notification banner if an action was fired */}
         {telemetryMessage && (
-          <div className="mx-4 md:mx-8 mt-4 p-3 rounded-xl bg-cyan-950/80 border border-cyan-800/80 text-cyan-200 text-xs flex items-center justify-between shadow-lg shadow-cyan-950/40 animate-in fade-in">
+          <div className="mx-4 md:mx-8 mt-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center justify-between shadow-lg shadow-emerald-950/40 animate-in fade-in">
             <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-cyan-400 animate-pulse" />
+              <Activity className="h-4 w-4 text-emerald-400 animate-pulse" />
               <span>{telemetryMessage}</span>
             </div>
-            <span className="text-[10px] font-mono text-cyan-400/80">HTTP 200 OK</span>
+            <span className="text-[10px] font-mono text-emerald-400/80">HTTP 200 OK • Saved</span>
           </div>
         )}
 
         {/* Page Content View Router */}
         <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto w-full">
           {currentTab === 'home' && renderHomeView()}
+          {currentTab === 'phone_hub' && renderPhoneHubView()}
           {currentTab === 'fatigue' && renderFatigueView()}
           {currentTab === 'cooldown' && renderCooldownView()}
           {currentTab === 'history' && renderHistoryView()}
@@ -459,22 +637,13 @@ export default function App() {
           <span>Home</span>
         </button>
         <button
-          onClick={() => setCurrentTab('fatigue')}
+          onClick={() => setCurrentTab('phone_hub')}
           className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'fatigue' ? 'text-amber-400' : 'text-slate-400'
+            currentTab === 'phone_hub' ? 'text-emerald-400 font-bold' : 'text-slate-400'
           }`}
         >
-          <Flame className="h-4 w-4" />
-          <span>Fatigue</span>
-        </button>
-        <button
-          onClick={() => setCurrentTab('cooldown')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'cooldown' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Snowflake className="h-4 w-4" />
-          <span>Cooldown</span>
+          <Smartphone className="h-4 w-4" />
+          <span>Ingest</span>
         </button>
         <button
           onClick={() => setCurrentTab('history')}
@@ -486,6 +655,15 @@ export default function App() {
           <span>Sessions</span>
         </button>
         <button
+          onClick={() => setCurrentTab('fatigue')}
+          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
+            currentTab === 'fatigue' ? 'text-amber-400' : 'text-slate-400'
+          }`}
+        >
+          <Flame className="h-4 w-4" />
+          <span>Fatigue</span>
+        </button>
+        <button
           onClick={() => setCurrentTab('study')}
           className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
             currentTab === 'study' ? 'text-indigo-400' : 'text-slate-400'
@@ -495,6 +673,46 @@ export default function App() {
           <span>Study</span>
         </button>
       </nav>
+
+      {/* Raw Event Inspector Modal */}
+      {selectedRawEvent && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <Code className="h-4 w-4 text-cyan-400" />
+                  Raw Ingested Event Payload
+                </h3>
+                <span className="text-xs font-mono text-slate-400">{selectedRawEvent.event_id}</span>
+              </div>
+              <button
+                onClick={() => setSelectedRawEvent(null)}
+                className="text-slate-400 hover:text-slate-200 text-sm p-1.5 rounded-lg bg-slate-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 max-h-96 overflow-y-auto">
+              <pre className="text-xs font-mono text-emerald-400/90 whitespace-pre-wrap">
+                {(() => {
+                  try {
+                    return JSON.stringify(JSON.parse(selectedRawEvent.payload_json), null, 2);
+                  } catch {
+                    return selectedRawEvent.payload_json;
+                  }
+                })()}
+              </pre>
+            </div>
+
+            <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+              <span>App: {selectedRawEvent.media_source}</span>
+              <span>Occurred: {new Date(selectedRawEvent.occurred_at).toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Manual Cooldown Selection Modal */}
       {showManualCooldownModal && (
@@ -557,11 +775,37 @@ export default function App() {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 1. HOME SCREEN
+  // 1. HOME SCREEN (Linked directly to real backend music playback)
   // ─────────────────────────────────────────────────────────────────────────────
   function renderHomeView() {
     return (
       <div className="space-y-6">
+        {/* Banner linking to Phone Ingestion Hub */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-slate-900 to-cyan-950/40 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Smartphone className="h-5 w-5 animate-bounce" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white flex items-center gap-2">
+                Live Phone Listening & Storage Active
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">
+                  Durable File Store
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                All music played on Spotify, YouTube Music, and Apple Music is captured and stored directly on the backend.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setCurrentTab('phone_hub')}
+            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shrink-0 transition-all shadow-md shadow-emerald-500/20"
+          >
+            Open Phone Ingest Hub <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
         {/* Hero Section: Now Playing & Live Acoustic Intelligence Bar */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Main Now Playing Deck */}
@@ -574,9 +818,9 @@ export default function App() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
                 </span>
-                Live Audio Session Capture
+                {isLiveFromPhone ? 'Live Phone Playback Stream' : 'Audio Session Capture'}
               </div>
-              <span className="text-xs font-mono text-slate-400 px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">
+              <span className={`text-xs font-mono px-2 py-0.5 rounded border ${getAppBadgeColor(currentTrack.sourceApp)}`}>
                 {currentTrack.sourceApp}
               </span>
             </div>
@@ -614,7 +858,7 @@ export default function App() {
                     Satiety: {currentTrack.satietyScore}%
                   </div>
                   <div className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono">
-                    {currentTrack.playCount} Total Plays
+                    {currentTrack.playCount} Plays Logged
                   </div>
                 </div>
 
@@ -701,26 +945,35 @@ export default function App() {
               </div>
 
               {/* Live Backend Telemetry Trigger */}
-              <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
+              <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-400 flex items-center gap-1.5">
-                    <Database className="h-3.5 w-3.5 text-cyan-400" />
-                    SQLite Telemetry Buffer
+                  <span className="text-slate-400 flex items-center gap-1.5 font-medium">
+                    <Database className="h-3.5 w-3.5 text-emerald-400" />
+                    Persistent Event Database
                   </span>
-                  <span className="font-mono text-cyan-300">
-                    {analyticsData?.totalEvents ?? 28} / 500 records
+                  <span className="font-mono text-emerald-400 font-bold">
+                    {totalStoredEvents} Stored
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Raw observations retain 500 rows. Reconstructed on demand without external network calls.
+                  Saved on disk at <code className="text-cyan-400">data/tunemind_events.json</code>. Reconstructed into sessions automatically.
                 </p>
-                <button
-                  onClick={() => sendLiveEvent('METADATA_CHANGED', currentTrack)}
-                  className="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono transition-colors border border-slate-700 flex items-center justify-center gap-1.5"
-                >
-                  <Activity className="h-3.5 w-3.5 text-cyan-400" />
-                  Emit Observation Callback
-                </button>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setCurrentTab('phone_hub')}
+                    className="flex-1 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-mono transition-colors border border-emerald-500/30 flex items-center justify-center gap-1.5"
+                  >
+                    <Smartphone className="h-3.5 w-3.5" />
+                    Phone Hub
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab('history')}
+                    className="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono transition-colors border border-slate-700 flex items-center justify-center gap-1.5"
+                  >
+                    <History className="h-3.5 w-3.5" />
+                    Sessions ({episodesData.length})
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -850,66 +1103,414 @@ export default function App() {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
 
-        {/* Palate Cleanser Recommendations Section */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center justify-between">
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2. PHONE INGESTION HUB & LIVE STREAM SCREEN
+  // ─────────────────────────────────────────────────────────────────────────────
+  function renderPhoneHubView() {
+    return (
+      <div className="space-y-6">
+        {/* Hub Title & Description */}
+        <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-cyan-950/40 border border-emerald-500/30 rounded-2xl p-6 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-cyan-400" />
-                Acoustic Palate Cleansers
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Low satiety tracks engineered to reset auditory receptors while preserving groove momentum.
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Smartphone className="h-6 w-6 text-emerald-400" />
+                Phone Listening & Ingestion Hub
+              </h2>
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                TuneMind is ready to listen and store everything you play on your phone. Connect your Android app,
+                stream audio from mobile browser, or use our test bench below to verify real-time listening.
               </p>
             </div>
-            <button
-              onClick={() => setCurrentTab('fatigue')}
-              className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1"
-            >
-              Fatigue Deck <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-xs">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Endpoint Active
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Server Endpoint Card */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <Server className="h-4 w-4 text-cyan-400" />
+              Live Ingestion Server URL
+            </h3>
+            <p className="text-xs text-slate-400">
+              Set this URL in your phone's TuneMind Android app (under <code>Settings &gt; Backend Ingestion Target</code>) or point your phone's webhooks here.
+            </p>
+
+            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2.5 rounded-xl">
+              <code className="text-xs font-mono text-emerald-400 flex-1 truncate px-2 select-all">
+                {backendUrl}
+              </code>
+              <button
+                onClick={copyEndpointUrl}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 font-medium flex items-center gap-1.5 shrink-0 transition-colors border border-slate-700"
+              >
+                {copiedUrl ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedUrl ? 'Copied!' : 'Copy URL'}
+              </button>
+            </div>
+
+            {/* Laptop Code Sync Helper */}
+            <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-cyan-500/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                  <Download className="h-4 w-4 text-cyan-400" />
+                  Sync Latest Code to Your Laptop (PowerShell)
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">1-Step Sync</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Because you are compiling on your laptop at <code className="text-slate-300">C:\Users\hp\Documents\TuneMind\android</code>, run this in PowerShell to pull the new Compose frontend files directly into your folder:
+              </p>
+              <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs font-mono text-cyan-300 overflow-x-auto whitespace-pre">
+                {`Invoke-WebRequest -Uri "${window.location.origin}/api/download-android" -OutFile "android_update.zip"; Expand-Archive android_update.zip -DestinationPath . -Force`}
+              </div>
+            </div>
+
+            <div className="pt-2 flex flex-wrap gap-2">
+              <button
+                onClick={copyCurlSample}
+                className="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-xs text-slate-300 flex items-center gap-1.5 border border-slate-700/80"
+              >
+                {copiedCurl ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Code className="h-3.5 w-3.5 text-cyan-400" />}
+                {copiedCurl ? 'cURL Copied!' : 'Copy cURL Test Command'}
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {palateCleansers.map((pc) => (
-              <div
-                key={pc.id}
-                className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-cyan-500/40 transition-all flex flex-col justify-between"
+          <div className="lg:col-span-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-3 flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Database className="h-4 w-4 text-emerald-400" />
+                Durable Storage Status
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Data persists to disk in real-time.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs font-mono">
+                <span className="text-slate-400">Total Observations:</span>
+                <span className="text-white font-bold">{totalStoredEvents}</span>
+              </div>
+              <div className="flex justify-between text-xs font-mono">
+                <span className="text-slate-400">Disk Storage:</span>
+                <span className="text-emerald-400">data/tunemind_events.json</span>
+              </div>
+              <div className="flex justify-between text-xs font-mono">
+                <span className="text-slate-400">Accepted Apps:</span>
+                <span className="text-slate-200">Spotify, YT Music, Apple</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleClearDatabase}
+              className="w-full py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-medium border border-red-500/20 flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Reset Event Database
+            </button>
+          </div>
+        </div>
+
+        {/* USB Phone Run & Install Guide */}
+        <div className="p-6 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-indigo-950/40 border border-cyan-500/30 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300 font-bold">
+              <Smartphone className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                Install & Run Native Android App on Your USB-Connected Phone
+              </h3>
+              <p className="text-xs text-slate-400">
+                Follow these 2 simple steps on your laptop to push the compiled TuneMind app directly to your phone:
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
+                  <span className="h-5 w-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-xs">1</span>
+                  Run install command on laptop
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">Terminal in project root</span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs font-mono text-emerald-400 select-all">
+                cd android && ./gradlew installDebug
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Gradle will compile the APK with the live cloud backend URL preconfigured and install it on your connected USB phone via ADB.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+                  <span className="h-5 w-5 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center text-xs">2</span>
+                  Grant Notification Access on Phone
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">One-time Android permission</span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs font-mono text-indigo-300">
+                Settings → Notification Access → TuneMind: ON
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Android requires this permission so TuneMind's background observer can capture track title, artist, and playback status when you play music.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Phone Music Simulator & Instant Playback Deck */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Radio className="h-4 w-4 text-emerald-400 animate-pulse" />
+                Live Music Ingestion Test Bench
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Simulate or emit the exact music currently playing on your phone across all supported apps.
+              </p>
+            </div>
+            <span className="text-xs font-mono text-cyan-400">Instant Database Write</span>
+          </div>
+
+          {/* Quick presets for common phone music */}
+          <div className="space-y-2 pt-1">
+            <span className="text-xs font-semibold text-slate-400">Quick Music Stream Presets:</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <button
+                onClick={() =>
+                  sendLiveEvent(
+                    'PLAYBACK_STATE_CHANGED',
+                    { title: 'Birds of a Feather', artist: 'Billie Eilish', album: 'HIT ME HARD AND SOFT', durationSeconds: 196 },
+                    'com.spotify.music'
+                  )
+                }
+                className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 hover:border-emerald-500/70 text-left transition-all group"
               >
-                <div className="flex items-start gap-3">
-                  <img
-                    src={pc.albumCoverUrl}
-                    alt={pc.title}
-                    className="h-14 w-14 rounded-xl object-cover shrink-0"
-                  />
-                  <div>
-                    <div className="text-sm font-bold text-slate-100">{pc.title}</div>
-                    <div className="text-xs text-slate-400">{pc.artist}</div>
-                    <div className="text-[10px] text-cyan-400/90 font-mono mt-1">
-                      {pc.genre}
+                <div className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> Spotify Stream
+                </div>
+                <div className="text-xs font-bold text-slate-100 mt-1 group-hover:text-cyan-300">
+                  Birds of a Feather
+                </div>
+                <div className="text-[11px] text-slate-400">Billie Eilish</div>
+              </button>
+
+              <button
+                onClick={() =>
+                  sendLiveEvent(
+                    'PLAYBACK_STATE_CHANGED',
+                    { title: 'Espresso', artist: 'Sabrina Carpenter', album: 'Short n Sweet', durationSeconds: 175 },
+                    'com.spotify.music'
+                  )
+                }
+                className="p-3 rounded-xl bg-slate-950 border border-emerald-500/30 hover:border-emerald-500/70 text-left transition-all group"
+              >
+                <div className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span> Spotify Stream
+                </div>
+                <div className="text-xs font-bold text-slate-100 mt-1 group-hover:text-cyan-300">
+                  Espresso
+                </div>
+                <div className="text-[11px] text-slate-400">Sabrina Carpenter</div>
+              </button>
+
+              <button
+                onClick={() =>
+                  sendLiveEvent(
+                    'PLAYBACK_STATE_CHANGED',
+                    { title: 'Not Like Us', artist: 'Kendrick Lamar', album: 'Single', durationSeconds: 274 },
+                    'com.google.android.apps.youtube.music'
+                  )
+                }
+                className="p-3 rounded-xl bg-slate-950 border border-rose-500/30 hover:border-rose-500/70 text-left transition-all group"
+              >
+                <div className="text-[10px] font-mono text-rose-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-rose-400"></span> YouTube Music
+                </div>
+                <div className="text-xs font-bold text-slate-100 mt-1 group-hover:text-cyan-300">
+                  Not Like Us
+                </div>
+                <div className="text-[11px] text-slate-400">Kendrick Lamar</div>
+              </button>
+
+              <button
+                onClick={() =>
+                  sendLiveEvent(
+                    'PLAYBACK_STATE_CHANGED',
+                    { title: 'Blinding Lights', artist: 'The Weeknd', album: 'After Hours', durationSeconds: 200 },
+                    'com.apple.android.music'
+                  )
+                }
+                className="p-3 rounded-xl bg-slate-950 border border-pink-500/30 hover:border-pink-500/70 text-left transition-all group"
+              >
+                <div className="text-[10px] font-mono text-pink-400 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-pink-400"></span> Apple Music
+                </div>
+                <div className="text-xs font-bold text-slate-100 mt-1 group-hover:text-cyan-300">
+                  Blinding Lights
+                </div>
+                <div className="text-[11px] text-slate-400">The Weeknd</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Custom Track Ingest Form */}
+          <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3 pt-4">
+            <span className="text-xs font-semibold text-slate-300">Send Specific Track Playing on Phone:</span>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Track Title</label>
+                <input
+                  type="text"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  placeholder="e.g. Bohemian Rhapsody"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Artist</label>
+                <input
+                  type="text"
+                  value={customArtist}
+                  onChange={(e) => setCustomArtist(e.target.value)}
+                  placeholder="e.g. Queen"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Music App</label>
+                <select
+                  value={customApp}
+                  onChange={(e) => setCustomApp(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="com.spotify.music">Spotify</option>
+                  <option value="com.google.android.apps.youtube.music">YouTube Music</option>
+                  <option value="com.apple.android.music">Apple Music</option>
+                  <option value="com.soundcloud.android">SoundCloud</option>
+                  <option value="com.aspiro.tidal">TIDAL</option>
+                  <option value="com.deezer.android.app">Deezer</option>
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() =>
+                    sendLiveEvent(
+                      'PLAYBACK_STATE_CHANGED',
+                      { title: customTitle, artist: customArtist, album: 'Phone Live Stream', durationSeconds: 210 },
+                      customApp
+                    )
+                  }
+                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Emit Live Play
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Real-time Stored Events Stream Table */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Activity className="h-4 w-4 text-cyan-400" />
+              Live Ingested Telemetry Feed (Newest First)
+            </h3>
+            <span className="text-xs text-slate-400 font-mono">
+              Showing last {rawEventsList.length} events
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {rawEventsList.length > 0 ? (
+              rawEventsList.map((event) => {
+                let trackInfo: any = {};
+                let playbackInfo: any = {};
+                try {
+                  const parsed = JSON.parse(event.payload_json);
+                  trackInfo = parsed.track || {};
+                  playbackInfo = parsed.playback || {};
+                } catch {}
+
+                return (
+                  <div
+                    key={event.event_id}
+                    className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-slate-950 flex items-center justify-center font-mono text-xs text-slate-400 border border-slate-800 shrink-0">
+                        <Music2 className="h-4 w-4 text-cyan-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-100">
+                            {trackInfo.title || 'Playback State Event'}
+                          </span>
+                          {trackInfo.artist && (
+                            <span className="text-xs text-slate-400 font-medium">
+                              by {trackInfo.artist}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] font-mono text-slate-500">
+                          <span className={`px-1.5 py-0.2 rounded border ${getAppBadgeColor(event.media_source)}`}>
+                            {getAppDisplayName(event.media_source)}
+                          </span>
+                          <span>{event.event_type}</span>
+                          <span>•</span>
+                          <span>Device: {event.device_id}</span>
+                          {playbackInfo.isPlaying !== undefined && (
+                            <>
+                              <span>•</span>
+                              <span className={playbackInfo.isPlaying ? 'text-emerald-400' : 'text-amber-400'}>
+                                {playbackInfo.isPlaying ? 'PLAYING' : 'PAUSED'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-3 text-right">
+                      <span className="text-[11px] font-mono text-slate-500">
+                        {new Date(event.occurred_at).toLocaleTimeString()}
+                      </span>
+                      <button
+                        onClick={() => setSelectedRawEvent(event)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-mono flex items-center gap-1 border border-slate-700"
+                      >
+                        <Eye className="h-3 w-3" />
+                        JSON
+                      </button>
                     </div>
                   </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[11px] text-emerald-400 font-mono font-medium">
-                    {pc.fatigueCategory}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setCurrentTrack(pc);
-                      setIsPlaying(true);
-                      setPlaybackProgress(0);
-                      sendLiveEvent('PLAYBACK_STATE_CHANGED', pc);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-xs font-medium flex items-center gap-1 border border-cyan-500/30"
-                  >
-                    <Play className="h-3 w-3" /> Play
-                  </button>
-                </div>
+                );
+              })
+            ) : (
+              <div className="p-8 text-center bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400">
+                No events received yet. Play music on your phone or use the test bench above.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
@@ -917,12 +1518,11 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 2. SONG FATIGUE & SATIETY SCREEN
+  // 3. SONG FATIGUE & SATIETY SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderFatigueView() {
     return (
       <div className="space-y-6">
-        {/* Header & Overview */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 p-6 rounded-2xl border border-amber-900/30">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -1070,7 +1670,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 3. COOLDOWN VAULT SCREEN
+  // 4. COOLDOWN VAULT SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderCooldownView() {
     return (
@@ -1187,7 +1787,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 4. RECONSTRUCTED SESSIONS & HISTORY SCREEN
+  // 5. RECONSTRUCTED SESSIONS SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderHistoryView() {
     return (
@@ -1203,7 +1803,7 @@ export default function App() {
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-            Derived on demand from retained raw observations using deterministic wall-clock sorting and callback
+            Derived deterministically from raw observations using wall-clock sorting and callback
             span grouping. No user identification or cloud telemetry is transmitted.
           </p>
         </div>
@@ -1213,30 +1813,30 @@ export default function App() {
           <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
             <span className="text-xs text-slate-400">Total Observations</span>
             <div className="text-xl font-bold text-white font-mono mt-1">
-              {analyticsData?.totalEvents ?? 28}
+              {totalStoredEvents}
             </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Retained rows</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Durable records</div>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
             <span className="text-xs text-slate-400">Spotify Telemetry</span>
             <div className="text-xl font-bold text-emerald-400 font-mono mt-1">
-              {analyticsData?.bySource?.['com.spotify.music'] ?? 21}
+              {analyticsData?.bySource?.['com.spotify.music'] ?? 50}
             </div>
             <div className="text-[10px] text-slate-500 mt-0.5">Direct callbacks</div>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
             <span className="text-xs text-slate-400">YouTube Music</span>
             <div className="text-xl font-bold text-red-400 font-mono mt-1">
-              {analyticsData?.bySource?.['com.google.android.apps.youtube.music'] ?? 7}
+              {analyticsData?.bySource?.['com.google.android.apps.youtube.music'] ?? 14}
             </div>
             <div className="text-[10px] text-slate-500 mt-0.5">Direct callbacks</div>
           </div>
           <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800">
             <span className="text-xs text-slate-400">Observer Sessions</span>
             <div className="text-xl font-bold text-cyan-400 font-mono mt-1">
-              {analyticsData?.distinctSessionCount ?? 7}
+              {episodesData.length}
             </div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Bounded connections</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Bounded episodes</div>
           </div>
         </div>
 
@@ -1262,7 +1862,7 @@ export default function App() {
                     </span>
                     <span className="text-slate-600">•</span>
                     <span className="text-xs text-slate-400 font-mono">
-                      {ep.sourcePackage || 'com.spotify.music'}
+                      {getAppDisplayName(ep.sourcePackage || 'com.spotify.music')}
                     </span>
                   </div>
                   <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
@@ -1307,12 +1907,6 @@ export default function App() {
             <div className="p-8 text-center bg-slate-900/40 rounded-2xl border border-slate-800/80 space-y-3">
               <History className="h-8 w-8 text-slate-600 mx-auto" />
               <div className="text-sm text-slate-400">No episodes reconstructed yet.</div>
-              <button
-                onClick={() => sendLiveEvent('PLAYBACK_STATE_CHANGED', currentTrack)}
-                className="px-4 py-2 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-semibold"
-              >
-                Emit Sample Event
-              </button>
             </div>
           )}
         </div>
@@ -1321,7 +1915,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 5. SESSION DETAILS SCREEN
+  // 6. SESSION DETAILS SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderSessionDetailsView() {
     const ep = selectedEpisode || episodesData[0];
@@ -1353,7 +1947,7 @@ export default function App() {
             <div>
               <span className="text-xs font-mono text-cyan-400">Observer Connection</span>
               <h3 className="text-xl font-bold text-white">{ep.observerSessionId}</h3>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">{ep.sourcePackage}</p>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">{getAppDisplayName(ep.sourcePackage || '')}</p>
             </div>
             <div className="text-right">
               <span className="px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 text-xs font-mono">
@@ -1430,7 +2024,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 6. 7-DAY BASELINE STUDY SCREEN
+  // 7. 7-DAY BASELINE STUDY SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderStudyView() {
     return (
@@ -1526,7 +2120,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 7. ACOUSTIC PROFILE SCREEN
+  // 8. ACOUSTIC PROFILE SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderProfileView() {
     return (
@@ -1596,7 +2190,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 8. CROSS-APP AUDIO CAPTURE SCREEN
+  // 9. CROSS-APP AUDIO CAPTURE SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderCrossAppView() {
     return (
@@ -1633,7 +2227,7 @@ export default function App() {
                 </div>
                 <div className="text-xs font-mono text-slate-500">{app.pkg}</div>
                 <div className="text-xs text-slate-400 font-mono pt-1">
-                  {app.observations} observations logged
+                  {rawEventsList.filter((e) => e.media_source === app.pkg).length} live observations stored
                 </div>
               </div>
 
@@ -1665,7 +2259,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 9. RECEPTIVE HORIZON / WEEKLY REPORT SCREEN
+  // 10. RECEPTIVE HORIZON / WEEKLY REPORT SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderWeeklyReportView() {
     return (
@@ -1719,7 +2313,7 @@ export default function App() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 10. TELEMETRY SETTINGS SCREEN
+  // 11. TELEMETRY SETTINGS SCREEN
   // ─────────────────────────────────────────────────────────────────────────────
   function renderSettingsView() {
     return (
@@ -1737,13 +2331,13 @@ export default function App() {
         <div className="space-y-4">
           <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-100">Local Observation Retention Cap</h4>
+              <h4 className="text-sm font-bold text-slate-100">Durable Disk Storage</h4>
               <p className="text-xs text-slate-400 mt-0.5">
-                Maximum observations stored in private database before FIFO rotation.
+                Saved to disk at <code>data/tunemind_events.json</code> on every ingested track.
               </p>
             </div>
-            <span className="font-mono text-sm text-cyan-400 font-bold px-3 py-1 rounded bg-slate-950 border border-slate-800">
-              500 Records
+            <span className="font-mono text-sm text-emerald-400 font-bold px-3 py-1 rounded bg-slate-950 border border-slate-800">
+              {totalStoredEvents} Records
             </span>
           </div>
 
@@ -1761,31 +2355,28 @@ export default function App() {
 
           <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-100">Backend Server Ingestion Target</h4>
+              <h4 className="text-sm font-bold text-slate-100">Public Phone Ingestion Endpoint</h4>
               <p className="text-xs text-slate-400 mt-0.5">
-                Target endpoint for sync worker batch uploads (POST /api/v1/events).
+                POST /api/v1/events target URL for background sync.
               </p>
             </div>
-            <span className="font-mono text-xs text-slate-300 px-3 py-1 rounded bg-slate-950 border border-slate-800">
-              http://0.0.0.0:3000
+            <span className="font-mono text-xs text-slate-300 px-3 py-1 rounded bg-slate-950 border border-slate-800 truncate max-w-xs">
+              {backendUrl}
             </span>
           </div>
 
           <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
             <div>
-              <h4 className="text-sm font-bold text-slate-100">Purge Local Event Buffer</h4>
+              <h4 className="text-sm font-bold text-slate-100">Purge Telemetry Database</h4>
               <p className="text-xs text-slate-400 mt-0.5">
-                Clears all retained raw observations from memory. Derived summaries will reset.
+                Clears all retained raw observations from disk and memory.
               </p>
             </div>
             <button
-              onClick={() => {
-                setTelemetryMessage('Telemetry observation buffer purged.');
-                setTimeout(() => setTelemetryMessage(null), 3000);
-              }}
-              className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold border border-red-500/30"
+              onClick={handleClearDatabase}
+              className="px-3.5 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold border border-red-500/30"
             >
-              Purge Buffer
+              Purge Database
             </button>
           </div>
         </div>
