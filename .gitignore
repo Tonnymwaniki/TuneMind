@@ -51,5 +51,5 @@ desktop.ini
 node_modules/
 dist/
 android_update.zip
-data/
+/data/
 *.log
