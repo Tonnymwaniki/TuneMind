@@ -366,15 +366,15 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun togglePlayback() {
-        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.togglePlayback()
+        com.tunemind.app.service.TuneMindListenerService.instance?.togglePlayback()
     }
 
     fun skipNext() {
-        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.skipNext()
+        com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
     }
 
     fun skipPrev() {
-        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.skipPrev()
+        com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
     }
 }
 

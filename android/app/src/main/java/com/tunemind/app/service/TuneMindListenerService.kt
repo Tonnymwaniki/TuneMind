@@ -119,7 +119,19 @@ class TuneMindListenerService : NotificationListenerService() {
     private val repository: EventBufferRepository by lazy { EventBufferRepository(db.eventQueueDao()) }
     private val experimentRepo: ExperimentRepository by lazy { ExperimentRepository(db) }
 
-    private fun observerOrNull(): MediaSessionObserver? = if (::observer.isInitialized) observer else null
+    fun observerOrNull(): MediaSessionObserver? = if (::observer.isInitialized) observer else null
+
+    fun togglePlayback() {
+        observerOrNull()?.togglePlayback()
+    }
+
+    fun skipNext() {
+        observerOrNull()?.skipNext()
+    }
+
+    fun skipPrev() {
+        observerOrNull()?.skipPrev()
+    }
 
     companion object {
         private const val TAG = "TuneMindListener"
