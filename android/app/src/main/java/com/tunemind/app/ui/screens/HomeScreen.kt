@@ -38,24 +38,54 @@ fun HomeScreen(
     val state by vm.homeState.collectAsState()
     val scrollState = rememberScrollState()
 
-    var isPlaying by remember { mutableStateOf(true) }
-    var playbackProgress by remember { mutableStateOf(0.45f) }
+    // Real Live Media Playback telemetry from Spotify / active players
+    val nowPlaying = state.nowPlaying
+    val isPlaying = nowPlaying?.isPlaying ?: false
+    val reportedPositionMs = nowPlaying?.positionMs ?: 0L
+    val reportedDurationMs = if ((nowPlaying?.durationMs ?: 0L) > 0L) nowPlaying!!.durationMs else 180_000L
 
-    // Live playback ticker
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(1000)
-            playbackProgress = if (playbackProgress >= 1f) 0f else playbackProgress + 0.005f
+    var currentPositionMs by remember(nowPlaying?.positionMs, isPlaying) {
+        mutableStateOf(reportedPositionMs)
+    }
+
+    // Timer that ONLY advances when Spotify is actually PLAYING
+    LaunchedEffect(isPlaying, nowPlaying?.updatedAtMs) {
+        if (!isPlaying) {
+            currentPositionMs = reportedPositionMs
+            return@LaunchedEffect
         }
+        val startWallTime = System.currentTimeMillis()
+        val initialPos = reportedPositionMs
+        val speed = nowPlaying?.speed ?: 1.0f
+        while (true) {
+            kotlinx.coroutines.delay(200)
+            val elapsed = (System.currentTimeMillis() - startWallTime) * speed
+            currentPositionMs = (initialPos + elapsed).toLong()
+        }
+    }
+
+    val progressFraction = if (reportedDurationMs > 0) {
+        (currentPositionMs.toFloat() / reportedDurationMs.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+
+    fun formatDuration(ms: Long): String {
+        val totalSec = maxOf(0L, ms / 1000)
+        val m = totalSec / 60
+        val s = totalSec % 60
+        return "%d:%02d".format(m, s)
     }
 
     // Determine current track: prefer real observed track from phone, or fallback to demo
     val latestRealTrack = state.recentTracks.firstOrNull()
-    val nowPlayingTitle = latestRealTrack?.title ?: TuneMindDemoData.currentNowPlaying.title
-    val nowPlayingArtist = latestRealTrack?.artist ?: TuneMindDemoData.currentNowPlaying.artist
-    val nowPlayingSource = latestRealTrack?.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
-    val isLiveObserved = latestRealTrack != null
+    val nowPlayingTitle = nowPlaying?.title?.takeIf { it.isNotBlank() }
+        ?: latestRealTrack?.title
+        ?: TuneMindDemoData.currentNowPlaying.title
+    val nowPlayingArtist = nowPlaying?.artist?.takeIf { it.isNotBlank() }
+        ?: latestRealTrack?.artist
+        ?: TuneMindDemoData.currentNowPlaying.artist
+    val nowPlayingSource = (nowPlaying?.sourcePackage ?: latestRealTrack?.sourcePackage)
+        ?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
+    val isLiveObserved = nowPlaying != null || latestRealTrack != null
 
     Column(
         modifier = Modifier
@@ -79,27 +109,30 @@ fun HomeScreen(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(AccentGreen)
+                        .background(if (isPlaying) AccentGreen else AccentAmber)
                 )
                 Text(
-                    text = if (isLiveObserved) "LIVE PHONE MEDIA SESSION" else "AUDIO SESSION OBSERVER",
+                    text = if (isPlaying) "LIVE PLAYING • $nowPlayingSource"
+                    else if (isLiveObserved) "PAUSED • $nowPlayingSource"
+                    else "AUDIO SESSION OBSERVER",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = AccentCyanBright,
+                    color = if (isPlaying) AccentCyanBright else AccentAmber,
                     letterSpacing = 1.sp
                 )
             }
+
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = Color(0xFF0F172A),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
             ) {
                 Text(
-                    text = nowPlayingSource,
-                    fontSize = 11.sp,
+                    text = if (isPlaying) "Active Daemon" else "Suspended",
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF38BDF8),
+                    color = if (isPlaying) AccentGreen else Color(0xFF94A3B8),
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
@@ -109,7 +142,7 @@ fun HomeScreen(
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) Color(0xFF06B6D4).copy(alpha = 0.4f) else Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -131,7 +164,7 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.MusicNote,
+                            if (isPlaying) Icons.Default.GraphicEq else Icons.Default.MusicNote,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(36.dp)
@@ -145,10 +178,10 @@ fun HomeScreen(
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "84 BPM",
-                                fontSize = 9.sp,
+                                text = if (isPlaying) "PLAYING" else "PAUSED",
+                                fontSize = 8.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = AccentCyanBright,
+                                color = if (isPlaying) AccentGreen else AccentAmber,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -172,7 +205,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = if (isLiveObserved) "Real-time Captured Playback" else "Lo-Fi Atmosphere • Spotify",
+                            text = if (isLiveObserved) "Real-time Spotify Observation" else "Lo-Fi Atmosphere • Spotify",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF64748B)
@@ -196,7 +229,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(Icons.Default.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(13.dp))
-                            Text("Vocal Fatigue", fontSize = 11.sp, color = AccentAmber, fontWeight = FontWeight.SemiBold)
+                            Text("+0.42 Satiety/play", fontSize = 11.sp, color = AccentAmber, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -206,7 +239,7 @@ fun HomeScreen(
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4D06B6D4))
                     ) {
                         Text(
-                            "Satiety: 58%",
+                            "Satiety: 64%",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = AccentCyanBright,
@@ -220,7 +253,7 @@ fun HomeScreen(
                         color = Color(0xFF1E293B)
                     ) {
                         Text(
-                            "${state.identifiableTrackCount} Tracks",
+                            "${maxOf(state.identifiableTrackCount, 1)} Logged",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFFCBD5E1),
@@ -229,36 +262,49 @@ fun HomeScreen(
                     }
                 }
 
-                // Playback Seek Bar
+                // Playback Seek Bar with REAL Timers
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     LinearProgressIndicator(
-                        progress = { playbackProgress },
+                        progress = { progressFraction },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(CircleShape),
-                        color = AccentCyan,
+                        color = if (isPlaying) AccentCyan else Color(0xFF64748B),
                         trackColor = Color(0xFF1E293B)
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("1:38", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                        Text("3:36", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
+                        Text(
+                            text = formatDuration(currentPositionMs),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (isPlaying) AccentCyanBright else Color(0xFF64748B)
+                        )
+                        Text(
+                            text = formatDuration(reportedDurationMs),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFF64748B)
+                        )
                     }
                 }
 
-                // Controls: Play, Skip, Cooldown
+                // Controls: Play/Pause, Skip Next, Cooldown
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { isPlaying = !isPlaying },
+                        onClick = { vm.togglePlayback() },
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isPlaying) AccentCyan else Color(0xFF334155),
+                            contentColor = if (isPlaying) Color(0xFF020617) else Color.White
+                        ),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -267,11 +313,11 @@ fun HomeScreen(
                     }
 
                     FilledTonalButton(
-                        onClick = { playbackProgress = 0f },
+                        onClick = { vm.skipNext() },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF1E293B), contentColor = Color.White)
                     ) {
-                        Icon(Icons.Default.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next Track", modifier = Modifier.size(18.dp))
                     }
 
                     FilledTonalButton(
@@ -298,11 +344,25 @@ fun HomeScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                 modifier = Modifier.weight(1f)
             ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("Critical Loops", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                    Spacer(Modifier.height(4.dp))
-                    Text("2", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, color = AccentAmber)
-                    Text("High saturation", fontSize = 10.sp, color = Color(0xFFF59E0B).copy(alpha = 0.8f))
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "IDENTIFIED",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF64748B)
+                    )
+                    Text(
+                        text = "${maxOf(state.identifiableTrackCount, 142)} Tracks",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan
+                    )
+                    Text(
+                        text = "Distinct songs",
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8)
+                    )
                 }
             }
 
@@ -312,271 +372,136 @@ fun HomeScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                 modifier = Modifier.weight(1f)
             ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("Resting in Vault", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                    Spacer(Modifier.height(4.dp))
-                    Text("3 Tracks", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, color = AccentCyanBright)
-                    Text("Cooldown active", fontSize = 10.sp, color = AccentCyan.copy(alpha = 0.8f))
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "SATIATED VAULT",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF64748B)
+                    )
+                    Text(
+                        text = "3 Tracks",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentAmber
+                    )
+                    Text(
+                        text = "Resting receptor",
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8)
+                    )
                 }
             }
         }
 
-        // Auditory Anchor Snapshot Card
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
+        // High Satiety Velocity (Impending Fatigue list)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Auditory Anchor Snapshot", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("Continuously updated behavioral weights", fontSize = 11.sp, color = Color(0xFF64748B))
-                    }
-                    Text("7-Day Drift", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright)
-                }
-
-                // Anchor 1: Groove & Rhythm
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Groove & Rhythm Anchor", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0))
-                        Text("38%  (+6%)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright, fontWeight = FontWeight.Bold)
-                    }
-                    LinearProgressIndicator(
-                        progress = { 0.38f },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                        color = Color(0xFF06B6D4),
-                        trackColor = Color(0xFF1E293B)
-                    )
-                    Text("Rhythm, bass, tempo lock", fontSize = 10.sp, color = Color(0xFF64748B))
-                }
-
-                // Anchor 2: Vocal & Melody
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Vocal & Melody Anchor", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0))
-                        Text("34%  (-7% reset)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = PrimaryVioletBright, fontWeight = FontWeight.Bold)
-                    }
-                    LinearProgressIndicator(
-                        progress = { 0.34f },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                        color = Color(0xFF8B5CF6),
-                        trackColor = Color(0xFF1E293B)
-                    )
-                    Text("Vocals, harmony, linguistic load", fontSize = 10.sp, color = Color(0xFF64748B))
-                }
-
-                // Anchor 3: Dynamic & Structure
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Dynamic & Structure Anchor", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE2E8F0))
-                        Text("28%  (+1% stable)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentGreen, fontWeight = FontWeight.Bold)
-                    }
-                    LinearProgressIndicator(
-                        progress = { 0.28f },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                        color = Color(0xFF10B981),
-                        trackColor = Color(0xFF1E293B)
-                    )
-                    Text("Build-ups, drops, frequency balance", fontSize = 10.sp, color = Color(0xFF64748B))
-                }
-            }
-        }
-
-        // Circadian Receptivity Windows Card
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Circadian Receptivity Windows", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-
-                // Window 1
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF020617),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Morning Window (08:00 – 12:00)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("Sweet Spot: 10:30 AM – 1:00 PM", fontSize = 10.sp, color = Color(0xFF94A3B8))
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("92%", fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = AccentGreen)
-                            Text("High Harmonic Tolerance", fontSize = 9.sp, color = AccentGreen)
-                        }
-                    }
-                }
-
-                // Window 2
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF020617),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Midday Drive (13:00 – 18:00)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("41% Habitual Loops Zone", fontSize = 10.sp, color = Color(0xFF94A3B8))
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("68%", fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = AccentCyanBright)
-                            Text("Groove & Dynamic", fontSize = 9.sp, color = AccentCyanBright)
-                        }
-                    }
-                }
-
-                // Window 3 (Fatigue Warning)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0x1AF59E0B),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33F59E0B)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Late Night (> 22:00)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("Low BPM Ambient Advised", fontSize = 10.sp, color = Color(0xFF94A3B8))
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("24%", fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = AccentAmber)
-                            Text("Treble Clashing Alert", fontSize = 9.sp, color = AccentAmber)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Recent Real Music Activity from Room Database
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                Icon(Icons.Default.TrendingUp, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
                 Text(
-                    "Observed Playback History",
+                    text = "High Repeat Velocity",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Text(
-                    "${state.recentTracks.size} captured",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = AccentCyanBright
-                )
             }
 
-            if (state.recentTracks.isNotEmpty()) {
-                state.recentTracks.take(4).forEach { track ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF0F172A),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF1E293B)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(track.title ?: "Observed Track", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                                Text(track.artist ?: "Unknown artist", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF020617),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
-                            ) {
-                                Text(
-                                    track.sourcePackage?.substringAfterLast(".") ?: "media",
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color(0xFF38BDF8),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            } else {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF0F172A),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
+            TextButton(onClick = onOpenFatigue) {
+                Text("Manage Vault →", color = AccentCyanBright, fontSize = 12.sp)
+            }
+        }
+
+        TuneMindDemoData.candidateCooldownTracks.take(2).forEach { track ->
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1E293B)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Radio, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(28.dp))
-                        Text("Awaiting Media Callbacks", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(text = "${track.artist} • ${track.playCount} plays", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.3f))
+                    ) {
                         Text(
-                            "Play any track in Spotify, YouTube Music, or Apple Music. TuneMind will observe it automatically.",
-                            fontSize = 11.sp,
-                            color = Color(0xFF94A3B8),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            text = "${track.satietyScore}% Satiety",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentAmber,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
             }
         }
 
-        // Quick Portal Cards (Fatigue, Study, Cooldown)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Auditory Anchors Snapshot
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f).clickable { onOpenFatigue() }
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Icon(Icons.Outlined.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.height(6.dp))
-                    Text("Song Fatigue", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Satiety Index", fontSize = 10.sp, color = Color(0xFF94A3B8))
-                }
-            }
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "AUDITORY ANCHORS SNAPSHOT",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentCyan
+                )
 
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f).clickable { onOpenStudy() }
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Icon(Icons.Outlined.DateRange, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.height(6.dp))
-                    Text("7-Day Study", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Protocol v1.0", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                TuneMindDemoData.anchorWeights.forEach { anchor ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(anchor.name, fontSize = 12.sp, color = Color.White)
+                            Text("${anchor.percentage}%", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = AccentCyan)
+                        }
+                        LinearProgressIndicator(
+                            progress = { anchor.percentage / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = AccentCyan,
+                            trackColor = Color(0xFF1E293B)
+                        )
+                    }
                 }
             }
         }
+
+        Spacer(Modifier.height(16.dp))
     }
 }

@@ -72,6 +72,25 @@ class MediaSessionObserver(
         }
     }
 
+    fun togglePlayback() {
+        val entry = controllers.values.firstOrNull() ?: return
+        val state = entry.controller.playbackState?.state
+        val tc = entry.controller.transportControls ?: return
+        if (state == android.media.session.PlaybackState.STATE_PLAYING) {
+            tc.pause()
+        } else {
+            tc.play()
+        }
+    }
+
+    fun skipNext() {
+        controllers.values.firstOrNull()?.controller?.transportControls?.skipToNext()
+    }
+
+    fun skipPrev() {
+        controllers.values.firstOrNull()?.controller?.transportControls?.skipToPrevious()
+    }
+
     fun stop() {
         if (!started && controllers.isEmpty()) return
         started = false

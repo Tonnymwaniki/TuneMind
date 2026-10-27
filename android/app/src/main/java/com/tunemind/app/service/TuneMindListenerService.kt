@@ -47,6 +47,7 @@ class TuneMindListenerService : NotificationListenerService() {
         }
         observer.start()
         isConnected = true
+        instance = this
         Log.i(TAG, "Notification listener connected; observer initialization requested")
 
         // Schedule background sync.
@@ -60,6 +61,7 @@ class TuneMindListenerService : NotificationListenerService() {
         emitObservationStop()
         observerOrNull()?.stop()
         isConnected = false
+        instance = null
         Log.i(TAG, "Notification listener disconnected")
         super.onListenerDisconnected()
     }
@@ -68,6 +70,7 @@ class TuneMindListenerService : NotificationListenerService() {
         emitObservationStop()
         observerOrNull()?.stop()
         isConnected = false
+        instance = null
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -123,6 +126,10 @@ class TuneMindListenerService : NotificationListenerService() {
 
         @Volatile
         var isConnected: Boolean = false
+            private set
+
+        @Volatile
+        var instance: TuneMindListenerService? = null
             private set
     }
 }

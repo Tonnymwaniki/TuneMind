@@ -27,11 +27,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class NowPlayingObservation(
+    val title: String? = null,
+    val artist: String? = null,
+    val album: String? = null,
+    val sourcePackage: String? = null,
+    val isPlaying: Boolean = false,
+    val playbackStateCode: Int? = null,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+    val speed: Float = 1.0f,
+    val updatedAtMs: Long = 0L,
+)
+
 data class HomeState(
     val identifiableTrackCount: Int = 0,
     val distinctAppearanceCount: Int = 0,
     val recurringTrackCount: Int = 0,
     val recentTracks: List<TrackMemoryEntry> = emptyList(),
+    val nowPlaying: NowPlayingObservation? = null,
     val coverage: CoverageAssessment? = null,
     val isLoading: Boolean = true,
 )
@@ -181,11 +195,31 @@ class TuneMindViewModel : ViewModel() {
                     .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
                     .sortedByDescending { it.lastObservedAppearanceAtMs }.take(5)
 
+                val latestStateObs = rows.firstOrNull { it.playbackStateCode != null }
+                val latestTrackMeta = rows.firstOrNull { !it.trackTitle.isNullOrBlank() }
+                val isPlayingNow = latestStateObs?.playbackStateCode == 3 // PlaybackState.STATE_PLAYING
+
+                val nowPlayingObs = if (latestTrackMeta != null || latestStateObs != null) {
+                    NowPlayingObservation(
+                        title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
+                        artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
+                        album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
+                        sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
+                        isPlaying = isPlayingNow,
+                        playbackStateCode = latestStateObs?.playbackStateCode,
+                        positionMs = latestStateObs?.positionMs ?: 0L,
+                        durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
+                        speed = latestStateObs?.playbackSpeed ?: 1.0f,
+                        updatedAtMs = latestStateObs?.eventTimeMs ?: System.currentTimeMillis()
+                    )
+                } else null
+
                 _homeState.value = HomeState(
                     identifiableTrackCount = summary.identifiableTrackCount,
                     distinctAppearanceCount = summary.distinctReconstructedAppearanceCount,
                     recurringTrackCount = summary.recurringTrackIdentityCount,
                     recentTracks = recent,
+                    nowPlaying = nowPlayingObs,
                     coverage = coverage,
                     isLoading = false,
                 )
@@ -329,6 +363,18 @@ class TuneMindViewModel : ViewModel() {
             "recurring" -> state.tracks.filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT && it.distinctAppearanceCount >= 2 }
             else -> state.tracks
         }
+    }
+
+    fun togglePlayback() {
+        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.togglePlayback()
+    }
+
+    fun skipNext() {
+        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.skipNext()
+    }
+
+    fun skipPrev() {
+        com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.skipPrev()
     }
 }
 
