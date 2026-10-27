@@ -5,12 +5,9 @@
 
     <!--
         TuneMind is a passive observer of media sessions from other applications.
-        It does NOT play audio itself.
-        Permissions declared here are for the observer role only.
         NotificationListenerService binding is granted by the user through
-        Settings → Notification Access — it cannot be requested programmatically.
+        Settings → Notification Access.
     -->
-
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -34,25 +31,17 @@
 
         <activity
             android:name=".ui.MainActivity"
-            android:exported="true"
-            android:theme="@style/Theme.TuneMind"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:theme="@style/Theme.TuneMind" />
 
         <!--
-            TuneMindListenerService: NotificationListenerService
-            The system binds this service when the user grants Notification Access.
-            It is NOT started by our code — lifecycle is controlled by the Android
-            notification framework.
-            Observes media sessions only while the user grants Notification Access.
+            TuneMindListenerService MUST have android:exported="true"
+            so the Android system server process (NotificationManagerService) can bind to it.
+            It is protected by android.permission.BIND_NOTIFICATION_LISTENER_SERVICE.
         -->
         <service
             android:name=".service.TuneMindListenerService"
-            android:exported="false"
+            android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

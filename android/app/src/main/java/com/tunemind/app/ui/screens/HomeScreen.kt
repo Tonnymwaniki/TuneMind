@@ -87,11 +87,15 @@ fun HomeScreen(
         ?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
     val isLiveObserved = nowPlaying != null || latestRealTrack != null
 
-    LaunchedEffect(Unit) {
-        vm.rebindListener()
-    }
-
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val hasAccess = com.tunemind.app.service.NotificationAccess.isEnabled(context)
     val isListenerBound = com.tunemind.app.service.TuneMindListenerService.isConnected
+
+    LaunchedEffect(Unit) {
+        if (hasAccess) {
+            vm.rebindListener()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -101,7 +105,7 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (!isListenerBound) {
+        if (!hasAccess || !isListenerBound) {
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF451A03).copy(alpha = 0.6f)),
@@ -114,16 +118,33 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Android Listener Disconnected", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
-                        Text("Tap Rebind or toggle Notification Access in Settings.", fontSize = 10.sp, color = Color(0xFFCBD5E1))
+                        Text(
+                            text = if (!hasAccess) "Notification Access Required" else "Listener Rebind Required",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentAmber
+                        )
+                        Text(
+                            text = if (!hasAccess) "Grant TuneMind Notification Access in Settings to capture playback."
+                            else "Tap Rebind to command Android to reconnect Spotify listener.",
+                            fontSize = 10.sp,
+                            color = Color(0xFFCBD5E1)
+                        )
                     }
                     Button(
-                        onClick = { vm.rebindListener() },
+                        onClick = {
+                            if (!hasAccess) {
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                context.startActivity(intent)
+                            } else {
+                                vm.rebindListener()
+                            }
+                        },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color(0xFF020617)),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Text("Rebind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(if (!hasAccess) "Settings" else "Rebind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
