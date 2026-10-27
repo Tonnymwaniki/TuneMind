@@ -34,6 +34,7 @@ fun SongFatigueScreen(
 ) {
     var restingTracks by remember { mutableStateOf(TuneMindDemoData.highSatietyTracks) }
     var watchlistTracks by remember { mutableStateOf(TuneMindDemoData.candidateCooldownTracks) }
+    var selectedTab by remember { mutableStateOf(0) } // 0 = Watchlist, 1 = Cooldown Vault, 2 = Palate Cleansers
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -77,7 +78,7 @@ fun SongFatigueScreen(
                         }
                         Column {
                             Text(
-                                text = "SONG FATIGUE LAB",
+                                text = "SATIETY LAB",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -85,7 +86,7 @@ fun SongFatigueScreen(
                                 letterSpacing = 1.sp
                             )
                             Text(
-                                text = "Acoustic Satiety Monitor",
+                                text = "Fatigue & Cooldown Vault",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -101,12 +102,12 @@ fun SongFatigueScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF020617), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Add Cooldown", color = Color(0xFF020617), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Add to Vault", color = Color(0xFF020617), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 Text(
-                    text = "Deterministic satiety detection spots tracks entering acoustic exhaustion before you burn out on them. Tracks with high repeat velocity are quarantined to restore receptivity.",
+                    text = "Protects your favorite music from dopamine burnout. Mathematical decay formulas predict when repeated exposure desensitizes auditory receptors, guiding songs into recovery.",
                     fontSize = 12.sp,
                     color = Color(0xFF94A3B8),
                     lineHeight = 18.sp
@@ -137,13 +138,13 @@ fun SongFatigueScreen(
                         color = Color(0xFF64748B)
                     )
                     Text(
-                        text = "82% • High Velocity",
+                        text = "78% • Moderate Saturation",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentAmber
                     )
                     Text(
-                        text = "${restingTracks.size} songs currently in receptor recovery vault",
+                        text = "${restingTracks.size} tracks resting • Cooldown decay λ = 0.18/day",
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8)
                     )
@@ -157,14 +158,14 @@ fun SongFatigueScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        progress = { 0.82f },
+                        progress = { 0.78f },
                         modifier = Modifier.size(46.dp),
                         color = AccentAmber,
                         strokeWidth = 4.dp,
                         trackColor = Color(0xFF334155)
                     )
                     Text(
-                        text = "82%",
+                        text = "78%",
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -174,354 +175,256 @@ fun SongFatigueScreen(
             }
         }
 
-        // Active Cooldowns Section
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                Text(
-                    text = "Active Cooldown Vault (${restingTracks.size})",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Text(
-                text = "Receptor Recovery",
-                fontSize = 11.sp,
-                color = Color(0xFF64748B)
-            )
-        }
-
-        restingTracks.forEach { track ->
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Track Initial Avatar
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(PrimaryViolet, AccentCyan)
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = track.title.take(1),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = track.title,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "${track.artist} • ${track.genre}",
-                                fontSize = 11.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                        }
-
-                        // Satiety Pill
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFEF4444).copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.3f))
-                        ) {
-                            Text(
-                                text = "${track.satietyScore}% Satiety",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFF87171),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    // Progress Bar
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Resting: ${track.cooldownDaysRemaining} days remaining",
-                                fontSize = 11.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                            Text(
-                                text = "${(track.recoveryProgress * 100).toInt()}% Recovered",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = AccentCyan
-                            )
-                        }
-                        LinearProgressIndicator(
-                            progress = { track.recoveryProgress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp)),
-                            color = AccentCyan,
-                            trackColor = Color(0xFF1E293B)
-                        )
-                    }
-
-                    // Interactive Controls
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    restingTracks = restingTracks.map {
-                                        if (it.id == track.id) it.copy(cooldownDaysRemaining = it.cooldownDaysRemaining + 1f) else it
-                                    }
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                            ) {
-                                Text("+1d", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    restingTracks = restingTracks.map {
-                                        if (it.id == track.id) it.copy(
-                                            cooldownDaysRemaining = maxOf(0.5f, it.cooldownDaysRemaining - 1f)
-                                        ) else it
-                                    }
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                            ) {
-                                Text("-1d", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                            }
-                        }
-
-                        TextButton(
-                            onClick = {
-                                restingTracks = restingTracks.filter { it.id != track.id }
-                                snackbarMessage = "Reactivated ${track.title} early"
-                            }
-                        ) {
-                            Text("Reactivate Early", fontSize = 11.sp, color = AccentGreen, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Impending Fatigue Watchlist
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.TrendingUp, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
-                Text(
-                    text = "Impending Burnout Watchlist",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Text(
-                text = "Rapid Repeat Velocity",
-                fontSize = 11.sp,
-                color = Color(0xFF64748B)
-            )
-        }
-
-        watchlistTracks.forEach { track ->
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF1E293B)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${track.artist} • ${track.playCount} plays", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        Text(
-                            text = "${track.fatigueCategory} • Satiety: ${track.satietyScore}%",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = AccentAmber
-                        )
-                    }
-
-                    Button(
-                        onClick = {
-                            val moved = track.copy(
-                                cooldownActive = true,
-                                recoveryProgress = 0.1f,
-                                cooldownDaysRemaining = 5.0f
-                            )
-                            watchlistTracks = watchlistTracks.filter { it.id != track.id }
-                            restingTracks = restingTracks + moved
-                            snackbarMessage = "Moved ${track.title} to Cooldown Vault"
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                    ) {
-                        Text("Rest Track", fontSize = 11.sp, color = AccentCyanBright, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // Acoustic Palate Cleansers
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.Spa, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
-                Text(
-                    text = "Acoustic Palate Cleansers",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Text(
-                text = "Low Satiety Contrast",
-                fontSize = 11.sp,
-                color = Color(0xFF64748B)
-            )
-        }
-
-        TuneMindDemoData.palateCleansers.forEach { track ->
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF064E3B).copy(alpha = 0.4f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Headphones, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${track.artist} • ${track.genre}", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF10B981).copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f))
-                    ) {
-                        Text(
-                            text = "${track.satietyScore}% Satiety",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF34D399),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Scientific Explanation Card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF090D16)),
+        // Interactive Segmented Controls
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF0F172A),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "NEURO-ACOUSTIC SATIATION DYNAMICS",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentCyan
-                )
-                Text(
-                    text = "Why songs become stale",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Text(
-                    text = "Musical satiety is driven by predictable pattern repetition exhausting mesolimbic dopamine release. Rest periods of 4-7 days reset auditory receptor tolerance, restoring emotional resonance.",
-                    fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
-                    lineHeight = 18.sp
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(
+                    0 to "Watchlist (${watchlistTracks.size})",
+                    1 to "In Vault (${restingTracks.size})",
+                    2 to "Cleansers (3)"
+                ).forEach { (index, label) ->
+                    val isSelected = selectedTab == index
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) Color(0xFF1E293B) else Color.Transparent,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) AccentCyan.copy(alpha = 0.4f) else Color.Transparent
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { selectedTab = index }
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) AccentCyanBright else Color(0xFF94A3B8),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Notification Snackbar
+        snackbarMessage?.let { msg ->
+            Card(
+                shape = RoundedCornerShape(10.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(msg, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    IconButton(onClick = { snackbarMessage = null }, modifier = Modifier.size(20.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+
+        // Tab Content
+        when (selectedTab) {
+            0 -> {
+                // High Velocity Watchlist (Impending Fatigue)
+                watchlistTracks.forEach { track ->
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF78350F).copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(22.dp))
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("${track.artist} • ${track.playCount} plays", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                                Spacer(Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${track.satietyScore}% Satiety", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentAmber, fontWeight = FontWeight.Bold)
+                                    Text("•", color = Color(0xFF475569))
+                                    Text("+0.58 Vel", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFFF87171))
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    watchlistTracks = watchlistTracks.filter { it.id != track.id }
+                                    restingTracks = restingTracks + track.copy(cooldownDaysRemaining = 5)
+                                    snackbarMessage = "Quarantined '${track.title}' to Cooldown Vault for 5 days."
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentAmber.copy(alpha = 0.5f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Quarantine", color = AccentAmber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            1 -> {
+                // Resting in Vault
+                restingTracks.forEach { track ->
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF064E3B).copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Restore, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(22.dp))
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text(track.artist, fontSize = 12.sp, color = Color(0xFF94A3B8))
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF064E3B).copy(alpha = 0.4f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                                ) {
+                                    Text(
+                                        "${track.cooldownDaysRemaining} days left",
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGreen,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            // Receptor Recovery Progress
+                            val recoveryProgress = 1f - (track.cooldownDaysRemaining.toFloat() / 7f)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Receptor Recovery ($e^-0.18t)", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
+                                    Text("${(recoveryProgress * 100).toInt()}% restored", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = AccentGreen)
+                                }
+                                LinearProgressIndicator(
+                                    progress = { recoveryProgress.coerceIn(0.1f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                                    color = AccentGreen,
+                                    trackColor = Color(0xFF1E293B)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        restingTracks = restingTracks.filter { it.id != track.id }
+                                        snackbarMessage = "Restored '${track.title}' from Vault early."
+                                    }
+                                ) {
+                                    Text("Restore Early", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            2 -> {
+                // Curated Palate Cleansers
+                TuneMindDemoData.palateCleansers.forEach { cleanser ->
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0891B2).copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Spa, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(22.dp))
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(cleanser.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("${cleanser.artist} • ${cleanser.genre}", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                                Text(cleanser.effect, fontSize = 11.sp, color = AccentCyanBright)
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF1E293B)
+                            ) {
+                                Text(
+                                    "-0.45 Vel",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentCyan,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 

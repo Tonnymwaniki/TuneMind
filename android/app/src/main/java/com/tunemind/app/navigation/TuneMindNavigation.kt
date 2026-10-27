@@ -24,21 +24,23 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
+import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.screens.*
 import com.tunemind.app.ui.theme.*
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    object Home : Screen("home", "Home", Icons.Outlined.Home)
-    object CrossApp : Screen("cross_app", "Ingest", Icons.Outlined.Smartphone)
-    object Fatigue : Screen("fatigue", "Fatigue", Icons.Outlined.LocalFireDepartment)
-    object CooldownManagement : Screen("cooldown_mgmt", "Cooldown", Icons.Outlined.AcUnit)
-    object History : Screen("history", "Sessions", Icons.Outlined.History)
+    // 4 Core Streamlined Bottom Navigation Destinations
+    object Home : Screen("home", "Pulse", Icons.Outlined.GraphicEq)
+    object Fatigue : Screen("fatigue", "Satiety Lab", Icons.Outlined.LocalFireDepartment)
+    object History : Screen("history", "Timeline", Icons.Outlined.History)
+    object SevenDayStudy : Screen("seven_day_study", "Intelligence", Icons.Outlined.DateRange)
 
-    // Additional Deep-Dive and Utility Routes
-    object Profile : Screen("profile", "Profile", Icons.Outlined.Person)
+    // Secondary Drilldown & Utility Screens
+    object CrossApp : Screen("cross_app", "Daemons & Ingest", Icons.Outlined.Sensors)
+    object CooldownManagement : Screen("cooldown_mgmt", "Cooldown Vault", Icons.Outlined.AcUnit)
+    object Profile : Screen("profile", "Sonic Genome", Icons.Outlined.Person)
     object SessionDetails : Screen("session_details", "Session", Icons.Outlined.GraphicEq)
-    object SevenDayStudy : Screen("seven_day_study", "7-Day Study", Icons.Outlined.DateRange)
     object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)
     object WeeklyReport : Screen("weekly_report", "Receptive Horizon", Icons.Outlined.Insights)
     object ManualCooldown : Screen("manual_cooldown", "Add to Cooldown", Icons.Outlined.AddCircleOutline)
@@ -50,7 +52,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
     val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
-        containerColor = Color(0xFF020617), // Slate-950
+        containerColor = Color(0xFF020617), // Deep slate-950
         topBar = {
             TuneMindTopAppBar(
                 currentRoute = currentRoute,
@@ -72,6 +74,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
         }
     ) { innerPadding ->
         val vm: TuneMindViewModel = viewModel()
+
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
@@ -92,7 +95,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             composable(Screen.Fatigue.route) {
                 SongFatigueScreen(
                     onOpenCalibration = { navController.navigate(Screen.WeeklyReport.route) },
-                    onOpenCooldown = { navController.navigate(Screen.CooldownManagement.route) }
+                    onOpenCooldown = { navController.navigate(Screen.ManualCooldown.route) }
                 )
             }
             composable(Screen.CooldownManagement.route) {
@@ -138,11 +141,12 @@ fun TuneMindTopAppBar(
 ) {
     val isRootTab = currentRoute in listOf(
         Screen.Home.route,
-        Screen.CrossApp.route,
         Screen.Fatigue.route,
-        Screen.CooldownManagement.route,
-        Screen.History.route
+        Screen.History.route,
+        Screen.SevenDayStudy.route
     )
+
+    val isDaemonConnected = TuneMindListenerService.isConnected
 
     Row(
         modifier = Modifier
@@ -174,9 +178,7 @@ fun TuneMindTopAppBar(
                     )
                 }
             }
-
             Spacer(modifier = Modifier.width(10.dp))
-
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
@@ -191,19 +193,19 @@ fun TuneMindTopAppBar(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(AccentGreen)
+                            .background(if (isDaemonConnected) AccentGreen else AccentAmber)
                     )
                 }
                 Text(
                     text = when (currentRoute) {
-                        Screen.Home.route -> "Home Dashboard"
-                        Screen.CrossApp.route -> "Phone Ingestion Hub"
-                        Screen.Fatigue.route -> "Song Fatigue Lab"
+                        Screen.Home.route -> "Live Pulse"
+                        Screen.Fatigue.route -> "Satiety Lab"
+                        Screen.History.route -> "Playback Timeline"
+                        Screen.SevenDayStudy.route -> "7-Day Intelligence"
+                        Screen.CrossApp.route -> "Observer & Ingest"
                         Screen.CooldownManagement.route -> "Cooldown Vault"
-                        Screen.History.route -> "Acoustic Log"
                         Screen.Profile.route -> "Sonic Genome"
                         Screen.SessionDetails.route -> "Session Breakdown"
-                        Screen.SevenDayStudy.route -> "7-Day Study"
                         Screen.Settings.route -> "Settings & Sync"
                         Screen.WeeklyReport.route -> "Receptive Horizon"
                         Screen.ManualCooldown.route -> "Manual Cooldown"
@@ -216,21 +218,41 @@ fun TuneMindTopAppBar(
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconButton(onClick = { onNavigate(Screen.SevenDayStudy.route) }) {
-                Icon(Icons.Default.DateRange, contentDescription = "Study", tint = Color(0xFF94A3B8))
-            }
-            IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8))
-            }
-            Box(
-                modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(PrimaryViolet),
-                contentAlignment = Alignment.Center
+        // Top Right Utility Controls (Live Daemon Pill + Settings)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Live Daemon Pill Button (opens Ingest & Daemon screen)
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDaemonConnected) Color(0xFF064E3B).copy(alpha = 0.35f) else Color(0xFF451A03).copy(alpha = 0.4f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isDaemonConnected) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFFF59E0B).copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
             ) {
-                Text("T", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (isDaemonConnected) AccentGreen else AccentAmber)
+                    )
+                    Text(
+                        text = if (isDaemonConnected) "DAEMON" else "OFFLINE",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDaemonConnected) AccentGreen else AccentAmber
+                    )
+                }
+            }
+
+            IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -241,12 +263,12 @@ fun TuneMindBottomNavigationBar(
     currentRoute: String?,
     onTabSelected: (String) -> Unit
 ) {
+    // Exactly 4 Streamlined Core Destinations
     val items = listOf(
         Screen.Home,
-        Screen.CrossApp,
         Screen.Fatigue,
-        Screen.CooldownManagement,
-        Screen.History
+        Screen.History,
+        Screen.SevenDayStudy
     )
 
     NavigationBar(
@@ -264,14 +286,14 @@ fun TuneMindBottomNavigationBar(
                         screen.icon,
                         contentDescription = screen.title,
                         tint = if (selected) AccentCyan else Color(0xFF64748B),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 },
                 label = {
                     Text(
                         screen.title,
-                        fontSize = 10.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         color = if (selected) AccentCyanBright else Color(0xFF64748B)
                     )
                 },
