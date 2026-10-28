@@ -21,27 +21,52 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.model.TrackItem
-import com.tunemind.app.model.TuneMindDemoData
+import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
+
+data class CooldownCandidate(
+    val title: String,
+    val artist: String,
+    val playCount: Int,
+    val satietyScore: Int
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
+fun ManualCooldownSelectionScreen(
+    vm: TuneMindViewModel,
+    onBack: () -> Unit
+) {
+    val historyState by vm.historyState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var selectedDays by remember { mutableStateOf(5f) }
-    var selectedTrack by remember { mutableStateOf<TrackItem?>(null) }
+    var selectedTrack by remember { mutableStateOf<CooldownCandidate?>(null) }
     var isSubmitted by remember { mutableStateOf(false) }
 
-    val allCandidates = remember {
-        TuneMindDemoData.candidateCooldownTracks + TuneMindDemoData.palateCleansers
+    // Derive candidates strictly from real captured songs
+    val realCandidates = remember(historyState.tracks) {
+        historyState.tracks
+            .filter { !it.title.isNullOrBlank() }
+            .map {
+                CooldownCandidate(
+                    title = it.title ?: "Unknown",
+                    artist = it.artist ?: "Unknown",
+                    playCount = it.distinctAppearanceCount,
+                    satietyScore = minOf(95, it.distinctAppearanceCount * 22)
+                )
+            }
     }
-    val filteredTracks = remember(searchQuery) {
-        if (searchQuery.isBlank()) allCandidates
-        else allCandidates.filter {
+
+    val filteredTracks = remember(searchQuery, realCandidates) {
+        if (searchQuery.isBlank()) realCandidates
+        else realCandidates.filter {
             it.title.contains(searchQuery, ignoreCase = true) ||
             it.artist.contains(searchQuery, ignoreCase = true)
         }
+    }
+
+    val isCustomSearchMatch = searchQuery.isNotBlank() && filteredTracks.none {
+        it.title.equals(searchQuery.trim(), ignoreCase = true)
     }
 
     Column(
@@ -52,62 +77,55 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Hero Header Card
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                Column {
+                    Text(
+                        text = "MANUAL QUARANTINE",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Add Track to Vault",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        // Info Banner
         Card(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Outlined.AddCircleOutline,
-                                contentDescription = null,
-                                tint = AccentCyan,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "QUARANTINE BENCH",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentCyan,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "Add Track to Cooldown",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
-
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8))
-                    }
-                }
-
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Manually place a high-rotation track into receptor rest. While quarantined, TuneMind will actively prevent repeat exposure.",
+                    text = "RECEPTOR RESET PROTOCOL",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentCyan
+                )
+                Text(
+                    text = "Quarantining a song temporarily pauses its exposure, allowing dopamine receptor sensitivity to recover via exponential decay (e^-0.18t).",
                     fontSize = 12.sp,
                     color = Color(0xFF94A3B8),
                     lineHeight = 18.sp
@@ -144,18 +162,25 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
                         colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Return to Cooldown Vault", color = Color(0xFF020617), fontWeight = FontWeight.Bold)
+                        Text("Return to Satiety Lab", color = Color(0xFF020617), fontWeight = FontWeight.Bold)
                     }
                 }
             }
         } else {
-            // Search field
+            // Working Search Field
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search songs or artists...", color = Color(0xFF64748B)) },
+                placeholder = { Text("Search captured songs or type any track...", color = Color(0xFF64748B)) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B)) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B))
+                        }
+                    }
+                },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = Color(0xFF0F172A),
                     unfocusedContainerColor = Color(0xFF0F172A),
@@ -189,7 +214,6 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
                             color = AccentCyan
                         )
                     }
-
                     Slider(
                         value = selectedDays,
                         onValueChange = { selectedDays = it },
@@ -201,7 +225,6 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
                             inactiveTrackColor = Color(0xFF1E293B)
                         )
                     )
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -212,56 +235,132 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
                 }
             }
 
-            // Track Selection List
+            // Custom search write-in card
+            if (isCustomSearchMatch) {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0891B2).copy(alpha = 0.15f)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentCyan.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedTrack = CooldownCandidate(
+                                title = searchQuery.trim(),
+                                artist = "Custom Track",
+                                playCount = 1,
+                                satietyScore = 75
+                            )
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Quarantine \"${searchQuery.trim()}\"", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Custom song name • Will be added to Vault", fontSize = 11.sp, color = AccentCyanBright)
+                        }
+                        RadioButton(
+                            selected = selectedTrack?.title == searchQuery.trim(),
+                            onClick = {
+                                selectedTrack = CooldownCandidate(
+                                    title = searchQuery.trim(),
+                                    artist = "Custom Track",
+                                    playCount = 1,
+                                    satietyScore = 75
+                                )
+                            },
+                            colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = Color(0xFF64748B))
+                        )
+                    }
+                }
+            }
+
+            // Real Captured Track Selection List
             Text(
-                text = "Select Track to Quarantine",
+                text = "Captured Songs Available for Vault",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
 
-            filteredTracks.forEach { track ->
-                val isSelected = selectedTrack?.id == track.id
+            if (filteredTracks.isEmpty() && !isCustomSearchMatch) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) Color(0xFF0891B2).copy(alpha = 0.2f) else Color(0xFF0F172A)
-                    ),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (isSelected) AccentCyan else Color(0xFF1E293B)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { selectedTrack = track }
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(32.dp))
+                        Text(
+                            text = if (searchQuery.isBlank()) "No songs captured yet" else "No matching captured songs",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (searchQuery.isBlank())
+                                "Play tracks in Spotify to populate this list, or type a custom track name in the search bar above."
+                            else
+                                "You can type any track name above to quarantine it directly.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF94A3B8),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                filteredTracks.forEach { track ->
+                    val isSelected = selectedTrack?.title == track.title
+
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Color(0xFF0891B2).copy(alpha = 0.2f) else Color(0xFF0F172A)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) AccentCyan else Color(0xFF1E293B)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .clickable { selectedTrack = track }
                     ) {
-                        Box(
+                        Row(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1E293B)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                        }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF1E293B)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                            }
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text(text = "${track.artist} • Satiety: ${track.satietyScore}%", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                        }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(text = "${track.artist} • ${track.playCount} plays • ${track.satietyScore}% Satiety", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            }
 
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = { selectedTrack = track },
-                            colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = Color(0xFF64748B))
-                        )
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { selectedTrack = track },
+                                colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = Color(0xFF64748B))
+                            )
+                        }
                     }
                 }
             }
@@ -270,7 +369,8 @@ fun ManualCooldownSelectionScreen(onBack: () -> Unit) {
 
             Button(
                 onClick = {
-                    if (selectedTrack != null) {
+                    selectedTrack?.let { track ->
+                        vm.quarantineTrack(track.title, track.artist, selectedDays)
                         isSubmitted = true
                     }
                 },

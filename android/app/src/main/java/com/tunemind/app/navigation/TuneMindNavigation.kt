@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import com.tunemind.app.service.TuneMindListenerService
@@ -65,7 +66,9 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                 currentRoute = currentRoute,
                 onTabSelected = { route ->
                     navController.navigate(route) {
-                        popUpTo(Screen.Home.route) { saveState = true }
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
                         launchSingleTop = true
                         restoreState = true
                     }
@@ -101,6 +104,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             }
             composable(Screen.CooldownManagement.route) {
                 CooldownManagementScreen(
+                    vm = vm,
                     onBack = { navController.popBackStack() },
                     onAddTrack = { navController.navigate(Screen.ManualCooldown.route) }
                 )
@@ -128,7 +132,10 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                 WeeklyReportScreen(onBack = { navController.popBackStack() })
             }
             composable(Screen.ManualCooldown.route) {
-                ManualCooldownSelectionScreen(onBack = { navController.popBackStack() })
+                ManualCooldownSelectionScreen(
+                    vm = vm,
+                    onBack = { navController.popBackStack() }
+                )
             }
         }
     }
@@ -264,7 +271,6 @@ fun TuneMindBottomNavigationBar(
     currentRoute: String?,
     onTabSelected: (String) -> Unit
 ) {
-    // Exactly 4 Streamlined Core Destinations
     val items = listOf(
         Screen.Home,
         Screen.Fatigue,
@@ -278,7 +284,14 @@ fun TuneMindBottomNavigationBar(
         modifier = Modifier.navigationBarsPadding()
     ) {
         items.forEach { screen ->
-            val selected = currentRoute == screen.route
+            val selected = when (screen) {
+                Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route, Screen.Settings.route)
+                Screen.Fatigue -> currentRoute in listOf(Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
+                Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
+                Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route)
+                else -> currentRoute == screen.route
+            }
+
             NavigationBarItem(
                 selected = selected,
                 onClick = { onTabSelected(screen.route) },

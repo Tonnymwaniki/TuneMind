@@ -50,7 +50,7 @@ fun SongFatigueScreen(
         else -> "High Auditory Potency"
     }
 
-    val watchlistDisplayCount = maxOf(realCapturedTracks.size, TuneMindDemoData.candidateCooldownTracks.size)
+    val watchlistDisplayCount = realCapturedTracks.size
 
     Column(
         modifier = Modifier
@@ -327,58 +327,21 @@ fun SongFatigueScreen(
                             }
                         }
                     }
-                }
-
-                // Additional candidate tracks from demo data
-                TuneMindDemoData.candidateCooldownTracks.forEach { track ->
+                } else {
                     Card(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF78350F).copy(alpha = 0.3f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(22.dp))
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text("${track.artist} • ${track.playCount} plays", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                                Spacer(Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${track.satietyScore}% Satiety", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentAmber, fontWeight = FontWeight.Bold)
-                                    Text("•", color = Color(0xFF475569))
-                                    Text("+0.58 Vel", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFFF87171))
-                                }
-                            }
-
-                            Button(
-                                onClick = {
-                                    vm.quarantineTrack(track.title, track.artist, 5f)
-                                    snackbarMessage = "Quarantined '${track.title}' to Cooldown Vault for 5 days."
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, AccentAmber.copy(alpha = 0.5f)),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Quarantine", color = AccentAmber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
+                            Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(36.dp))
+                            Text("No Satiety Fatigue Detected", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("As you listen to songs repeatedly on Spotify, TuneMind will automatically detect repeat loops and surface them here.", fontSize = 12.sp, color = Color(0xFF94A3B8), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
                     }
                 }
