@@ -328,20 +328,20 @@ class TuneMindViewModel : ViewModel() {
 
     fun startStudy() {
         viewModelScope.launch {
-            experimentRepo.start(AppHolder.context)
+            experimentRepo?.start(AppHolder.context)
             _studyState.value = _studyState.value.copy(showReadiness = false)
         }
     }
 
     fun resetStudy() {
-        viewModelScope.launch { experimentRepo.reset() }
+        viewModelScope.launch { experimentRepo?.reset() }
     }
 
     fun recordExperimentObservation(observation: PlaybackObservation) {
         val expId = _studyState.value.experimentId
         if (expId.isNotEmpty() && _studyState.value.status == ExperimentStatus.ACTIVE) {
             viewModelScope.launch {
-                experimentRepo.recordObservation(observation, expId)
+                experimentRepo?.recordObservation(observation, expId)
             }
         }
     }
