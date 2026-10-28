@@ -426,6 +426,7 @@ fun HomeScreen(
                 }
             }
 
+            val vaultTracks by vm.vaultState.collectAsState()
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
@@ -441,7 +442,7 @@ fun HomeScreen(
                         color = Color(0xFF64748B)
                     )
                     Text(
-                        text = "3 Resting",
+                        text = "${vaultTracks.size} Resting",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentAmber

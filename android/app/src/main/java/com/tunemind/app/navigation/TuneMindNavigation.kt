@@ -94,6 +94,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             }
             composable(Screen.Fatigue.route) {
                 SongFatigueScreen(
+                    vm = vm,
                     onOpenCalibration = { navController.navigate(Screen.WeeklyReport.route) },
                     onOpenCooldown = { navController.navigate(Screen.ManualCooldown.route) }
                 )

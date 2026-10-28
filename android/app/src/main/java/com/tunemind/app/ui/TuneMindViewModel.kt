@@ -382,7 +382,103 @@ class TuneMindViewModel : ViewModel() {
         com.tunemind.app.MainActivity.forceRebindListener(ctx)
         com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
     }
+
+    // Cooldown Vault Persistence
+    private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
+    val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
+
+    private fun loadVaultFromPrefs(): List<VaultTrack> {
+        val ctx = AppHolder.context ?: return defaultSeedVault()
+        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("vault_items", null) ?: return defaultSeedVault()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val now = System.currentTimeMillis()
+            val list = mutableListOf<VaultTrack>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val qTime = obj.getLong("quarantinedAtMs")
+                val totalDays = obj.getDouble("totalDays").toFloat()
+                val elapsedDays = maxOf(0f, (now - qTime) / 86_400_000f)
+                val remaining = maxOf(0f, totalDays - elapsedDays)
+                val progress = (1f - (remaining / totalDays)).coerceIn(0f, 1f)
+                list.add(
+                    VaultTrack(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        artist = obj.getString("artist"),
+                        quarantinedAtMs = qTime,
+                        totalDays = totalDays,
+                        cooldownDaysRemaining = (remaining * 10).toInt() / 10f,
+                        recoveryProgress = progress,
+                        satietyScore = obj.optInt("satietyScore", 85)
+                    )
+                )
+            }
+            if (list.isEmpty()) defaultSeedVault() else list
+        } catch (_: Exception) {
+            defaultSeedVault()
+        }
+    }
+
+    private fun defaultSeedVault(): List<VaultTrack> = listOf(
+        VaultTrack("v-1", "Electric Dreams", "The Wanderers", System.currentTimeMillis() - 86_400_000L * 2, 7f, 5.0f, 0.28f, 88),
+        VaultTrack("v-2", "Better Days", "Juno Vale", System.currentTimeMillis() - 86_400_000L * 4, 7f, 3.0f, 0.57f, 82),
+        VaultTrack("v-3", "Starlight Echoes", "Aura Nova", System.currentTimeMillis() - 86_400_000L * 6, 7f, 1.0f, 0.85f, 92)
+    )
+
+    private fun saveVaultToPrefs(items: List<VaultTrack>) {
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val array = org.json.JSONArray()
+        for (item in items) {
+            val obj = org.json.JSONObject().apply {
+                put("id", item.id)
+                put("title", item.title)
+                put("artist", item.artist)
+                put("quarantinedAtMs", item.quarantinedAtMs)
+                put("totalDays", item.totalDays.toDouble())
+                put("satietyScore", item.satietyScore)
+            }
+            array.put(obj)
+        }
+        prefs.edit().putString("vault_items", array.toString()).apply()
+    }
+
+    fun quarantineTrack(title: String, artist: String, durationDays: Float = 5f) {
+        val id = "vault-${System.currentTimeMillis()}"
+        val newTrack = VaultTrack(
+            id = id,
+            title = title,
+            artist = artist,
+            quarantinedAtMs = System.currentTimeMillis(),
+            totalDays = durationDays,
+            cooldownDaysRemaining = durationDays,
+            recoveryProgress = 0.05f,
+            satietyScore = 85
+        )
+        val updated = listOf(newTrack) + _vaultState.value.filter { it.title != title }
+        _vaultState.value = updated
+        saveVaultToPrefs(updated)
+    }
+
+    fun restoreFromVault(id: String) {
+        val updated = _vaultState.value.filter { it.id != id }
+        _vaultState.value = updated
+        saveVaultToPrefs(updated)
+    }
 }
+
+data class VaultTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val quarantinedAtMs: Long,
+    val totalDays: Float = 5f,
+    val cooldownDaysRemaining: Float = 5f,
+    val recoveryProgress: Float = 0f,
+    val satietyScore: Int = 85,
+)
 
 object AppHolder {
     var context: android.content.Context? = null
