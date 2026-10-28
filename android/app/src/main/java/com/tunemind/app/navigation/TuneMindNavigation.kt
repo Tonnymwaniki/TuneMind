@@ -123,6 +123,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
             }
             composable(Screen.Settings.route) {
                 SettingsScreen(
+                    vm = vm,
                     onBack = { navController.popBackStack() },
                     onOpenCrossApp = { navController.navigate(Screen.CrossApp.route) },
                     onOpenWeeklyReport = { navController.navigate(Screen.WeeklyReport.route) }

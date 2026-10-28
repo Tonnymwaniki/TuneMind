@@ -22,10 +22,17 @@ import com.tunemind.app.ui.theme.*
 
 @Composable
 fun SettingsScreen(
+    vm: com.tunemind.app.ui.TuneMindViewModel? = null,
     onBack: () -> Unit,
     onOpenCrossApp: () -> Unit,
     onOpenWeeklyReport: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val registry = remember(context) { com.tunemind.app.provider.MusicProviderRegistry.getInstance(context) }
+    var selectedProviderId by remember { mutableStateOf(registry.getPreferredProviderId()) }
+    val providers = remember { registry.getInstalledProviders() }
+    var showResetDialog by remember { mutableStateOf(false) }
+
     var persistentListener by remember { mutableStateOf(true) }
     var fatigueSensitivity by remember { mutableStateOf(0.75f) }
     var chronoReceptivity by remember { mutableStateOf(true) }
@@ -131,6 +138,94 @@ fun SettingsScreen(
             }
         }
 
+        // Music Services & Handoff Playback
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Default Music Service", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text("Agent Handoff", fontSize = 11.sp, color = AccentCyan)
+        }
+
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceContainer),
+            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "When you tap 'Play this song' in TuneMind, playback starts in your preferred music service. The intelligence belongs to TuneMind — the music belongs to your services.",
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    lineHeight = 15.sp
+                )
+
+                providers.forEach { provider ->
+                    val isSelected = provider.providerId == selectedProviderId
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) Color(0xFF1E293B) else SurfaceContainerLow,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentCyan else BorderSubtle),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            selectedProviderId = provider.providerId
+                            vm?.setPreferredProviderId(context, provider.providerId)
+                                ?: registry.setPreferredProviderId(provider.providerId)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedProviderId = provider.providerId
+                                    vm?.setPreferredProviderId(context, provider.providerId)
+                                        ?: registry.setPreferredProviderId(provider.providerId)
+                                },
+                                colors = RadioButtonDefaults.colors(selectedColor = AccentCyan)
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = provider.displayName,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) Color.White else TextPrimary
+                                    )
+                                    val isInstalled = provider.isInstalled()
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (isInstalled) AccentGreen.copy(alpha = 0.15f) else Color(0xFF334155),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isInstalled) AccentGreen.copy(alpha = 0.4f) else Color(0xFF475569))
+                                    ) {
+                                        Text(
+                                            text = if (isInstalled) "Installed" else "Web Handoff",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isInstalled) AccentGreen else Color(0xFF94A3B8),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+
+                                val capDesc = if (provider.capabilities.contains(com.tunemind.app.provider.ProviderCapability.DIRECT_TRACK_PLAYBACK)) {
+                                    "Supports direct deep links & track playback"
+                                } else {
+                                    "Supports search intent handoff"
+                                }
+                                Text(text = capDesc, fontSize = 10.sp, color = TextMuted)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Intelligence & Calibration (TM-Engine 4.2)
         Text("Intelligence & Calibration (TM-Engine 4.2)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
 
@@ -232,6 +327,54 @@ fun SettingsScreen(
             border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
         ) {
             Text("Export Listening Ledger (.JSON / .CSV)", fontSize = 12.sp, color = TextSecondary)
+        }
+
+        // Profile Reset
+        Button(
+            onClick = { showResetDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF451A03),
+                contentColor = AccentAmber
+            ),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f))
+        ) {
+            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Reset & Delete Listening Profile", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+
+        if (showResetDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetDialog = false },
+                title = { Text("Reset Listening Profile?", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "This will permanently erase all local Room database playback history, observed listening patterns, satiety models, and quarantined cooldowns. TuneMind will begin a fresh observation cycle.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFCBD5E1)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showResetDialog = false
+                            vm?.resetListeningProfile()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White)
+                    ) {
+                        Text("Erase Profile")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetDialog = false }) {
+                        Text("Cancel", color = Color(0xFF94A3B8))
+                    }
+                },
+                containerColor = Color(0xFF0F172A),
+                shape = RoundedCornerShape(16.dp)
+            )
         }
     }
 }

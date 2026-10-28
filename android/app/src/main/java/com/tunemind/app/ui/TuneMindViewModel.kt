@@ -178,6 +178,7 @@ class TuneMindViewModel : ViewModel() {
         }
 
         refreshReadiness()
+        refreshRecommendations()
 
         viewModelScope.launch {
             repo.observeRecent().collect { rows ->
@@ -280,6 +281,8 @@ class TuneMindViewModel : ViewModel() {
                     signalText = sigText, dynamicsText = dynText, researchText = resText,
                     observationCount = rows.size,
                 )
+
+                refreshRecommendations()
             }
         }
     }
@@ -460,12 +463,92 @@ class TuneMindViewModel : ViewModel() {
         val updated = listOf(newTrack) + _vaultState.value.filter { it.title != title }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
+        refreshRecommendations()
     }
 
     fun restoreFromVault(id: String) {
         val updated = _vaultState.value.filter { it.id != id }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
+        refreshRecommendations()
+    }
+
+    // Agent Recommendations & Music Provider Playback
+    private val _recommendations = MutableStateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>>(emptyList())
+    val recommendations: StateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>> = _recommendations.asStateFlow()
+
+    private val _playbackLaunchFeedback = MutableStateFlow<com.tunemind.app.provider.PlaybackLaunchResult?>(null)
+    val playbackLaunchFeedback: StateFlow<com.tunemind.app.provider.PlaybackLaunchResult?> = _playbackLaunchFeedback.asStateFlow()
+
+    fun clearPlaybackLaunchFeedback() {
+        _playbackLaunchFeedback.value = null
+    }
+
+    fun playRecommendation(context: android.content.Context, track: com.tunemind.app.domain.recommendation.RecommendedTrack, explicitProviderId: String? = null): com.tunemind.app.provider.PlaybackLaunchResult {
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        val result = registry.launchRecommendation(track, explicitProviderId)
+        _playbackLaunchFeedback.value = result
+        return result
+    }
+
+    fun getInstalledProviders(context: android.content.Context): List<com.tunemind.app.provider.MusicProvider> {
+        return com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).getInstalledProviders()
+    }
+
+    fun getPreferredProviderId(context: android.content.Context): String {
+        return com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).getPreferredProviderId()
+    }
+
+    fun setPreferredProviderId(context: android.content.Context, providerId: String) {
+        com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).setPreferredProviderId(providerId)
+        refreshRecommendations()
+    }
+
+    // Onboarding State
+    private val _hasCompletedOnboarding = MutableStateFlow(loadOnboardingState())
+    val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
+
+    private fun loadOnboardingState(): Boolean {
+        val ctx = AppHolder.context ?: return true
+        val prefs = ctx.getSharedPreferences("tunemind_agent_prefs", android.content.Context.MODE_PRIVATE)
+        return prefs.getBoolean("has_completed_onboarding", false)
+    }
+
+    fun completeOnboarding(context: android.content.Context, preferredProviderId: String) {
+        val prefs = context.getSharedPreferences("tunemind_agent_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("has_completed_onboarding", true).apply()
+        setPreferredProviderId(context, preferredProviderId)
+        _hasCompletedOnboarding.value = true
+    }
+
+    fun refreshRecommendations() {
+        val ctx = AppHolder.context
+        val prefProvider = if (ctx != null) getPreferredProviderId(ctx) else "spotify"
+        val memory = com.tunemind.app.domain.model.ListeningMemory(
+            tracks = _historyState.value.tracks,
+            unidentifiedAppearanceCount = 0,
+            historyMayBeIncomplete = false
+        )
+        _recommendations.value = com.tunemind.app.domain.recommendation.RecommendationEngine.generateRecommendations(
+            memory = memory,
+            vaultTracks = _vaultState.value,
+            preferredProviderId = prefProvider
+        )
+    }
+
+    fun resetListeningProfile() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repo.clear()
+            }
+            _vaultState.value = emptyList()
+            val ctx = AppHolder.context
+            if (ctx != null) {
+                val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().clear().apply()
+            }
+            refreshRecommendations()
+        }
     }
 }
 

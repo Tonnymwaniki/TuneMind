@@ -23,6 +23,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.recommendation.RecommendationCategory
+import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
@@ -95,6 +97,14 @@ fun HomeScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val hasAccess = com.tunemind.app.service.NotificationAccess.isEnabled(context)
     val isListenerBound = com.tunemind.app.service.TuneMindListenerService.isConnected
+
+    val hasCompletedOnboarding by vm.hasCompletedOnboarding.collectAsState()
+    if (!hasCompletedOnboarding) {
+        PersonalOnboardingDialog(
+            vm = vm,
+            onDismiss = { }
+        )
+    }
 
     LaunchedEffect(Unit) {
         if (hasAccess) {
@@ -456,6 +466,103 @@ fun HomeScreen(
             }
         }
 
+        // AGENT RECOMMENDATIONS FOR YOU
+        val recommendations by vm.recommendations.collectAsState()
+        val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
+
+        // Playback Launch Toast / Alert Banner
+        playbackFeedback?.let { feedback ->
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = if (feedback.isSuccess) Color(0xFF064E3B) else Color(0xFF451A03)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (feedback.isSuccess) AccentGreen else AccentAmber),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (feedback.isSuccess) Icons.Default.CheckCircle else Icons.Default.Info,
+                            contentDescription = null,
+                            tint = if (feedback.isSuccess) AccentGreen else AccentAmber,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = feedback.message,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        )
+                    }
+                    IconButton(
+                        onClick = { vm.clearPlaybackFeedback() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
+        // Recommendations Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentCyan.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(16.dp))
+                }
+                Column {
+                    Text(
+                        text = "FOR YOU • AGENT INTELLIGENCE",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyanBright,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Curated For Your Cognitive State",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            IconButton(onClick = { vm.refreshRecommendations() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+            }
+        }
+
+        if (recommendations.isNotEmpty()) {
+            recommendations.take(4).forEach { rec ->
+                RecommendationCard(
+                    track = rec,
+                    onPlay = { vm.playRecommendation(context, rec) },
+                    onCooldown = { vm.addToVault(rec.title, rec.artist) }
+                )
+            }
+        }
+
         // Live 7-Day Neuro-Acoustic Study Tracker
         val studyState by vm.studyState.collectAsState()
         val elapsedDays = studyState.startDateMs?.let { start ->
@@ -698,5 +805,187 @@ fun HomeScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun RecommendationCard(
+    track: RecommendedTrack,
+    onPlay: () -> Unit,
+    onCooldown: () -> Unit
+) {
+    val categoryBadgeColor = when (track.category) {
+        RecommendationCategory.EXPLORATION_DISCOVERY -> Color(0xFF8B5CF6)
+        RecommendationCategory.COOLDOWN_RESTORED -> AccentGreen
+        RecommendationCategory.PALATE_CLEANSER -> Color(0xFF06B6D4)
+        RecommendationCategory.FAMILIAR_RECEPTIVE -> AccentAmber
+    }
+    val categoryLabel = when (track.category) {
+        RecommendationCategory.EXPLORATION_DISCOVERY -> "DISCOVERY"
+        RecommendationCategory.COOLDOWN_RESTORED -> "RESTORED"
+        RecommendationCategory.PALATE_CLEANSER -> "CLEANSER"
+        RecommendationCategory.FAMILIAR_RECEPTIVE -> "FAMILIAR"
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header Row: Category Badge + Match Pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = categoryBadgeColor.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, categoryBadgeColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = categoryLabel,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = categoryBadgeColor,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1E293B)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (track.confidence >= 0.85f) AccentGreen else AccentAmber)
+                        )
+                        Text(
+                            text = "${(track.confidence * 100).toInt()}% Match",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFCBD5E1)
+                        )
+                    }
+                }
+            }
+
+            // Track Title & Artist
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(categoryBadgeColor.copy(alpha = 0.8f), Color(0xFF1E293B))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = track.title,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "${track.artist}${track.album?.let { " • $it" } ?: ""}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF94A3B8),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Explanation / Agent Reasoning
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF020617).copy(alpha = 0.5f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B).copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Outlined.Lightbulb,
+                        contentDescription = null,
+                        tint = AccentCyanBright,
+                        modifier = Modifier.size(16.dp).padding(top = 1.dp)
+                    )
+                    Text(
+                        text = track.reason,
+                        fontSize = 11.sp,
+                        color = Color(0xFFCBD5E1),
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+
+            // Action Buttons: Play this song (Central feature!) + Cooldown option
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onPlay,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentCyan,
+                        contentColor = Color(0xFF020617)
+                    ),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Play this song",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                FilledTonalButton(
+                    onClick = onCooldown,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color(0xFF1E293B),
+                        contentColor = Color(0xFF94A3B8)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Outlined.AcUnit, contentDescription = "Quarantine", modifier = Modifier.size(14.dp))
+                }
+            }
+        }
     }
 }
