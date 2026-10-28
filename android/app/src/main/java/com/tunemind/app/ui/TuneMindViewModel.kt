@@ -466,6 +466,10 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
+    fun addToVault(title: String, artist: String, durationDays: Float = 5f) {
+        quarantineTrack(title, artist, durationDays)
+    }
+
     fun restoreFromVault(id: String) {
         val updated = _vaultState.value.filter { it.id != id }
         _vaultState.value = updated
@@ -482,6 +486,10 @@ class TuneMindViewModel : ViewModel() {
 
     fun clearPlaybackLaunchFeedback() {
         _playbackLaunchFeedback.value = null
+    }
+
+    fun clearPlaybackFeedback() {
+        clearPlaybackLaunchFeedback()
     }
 
     fun playRecommendation(context: android.content.Context, track: com.tunemind.app.domain.recommendation.RecommendedTrack, explicitProviderId: String? = null): com.tunemind.app.provider.PlaybackLaunchResult {
@@ -524,13 +532,8 @@ class TuneMindViewModel : ViewModel() {
     fun refreshRecommendations() {
         val ctx = AppHolder.context
         val prefProvider = if (ctx != null) getPreferredProviderId(ctx) else "spotify"
-        val memory = com.tunemind.app.domain.model.ListeningMemory(
-            tracks = _historyState.value.tracks,
-            unidentifiedAppearanceCount = 0,
-            historyMayBeIncomplete = false
-        )
         _recommendations.value = com.tunemind.app.domain.recommendation.RecommendationEngine.generateRecommendations(
-            memory = memory,
+            tracks = _historyState.value.tracks,
             vaultTracks = _vaultState.value,
             preferredProviderId = prefProvider
         )

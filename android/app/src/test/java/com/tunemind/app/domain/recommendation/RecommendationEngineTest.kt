@@ -1,6 +1,7 @@
 package com.tunemind.app.domain.recommendation
 
-import com.tunemind.app.domain.model.ListeningMemory
+import com.tunemind.app.domain.model.MemoryEvidenceQuality
+import com.tunemind.app.domain.model.TrackAppearanceEvidence
 import com.tunemind.app.domain.model.TrackIdentityBasis
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.ui.VaultTrack
@@ -9,15 +10,34 @@ import org.junit.Test
 
 class RecommendationEngineTest {
 
+    private fun createTestTrack(
+        id: String,
+        title: String,
+        artist: String,
+        distinctPlays: Int
+    ): TrackMemoryEntry {
+        return TrackMemoryEntry(
+            entryId = id,
+            sourcePackage = "com.spotify.music",
+            providerTrackId = id,
+            title = title,
+            artist = artist,
+            album = "Test Album",
+            distinctAppearanceCount = distinctPlays,
+            firstObservedAppearanceAtMs = 1000L,
+            lastObservedAppearanceAtMs = 2000L,
+            supportingObservationIds = emptyList(),
+            identityBasis = TrackIdentityBasis.TITLE_AND_ARTIST,
+            evidenceQuality = MemoryEvidenceQuality.SUPPORTED_IDENTITY,
+            historyMayBeIncomplete = false,
+            appearances = emptyList()
+        )
+    }
+
     @Test
     fun testGenerateRecommendationsWithEmptyMemoryReturnsStarters() {
-        val memory = ListeningMemory(
-            tracks = emptyList(),
-            unidentifiedAppearanceCount = 0,
-            historyMayBeIncomplete = false
-        )
         val recommendations = RecommendationEngine.generateRecommendations(
-            memory = memory,
+            tracks = emptyList(),
             vaultTracks = emptyList(),
             preferredProviderId = "spotify"
         )
@@ -31,31 +51,9 @@ class RecommendationEngineTest {
 
     @Test
     fun testQuarantinedTracksAreExcludedFromRecommendations() {
-        val memory = ListeningMemory(
-            tracks = listOf(
-                TrackMemoryEntry(
-                    entryId = "track-1",
-                    title = "Midnight City",
-                    artist = "M83",
-                    album = "Hurry Up, We're Dreaming",
-                    distinctAppearanceCount = 5,
-                    firstObservedAppearanceAtMs = 1000L,
-                    lastObservedAppearanceAtMs = 2000L,
-                    identityBasis = TrackIdentityBasis.TITLE_AND_ARTIST
-                ),
-                TrackMemoryEntry(
-                    entryId = "track-2",
-                    title = "Instant Crush",
-                    artist = "Daft Punk",
-                    album = "Random Access Memories",
-                    distinctAppearanceCount = 2,
-                    firstObservedAppearanceAtMs = 1500L,
-                    lastObservedAppearanceAtMs = 2500L,
-                    identityBasis = TrackIdentityBasis.TITLE_AND_ARTIST
-                )
-            ),
-            unidentifiedAppearanceCount = 0,
-            historyMayBeIncomplete = false
+        val tracks = listOf(
+            createTestTrack("t-1", "Midnight City", "M83", 5),
+            createTestTrack("t-2", "Instant Crush", "Daft Punk", 2)
         )
 
         val vault = listOf(
@@ -68,7 +66,7 @@ class RecommendationEngineTest {
         )
 
         val recommendations = RecommendationEngine.generateRecommendations(
-            memory = memory,
+            tracks = tracks,
             vaultTracks = vault,
             preferredProviderId = "youtube_music"
         )
@@ -81,13 +79,8 @@ class RecommendationEngineTest {
 
     @Test
     fun testConfidenceScoresAreBoundedBetweenZeroAndOne() {
-        val memory = ListeningMemory(
-            tracks = emptyList(),
-            unidentifiedAppearanceCount = 0,
-            historyMayBeIncomplete = false
-        )
         val recommendations = RecommendationEngine.generateRecommendations(
-            memory = memory,
+            tracks = emptyList(),
             vaultTracks = emptyList(),
             preferredProviderId = "spotify"
         )

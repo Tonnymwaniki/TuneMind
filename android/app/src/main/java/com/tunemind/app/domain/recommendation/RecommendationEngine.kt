@@ -18,14 +18,16 @@ object RecommendationEngine {
      * Generates a ranked list of personalized recommendations based on observed listening evidence.
      */
     fun generateRecommendations(
-        memory: ListeningMemory,
+        tracks: List<TrackMemoryEntry> = emptyList(),
+        memory: ListeningMemory? = null,
         vaultTracks: List<VaultTrack> = emptyList(),
         preferredProviderId: String = "spotify"
     ): List<RecommendedTrack> {
         val recommendations = mutableListOf<RecommendedTrack>()
         val quarantinedTitles = vaultTracks.map { it.title.lowercase().trim() }.toSet()
 
-        val validCapturedTracks = memory.tracks
+        val sourceTracks = if (tracks.isNotEmpty()) tracks else memory?.tracks ?: emptyList()
+        val validCapturedTracks = sourceTracks
             .filter { !it.title.isNullOrBlank() }
             .sortedByDescending { it.distinctAppearanceCount }
 
