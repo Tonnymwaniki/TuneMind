@@ -47,26 +47,33 @@ class MediaSessionObserver(
             diagnosticStatus = "Observer idle: Notification Access unavailable"
             return false
         }
+        val mgr = manager ?: run {
+            diagnosticStatus = "Observer unavailable: MediaSessionManager null"
+            return false
+        }
         diagnosticStatus = "Checking active media sessions…"
         started = true
         return try {
-            manager.addOnActiveSessionsChangedListener(
+            mgr.addOnActiveSessionsChangedListener(
                 activeSessionsListener,
                 ComponentName(service, TuneMindListenerService::class.java),
                 mainHandler,
             )
-            val active = manager.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
+            val active = mgr.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
             diagnosticStatus = "Watching ${active.size} active media session(s)"
             Log.i(TAG, "Observer started with ${active.size} active media sessions")
             reconcile(active)
             started
         } catch (_: SecurityException) {
             diagnosticStatus = "Observer blocked: Android denied media-session access"
-            // Access may be revoked between the settings check and framework call.
             stop()
             false
         } catch (_: IllegalStateException) {
             diagnosticStatus = "Observer unavailable: Android media-session service not ready"
+            stop()
+            false
+        } catch (t: Throwable) {
+            diagnosticStatus = "Observer error: ${t.message}"
             stop()
             false
         }

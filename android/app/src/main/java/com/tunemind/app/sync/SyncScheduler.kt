@@ -23,24 +23,28 @@ object SyncScheduler {
      * Enqueue a sync attempt, replacing any existing pending or failed job.
      */
     fun schedule(context: Context) {
-        val constraints = androidx.work.Constraints.Builder()
-            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
-            .build()
+        try {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
 
-        val request = OneTimeWorkRequestBuilder<EventSyncWorker>()
-            .setConstraints(constraints)
-            .setBackoffCriteria(
-                androidx.work.BackoffPolicy.EXPONENTIAL,
-                WorkRequestBackoffInitialMinutes,
-                TimeUnit.MINUTES,
+            val request = OneTimeWorkRequestBuilder<EventSyncWorker>()
+                .setConstraints(constraints)
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    WorkRequestBackoffInitialMinutes,
+                    TimeUnit.MINUTES,
+                )
+                .addTag(WORK_TAG)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                UNIQUE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request,
             )
-            .addTag(WORK_TAG)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            request,
-        )
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "Sync work scheduling notice: ${t.message}")
+        }
     }
 }

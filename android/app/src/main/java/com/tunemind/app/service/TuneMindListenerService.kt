@@ -28,36 +28,44 @@ class TuneMindListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        stopEmitted.set(false)
-        observer = MediaSessionObserver(this, serviceScope) { observation ->
-            repository.record(observation)
-            serviceScope.launch {
-                SyncScheduler.schedule(this@TuneMindListenerService)
-            }
-            // Ensure 7-day study is active and store observation with zero loss
-            serviceScope.launch {
-                var exp = experimentRepo.getExperiment()
-                if (exp == null || exp.status == ExperimentStatus.NOT_STARTED.name) {
-                    exp = experimentRepo.start(this@TuneMindListenerService)
-                    Log.i(TAG, "Auto-started 7-day listening study from today: ${exp.experimentId}")
+        try {
+            stopEmitted.set(false)
+            observer = MediaSessionObserver(this, serviceScope) { observation ->
+                repository.record(observation)
+                serviceScope.launch {
+                    SyncScheduler.schedule(this@TuneMindListenerService)
                 }
-                if (exp.status == ExperimentStatus.ACTIVE.name) {
-                    val windowEnd = exp.endDateMs ?: (System.currentTimeMillis() + 7L * 86_400_000L)
-                    if (observation.eventTimeMs > 0L && observation.eventTimeMs <= windowEnd) {
-                        experimentRepo.recordObservation(observation, exp.experimentId)
+                // Ensure 7-day study is active and store observation with zero loss
+                serviceScope.launch {
+                    try {
+                        var exp = experimentRepo.getExperiment()
+                        if (exp == null || exp.status == ExperimentStatus.NOT_STARTED.name) {
+                            exp = experimentRepo.start(this@TuneMindListenerService)
+                            Log.i(TAG, "Auto-started 7-day listening study from today: ${exp.experimentId}")
+                        }
+                        if (exp.status == ExperimentStatus.ACTIVE.name) {
+                            val windowEnd = exp.endDateMs ?: (System.currentTimeMillis() + 7L * 86_400_000L)
+                            if (observation.eventTimeMs > 0L && observation.eventTimeMs <= windowEnd) {
+                                experimentRepo.recordObservation(observation, exp.experimentId)
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Experiment tracking error: ${t.message}")
                     }
                 }
             }
-        }
-        observer.start()
-        isConnected = true
-        instance = this
-        Log.i(TAG, "Notification listener connected; observer initialization requested")
+            observer.start()
+            isConnected = true
+            instance = this
+            Log.i(TAG, "Notification listener connected; observer initialization requested")
 
-        // Schedule background sync.
-        serviceScope.launch {
-            SyncScheduler.schedule(this@TuneMindListenerService)
-            Log.i(TAG, "Sync work scheduled")
+            // Schedule background sync.
+            serviceScope.launch {
+                SyncScheduler.schedule(this@TuneMindListenerService)
+                Log.i(TAG, "Sync work scheduled")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error in onListenerConnected: ${t.message}", t)
         }
     }
 
