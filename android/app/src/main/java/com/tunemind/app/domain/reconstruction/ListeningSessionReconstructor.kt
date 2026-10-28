@@ -141,9 +141,17 @@ class ListeningSessionReconstructor(
         val id = "track:${first.eventId}"; val source = first.sourcePackage; var trackId = first.trackId
         var title = first.trackTitle; var artist = first.trackArtist; var album = first.trackAlbum; var duration = first.durationMs
         val start = first.eventTimeMs; var end = first.eventTimeMs; val ids = linkedSetOf(first.eventId)
-        fun matchesFingerprint(row: PlaybackObservation): Boolean = !title.isNullOrBlank() && !artist.isNullOrBlank() &&
-            title!!.trim().equals(row.trackTitle?.trim(), ignoreCase = true) && artist!!.trim().equals(row.trackArtist?.trim(), ignoreCase = true) &&
-            (album.isNullOrBlank() || row.trackAlbum.isNullOrBlank() || album!!.trim().equals(row.trackAlbum.trim(), ignoreCase = true))
+        fun matchesFingerprint(row: PlaybackObservation): Boolean {
+            val t = title?.trim() ?: return false
+            val a = artist?.trim() ?: return false
+            val rowT = row.trackTitle?.trim() ?: return false
+            val rowA = row.trackArtist?.trim() ?: return false
+            if (!t.equals(rowT, ignoreCase = true) || !a.equals(rowA, ignoreCase = true)) return false
+            val al = album?.trim()
+            val rowAl = row.trackAlbum?.trim()
+            if (al != null && rowAl != null && !al.equals(rowAl, ignoreCase = true)) return false
+            return true
+        }
         fun update(row: PlaybackObservation, status: TrackAppearanceEvidence) { ids += row.eventId; end = maxOf(end, row.eventTimeMs); trackId = trackId ?: row.trackId; title = row.trackTitle ?: title; artist = row.trackArtist ?: artist; album = row.trackAlbum ?: album; duration = duration ?: row.durationMs; evidence = status }
         fun toModel() = TrackAppearance(id, source, trackId, title, artist, album, duration, start, end, basis, evidence, ids.toList())
     }

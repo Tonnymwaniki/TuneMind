@@ -155,7 +155,9 @@ class ListeningPatternAnalyzer {
         zoneId: ZoneId,
         notices: MutableSet<PatternDataNotice>,
     ): List<DailyListeningRoutine> {
-        val episodesByDate = episodes.groupBy { localDateTime(it.firstObservedAtMs, zoneId)!!.toLocalDate() }
+        val episodesByDate = episodes
+            .mapNotNull { ep -> localDateTime(ep.firstObservedAtMs, zoneId)?.toLocalDate()?.let { date -> date to ep } }
+            .groupBy({ it.first }, { it.second })
         return (rawCounts.keys + episodesByDate.keys).distinct().sorted().map { date ->
             val dayEpisodes = episodesByDate[date].orEmpty().sortedBy { it.episodeId }
             var durationStatus = DailyDurationStatus.NO_RECONSTRUCTED_EPISODE

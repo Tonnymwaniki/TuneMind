@@ -44,7 +44,7 @@ fun HomeScreen(
     val nowPlaying = state.nowPlaying
     val isPlaying = nowPlaying?.isPlaying ?: false
     val reportedPositionMs = nowPlaying?.positionMs ?: 0L
-    val reportedDurationMs = if ((nowPlaying?.durationMs ?: 0L) > 0L) nowPlaying!!.durationMs else 180_000L
+    val reportedDurationMs = nowPlaying?.durationMs?.takeIf { it > 0L } ?: 180_000L
 
     var currentPositionMs by remember(nowPlaying?.positionMs, isPlaying) {
         mutableStateOf(reportedPositionMs)

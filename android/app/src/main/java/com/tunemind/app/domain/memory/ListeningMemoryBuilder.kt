@@ -58,7 +58,7 @@ class ListeningMemoryBuilder {
 
         val artists = tracks.asSequence()
             .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT && !it.artist.isNullOrBlank() && it.evidenceQuality != MemoryEvidenceQuality.CONFLICTING_METADATA }
-            .groupBy { normalize(it.artist)!! }
+            .groupBy { normalize(it.artist) ?: "unknown" }
             .map { (_, artistTracks) ->
                 val labels = artistTracks.mapNotNull { it.artist }.distinct().sortedWith(compareBy<String> { it.lowercase(Locale.ROOT) }.thenBy { it })
                 ArtistMemorySummary(
