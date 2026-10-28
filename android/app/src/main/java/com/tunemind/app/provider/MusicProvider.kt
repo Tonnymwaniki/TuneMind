@@ -8,31 +8,37 @@ import com.tunemind.app.domain.recommendation.RecommendedTrack
  * Distinguishes direct deep-links from search handoffs and unavailable states.
  */
 sealed class PlaybackLaunchResult {
+    open val isSuccess: Boolean
+        get() = this is DirectPlaybackLaunched || this is SearchHandoffLaunched
+
+    abstract val message: String
+
     data class DirectPlaybackLaunched(
         val providerId: String,
         val providerDisplayName: String,
         val trackTitle: String,
         val destinationUri: String,
-        val message: String
+        override val message: String
     ) : PlaybackLaunchResult()
 
     data class SearchHandoffLaunched(
         val providerId: String,
         val providerDisplayName: String,
         val query: String,
-        val message: String
+        override val message: String
     ) : PlaybackLaunchResult()
 
     data class ProviderNotInstalled(
         val providerId: String,
         val providerDisplayName: String,
         val playStorePackage: String,
-        val message: String
+        override val message: String
     ) : PlaybackLaunchResult()
 
     data class LaunchFailed(
         val providerId: String,
-        val reason: String
+        val reason: String,
+        override val message: String = reason
     ) : PlaybackLaunchResult()
 }
 

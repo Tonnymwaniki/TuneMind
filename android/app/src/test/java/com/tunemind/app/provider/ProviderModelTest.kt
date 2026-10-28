@@ -8,11 +8,11 @@ class ProviderModelTest {
     @Test
     fun testTrackMatchDataIntegrity() {
         val match = TrackMatch(
-            trackId = "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+            providerId = "spotify",
+            providerDisplayName = "Spotify",
             title = "Nevermind",
             artist = "Dennis Lloyd",
-            album = "Nevermind",
-            providerId = "spotify",
+            providerTrackId = "4cOdK2wGLETKBW3PvgPWqT",
             deepLinkUri = "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
             webFallbackUrl = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
             confidence = 0.95f
@@ -25,25 +25,30 @@ class ProviderModelTest {
 
     @Test
     fun testPlaybackLaunchResultVariations() {
-        val successDirect = PlaybackLaunchResult.DirectPlaybackStarted(
+        val successDirect = PlaybackLaunchResult.DirectPlaybackLaunched(
             providerId = "spotify",
+            providerDisplayName = "Spotify",
             trackTitle = "Resonance",
-            deepLink = "spotify:track:123"
+            destinationUri = "spotify:track:123",
+            message = "Starting Resonance on Spotify (direct playback)"
         )
         assertTrue(successDirect.isSuccess)
         assertTrue(successDirect.message.contains("direct playback"))
 
-        val searchHandoff = PlaybackLaunchResult.SearchHandoffOpened(
+        val searchHandoff = PlaybackLaunchResult.SearchHandoffLaunched(
             providerId = "youtube_music",
-            query = "Tycho Awake"
+            providerDisplayName = "YouTube Music",
+            query = "Tycho Awake",
+            message = "Opening YouTube Music search for \"Tycho Awake\""
         )
         assertTrue(searchHandoff.isSuccess)
         assertTrue(searchHandoff.message.contains("search"))
 
-        val failed = PlaybackLaunchResult.Failed(
+        val failed = PlaybackLaunchResult.LaunchFailed(
             providerId = "spotify",
             reason = "App not installed and browser unavailable"
         )
         assertFalse(failed.isSuccess)
+        assertEquals("App not installed and browser unavailable", failed.message)
     }
 }

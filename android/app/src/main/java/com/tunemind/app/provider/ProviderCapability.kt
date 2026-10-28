@@ -34,4 +34,6 @@ data class TrackMatch(
     val webFallbackUrl: String? = null,
     val searchQuery: String = "$artist $title".trim(),
     val confidence: Float = 1.0f
-)
+) {
+    fun isDirectPlayable(): Boolean = !deepLinkUri.isNullOrBlank()
+}

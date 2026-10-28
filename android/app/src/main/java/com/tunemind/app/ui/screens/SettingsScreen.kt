@@ -197,7 +197,7 @@ fun SettingsScreen(
                                         fontWeight = FontWeight.Bold,
                                         color = if (isSelected) Color.White else TextPrimary
                                     )
-                                    val isInstalled = provider.isInstalled()
+                                    val isInstalled = provider.isInstalled(context)
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
                                         color = if (isInstalled) AccentGreen.copy(alpha = 0.15f) else Color(0xFF334155),
@@ -213,7 +213,7 @@ fun SettingsScreen(
                                     }
                                 }
 
-                                val capDesc = if (provider.capabilities.contains(com.tunemind.app.provider.ProviderCapability.DIRECT_TRACK_PLAYBACK)) {
+                                val capDesc = if (provider.supportedCapabilities.contains(com.tunemind.app.provider.ProviderCapability.CAN_DEEP_LINK)) {
                                     "Supports direct deep links & track playback"
                                 } else {
                                     "Supports search intent handoff"
