@@ -114,8 +114,14 @@ data class ProfileState(
 )
 
 class TuneMindViewModel : ViewModel() {
-    private val repo = EventBufferRepository(TuneMindDatabase.getInstance(AppHolder.context!!).eventQueueDao())
-    private val experimentRepo = ExperimentRepository(TuneMindDatabase.getInstance(AppHolder.context!!), AppHolder.context)
+    private val repo by lazy {
+        val ctx = AppHolder.context ?: throw IllegalStateException("AppHolder.context not initialized")
+        EventBufferRepository(TuneMindDatabase.getInstance(ctx).eventQueueDao())
+    }
+    private val experimentRepo by lazy {
+        val ctx = AppHolder.context ?: throw IllegalStateException("AppHolder.context not initialized")
+        ExperimentRepository(TuneMindDatabase.getInstance(ctx), ctx)
+    }
 
     private val _homeState = MutableStateFlow(HomeState())
     val homeState: StateFlow<HomeState> = _homeState.asStateFlow()

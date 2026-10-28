@@ -25,7 +25,7 @@ class YouTubeMusicProvider : MusicProvider {
         return try {
             context.packageManager.getPackageInfo(packageName, 0)
             true
-        } catch (_: PackageManager.NameNotFoundException) {
+        } catch (_: Exception) {
             false
         }
     }

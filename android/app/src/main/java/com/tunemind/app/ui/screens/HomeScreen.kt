@@ -104,6 +104,7 @@ fun HomeScreen(
             vm = vm,
             onDismiss = { }
         )
+        return
     }
 
     LaunchedEffect(Unit) {

@@ -36,20 +36,19 @@ fun PersonalOnboardingDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val installedProviders = remember { vm.getInstalledProviders(context) }
+    val installedProviders = remember {
+        val detected = vm.getInstalledProviders(context)
+        if (detected.isNotEmpty()) detected else com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).getAllProviders()
+    }
     var selectedProviderId by remember { mutableStateOf(vm.getPreferredProviderId(context)) }
     val hasNotificationAccess = NotificationAccess.isEnabled(context)
 
-    Dialog(
-        onDismissRequest = { /* forced completion */ },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF020617)), // Deep slate-950
+        color = Color(0xFF020617)
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF020617)), // Deep slate-950
-            color = Color(0xFF020617)
-        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -285,5 +284,4 @@ fun PersonalOnboardingDialog(
                 Spacer(Modifier.height(16.dp))
             }
         }
-    }
 }

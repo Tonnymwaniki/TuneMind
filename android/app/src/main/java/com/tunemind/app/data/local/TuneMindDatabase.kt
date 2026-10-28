@@ -44,7 +44,9 @@ abstract class TuneMindDatabase : RoomDatabase() {
                     context.applicationContext,
                     TuneMindDatabase::class.java,
                     DATABASE_NAME,
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .fallbackToDestructiveMigration()
+                    .build().also { INSTANCE = it }
             }
         }
 
