@@ -114,13 +114,15 @@ data class ProfileState(
 )
 
 class TuneMindViewModel : ViewModel() {
-    private val repo by lazy {
-        val ctx = AppHolder.context ?: throw IllegalStateException("AppHolder.context not initialized")
-        EventBufferRepository(TuneMindDatabase.getInstance(ctx).eventQueueDao())
+    private val repo: EventBufferRepository? by lazy {
+        AppHolder.context?.let { ctx ->
+            EventBufferRepository(TuneMindDatabase.getInstance(ctx).eventQueueDao())
+        }
     }
-    private val experimentRepo by lazy {
-        val ctx = AppHolder.context ?: throw IllegalStateException("AppHolder.context not initialized")
-        ExperimentRepository(TuneMindDatabase.getInstance(ctx), ctx)
+    private val experimentRepo: ExperimentRepository? by lazy {
+        AppHolder.context?.let { ctx ->
+            ExperimentRepository(TuneMindDatabase.getInstance(ctx), ctx)
+        }
     }
 
     private val _homeState = MutableStateFlow(HomeState())
@@ -140,14 +142,14 @@ class TuneMindViewModel : ViewModel() {
 
     fun refreshCrossAppData() {
         viewModelScope.launch {
-            val exp = experimentRepo.getExperiment()
+            val exp = experimentRepo?.getExperiment()
             if (exp == null || exp.status != ExperimentStatus.ACTIVE.name) {
                 _crossAppState.value = CrossAppState(isLoading = false)
                 return@launch
             }
-            val sources = experimentRepo.getObservedSources(exp.experimentId)
+            val sources = experimentRepo?.getObservedSources(exp.experimentId) ?: emptyList()
             val summaries = sources.map { source ->
-                val events = experimentRepo.getEventsBySource(exp.experimentId, source)
+                val events = experimentRepo?.getEventsBySource(exp.experimentId, source) ?: emptyList()
                 val result = PlaybackIntervalEstimator.estimate(source, events)
                 SourceAppSummary(
                     sourcePackage = source,
@@ -168,18 +170,22 @@ class TuneMindViewModel : ViewModel() {
     }
 
     init {
-        // Observe experiment state
+        // Observe experiment state safely
         viewModelScope.launch {
-            experimentRepo.observeExperiment().collect { exp ->
-                val status = exp?.status?.let { runCatching { ExperimentStatus.valueOf(it) }.getOrNull() } ?: ExperimentStatus.NOT_STARTED
-                _studyState.value = _studyState.value.copy(
-                    experimentId = exp?.experimentId ?: "",
-                    status = status,
-                    startDateMs = exp?.startDateMs,
-                    endDateMs = exp?.endDateMs,
-                    observationCount = exp?.observationCount ?: 0,
-                    lastObservationMs = exp?.lastObservationMs,
-                )
+            try {
+                experimentRepo?.observeExperiment()?.collect { exp ->
+                    val status = exp?.status?.let { runCatching { ExperimentStatus.valueOf(it) }.getOrNull() } ?: ExperimentStatus.NOT_STARTED
+                    _studyState.value = _studyState.value.copy(
+                        experimentId = exp?.experimentId ?: "",
+                        status = status,
+                        startDateMs = exp?.startDateMs,
+                        endDateMs = exp?.endDateMs,
+                        observationCount = exp?.observationCount ?: 0,
+                        lastObservationMs = exp?.lastObservationMs,
+                    )
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeExperiment notice: ${t.message}")
             }
         }
 
@@ -187,7 +193,8 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
 
         viewModelScope.launch {
-            repo.observeRecent().collect { rows ->
+            try {
+                repo?.observeRecent()?.collect { rows ->
                 val memory: ListeningMemory
                 val coverage: CoverageAssessment
                 withContext(Dispatchers.Default) {
@@ -270,11 +277,11 @@ class TuneMindViewModel : ViewModel() {
                 // Study day evidence from experiment events
                 val expId = _studyState.value.experimentId
                 val studyDays = if (expId.isNotEmpty() && _studyState.value.status == ExperimentStatus.ACTIVE) {
-                    val eventTimes = runCatching { experimentRepo.getEventTimestamps(expId) }.getOrNull() ?: emptyList()
+                    val eventTimes = runCatching { experimentRepo?.getEventTimestamps(expId) }.getOrNull()?.filterNotNull() ?: emptyList()
                     computeStudyDayEvidence(eventTimes, _studyState.value)
                 } else emptyList()
                 val sources = if (expId.isNotEmpty()) {
-                    runCatching { experimentRepo.getSummary(expId)?.observedSources ?: emptyList() }.getOrNull() ?: emptyList()
+                    runCatching { experimentRepo?.getSummary(expId)?.observedSources ?: emptyList() }.getOrNull() ?: emptyList()
                 } else emptyList()
 
                 _studyState.value = _studyState.value.copy(
@@ -290,7 +297,10 @@ class TuneMindViewModel : ViewModel() {
 
                 refreshRecommendations()
             }
+        } catch (t: Throwable) {
+            android.util.Log.w("TuneMindVM", "observeRecent error: ${t.message}")
         }
+    }
     }
 
     fun showReadinessScreen() {
@@ -548,7 +558,7 @@ class TuneMindViewModel : ViewModel() {
     fun resetListeningProfile() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                repo.clear()
+                repo?.clear()
             }
             _vaultState.value = emptyList()
             val ctx = AppHolder.context

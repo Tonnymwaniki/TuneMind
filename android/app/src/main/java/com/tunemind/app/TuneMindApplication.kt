@@ -1,17 +1,18 @@
 package com.tunemind.app
 
 import android.app.Application
-import androidx.work.Configuration
-import androidx.work.WorkManager
+import android.util.Log
 
 class TuneMindApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         com.tunemind.app.ui.AppHolder.context = applicationContext
-        try {
-            WorkManager.initialize(this, Configuration.Builder().build())
-        } catch (_: IllegalStateException) {
-            // Already initialized by the default content provider
+
+        // Global uncaught exception logger
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e("TuneMindFatal", "Fatal crash in thread ${thread.name}: ${throwable.message}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
         }
     }
 }
