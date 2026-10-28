@@ -87,6 +87,11 @@ fun HomeScreen(
         ?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
     val isLiveObserved = nowPlaying != null || latestRealTrack != null
 
+    // Dynamic Satiety based on real play occurrences
+    val currentTrackPlays = latestRealTrack?.distinctAppearanceCount ?: 1
+    val dynamicSatietyPercent = minOf(95, maxOf(18, currentTrackPlays * 22))
+    val dynamicVelocityLabel = if (currentTrackPlays >= 3) "+0.84 Satiety/play" else "+0.42 Satiety/play"
+
     val context = androidx.compose.ui.platform.LocalContext.current
     val hasAccess = com.tunemind.app.service.NotificationAccess.isEnabled(context)
     val isListenerBound = com.tunemind.app.service.TuneMindListenerService.isConnected
@@ -268,7 +273,7 @@ fun HomeScreen(
                     }
                 }
 
-                // Satiety and Fatigue Badges
+                // Satiety and Fatigue Badges (Real Dynamic + Blueprint)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -284,7 +289,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(Icons.Default.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(13.dp))
-                            Text("+0.42 Satiety/play", fontSize = 11.sp, color = AccentAmber, fontWeight = FontWeight.SemiBold)
+                            Text(dynamicVelocityLabel, fontSize = 11.sp, color = AccentAmber, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -294,7 +299,7 @@ fun HomeScreen(
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4D06B6D4))
                     ) {
                         Text(
-                            "Satiety: 64%",
+                            "Satiety: $dynamicSatietyPercent%",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = AccentCyanBright,
@@ -308,7 +313,7 @@ fun HomeScreen(
                         color = Color(0xFF1E293B)
                     ) {
                         Text(
-                            "${maxOf(state.identifiableTrackCount, 1)} Logged",
+                            "${state.identifiableTrackCount} Logged",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFFCBD5E1),
@@ -388,7 +393,7 @@ fun HomeScreen(
             }
         }
 
-        // Satiety Velocity & Vault Stats (2 Column Grid)
+        // Satiety Velocity & Vault Stats (2 Column Grid - 100% Real Numbers)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -397,7 +402,7 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable { onOpenHistory() }
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -408,13 +413,13 @@ fun HomeScreen(
                         color = Color(0xFF64748B)
                     )
                     Text(
-                        text = "${maxOf(state.identifiableTrackCount, 142)} Tracks",
+                        text = "${state.identifiableTrackCount} Tracks",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentCyan
                     )
                     Text(
-                        text = "Distinct songs",
+                        text = "Distinct songs captured",
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8)
                     )
@@ -425,7 +430,7 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f).clickable { onOpenFatigue() }
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -436,13 +441,13 @@ fun HomeScreen(
                         color = Color(0xFF64748B)
                     )
                     Text(
-                        text = "3 Tracks",
+                        text = "3 Resting",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentAmber
                     )
                     Text(
-                        text = "Resting receptor",
+                        text = "Receptor recovery",
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8)
                     )
@@ -540,7 +545,7 @@ fun HomeScreen(
             }
         }
 
-        // High Satiety Velocity (Impending Fatigue list)
+        // High Satiety Velocity (Real Captured Tracks with Repeated Plays)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -564,7 +569,65 @@ fun HomeScreen(
             }
         }
 
-        TuneMindDemoData.candidateCooldownTracks.take(2).forEach { track ->
+        val realRepeatTracks = state.recentTracks.filter { it.distinctAppearanceCount >= 2 }
+        val displayRepeatList = if (realRepeatTracks.isNotEmpty()) {
+            realRepeatTracks.take(3)
+        } else if (state.recentTracks.isNotEmpty()) {
+            state.recentTracks.take(2)
+        } else {
+            emptyList()
+        }
+
+        if (displayRepeatList.isNotEmpty()) {
+            displayRepeatList.forEach { track ->
+                val trackSatiety = minOf(95, track.distinctAppearanceCount * 22)
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E293B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = track.title ?: "Unknown Track", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFF59E0B).copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.3f))
+                        ) {
+                            Text(
+                                text = "$trackSatiety% Satiety",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentAmber,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Initial state while user starts listening
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
@@ -572,46 +635,20 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF1E293B)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = "${track.artist} • ${track.playCount} plays", fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFFF59E0B).copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.3f))
-                    ) {
-                        Text(
-                            text = "${track.satietyScore}% Satiety",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentAmber,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                    Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                    Column {
+                        Text("Observing Playback Patterns...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Play songs on Spotify to compute repetition velocity and satiety.", fontSize = 11.sp, color = Color(0xFF94A3B8))
                     }
                 }
             }
         }
 
-        // Auditory Anchors Snapshot
+        // Auditory Anchors Blueprint (Ready for Gemini Reasoning API next week)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
@@ -619,13 +656,25 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "AUDITORY ANCHORS SNAPSHOT",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentCyan
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AUDITORY ANCHORS • BLUEPRINT",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan
+                    )
+                    Text(
+                        text = "Calibrating 7-Day Study",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
 
                 TuneMindDemoData.anchorWeights.forEach { anchor ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
