@@ -84,18 +84,94 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
             .fillMaxSize()
             .background(Color(0xFF020617)) // Deep slate-950
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // TOP: Sleek Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search by title, artist, or album…", fontSize = 13.sp, color = Color(0xFF64748B)) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp)) },
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    if (searchQuery.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0x3306B6D4),
+                            modifier = Modifier.padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = "${displayedTracks.size}",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = AccentCyanBright,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF0F172A),
+                unfocusedContainerColor = Color(0xFF0F172A),
+                focusedBorderColor = AccentCyan,
+                unfocusedBorderColor = Color(0xFF1E293B),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Filter Pills
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(
+                "all" to "All Timeline (${rawTracks.size})",
+                "satiated" to "Fatigue ($satiatedCount)",
+                "recurring" to "Loops",
+                "fresh" to "Fresh"
+            ).forEach { (mode, label) ->
+                val isSelected = filterChip == mode
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color(0xFF0F172A),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isSelected) AccentCyan else Color(0xFF1E293B)
+                    ),
+                    modifier = Modifier.clickable { filterChip = mode }
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) AccentCyanBright else Color(0xFF94A3B8),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
         // Hero Chrono-Radar Header
         Card(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -108,8 +184,8 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF0284C7).copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
@@ -117,13 +193,13 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                 Icons.Default.History,
                                 contentDescription = null,
                                 tint = AccentCyan,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         Column {
                             Text(
                                 text = "ACOUSTIC TELEMETRY",
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 color = AccentCyan,
@@ -131,7 +207,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                             )
                             Text(
                                 text = "Playback Timeline",
-                                fontSize = 20.sp,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
                             )
@@ -144,7 +220,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
@@ -155,7 +231,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                     .background(if (totalCaptured > 0) AccentGreen else AccentAmber)
                             )
                             Text(
-                                text = "$totalCaptured Episodes",
+                                text = "$totalCaptured Captured",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -232,64 +308,6 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                             Text("Burnout Watch", fontSize = 9.sp, color = Color(0xFF64748B))
                         }
                     }
-                }
-            }
-        }
-
-        // Search Bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Filter timeline by title or artist…", fontSize = 12.sp, color = Color(0xFF64748B)) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F172A),
-                unfocusedContainerColor = Color(0xFF0F172A),
-                focusedBorderColor = AccentCyan,
-                unfocusedBorderColor = Color(0xFF1E293B),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // Filter Pills
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(
-                "all" to "All Timeline",
-                "satiated" to "Fatigue ($satiatedCount)",
-                "recurring" to "Loops",
-                "fresh" to "Fresh"
-            ).forEach { (mode, label) ->
-                val isSelected = filterChip == mode
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color(0xFF0F172A),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (isSelected) AccentCyan else Color(0xFF1E293B)
-                    ),
-                    modifier = Modifier.clickable { filterChip = mode }
-                ) {
-                    Text(
-                        text = label,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) AccentCyanBright else Color(0xFF94A3B8),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                    )
                 }
             }
         }

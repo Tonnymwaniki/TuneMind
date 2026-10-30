@@ -45,6 +45,8 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)
     object WeeklyReport : Screen("weekly_report", "Receptive Horizon", Icons.Outlined.Insights)
     object ManualCooldown : Screen("manual_cooldown", "Add to Cooldown", Icons.Outlined.AddCircleOutline)
+    object MusicalMoments : Screen("musical_moments", "Musical Moments", Icons.Outlined.BookmarkBorder)
+    object HearingInsights : Screen("hearing_insights", "Hearing Insights", Icons.Outlined.Headphones)
 }
 
 @Composable
@@ -89,8 +91,16 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                     onOpenFatigue = { navController.navigate(Screen.Fatigue.route) },
                     onOpenHistory = { navController.navigate(Screen.History.route) },
                     onOpenWeeklyReport = { navController.navigate(Screen.WeeklyReport.route) },
-                    onOpenStudy = { navController.navigate(Screen.SevenDayStudy.route) }
+                    onOpenStudy = { navController.navigate(Screen.SevenDayStudy.route) },
+                    onOpenMoments = { navController.navigate(Screen.MusicalMoments.route) },
+                    onOpenHearing = { navController.navigate(Screen.HearingInsights.route) }
                 )
+            }
+            composable(Screen.MusicalMoments.route) {
+                MusicalMomentsScreen(vm = vm, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.HearingInsights.route) {
+                HearingInsightsScreen(vm = vm, onBack = { navController.popBackStack() })
             }
             composable(Screen.CrossApp.route) {
                 CrossAppActivityScreen(vm = vm, onBack = { navController.popBackStack() })
@@ -218,6 +228,8 @@ fun TuneMindTopAppBar(
                         Screen.Settings.route -> "Settings & Sync"
                         Screen.WeeklyReport.route -> "Receptive Horizon"
                         Screen.ManualCooldown.route -> "Manual Cooldown"
+                        Screen.MusicalMoments.route -> "My Musical Moments"
+                        Screen.HearingInsights.route -> "Hearing Insights"
                         else -> "Live Intelligence"
                     },
                     fontSize = 15.sp,
@@ -227,8 +239,18 @@ fun TuneMindTopAppBar(
             }
         }
 
-        // Top Right Utility Controls (Live Daemon Pill + Settings)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Top Right Utility Controls (Moments + Hearing + Live Daemon Pill + Settings)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Musical Moments quick shortcut
+            IconButton(onClick = { onNavigate(Screen.MusicalMoments.route) }, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = AccentCyan, modifier = Modifier.size(19.dp))
+            }
+
+            // Hearing Insights quick shortcut
+            IconButton(onClick = { onNavigate(Screen.HearingInsights.route) }, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Outlined.Headphones, contentDescription = "Hearing Insights", tint = AccentCyanBright, modifier = Modifier.size(19.dp))
+            }
+
             // Live Daemon Pill Button (opens Ingest & Daemon screen)
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -240,19 +262,19 @@ fun TuneMindTopAppBar(
                 modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(5.dp)
                             .clip(CircleShape)
                             .background(if (isDaemonConnected) AccentGreen else AccentAmber)
                     )
                     Text(
-                        text = if (isDaemonConnected) "DAEMON" else "OFFLINE",
-                        fontSize = 10.sp,
+                        text = if (isDaemonConnected) "LIVE" else "OFFLINE",
+                        fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = if (isDaemonConnected) AccentGreen else AccentAmber
@@ -260,8 +282,8 @@ fun TuneMindTopAppBar(
                 }
             }
 
-            IconButton(onClick = { onNavigate(Screen.Settings.route) }) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
+            IconButton(onClick = { onNavigate(Screen.Settings.route) }, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8), modifier = Modifier.size(19.dp))
             }
         }
     }

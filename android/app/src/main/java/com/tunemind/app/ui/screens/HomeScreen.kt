@@ -37,7 +37,9 @@ fun HomeScreen(
     onOpenFatigue: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenWeeklyReport: () -> Unit,
-    onOpenStudy: () -> Unit = {}
+    onOpenStudy: () -> Unit = {},
+    onOpenMoments: () -> Unit = {},
+    onOpenHearing: () -> Unit = {}
 ) {
     val state by vm.homeState.collectAsState()
     val scrollState = rememberScrollState()
@@ -933,12 +935,21 @@ fun HomeScreen(
                             color = AccentCyan
                         )
                     }
-                    Text(
-                        text = "${momentsState.confirmedMoments.size} Saved • ${momentsState.candidateMoments.size} Discovered",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF64748B)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0x3306B6D4),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6606B6D4)),
+                        modifier = Modifier.clickable { onOpenMoments() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("Explore All", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                        }
+                    }
                 }
 
                 if (momentsState.confirmedMoments.isEmpty() && momentsState.candidateMoments.isEmpty()) {
@@ -1057,12 +1068,21 @@ fun HomeScreen(
                             color = AccentCyan
                         )
                     }
-                    Text(
-                        text = "Defensible Sound Exposure",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF64748B)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0x3306B6D4),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6606B6D4)),
+                        modifier = Modifier.clickable { onOpenHearing() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("View Details", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                        }
+                    }
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
