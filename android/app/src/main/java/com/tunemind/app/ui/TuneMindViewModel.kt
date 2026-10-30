@@ -190,7 +190,6 @@ class TuneMindViewModel : ViewModel() {
         }
 
         refreshReadiness()
-        refreshRecommendations()
 
         viewModelScope.launch {
             try {

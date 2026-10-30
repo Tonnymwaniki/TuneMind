@@ -22,11 +22,29 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.model.TrackMemoryEntry
+import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.SongProfileData
+import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ListeningSessionDetailsScreen(onBack: () -> Unit) {
+fun ListeningSessionDetailsScreen(
+    vm: TuneMindViewModel? = null,
+    onBack: () -> Unit
+) {
+    val historyTracks = vm?.historyState?.collectAsState()?.value?.tracks?.filter { !it.title.isNullOrBlank() } ?: emptyList()
+    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
+
+    val trackCount = if (historyTracks.isNotEmpty()) historyTracks.size else 8
+    val durationLabel = if (historyTracks.isNotEmpty()) {
+        val totalMs = historyTracks.sumOf { (it.appearances.firstOrNull()?.durationMs ?: 195_000L) * maxOf(1, it.distinctAppearanceCount) }
+        val m = (totalMs / 1000) / 60
+        val s = (totalMs / 1000) % 60
+        "${m}m ${s}s"
+    } else "34m 12s"
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -52,6 +70,9 @@ fun ListeningSessionDetailsScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                        }
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
@@ -122,8 +143,8 @@ fun ListeningSessionDetailsScreen(onBack: () -> Unit) {
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Duration", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("34m 12s", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
-                    Text("8 tracks total", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text(durationLabel, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
+                    Text("$trackCount tracks total", fontSize = 10.sp, color = Color(0xFF94A3B8))
                 }
             }
 
@@ -155,71 +176,163 @@ fun ListeningSessionDetailsScreen(onBack: () -> Unit) {
         }
 
         // Chronological Track Sequence
-        Text(
-            text = "Reconstructed Track Timeline",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Reconstructed Track Timeline",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Text(
+                text = "Tap for Profile",
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = AccentCyan
+            )
+        }
 
-        val tracksInSession = listOf(
-            Triple("1. Espresso", "Sabrina Carpenter • 2:55", "+0.45 Satiety"),
-            Triple("2. Midnight Thoughts", "Luna Rivers • 3:36", "+0.18 Satiety"),
-            Triple("3. Stay With Me", "The Neon Hearts • 3:24", "+0.72 High Satiety"),
-            Triple("4. Hyperion Drive", "Solar Pulse • 3:50", "+0.55 Satiety"),
-            Triple("5. Electric Dreams", "The Wanderers • 3:14", "-0.10 Palate Cleanse")
-        )
-
-        tracksInSession.forEach { (title, meta, tag) ->
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
+        if (historyTracks.isNotEmpty()) {
+            historyTracks.take(8).forEachIndexed { idx, track ->
+                val satietyScore = minOf(95, track.distinctAppearanceCount * 22)
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .clickable {
+                            selectedProfileData = SongProfileData.fromTrackMemory(track)
+                        }
                 ) {
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF1E293B)),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                    }
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E293B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${idx + 1}",
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan
+                            )
+                        }
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(text = meta, fontSize = 11.sp, color = Color(0xFF94A3B8))
-                    }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = track.title ?: "Unknown Track", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
 
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (tag.contains("High")) Color(0xFFEF4444).copy(alpha = 0.15f)
-                        else if (tag.contains("Palate")) Color(0xFF10B981).copy(alpha = 0.15f)
-                        else Color(0xFF0284C7).copy(alpha = 0.15f)
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF0284C7).copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "$satietyScore% Satiety",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyanBright,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            val sampleTracks = listOf(
+                Triple("1. Espresso", "Sabrina Carpenter • 2:55", "+0.45 Satiety"),
+                Triple("2. Midnight Thoughts", "Luna Rivers • 3:36", "+0.18 Satiety"),
+                Triple("3. Stay With Me", "The Neon Hearts • 3:24", "+0.72 High Satiety"),
+                Triple("4. Hyperion Drive", "Solar Pulse • 3:50", "+0.55 Satiety"),
+                Triple("5. Electric Dreams", "The Wanderers • 3:14", "-0.10 Palate Cleanse")
+            )
+
+            sampleTracks.forEach { (title, meta, tag) ->
+                val cleanTitle = title.substringAfter(". ")
+                val cleanArtist = meta.substringBefore(" •")
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedProfileData = SongProfileData(
+                                title = cleanTitle,
+                                artist = cleanArtist,
+                                satietyScore = 40,
+                                estimatedPlaybackMs = 210_000L
+                            )
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = tag,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = if (tag.contains("High")) Color(0xFFF87171)
-                            else if (tag.contains("Palate")) Color(0xFF34D399)
-                            else AccentCyanBright,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E293B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(text = meta, fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (tag.contains("High")) Color(0xFFEF4444).copy(alpha = 0.15f)
+                            else if (tag.contains("Palate")) Color(0xFF10B981).copy(alpha = 0.15f)
+                            else Color(0xFF0284C7).copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = tag,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (tag.contains("High")) Color(0xFFF87171)
+                                else if (tag.contains("Palate")) Color(0xFF34D399)
+                                else AccentCyanBright,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    selectedProfileData?.let { profile ->
+        if (vm != null) {
+            SongProfileSheet(
+                profile = profile,
+                vm = vm,
+                onDismiss = { selectedProfileData = null }
+            )
+        }
     }
 }

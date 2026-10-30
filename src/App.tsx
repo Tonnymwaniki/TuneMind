@@ -38,6 +38,8 @@ import {
   Server
 } from 'lucide-react';
 
+import SongProfileModal, { getTrackEmoji, getTrackVibe } from './components/SongProfileModal';
+
 import {
   TrackItem,
   AnalyticsSummary,
@@ -81,6 +83,7 @@ export default function App() {
   const [studyTiles, setStudyTiles] = useState<DailyStudyTile[]>(studyDays);
   const [selectedEpisode, setSelectedEpisode] = useState<ReconstructedEpisode | null>(null);
   const [showManualCooldownModal, setShowManualCooldownModal] = useState(false);
+  const [selectedSongProfile, setSelectedSongProfile] = useState<TrackItem | null>(null);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsSummary | null>(null);
   const [episodesData, setEpisodesData] = useState<ReconstructedEpisode[]>([]);
   const [rawEventsList, setRawEventsList] = useState<StoredRawEvent[]>([]);
@@ -771,6 +774,26 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Song Profile Dossier Modal */}
+      {selectedSongProfile && (
+        <SongProfileModal
+          track={selectedSongProfile}
+          isOpen={!!selectedSongProfile}
+          onClose={() => setSelectedSongProfile(null)}
+          onQuarantine={(trk, days) => {
+            handleAddToCooldown(trk);
+            setTelemetryMessage(`Quarantined '${trk.title}' for ${days} days.`);
+            setTimeout(() => setTelemetryMessage(null), 3000);
+          }}
+          onPlay={(trk) => {
+            setCurrentTrack(trk);
+            setIsPlaying(true);
+            setTelemetryMessage(`Now Playing: ${trk.title}`);
+            setTimeout(() => setTelemetryMessage(null), 3000);
+          }}
+        />
+      )}
     </div>
   );
 
@@ -826,12 +849,20 @@ export default function App() {
             </div>
 
             <div className="flex flex-col sm:flex-row items-center gap-6">
-              <div className="relative group shrink-0">
+              <div
+                onClick={() => setSelectedSongProfile(currentTrack)}
+                className="relative group shrink-0 cursor-pointer"
+                title="Click to view Song Profile"
+              >
                 <img
                   src={currentTrack.albumCoverUrl}
                   alt={currentTrack.title}
-                  className="h-36 w-36 sm:h-44 sm:w-44 rounded-2xl object-cover shadow-2xl shadow-cyan-950/50 border border-slate-700/60"
+                  className="h-36 w-36 sm:h-44 sm:w-44 rounded-2xl object-cover shadow-2xl shadow-cyan-950/50 border border-slate-700/60 group-hover:border-cyan-400 transition"
                 />
+                {/* Profile Photo Emoji Badge */}
+                <div className="absolute top-2.5 left-2.5 h-10 w-10 rounded-xl bg-slate-950/85 backdrop-blur border border-slate-700/80 flex items-center justify-center text-xl shadow-md group-hover:scale-110 transition">
+                  {getTrackEmoji(currentTrack.title, currentTrack.artist)}
+                </div>
                 <div className="absolute inset-0 rounded-2xl bg-gradient-to-t from-black/60 to-transparent flex items-end p-3">
                   <span className="text-[11px] font-mono text-cyan-300 bg-slate-950/80 px-2 py-0.5 rounded-full border border-cyan-500/30">
                     {currentTrack.bpm} BPM
@@ -885,7 +916,7 @@ export default function App() {
                 </div>
 
                 {/* Playback Controls & Real Telemetry Actions */}
-                <div className="flex items-center justify-center sm:justify-start gap-3 pt-1">
+                <div className="flex items-center justify-center sm:justify-start gap-3 pt-1 flex-wrap">
                   <button
                     onClick={handleTogglePlay}
                     className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm flex items-center gap-2 shadow-lg shadow-cyan-500/25 transition-all"
@@ -903,11 +934,19 @@ export default function App() {
                   </button>
 
                   <button
+                    onClick={() => setSelectedSongProfile(currentTrack)}
+                    className="px-3.5 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-800/80 text-xs text-cyan-300 font-semibold flex items-center gap-1.5 transition"
+                  >
+                    <Activity className="h-3.5 w-3.5 text-cyan-400" />
+                    Song Profile
+                  </button>
+
+                  <button
                     onClick={() => handleAddToCooldown(currentTrack)}
                     className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-xs text-slate-300 flex items-center gap-1.5"
                   >
-                    <Snowflake className="h-3.5 w-3.5 text-cyan-400" />
-                    Move to Cooldown
+                    <Snowflake className="h-3.5 w-3.5 text-amber-400" />
+                    Cooldown
                   </button>
                 </div>
               </div>
@@ -1910,9 +1949,69 @@ export default function App() {
             </div>
           )}
         </div>
-      </div>
-    );
-  }
+
+        {/* Observed Song Profiles Catalog in History Screen */}
+        <div className="space-y-3 pt-4">
+          <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Activity className="h-4 w-4 text-cyan-400" />
+                Observed Track Profiles & Satiety Dossiers
+              </h3>
+              <span className="text-xs text-slate-400 font-mono">
+                Click any card to inspect full profile
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[currentTrack, ...highSatietyList, ...palateCleansers].map((trk, i) => (
+                <div
+                  key={trk.id || i}
+                  onClick={() => setSelectedSongProfile(trk)}
+                  className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 cursor-pointer transition-all flex items-center justify-between gap-3 group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="relative shrink-0">
+                      <img
+                        src={trk.albumCoverUrl}
+                        alt={trk.title}
+                        className="h-12 w-12 rounded-xl object-cover border border-slate-700/60 group-hover:border-cyan-400 transition"
+                      />
+                      <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-slate-950 border border-slate-700 flex items-center justify-center text-xs">
+                        {getTrackEmoji(trk.title, trk.artist)}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-slate-100 truncate group-hover:text-cyan-300 transition">
+                        {trk.title}
+                      </h4>
+                      <p className="text-xs text-slate-400 truncate">{trk.artist}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-800/40">
+                          {trk.satietyScore}% Satiety
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {trk.playCount} plays
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSongProfile(trk);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-xs font-semibold shrink-0 transition"
+                  >
+                    Profile
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // 6. SESSION DETAILS SCREEN
@@ -1987,31 +2086,63 @@ export default function App() {
 
           <div className="space-y-3">
             {ep.trackAppearances && ep.trackAppearances.length > 0 ? (
-              ep.trackAppearances.map((ta, idx) => (
-                <div
-                  key={ta.appearanceId || idx}
-                  className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-lg bg-slate-800 flex items-center justify-center font-mono text-xs text-slate-400">
-                      0{idx + 1}
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-100">{ta.title || 'Untitled Track'}</div>
-                      <div className="text-xs text-slate-400">{ta.artist || 'Unknown Artist'}</div>
-                    </div>
-                  </div>
+              ep.trackAppearances.map((ta, idx) => {
+                const title = ta.title || 'Observed Track';
+                const artist = ta.artist || 'Unknown Artist';
+                const emoji = getTrackEmoji(title, artist);
+                const matchingTrack: TrackItem = {
+                  id: ta.appearanceId || `trk-${idx}`,
+                  title,
+                  artist,
+                  albumCoverUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&auto=format&fit=crop&q=80',
+                  genre: 'Observed Playback',
+                  bpm: 110,
+                  durationSeconds: (ta.durationMs ? Math.round(ta.durationMs / 1000) : 195),
+                  playCount: Math.max(1, ta.observationCount || 1),
+                  satietyScore: Math.min(95, Math.max(15, (ta.observationCount || 1) * 20)),
+                  fatigueCategory: (ta.observationCount || 1) >= 3 ? 'Critical Loop' : 'Healthy Staple',
+                  sourceApp: ep.sourcePackage || 'com.spotify.music'
+                };
 
-                  <div className="text-right">
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                      {ta.identityBasis}
-                    </span>
-                    <div className="text-[10px] text-slate-500 font-mono mt-1">
-                      {ta.observationCount} observations
+                return (
+                  <div
+                    key={ta.appearanceId || idx}
+                    onClick={() => setSelectedSongProfile(matchingTrack)}
+                    className="p-4 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/90 cursor-pointer transition flex items-center justify-between group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center justify-center text-xl shadow-md group-hover:scale-105 transition shrink-0">
+                        {emoji}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-100 group-hover:text-cyan-300 transition">{title}</div>
+                        <div className="text-xs text-slate-400">{artist}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                          {ta.identityBasis}
+                        </span>
+                        <div className="text-[10px] text-slate-500 font-mono mt-1">
+                          {ta.observationCount} observations
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedSongProfile(matchingTrack);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-xs font-semibold shrink-0 transition"
+                      >
+                        Profile
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="p-4 text-xs text-slate-400 bg-slate-900/40 rounded-xl">
                 No individual track snapshots parsed.

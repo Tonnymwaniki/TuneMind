@@ -116,7 +116,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                 MusicProfileScreen(vm = vm, onBack = { navController.popBackStack() })
             }
             composable(Screen.SessionDetails.route) {
-                ListeningSessionDetailsScreen(onBack = { navController.popBackStack() })
+                ListeningSessionDetailsScreen(vm = vm, onBack = { navController.popBackStack() })
             }
             composable(Screen.SevenDayStudy.route) {
                 SevenDayStudyScreen(vm = vm, onBack = { navController.popBackStack() })
@@ -130,7 +130,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                 )
             }
             composable(Screen.WeeklyReport.route) {
-                WeeklyReportScreen(onBack = { navController.popBackStack() })
+                WeeklyReportScreen(vm = vm, onBack = { navController.popBackStack() })
             }
             composable(Screen.ManualCooldown.route) {
                 ManualCooldownSelectionScreen(

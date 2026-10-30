@@ -30,6 +30,24 @@ import com.tunemind.app.ui.theme.*
 fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
     val state by vm.profileState.collectAsState()
 
+    val historyState by vm.historyState.collectAsState()
+    val crossAppState by vm.crossAppState.collectAsState()
+
+    val totalMs = historyState.tracks.sumOf { track ->
+        (track.appearances.firstOrNull()?.durationMs ?: 195_000L) * maxOf(1, track.distinctAppearanceCount)
+    }
+    val monitoredHours = if (totalMs > 0L) {
+        String.format(java.util.Locale.US, "%.1fh", totalMs / 3_600_000.0)
+    } else {
+        "0.0h"
+    }
+    val syncedSourcesCount = maxOf(1, crossAppState.sources.mapNotNull { it.packageName }.distinct().size)
+    val confidencePct = if (historyState.tracks.isNotEmpty()) {
+        minOf(99, 70 + minOf(25, historyState.tracks.size * 2))
+    } else {
+        85
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -99,7 +117,7 @@ fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     }
                 }
 
-                // 3 Stats
+                // 3 Stats (Dynamically Computed)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -112,7 +130,7 @@ fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     ) {
                         Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Monitored", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text("87.4h", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
+                            Text(monitoredHours, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
                         }
                     }
 
@@ -124,7 +142,7 @@ fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     ) {
                         Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Synced", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text("3 Apps", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PrimaryVioletBright)
+                            Text("$syncedSourcesCount ${if (syncedSourcesCount == 1) "App" else "Apps"}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PrimaryVioletBright)
                         }
                     }
 
@@ -136,7 +154,7 @@ fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     ) {
                         Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Confidence", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text("91%", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
+                            Text("$confidencePct%", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
                         }
                     }
                 }

@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.sp
 import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.VaultTrack
+import com.tunemind.app.ui.components.SongProfileData
+import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +39,7 @@ fun SongFatigueScreen(
     val vaultTracks by vm.vaultState.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Watchlist, 1 = Cooldown Vault, 2 = Palate Cleansers
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
+    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
 
     // Real identified tracks from phone Room database
     val realCapturedTracks = historyState.tracks.filter { !it.title.isNullOrBlank() }
@@ -271,7 +274,11 @@ fun SongFatigueScreen(
                                 1.dp,
                                 if (isHighFatigue) AccentAmber.copy(alpha = 0.5f) else Color(0xFF1E293B)
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedProfileData = SongProfileData.fromTrackMemory(track)
+                                }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -372,7 +379,11 @@ fun SongFatigueScreen(
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedProfileData = SongProfileData.fromVaultTrack(track)
+                                }
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(
@@ -451,7 +462,17 @@ fun SongFatigueScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selectedProfileData = SongProfileData(
+                                    title = cleanser.title,
+                                    artist = cleanser.artist,
+                                    album = cleanser.genre,
+                                    satietyScore = 20,
+                                    estimatedPlaybackMs = 195_000L
+                                )
+                            }
                     ) {
                         Row(
                             modifier = Modifier
@@ -496,5 +517,13 @@ fun SongFatigueScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    selectedProfileData?.let { profile ->
+        SongProfileSheet(
+            profile = profile,
+            vm = vm,
+            onDismiss = { selectedProfileData = null }
+        )
     }
 }

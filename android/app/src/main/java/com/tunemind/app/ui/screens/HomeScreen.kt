@@ -27,6 +27,8 @@ import com.tunemind.app.domain.recommendation.RecommendationCategory
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.SongProfileData
+import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
 
 @Composable
@@ -39,6 +41,7 @@ fun HomeScreen(
 ) {
     val state by vm.homeState.collectAsState()
     val scrollState = rememberScrollState()
+    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
 
     // Real Live Media Playback telemetry from Spotify / active players
     val nowPlaying = state.nowPlaying
@@ -214,7 +217,11 @@ fun HomeScreen(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
             border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) Color(0xFF06B6D4).copy(alpha = 0.4f) else Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    selectedProfileData = SongProfileData.fromNowPlaying(nowPlaying, latestRealTrack)
+                }
         ) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(
@@ -222,23 +229,33 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Artwork / Audio Icon Box
+                    // Artwork / Audio Icon Box with Profile Photo Emoji & Vinyl Glow
+                    val nowPlayingEmoji = remember(nowPlayingTitle, nowPlayingArtist) {
+                        SongProfileData.pickEmoji(nowPlayingTitle, nowPlayingArtist)
+                    }
+                    val nowPlayingVibe = remember(nowPlayingTitle, nowPlayingArtist, dynamicSatietyPercent) {
+                        SongProfileData.pickVibeTag(nowPlayingTitle, nowPlayingArtist, dynamicSatietyPercent)
+                    }
+
                     Box(
                         modifier = Modifier
                             .size(76.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFF0891B2), Color(0xFF4F46E5), Color(0xFF9333EA))
+                                Brush.radialGradient(
+                                    listOf(Color(0xFF0891B2), Color(0xFF4F46E5), Color(0xFF0F172A))
                                 )
+                            )
+                            .border(
+                                1.5.dp,
+                                Brush.linearGradient(listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6))),
+                                RoundedCornerShape(18.dp)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            if (isPlaying) Icons.Default.GraphicEq else Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
+                        Text(
+                            text = nowPlayingEmoji,
+                            fontSize = 36.sp
                         )
                         Box(
                             modifier = Modifier
@@ -274,17 +291,24 @@ fun HomeScreen(
                             color = Color(0xFF94A3B8),
                             maxLines = 1
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = if (isLiveObserved) "Real-time Spotify Observation" else "Lo-Fi Atmosphere • Spotify",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFF64748B)
-                        )
+                        Spacer(Modifier.height(3.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFF020617),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                        ) {
+                            Text(
+                                text = nowPlayingVibe,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = AccentCyanBright,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
-                // Satiety and Fatigue Badges (Real Dynamic + Blueprint)
+                // Satiety, Velocity, and Auditory Anchor Badges
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -321,15 +345,20 @@ fun HomeScreen(
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1E293B)
+                        color = Color(0xFF0891B2).copy(alpha = 0.25f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            selectedProfileData = SongProfileData.fromNowPlaying(nowPlaying, latestRealTrack)
+                        }
                     ) {
-                        Text(
-                            "${state.identifiableTrackCount} Logged",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFCBD5E1),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                            Text("Song Profile", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -559,7 +588,8 @@ fun HomeScreen(
                 RecommendationCard(
                     track = rec,
                     onPlay = { vm.playRecommendation(context, rec) },
-                    onCooldown = { vm.addToVault(rec.title, rec.artist) }
+                    onCooldown = { vm.addToVault(rec.title, rec.artist) },
+                    onProfile = { selectedProfileData = SongProfileData.fromRecommendedTrack(rec) }
                 )
             }
         }
@@ -694,7 +724,11 @@ fun HomeScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedProfileData = SongProfileData.fromTrackMemory(track)
+                        }
                 ) {
                     Row(
                         modifier = Modifier
@@ -703,14 +737,22 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val trackEmoji = remember(track.title, track.artist) {
+                            SongProfileData.pickEmoji(track.title ?: "", track.artist ?: "")
+                        }
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1E293B)),
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    Brush.radialGradient(
+                                        listOf(Color(0xFFB45309).copy(alpha = 0.5f), Color(0xFF1E293B))
+                                    )
+                                )
+                                .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(20.dp))
+                            Text(text = trackEmoji, fontSize = 20.sp)
                         }
 
                         Column(modifier = Modifier.weight(1f)) {
@@ -807,13 +849,22 @@ fun HomeScreen(
 
         Spacer(Modifier.height(16.dp))
     }
+
+    selectedProfileData?.let { profile ->
+        SongProfileSheet(
+            profile = profile,
+            vm = vm,
+            onDismiss = { selectedProfileData = null }
+        )
+    }
 }
 
 @Composable
 private fun RecommendationCard(
     track: RecommendedTrack,
     onPlay: () -> Unit,
-    onCooldown: () -> Unit
+    onCooldown: () -> Unit,
+    onProfile: () -> Unit = {}
 ) {
     val categoryBadgeColor = when (track.category) {
         RecommendationCategory.EXPLORATION_DISCOVERY -> Color(0xFF8B5CF6)
@@ -832,7 +883,9 @@ private fun RecommendationCard(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onProfile() }
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -973,6 +1026,18 @@ private fun RecommendationCard(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                FilledTonalButton(
+                    onClick = onProfile,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color(0xFF1E293B),
+                        contentColor = AccentCyanBright
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = "Song Profile", modifier = Modifier.size(15.dp))
                 }
 
                 FilledTonalButton(

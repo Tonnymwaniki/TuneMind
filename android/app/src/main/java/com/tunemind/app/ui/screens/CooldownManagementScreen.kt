@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.SongProfileData
+import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,6 +35,7 @@ fun CooldownManagementScreen(
 ) {
     val vaultTracks by vm.vaultState.collectAsState()
     var notificationText by remember { mutableStateOf<String?>(null) }
+    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
 
     Column(
         modifier = Modifier
@@ -101,6 +104,10 @@ fun CooldownManagementScreen(
             }
         }
 
+        val avgResetDays = if (vaultTracks.isNotEmpty()) {
+            String.format(java.util.Locale.US, "%.1f Days", vaultTracks.map { it.cooldownDaysRemaining }.average())
+        } else "5.0 Days"
+
         // 3 Key Metrics Row
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -127,7 +134,7 @@ fun CooldownManagementScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Avg Reset", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("5.0 Days", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryVioletBright)
+                    Text(avgResetDays, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryVioletBright)
                     Text("Decay: 0.18/d", fontSize = 10.sp, color = Color(0xFF94A3B8))
                 }
             }
@@ -217,7 +224,11 @@ fun CooldownManagementScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedProfileData = SongProfileData.fromVaultTrack(track)
+                        }
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
@@ -289,5 +300,13 @@ fun CooldownManagementScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    selectedProfileData?.let { profile ->
+        SongProfileSheet(
+            profile = profile,
+            vm = vm,
+            onDismiss = { selectedProfileData = null }
+        )
     }
 }

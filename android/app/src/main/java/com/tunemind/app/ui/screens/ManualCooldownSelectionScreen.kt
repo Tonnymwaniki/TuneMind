@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.SongProfileData
+import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
 
 data class CooldownCandidate(
@@ -42,6 +44,7 @@ fun ManualCooldownSelectionScreen(
     var selectedDays by remember { mutableStateOf(5f) }
     var selectedTrack by remember { mutableStateOf<CooldownCandidate?>(null) }
     var isSubmitted by remember { mutableStateOf(false) }
+    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
 
     // Derive candidates strictly from real captured songs
     val realCandidates = remember(historyState.tracks) {
@@ -355,6 +358,20 @@ fun ManualCooldownSelectionScreen(
                                 Text(text = "${track.artist} • ${track.playCount} plays • ${track.satietyScore}% Satiety", fontSize = 11.sp, color = Color(0xFF94A3B8))
                             }
 
+                            IconButton(
+                                onClick = {
+                                    selectedProfileData = SongProfileData(
+                                        title = track.title,
+                                        artist = track.artist,
+                                        appearanceCount = track.playCount,
+                                        satietyScore = track.satietyScore
+                                    )
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = "View Profile", tint = AccentCyanBright, modifier = Modifier.size(18.dp))
+                            }
+
                             RadioButton(
                                 selected = isSelected,
                                 onClick = { selectedTrack = track },
@@ -394,5 +411,13 @@ fun ManualCooldownSelectionScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    selectedProfileData?.let { profile ->
+        SongProfileSheet(
+            profile = profile,
+            vm = vm,
+            onDismiss = { selectedProfileData = null }
+        )
     }
 }
