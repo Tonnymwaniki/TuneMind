@@ -81,108 +81,80 @@ fun MusicalMomentsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // High-End Studio Header Card
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+        // Sleek Borderless Studio Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AccentCyan.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.BookmarkBorder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                }
+                Column {
+                    Text(
+                        text = "ACOUSTIC INTELLIGENCE",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "My Musical Moments",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+            }
+        }
+
+        // Single Streamlined Telemetry Ribbon (Saved | Avg Length | Seek-Backs)
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF0F172A),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp, horizontal = 12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(Color(0xFF06B6D4).copy(alpha = 0.3f), Color(0xFF3B82F6).copy(alpha = 0.15f))
-                                    )
-                                )
-                                .border(1.dp, AccentCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Outlined.BookmarkBorder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
-                        }
-                        Column {
-                            Text(
-                                text = "ACOUSTIC INTELLIGENCE • STUDIO",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentCyan,
-                                letterSpacing = 1.2.sp
-                            )
-                            Text(
-                                text = "My Musical Moments",
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
-                        }
-                    }
-
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8))
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("SAVED", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                    Text("${confirmed.size}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AccentCyan)
+                    Text("Moments", fontSize = 9.sp, color = Color(0xFF94A3B8))
                 }
 
-                Text(
-                    text = "Preserve and loop exact sections of songs you enjoy — guitar solos, bass drops, or vocal hooks. Configure custom segment lengths up to full song duration.",
-                    fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
-                    lineHeight = 16.sp
-                )
+                Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF1E293B)))
 
-                // 3 Studio Metric Gauges
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("SAVED", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text("${confirmed.size}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
-                            Text("Moments", fontSize = 9.sp, color = Color(0xFF64748B))
-                        }
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("AVG LENGTH", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                    val avgSec = if (confirmed.isNotEmpty()) (confirmed.map { it.preferredPlaybackDurationMs }.average() / 1000).toInt() else 0
+                    Text(if (avgSec > 0) "${avgSec}s" else "--", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AccentGreen)
+                    Text("Per Section", fontSize = 9.sp, color = Color(0xFF94A3B8))
+                }
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("AVG LENGTH", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            val avgSec = if (confirmed.isNotEmpty()) (confirmed.map { it.preferredPlaybackDurationMs }.average() / 1000).toInt() else 0
-                            Text(if (avgSec > 0) "${avgSec}s" else "--", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
-                            Text("Per Section", fontSize = 9.sp, color = Color(0xFF64748B))
-                        }
-                    }
+                Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFF1E293B)))
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("SEEK-BACKS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text("${candidates.size}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
-                            Text("Loop Patterns", fontSize = 9.sp, color = Color(0xFF64748B))
-                        }
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("SEEK-BACKS", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                    Text("${candidates.size}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AccentAmber)
+                    Text("Loops Detected", fontSize = 9.sp, color = Color(0xFF94A3B8))
                 }
             }
         }

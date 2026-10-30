@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,8 +23,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.RecommendationCategory
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.model.TuneMindDemoData
@@ -50,6 +54,10 @@ fun HomeScreen(
     var bookmarkCustomName by remember { mutableStateOf("") }
     val momentsState by vm.musicalMomentsState.collectAsState()
     val hearingState by vm.hearingInsightsState.collectAsState()
+    val studyState by vm.studyState.collectAsState()
+    val vaultTracks by vm.vaultState.collectAsState()
+    val recommendations by vm.recommendations.collectAsState()
+    val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
 
     // Real Live Media Playback telemetry from Spotify / active players
     val nowPlaying = state.nowPlaying
@@ -61,7 +69,7 @@ fun HomeScreen(
         mutableStateOf(reportedPositionMs)
     }
 
-    // Timer that ONLY advances when Spotify is actually PLAYING
+    // Timer that advances when Spotify is actually PLAYING
     LaunchedEffect(isPlaying, nowPlaying?.updatedAtMs) {
         if (!isPlaying) {
             currentPositionMs = reportedPositionMs
@@ -103,7 +111,12 @@ fun HomeScreen(
     // Dynamic Satiety based on real play occurrences
     val currentTrackPlays = latestRealTrack?.distinctAppearanceCount ?: 1
     val dynamicSatietyPercent = minOf(95, maxOf(18, currentTrackPlays * 22))
-    val dynamicVelocityLabel = if (currentTrackPlays >= 3) "+0.84 Satiety/play" else "+0.42 Satiety/play"
+
+    val elapsedDays = studyState.startDateMs?.let { start ->
+        val elapsed = System.currentTimeMillis() - start
+        (elapsed / 86_400_000f).coerceIn(0f, 7f)
+    } ?: 0f
+    val currentDayNumber = (elapsedDays + 1).toInt().coerceAtMost(7)
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val hasAccess = com.tunemind.app.service.NotificationAccess.isEnabled(context)
@@ -127,35 +140,83 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(Color(0xFF020617)) // Deep slate-950 canvas
             .verticalScroll(scrollState)
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 1. Sleek Top Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isPlaying) AccentGreen else AccentCyan)
+                )
+                Text(
+                    text = "TuneMind",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF0F172A),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
+                ) {
+                    Text(
+                        text = if (isPlaying) "LIVE • $nowPlayingSource" else "OBSERVER READY",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPlaying) AccentGreen else AccentCyanBright,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Quick Studio Shortcuts
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenMoments, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Moments", tint = AccentCyan, modifier = Modifier.size(19.dp))
+                }
+                IconButton(onClick = onOpenHearing, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = AccentCyanBright, modifier = Modifier.size(19.dp))
+                }
+                IconButton(onClick = onOpenWeeklyReport, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Outlined.Insights, contentDescription = "Insights", tint = Color(0xFF94A3B8), modifier = Modifier.size(19.dp))
+                }
+            }
+        }
+
+        // Notification Access Alert (Compact & non-intrusive)
         if (!hasAccess || !isListenerBound) {
-            Card(
+            Surface(
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF451A03).copy(alpha = 0.6f)),
+                color = Color(0xFF451A03).copy(alpha = 0.5f),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(16.dp))
                         Text(
-                            text = if (!hasAccess) "Notification Access Required" else "Listener Rebind Required",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentAmber
-                        )
-                        Text(
-                            text = if (!hasAccess) "Grant TuneMind Notification Access in Settings to capture playback."
-                            else "Tap Rebind to command Android to reconnect Spotify listener.",
-                            fontSize = 10.sp,
-                            color = Color(0xFFCBD5E1)
+                            text = if (!hasAccess) "Enable Notification Access to capture audio" else "Tap Rebind to reconnect listener",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFED7AA)
                         )
                     }
                     Button(
@@ -169,75 +230,67 @@ fun HomeScreen(
                         },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color(0xFF020617)),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
                     ) {
-                        Text(if (!hasAccess) "Settings" else "Rebind", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(if (!hasAccess) "Enable" else "Rebind", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // Top Live Audio Session Pill
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (isPlaying) AccentGreen else AccentAmber)
-                )
-                Text(
-                    text = if (isPlaying) "LIVE PLAYING • $nowPlayingSource"
-                    else if (isLiveObserved) "PAUSED • $nowPlayingSource"
-                    else "AUDIO SESSION OBSERVER",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPlaying) AccentCyanBright else AccentAmber,
-                    letterSpacing = 1.sp
-                )
-            }
-
+        // Playback Toast / Alert Banner
+        playbackFeedback?.let { feedback ->
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
+                shape = RoundedCornerShape(10.dp),
+                color = if (feedback.isSuccess) Color(0xFF064E3B) else Color(0xFF451A03),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (feedback.isSuccess) AccentGreen else AccentAmber),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = if (isPlaying) "Active Daemon" else "Suspended",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPlaying) AccentGreen else Color(0xFF94A3B8),
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(feedback.message, fontSize = 11.sp, color = Color.White)
+                    IconButton(onClick = { vm.clearPlaybackFeedback() }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Color.White, modifier = Modifier.size(14.dp))
+                    }
+                }
             }
         }
 
-        // Main Now Playing Card (Glowing Slate Deck)
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (isPlaying) Color(0xFF06B6D4).copy(alpha = 0.4f) else Color(0xFF1E293B)),
+        // 2. NOW PLAYING HERO (Seamless Spotify-Inspired Ambient Canvas)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(22.dp))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF0E7490).copy(alpha = 0.28f),
+                            Color(0xFF0F172A),
+                            Color(0xFF020617)
+                        )
+                    )
+                )
+                .border(
+                    1.dp,
+                    if (isPlaying) Color(0xFF06B6D4).copy(alpha = 0.35f) else Color(0xFF1E293B),
+                    RoundedCornerShape(22.dp)
+                )
                 .clickable {
                     selectedProfileData = SongProfileData.fromNowPlaying(nowPlaying, latestRealTrack)
                 }
+                .padding(16.dp)
         ) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Top Row: Artwork + Track details
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Artwork / Audio Icon Box with Profile Photo Emoji & Vinyl Glow
                     val nowPlayingEmoji = remember(nowPlayingTitle, nowPlayingArtist) {
                         SongProfileData.pickEmoji(nowPlayingTitle, nowPlayingArtist)
                     }
@@ -245,140 +298,80 @@ fun HomeScreen(
                         SongProfileData.pickVibeTag(nowPlayingTitle, nowPlayingArtist, dynamicSatietyPercent)
                     }
 
+                    // Album Art Emoji Tile
                     Box(
                         modifier = Modifier
-                            .size(76.dp)
-                            .clip(RoundedCornerShape(18.dp))
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(
                                 Brush.radialGradient(
-                                    listOf(Color(0xFF0891B2), Color(0xFF4F46E5), Color(0xFF0F172A))
+                                    listOf(Color(0xFF0284C7), Color(0xFF4F46E5), Color(0xFF0F172A))
                                 )
                             )
-                            .border(
-                                1.5.dp,
-                                Brush.linearGradient(listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6))),
-                                RoundedCornerShape(18.dp)
-                            ),
+                            .border(1.dp, Brush.linearGradient(listOf(AccentCyan, PrimaryViolet)), RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = nowPlayingEmoji,
-                            fontSize = 36.sp
-                        )
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(4.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xCC020617))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = if (isPlaying) "PLAYING" else "PAUSED",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (isPlaying) AccentGreen else AccentAmber,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(text = nowPlayingEmoji, fontSize = 34.sp)
                     }
 
-                    // Track Title & Artist
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = nowPlayingTitle,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = nowPlayingArtist,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFF94A3B8),
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(Modifier.height(3.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF020617),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
-                        ) {
-                            Text(
-                                text = nowPlayingVibe,
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = AccentCyanBright,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0x3306B6D4)
+                            ) {
+                                Text(
+                                    text = nowPlayingVibe,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentCyanBright,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0x26F59E0B)
+                            ) {
+                                Text(
+                                    text = "$dynamicSatietyPercent% Satiety",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentAmber,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Satiety, Velocity, and Auditory Anchor Badges
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0x26F59E0B),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4DF59E0B))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(Icons.Default.Speed, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(13.dp))
-                            Text(dynamicVelocityLabel, fontSize = 11.sp, color = AccentAmber, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0x2606B6D4),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4D06B6D4))
-                    ) {
-                        Text(
-                            "Satiety: $dynamicSatietyPercent%",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = AccentCyanBright,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF0891B2).copy(alpha = 0.25f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.6f)),
-                        modifier = Modifier.clickable {
-                            selectedProfileData = SongProfileData.fromNowPlaying(nowPlaying, latestRealTrack)
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
-                            Text("Song Profile", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // Playback Seek Bar with REAL Timers
+                // Scrub Bar
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     LinearProgressIndicator(
                         progress = { progressFraction },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
+                            .height(4.dp)
                             .clip(CircleShape),
-                        color = if (isPlaying) AccentCyan else Color(0xFF64748B),
+                        color = AccentCyan,
                         trackColor = Color(0xFF1E293B)
                     )
                     Row(
@@ -389,7 +382,7 @@ fun HomeScreen(
                             text = formatDuration(currentPositionMs),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = if (isPlaying) AccentCyanBright else Color(0xFF64748B)
+                            color = Color(0xFF94A3B8)
                         )
                         Text(
                             text = formatDuration(reportedDurationMs),
@@ -400,643 +393,321 @@ fun HomeScreen(
                     }
                 }
 
-                // Controls: Play/Pause, Skip Next, Cooldown
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = { vm.togglePlayback() },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isPlaying) AccentCyan else Color(0xFF334155),
-                            contentColor = if (isPlaying) Color(0xFF020617) else Color.White
-                        ),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (isPlaying) "Pause" else "Play", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    FilledTonalButton(
-                        onClick = { vm.skipNext() },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF1E293B), contentColor = Color.White)
-                    ) {
-                        Icon(Icons.Default.SkipNext, contentDescription = "Next Track", modifier = Modifier.size(18.dp))
-                    }
-
-                    FilledTonalButton(
-                        onClick = {
-                            bookmarkStartMs = maxOf(0L, currentPositionMs - 5_000L)
-                            bookmarkEndMs = minOf(reportedDurationMs, currentPositionMs + 25_000L)
-                            bookmarkCustomName = "Moment: $nowPlayingTitle"
-                            showBookmarkMomentDialog = true
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF1E293B), contentColor = AccentCyan)
-                    ) {
-                        Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Bookmark Moment", modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Moment", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    FilledTonalButton(
-                        onClick = { onOpenFatigue() },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF1E293B), contentColor = AccentCyanBright)
-                    ) {
-                        Icon(Icons.Outlined.AcUnit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Cooldown", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
-
-        // Satiety Velocity & Vault Stats (2 Column Grid - 100% Real Numbers)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f).clickable { onOpenHistory() }
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "IDENTIFIED",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF64748B)
-                    )
-                    Text(
-                        text = "${state.identifiableTrackCount} Tracks",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentCyan
-                    )
-                    Text(
-                        text = "Distinct songs captured",
-                        fontSize = 11.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                }
-            }
-
-            val vaultTracks by vm.vaultState.collectAsState()
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.weight(1f).clickable { onOpenFatigue() }
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "SATIATED VAULT",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF64748B)
-                    )
-                    Text(
-                        text = "${vaultTracks.size} Resting",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentAmber
-                    )
-                    Text(
-                        text = "Receptor recovery",
-                        fontSize = 11.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                }
-            }
-        }
-
-        // AGENT RECOMMENDATIONS FOR YOU
-        val recommendations by vm.recommendations.collectAsState()
-        val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
-
-        // Playback Launch Toast / Alert Banner
-        playbackFeedback?.let { feedback ->
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = if (feedback.isSuccess) Color(0xFF064E3B) else Color(0xFF451A03)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (feedback.isSuccess) AccentGreen else AccentAmber),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (feedback.isSuccess) Icons.Default.CheckCircle else Icons.Default.Info,
-                            contentDescription = null,
-                            tint = if (feedback.isSuccess) AccentGreen else AccentAmber,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = feedback.message,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White
-                        )
-                    }
-                    IconButton(
-                        onClick = { vm.clearPlaybackFeedback() },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-        }
-
-        // Recommendations Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(AccentCyan.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(16.dp))
-                }
-                Column {
-                    Text(
-                        text = "FOR YOU • AGENT INTELLIGENCE",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentCyanBright,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        text = "Curated For Your Cognitive State",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-
-            IconButton(onClick = { vm.refreshRecommendations() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
-            }
-        }
-
-        if (recommendations.isNotEmpty()) {
-            recommendations.take(4).forEach { rec ->
-                RecommendationCard(
-                    track = rec,
-                    onPlay = { vm.playRecommendation(context, rec) },
-                    onCooldown = { vm.addToVault(rec.title, rec.artist) },
-                    onProfile = { selectedProfileData = SongProfileData.fromRecommendedTrack(rec) }
-                )
-            }
-        }
-
-        // Live 7-Day Neuro-Acoustic Study Tracker
-        val studyState by vm.studyState.collectAsState()
-        val elapsedDays = studyState.startDateMs?.let { start ->
-            val elapsed = System.currentTimeMillis() - start
-            (elapsed / 86_400_000f).coerceIn(0f, 7f)
-        } ?: 0f
-        val currentDayNumber = (elapsedDays + 1).toInt().coerceAtMost(7)
-
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.4f)),
-            modifier = Modifier.fillMaxWidth().clickable { onOpenStudy() }
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Transport Controls & Moment Bookmark Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PrimaryViolet.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.DateRange, contentDescription = null, tint = PrimaryVioletBright, modifier = Modifier.size(20.dp))
-                        }
-                        Column {
-                            Text(
-                                text = "7-DAY NEURO STUDY ACTIVE",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = PrimaryVioletBright,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "Day $currentDayNumber of 7 Continuous Capture",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
-
+                    // Quick Action: Bookmark Moment
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1E293B)
-                    ) {
-                        Text(
-                            text = "${studyState.observationCount} Events",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentCyanBright,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                LinearProgressIndicator(
-                    progress = { (currentDayNumber / 7f).coerceIn(0.14f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
-                    color = PrimaryViolet,
-                    trackColor = Color(0xFF1E293B)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Storing raw playback timestamps into local Room DB",
-                        fontSize = 10.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Text(
-                        text = "Study Details →",
-                        fontSize = 11.sp,
-                        color = AccentCyanBright,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        // High Satiety Velocity (Real Captured Tracks with Repeated Plays)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(Icons.Default.TrendingUp, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
-                Text(
-                    text = "High Repeat Velocity",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-
-            TextButton(onClick = onOpenFatigue) {
-                Text("Manage Vault →", color = AccentCyanBright, fontSize = 12.sp)
-            }
-        }
-
-        val realRepeatTracks = state.recentTracks.filter { it.distinctAppearanceCount >= 2 }
-        val displayRepeatList = if (realRepeatTracks.isNotEmpty()) {
-            realRepeatTracks.take(3)
-        } else if (state.recentTracks.isNotEmpty()) {
-            state.recentTracks.take(2)
-        } else {
-            emptyList()
-        }
-
-        if (displayRepeatList.isNotEmpty()) {
-            displayRepeatList.forEach { track ->
-                val trackSatiety = minOf(95, track.distinctAppearanceCount * 22)
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedProfileData = SongProfileData.fromTrackMemory(track)
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0x2606B6D4),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6606B6D4)),
+                        modifier = Modifier.clickable {
+                            bookmarkStartMs = maxOf(0L, currentPositionMs - 15_000L)
+                            bookmarkEndMs = minOf(reportedDurationMs, bookmarkStartMs + 45_000L)
+                            bookmarkCustomName = "Section: $nowPlayingTitle"
+                            showBookmarkMomentDialog = true
                         }
-                ) {
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Outlined.BookmarkBorder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(14.dp))
+                            Text("Bookmark Moment", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentCyanBright)
+                        }
+                    }
+
+                    // Playback Controls
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val trackEmoji = remember(track.title, track.artist) {
-                            SongProfileData.pickEmoji(track.title ?: "", track.artist ?: "")
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    Brush.radialGradient(
-                                        listOf(Color(0xFFB45309).copy(alpha = 0.5f), Color(0xFF1E293B))
-                                    )
-                                )
-                                .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
+                        IconButton(
+                            onClick = { vm.addToVault(nowPlayingTitle, nowPlayingArtist) },
+                            modifier = Modifier.size(34.dp)
                         ) {
-                            Text(text = trackEmoji, fontSize = 20.sp)
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = track.title ?: "Unknown Track", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text(text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Icon(Icons.Outlined.AcUnit, contentDescription = "Rest Track", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
                         }
 
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFF59E0B).copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.3f))
+                            shape = CircleShape,
+                            color = AccentCyan,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clickable {
+                                    if (isPlaying) vm.pausePlayback(context) else vm.resumePlayback(context)
+                                }
                         ) {
-                            Text(
-                                text = "$trackSatiety% Satiety",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentAmber,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFF020617),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
-                    }
-                }
-            }
-        } else {
-            // Initial state while user starts listening
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
-                    Column {
-                        Text("Observing Playback Patterns...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text("Play songs on Spotify to compute repetition velocity and satiety.", fontSize = 11.sp, color = Color(0xFF94A3B8))
+
+                        IconButton(
+                            onClick = { vm.skipToNext(context) },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }
         }
 
-        // Auditory Anchors Blueprint (Ready for Gemini Reasoning API next week)
-        Card(
+        // 3. UNIFIED INTELLIGENCE RIBBON (Single 3-Column Glass Capsule replacing 4 stacked cards)
+        Surface(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            color = Color(0xFF0F172A),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Satiety & Fatigue Capsule
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenFatigue() }
                 ) {
+                    Text("SATIETY", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                     Text(
-                        text = "AUDITORY ANCHORS • BLUEPRINT",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentCyan
+                        "$dynamicSatietyPercent%",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (dynamicSatietyPercent >= 70) AccentAmber else AccentGreen
                     )
                     Text(
-                        text = "Calibrating 7-Day Study",
+                        if (dynamicSatietyPercent >= 70) "High Repetition" else "Fresh Flow",
                         fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
                         color = Color(0xFF94A3B8)
                     )
                 }
 
-                TuneMindDemoData.anchorWeights.forEach { anchor ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(anchor.name, fontSize = 12.sp, color = Color.White)
-                            Text("${anchor.percentage}%", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = AccentCyan)
-                        }
-                        LinearProgressIndicator(
-                            progress = { anchor.percentage / 100f },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp)),
-                            color = AccentCyan,
-                            trackColor = Color(0xFF1E293B)
-                        )
-                    }
-                }
-            }
-        }
+                Box(modifier = Modifier.width(1.dp).height(28.dp).background(Color(0xFF1E293B)))
 
-        // TIME-OF-DAY RECEPTIVITY & CIRCADIAN INTELLIGENCE
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Hearing Exposure Capsule
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenHearing() }
                 ) {
+                    Text("HEARING", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                     Text(
-                        text = "CIRCADIAN RECEPTIVITY • TIME PATTERN",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentCyan
+                        "~${hearingState.estimatedAverageDb.toInt()} dB",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (hearingState.estimatedAverageDb > 85f) AccentAmber else AccentCyan
                     )
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0x3306B6D4)
-                    ) {
-                        Text(
-                            text = vm.currentTimeSlot.label,
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentCyanBright,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
+                    Text(
+                        if (hearingState.estimatedAverageDb > 85f) "High Volume" else "Safe Level",
+                        fontSize = 9.sp,
+                        color = Color(0xFF94A3B8)
+                    )
                 }
-                Text(
-                    text = "Acoustic preferences dynamically calibrated to your current ${vm.currentTimeSlot.label.lowercase()} routine.",
-                    fontSize = 12.sp,
-                    color = Color(0xFF94A3B8)
-                )
+
+                Box(modifier = Modifier.width(1.dp).height(28.dp).background(Color(0xFF1E293B)))
+
+                // Neuro-Acoustic Study Capsule
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onOpenStudy() }
+                ) {
+                    Text("NEURO STUDY", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                    Text(
+                        "Day $currentDayNumber / 7",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = PrimaryVioletBright
+                    )
+                    Text(
+                        "${studyState.observationCount} Observations",
+                        fontSize = 9.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
             }
         }
 
-        // MY MUSICAL MOMENTS (Repeatedly Enjoyed Song Sections)
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 4. HORIZONTAL SHELF: FOR YOU • COGNITIVE PLAYLIST
+        if (recommendations.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Outlined.BookmarkBorder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(15.dp))
                         Text(
-                            text = "MY MUSICAL MOMENTS",
-                            fontSize = 10.sp,
+                            text = "FOR YOU • COGNITIVE FLOW",
+                            fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentCyan
+                            color = AccentCyanBright,
+                            letterSpacing = 1.sp
                         )
                     }
+                    IconButton(onClick = { vm.refreshRecommendations() }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(recommendations.take(6)) { rec ->
+                        CompactRecommendationTile(
+                            track = rec,
+                            onPlay = { vm.playRecommendation(context, rec) },
+                            onProfile = { selectedProfileData = SongProfileData.fromRecommendedTrack(rec) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. HORIZONTAL SHELF: MY MUSICAL MOMENTS
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Outlined.BookmarkBorder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "MY MUSICAL MOMENTS",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentCyan,
+                        letterSpacing = 1.sp
+                    )
+                }
+                TextButton(
+                    onClick = onOpenMoments,
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Text("Studio →", fontSize = 11.sp, color = AccentCyanBright, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // First Item: Create Moment Chip
+                item {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0x3306B6D4),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6606B6D4)),
-                        modifier = Modifier.clickable { onOpenMoments() }
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF0F172A),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                        modifier = Modifier
+                            .width(130.dp)
+                            .height(115.dp)
+                            .clickable {
+                                bookmarkStartMs = maxOf(0L, currentPositionMs - 15_000L)
+                                bookmarkEndMs = minOf(reportedDurationMs, bookmarkStartMs + 45_000L)
+                                bookmarkCustomName = "Moment: $nowPlayingTitle"
+                                showBookmarkMomentDialog = true
+                            }
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("Explore All", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
-                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(AccentCyan.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text("New Moment", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Save section", fontSize = 9.sp, color = Color(0xFF64748B))
                         }
                     }
                 }
 
-                if (momentsState.confirmedMoments.isEmpty() && momentsState.candidateMoments.isEmpty()) {
-                    Box(
+                // Saved Moments
+                items(momentsState.confirmedMoments) { moment ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF0F172A),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF020617), RoundedCornerShape(10.dp))
-                            .padding(14.dp),
-                        contentAlignment = Alignment.Center
+                            .width(160.dp)
+                            .height(115.dp)
                     ) {
-                        Text(
-                            text = "Tap 'Moment' while listening to save your favorite drops, guitar riffs, or bridge sections.",
-                            fontSize = 11.sp,
-                            color = Color(0xFF64748B),
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                } else {
-                    // Confirmed moments
-                    momentsState.confirmedMoments.take(5).forEach { moment ->
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF020617),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                            modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
                         ) {
+                            Column {
+                                Text(
+                                    text = moment.customName ?: "${moment.trackTitle} Moment",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = moment.trackTitle,
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF94A3B8),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
                             Row(
-                                modifier = Modifier.padding(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(moment.customName ?: "${moment.trackTitle} Moment", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("${moment.trackTitle} • ${moment.trackArtist}", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0x3306B6D4)
+                                ) {
                                     Text(
-                                        "${formatDuration(moment.startPositionMs)} - ${formatDuration(moment.endPositionMs)} (${moment.preferredPlaybackDurationMs / 1000}s)",
-                                        fontSize = 10.sp,
+                                        text = "${formatDuration(moment.startPositionMs)} - ${formatDuration(moment.endPositionMs)}",
+                                        fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        color = AccentCyan
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentCyanBright,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
-                                IconButton(onClick = { vm.deleteMusicalMoment(moment.momentId) }) {
-                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
-                    }
 
-                    // Candidate moments (discovered via seek-back or replay patterns)
-                    if (momentsState.candidateMoments.isNotEmpty()) {
-                        Text(
-                            text = "AUTOMATICALLY DISCOVERED CANDIDATES",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentAmber
-                        )
-                        momentsState.candidateMoments.take(2).forEach { candidate ->
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF1E1E1E),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                IconButton(
+                                    onClick = { vm.deleteMusicalMoment(moment.momentId) },
+                                    modifier = Modifier.size(24.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(candidate.customName ?: "Seek-Back Section", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
-                                        Text("${candidate.trackTitle} • ${candidate.trackArtist}", fontSize = 11.sp, color = Color.White)
-                                        Text(
-                                            "Repeated seek pattern detected (${formatDuration(candidate.startPositionMs)} - ${formatDuration(candidate.endPositionMs)})",
-                                            fontSize = 9.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { vm.confirmCandidateMoment(candidate.momentId) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = AccentAmber, contentColor = Color(0xFF020617)),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Save", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFF64748B), modifier = Modifier.size(14.dp))
                                 }
                             }
                         }
@@ -1045,95 +716,76 @@ fun HomeScreen(
             }
         }
 
-        // HEARING INSIGHTS & ENVIRONMENT
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        // 6. RECENT ACOUSTIC TIMELINE (Sleek Spotify-Style List Rows, NOT heavy cards)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.History, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "RECENT AUDIO TIMELINE",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8),
+                        letterSpacing = 1.sp
+                    )
+                }
+                TextButton(
+                    onClick = onOpenHistory,
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Outlined.Headphones, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                    Text("Full Timeline →", fontSize = 11.sp, color = AccentCyanBright, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (state.recentTracks.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF0F172A))
+                        .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+                ) {
+                    state.recentTracks.take(4).forEachIndexed { index, track ->
+                        SleekTrackRow(
+                            track = track,
+                            onClick = { selectedProfileData = SongProfileData.fromTrackMemory(track) }
+                        )
+                        if (index < minOf(3, state.recentTracks.size - 1)) {
+                            HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.7.dp)
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF0F172A),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
                         Text(
-                            text = "TUNEMIND HEARING INSIGHTS",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentCyan
+                            "Awaiting live audio from Spotify or YouTube Music...",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
                         )
                     }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0x3306B6D4),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6606B6D4)),
-                        modifier = Modifier.clickable { onOpenHearing() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text("View Details", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
-                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
-                        }
-                    }
                 }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("ACTIVE OUTPUT", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text(
-                                hearingState.activeAudioDevice?.deviceName ?: hearingState.activeAudioDevice?.deviceType ?: "Built-in Speaker",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("ESTIMATED EXPOSURE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                            Text(
-                                "~${hearingState.estimatedAverageDb.toInt()} dB SPL",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (hearingState.estimatedAverageDb > 85f) AccentAmber else AccentGreen
-                            )
-                        }
-                    }
-                }
-
-                Text(
-                    text = hearingState.safetyGuidance,
-                    fontSize = 11.sp,
-                    color = Color(0xFF94A3B8)
-                )
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
     }
 
-    // Bookmark Musical Moment Dialog
+    // Bookmark Musical Moment Dialog (Dynamic full-song duration range)
     if (showBookmarkMomentDialog) {
         val totalTrackMs = maxOf(60_000L, reportedDurationMs)
 
@@ -1297,12 +949,12 @@ fun HomeScreen(
     }
 }
 
+// Compact Recommendation Tile for the Horizontal Shelf
 @Composable
-private fun RecommendationCard(
+private fun CompactRecommendationTile(
     track: RecommendedTrack,
     onPlay: () -> Unit,
-    onCooldown: () -> Unit,
-    onProfile: () -> Unit = {}
+    onProfile: () -> Unit
 ) {
     val categoryBadgeColor = when (track.category) {
         RecommendationCategory.EXPLORATION_DISCOVERY -> Color(0xFF8B5CF6)
@@ -1317,179 +969,234 @@ private fun RecommendationCard(
         RecommendationCategory.FAMILIAR_RECEPTIVE -> "FAMILIAR"
     }
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF0F172A),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
         modifier = Modifier
-            .fillMaxWidth()
+            .width(165.dp)
+            .height(145.dp)
             .clickable { onProfile() }
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header Row: Category Badge + Match Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = categoryBadgeColor.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, categoryBadgeColor.copy(alpha = 0.4f))
+                    shape = RoundedCornerShape(4.dp),
+                    color = categoryBadgeColor.copy(alpha = 0.15f)
                 ) {
                     Text(
                         text = categoryLabel,
-                        fontSize = 9.sp,
+                        fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = categoryBadgeColor,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF1E293B)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (track.confidence >= 0.85f) AccentGreen else AccentAmber)
-                        )
-                        Text(
-                            text = "${(track.confidence * 100).toInt()}% Match",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFCBD5E1)
-                        )
-                    }
-                }
+                Text(
+                    text = "${(track.confidence * 100).toInt()}% Match",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF94A3B8)
+                )
             }
 
-            // Track Title & Artist
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(categoryBadgeColor.copy(alpha = 0.8f), Color(0xFF1E293B))
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = "${track.artist}${track.album?.let { " • $it" } ?: ""}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF94A3B8),
-                        maxLines = 1
-                    )
-                }
+            Column {
+                Text(
+                    text = track.title,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = track.artist,
+                    fontSize = 10.sp,
+                    color = Color(0xFF94A3B8),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
-            // Explanation / Agent Reasoning
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF020617).copy(alpha = 0.5f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B).copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth()
+            Button(
+                onClick = onPlay,
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth().height(26.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        Icons.Outlined.Lightbulb,
-                        contentDescription = null,
-                        tint = AccentCyanBright,
-                        modifier = Modifier.size(16.dp).padding(top = 1.dp)
-                    )
-                    Text(
-                        text = track.reason,
-                        fontSize = 11.sp,
-                        color = Color(0xFFCBD5E1),
-                        lineHeight = 15.sp
-                    )
-                }
-            }
-
-            // Action Buttons: Play this song (Central feature!) + Cooldown option
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = onPlay,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentCyan,
-                        contentColor = Color(0xFF020617)
-                    ),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Play this song",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                FilledTonalButton(
-                    onClick = onProfile,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Color(0xFF1E293B),
-                        contentColor = AccentCyanBright
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.Info, contentDescription = "Song Profile", modifier = Modifier.size(15.dp))
-                }
-
-                FilledTonalButton(
-                    onClick = onCooldown,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Color(0xFF1E293B),
-                        contentColor = Color(0xFF94A3B8)
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Outlined.AcUnit, contentDescription = "Quarantine", modifier = Modifier.size(14.dp))
-                }
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Play", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
+}
+
+// Sleek Spotify-Style Timeline Row (No heavy nested card borders)
+@Composable
+private fun SleekTrackRow(
+    track: TrackMemoryEntry,
+    onClick: () -> Unit
+) {
+    val trackEmoji = remember(track.title, track.artist) {
+        SongProfileData.pickEmoji(track.title ?: "", track.artist ?: "")
+    }
+    val trackSatiety = minOf(95, track.distinctAppearanceCount * 22)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Mini Artwork Tile
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF1E293B)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = trackEmoji, fontSize = 18.sp)
+        }
+
+        // Title and Artist
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title ?: "Unknown Track",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        // Satiety Pill
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (trackSatiety >= 60) Color(0xFFF59E0B).copy(alpha = 0.15f) else Color(0xFF06B6D4).copy(alpha = 0.15f)
+        ) {
+            Text(
+                text = "$trackSatiety% Sat.",
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = if (trackSatiety >= 60) AccentAmber else AccentCyanBright,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun PersonalOnboardingDialog(
+    vm: TuneMindViewModel,
+    onDismiss: () -> Unit
+) {
+    var step by remember { mutableStateOf(1) }
+    var selectedGenres by remember { mutableStateOf(setOf("Electronic", "Indie Rock")) }
+    var selectedWorkStyle by remember { mutableStateOf("Deep Coding") }
+
+    AlertDialog(
+        onDismissRequest = { },
+        containerColor = Color(0xFF0F172A),
+        title = {
+            Text(
+                text = if (step == 1) "Calibrate Sonic Genome" else "Acoustic Receptor Calibration",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (step == 1) {
+                    Text(
+                        "TuneMind runs background neuro-acoustic observations to protect you from song burnout and optimize focus flow.",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text("Select primary genres you listen to:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
+                    listOf("Electronic", "Indie Rock", "Ambient / Lo-Fi", "Hip-Hop", "Classical").forEach { genre ->
+                        val isSelected = selectedGenres.contains(genre)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color(0xFF020617),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentCyan else Color(0xFF334155)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedGenres = if (isSelected) selectedGenres - genre else selectedGenres + genre
+                                }
+                        ) {
+                            Text(
+                                text = genre,
+                                fontSize = 12.sp,
+                                color = if (isSelected) AccentCyanBright else Color(0xFFCBD5E1),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        "What is your primary daytime cognitive state?",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    listOf("Deep Coding & Engineering", "High-Energy Workout", "Creative Writing", "Relaxation").forEach { style ->
+                        val isSelected = selectedWorkStyle == style
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color(0xFF020617),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentGreen else Color(0xFF334155)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedWorkStyle = style }
+                        ) {
+                            Text(
+                                text = style,
+                                fontSize = 12.sp,
+                                color = if (isSelected) AccentGreen else Color(0xFFCBD5E1),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (step == 1) {
+                        step = 2
+                    } else {
+                        vm.completeOnboarding()
+                        onDismiss()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617))
+            ) {
+                Text(if (step == 1) "Next →" else "Begin Intelligence", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
