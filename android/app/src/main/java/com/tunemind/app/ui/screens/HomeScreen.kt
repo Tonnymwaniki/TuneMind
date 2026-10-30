@@ -717,7 +717,7 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.TrendingUp, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
                 Text(
                     text = "High Repeat Velocity",
                     fontSize = 15.sp,
@@ -947,7 +947,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text("Explore All", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
                         }
                     }
                 }
@@ -1080,7 +1080,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text("View Details", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = AccentCyanBright)
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(12.dp))
                         }
                     }
                 }
