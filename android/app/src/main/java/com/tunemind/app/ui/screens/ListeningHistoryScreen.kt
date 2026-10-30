@@ -609,7 +609,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
     // Comprehensive Song Profile Bottom Sheet
     selectedProfileData?.let { profileData ->
         SongProfileSheet(
-            data = profileData,
+            profile = profileData,
             vm = vm,
             onDismiss = { selectedProfileData = null },
             onQuarantineSuccess = { msg -> snackbarMessage = msg }
