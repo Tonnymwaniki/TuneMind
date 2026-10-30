@@ -1135,6 +1135,8 @@ fun HomeScreen(
 
     // Bookmark Musical Moment Dialog
     if (showBookmarkMomentDialog) {
+        val totalTrackMs = maxOf(60_000L, reportedDurationMs)
+
         AlertDialog(
             onDismissRequest = { showBookmarkMomentDialog = false },
             containerColor = Color(0xFF0F172A),
@@ -1145,9 +1147,9 @@ fun HomeScreen(
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Mark your favorite section of '$nowPlayingTitle' by $nowPlayingArtist.",
+                        text = "Mark your favorite section of '$nowPlayingTitle' by $nowPlayingArtist. Length up to ${formatDuration(totalTrackMs)}.",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8)
                     )
@@ -1155,7 +1157,7 @@ fun HomeScreen(
                     OutlinedTextField(
                         value = bookmarkCustomName,
                         onValueChange = { bookmarkCustomName = it },
-                        label = { Text("Moment Name (e.g. Guitar Solo, Drop)") },
+                        label = { Text("Moment Label (e.g. Guitar Solo, Drop)") },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentCyan,
                             unfocusedBorderColor = Color(0xFF334155),
@@ -1165,20 +1167,99 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Start: ${formatDuration(bookmarkStartMs)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyan)
-                        Text("End: ${formatDuration(bookmarkEndMs)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright)
+                    // Dual range controls
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Start: ${formatDuration(bookmarkStartMs)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyan)
+                            Text("End: ${formatDuration(bookmarkEndMs)}", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = AccentCyanBright)
+                        }
+
+                        Slider(
+                            value = bookmarkStartMs.toFloat(),
+                            onValueChange = {
+                                bookmarkStartMs = it.toLong()
+                                if (bookmarkEndMs <= bookmarkStartMs + 5_000L) {
+                                    bookmarkEndMs = minOf(totalTrackMs, bookmarkStartMs + 30_000L)
+                                }
+                            },
+                            valueRange = 0f..(totalTrackMs - 5_000L).toFloat(),
+                            colors = SliderDefaults.colors(thumbColor = AccentCyan, activeTrackColor = AccentCyan)
+                        )
+
+                        Slider(
+                            value = bookmarkEndMs.toFloat(),
+                            onValueChange = {
+                                bookmarkEndMs = it.toLong()
+                                if (bookmarkStartMs >= bookmarkEndMs - 5_000L) {
+                                    bookmarkStartMs = maxOf(0L, bookmarkEndMs - 30_000L)
+                                }
+                            },
+                            valueRange = 5_000f..totalTrackMs.toFloat(),
+                            colors = SliderDefaults.colors(thumbColor = AccentCyanBright, activeTrackColor = AccentCyanBright)
+                        )
                     }
 
-                    Text(
-                        "Duration: ${(bookmarkEndMs - bookmarkStartMs) / 1000}s",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF64748B)
-                    )
+                    // Quick length chips
+                    Text("QUICK LENGTH PRESETS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            30_000L to "30s",
+                            60_000L to "1m",
+                            90_000L to "1m 30s",
+                            120_000L to "2m",
+                            totalTrackMs to "Full Track"
+                        ).forEach { (len, label) ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF020617),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                                modifier = Modifier.clickable {
+                                    if (len == totalTrackMs) {
+                                        bookmarkStartMs = 0L
+                                        bookmarkEndMs = totalTrackMs
+                                    } else {
+                                        bookmarkEndMs = minOf(totalTrackMs, bookmarkStartMs + len)
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    label,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    val dur = bookmarkEndMs - bookmarkStartMs
+                    val durLabel = if (dur >= 60_000L) "${dur / 60_000L}m ${(dur % 60_000L) / 1000L}s" else "${dur / 1000L}s"
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF020617),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Total Section Playback:", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Text(
+                                durLabel,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGreen
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
