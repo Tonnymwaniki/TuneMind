@@ -34,14 +34,14 @@ fun MusicProfileScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
     val crossAppState by vm.crossAppState.collectAsState()
 
     val totalMs = historyState.tracks.sumOf { track ->
-        (track.appearances.firstOrNull()?.durationMs ?: 195_000L) * maxOf(1, track.distinctAppearanceCount)
+        (track.appearances.firstOrNull()?.let { app -> (app.lastObservedAtMs - app.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * maxOf(1, track.distinctAppearanceCount)
     }
     val monitoredHours = if (totalMs > 0L) {
         String.format(java.util.Locale.US, "%.1fh", totalMs / 3_600_000.0)
     } else {
         "0.0h"
     }
-    val syncedSourcesCount = maxOf(1, crossAppState.sources.mapNotNull { it.packageName }.distinct().size)
+    val syncedSourcesCount = maxOf(1, crossAppState.sources.map { it.sourcePackage }.distinct().size)
     val confidencePct = if (historyState.tracks.isNotEmpty()) {
         minOf(99, 70 + minOf(25, historyState.tracks.size * 2))
     } else {

@@ -39,7 +39,7 @@ fun ListeningSessionDetailsScreen(
 
     val trackCount = if (historyTracks.isNotEmpty()) historyTracks.size else 8
     val durationLabel = if (historyTracks.isNotEmpty()) {
-        val totalMs = historyTracks.sumOf { (it.appearances.firstOrNull()?.durationMs ?: 195_000L) * maxOf(1, it.distinctAppearanceCount) }
+        val totalMs = historyTracks.sumOf { (it.appearances.firstOrNull()?.let { app -> (app.lastObservedAtMs - app.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * maxOf(1, it.distinctAppearanceCount) }
         val m = (totalMs / 1000) / 60
         val s = (totalMs / 1000) % 60
         "${m}m ${s}s"

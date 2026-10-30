@@ -210,7 +210,7 @@ data class SongProfileData(
             val artist = track.artist ?: "Unknown Artist"
             val count = maxOf(1, track.distinctAppearanceCount)
             val satiety = minOf(95, maxOf(15, count * 22))
-            val estDuration = (track.appearances.firstOrNull()?.durationMs ?: 195_000L) * count
+            val estDuration = (track.appearances.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * count
             val firstMs = track.firstObservedAppearanceAtMs
             val lastMs = track.lastObservedAppearanceAtMs
 
@@ -245,7 +245,7 @@ data class SongProfileData(
             val sourcePackage = np?.sourcePackage ?: latestRecentTrack?.sourcePackage ?: "com.spotify.music"
             val plays = maxOf(1, latestRecentTrack?.distinctAppearanceCount ?: 1)
             val satiety = minOf(95, maxOf(18, plays * 22))
-            val duration = if ((np?.durationMs ?: 0L) > 0L) np!!.durationMs else (latestRecentTrack?.appearances?.firstOrNull()?.durationMs ?: 180_000L)
+            val duration = if ((np?.durationMs ?: 0L) > 0L) np!!.durationMs else (latestRecentTrack?.appearances?.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 180_000L)
             val firstMs = latestRecentTrack?.firstObservedAppearanceAtMs ?: np?.updatedAtMs ?: System.currentTimeMillis()
             val lastMs = np?.updatedAtMs ?: latestRecentTrack?.lastObservedAppearanceAtMs ?: System.currentTimeMillis()
 
@@ -276,7 +276,7 @@ data class SongProfileData(
             return SongProfileData(
                 title = title,
                 artist = artist,
-                album = rec.category.label,
+                album = rec.album ?: rec.category.name,
                 sourcePackage = "com.spotify.music",
                 appearanceCount = 0,
                 satietyScore = satiety,
@@ -988,9 +988,8 @@ fun SongProfile(
                     artist = profile.artist,
                     album = profile.album,
                     category = com.tunemind.app.domain.recommendation.RecommendationCategory.PALATE_CLEANSER,
-                    reason = "Direct playback launch from Song Profile",
-                    contrastAttribute = profile.vibeTag,
-                    confidenceScore = 95,
+                    reason = "Direct playback launch from Song Profile: ${profile.vibeTag}",
+                    confidence = 0.95f
                 )
                 vm.playRecommendation(context, fakeRec)
                 onDismiss?.invoke()
@@ -1041,23 +1040,4 @@ fun SongProfileSheet(
             onQuarantineSuccess = onQuarantineSuccess
         )
     }
-}
-
-/**
- * Backward compatibility overload for callers passing `data = ...`.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SongProfileSheet(
-    data: SongProfileData,
-    vm: TuneMindViewModel,
-    onDismiss: () -> Unit,
-    onQuarantineSuccess: (String) -> Unit = {}
-) {
-    SongProfileSheet(
-        profile = data,
-        vm = vm,
-        onDismiss = onDismiss,
-        onQuarantineSuccess = onQuarantineSuccess
-    )
 }

@@ -40,7 +40,7 @@ fun WeeklyReportScreen(
 
     val realTracks = historyState.tracks.filter { !it.title.isNullOrBlank() }
     val totalMs = realTracks.sumOf { track ->
-        (track.appearances.firstOrNull()?.durationMs ?: 195_000L) * maxOf(1, track.distinctAppearanceCount)
+        (track.appearances.firstOrNull()?.let { app -> (app.lastObservedAtMs - app.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * maxOf(1, track.distinctAppearanceCount)
     }
     val monitoredHours = if (totalMs > 0L) {
         String.format(java.util.Locale.US, "%.1fh", totalMs / 3_600_000.0)
