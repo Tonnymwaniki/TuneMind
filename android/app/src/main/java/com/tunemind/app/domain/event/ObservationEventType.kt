@@ -1,28 +1,52 @@
 package com.tunemind.app.domain.event
 
 /**
- * The type of raw observation recorded from a MediaController.Callback.
+ * The type of raw observation or action recorded by TuneMind.
  *
- * These are what the Android MediaSession APIs directly report.
- * They are NOT inferred concepts — SKIP, PAUSE, and COMPLETION are not here.
- * Inferences are computed by the backend AnalyticsService from sequences of these events.
+ * Categorized according to Part 12 of the TuneMind Master Product Directive.
  */
 enum class ObservationEventType {
-    /** PlaybackState callback; the v1 record retains the raw state code and available values. */
+    // Playback Events
     PLAYBACK_STATE_CHANGED,
-
-    /** MediaMetadata changed — a new track is playing. */
     METADATA_CHANGED,
-
-    /** A new MediaController (active session) was discovered. */
     SESSION_CREATED,
-
-    /** A MediaController session was destroyed. */
     SESSION_DESTROYED,
-
-    /** TuneMindListenerService connected — observation began. */
     OBSERVATION_STARTED,
-
-    /** TuneMindListenerService disconnected — observation stopped. */
     OBSERVATION_STOPPED,
+
+    // Audio Device Events
+    AUDIO_DEVICE_CONNECTED,
+    AUDIO_DEVICE_DISCONNECTED,
+
+    // Volume Events
+    VOLUME_CHANGED,
+
+    // Musical Moment Events
+    MOMENT_MARKED,
+    MOMENT_UPDATED,
+    MOMENT_REMOVED,
+
+    // Recommendation Events
+    RECOMMENDATION_GENERATED,
+    RECOMMENDATION_ACCEPTED,
+    RECOMMENDATION_DISMISSED,
+
+    // Playback Agent Events
+    TRACK_LAUNCH_REQUESTED,
+    TRACK_LAUNCH_RESULT,
+
+    // Privacy & Control Events
+    OBSERVATION_ENABLED,
+    OBSERVATION_DISABLED
+}
+
+/**
+ * Distinct provenance of recorded events.
+ * A user action is never confused with an Android observation.
+ */
+enum class EventOrigin {
+    ANDROID_OBSERVATION,
+    USER_ACTION,
+    SYSTEM_DERIVED,
+    PROVIDER_RESPONSE
 }

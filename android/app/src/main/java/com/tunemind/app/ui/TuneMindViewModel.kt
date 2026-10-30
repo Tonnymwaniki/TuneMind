@@ -19,13 +19,32 @@ import com.tunemind.app.domain.coverage.CoverageAssessment
 import com.tunemind.app.domain.experiment.ExperimentRepository
 import com.tunemind.app.domain.experiment.ExperimentStatus
 import com.tunemind.app.domain.experiment.PlaybackIntervalEstimator
-import com.tunemind.app.domain.model.PlaybackObservation
+import com.tunemind.app.domain.audio.AudioDeviceSessionEntity
+import com.tunemind.app.domain.audio.VolumeObservationEntity
+import com.tunemind.app.domain.moment.MusicalMomentEntity
+import com.tunemind.app.domain.temporal.TimeSlot
+import com.tunemind.app.domain.temporal.TimePatternEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+data class MusicalMomentsState(
+    val confirmedMoments: List<MusicalMomentEntity> = emptyList(),
+    val candidateMoments: List<MusicalMomentEntity> = emptyList(),
+    val isLoading: Boolean = false
+)
+
+data class HearingInsightsState(
+    val recentAudioDevices: List<AudioDeviceSessionEntity> = emptyList(),
+    val activeAudioDevice: AudioDeviceSessionEntity? = null,
+    val recentVolumeObs: List<VolumeObservationEntity> = emptyList(),
+    val estimatedAverageDb: Float = 68f,
+    val dailyExposureMinutes: Int = 45,
+    val safetyGuidance: String = "Listening exposure within safe acoustic threshold (<80 dB)."
+)
 
 data class NowPlayingObservation(
     val title: String? = null,
@@ -140,6 +159,20 @@ class TuneMindViewModel : ViewModel() {
     private val _crossAppState = MutableStateFlow(CrossAppState())
     val crossAppState: StateFlow<CrossAppState> = _crossAppState.asStateFlow()
 
+    private val db: TuneMindDatabase? by lazy {
+        AppHolder.context?.let { TuneMindDatabase.getInstance(it) }
+    }
+    private val momentDao by lazy { db?.musicalMomentDao() }
+    private val audioDao by lazy { db?.audioDeviceDao() }
+
+    private val _musicalMomentsState = MutableStateFlow(MusicalMomentsState())
+    val musicalMomentsState: StateFlow<MusicalMomentsState> = _musicalMomentsState.asStateFlow()
+
+    private val _hearingInsightsState = MutableStateFlow(HearingInsightsState())
+    val hearingInsightsState: StateFlow<HearingInsightsState> = _hearingInsightsState.asStateFlow()
+
+    val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()
+
     fun refreshCrossAppData() {
         viewModelScope.launch {
             val exp = experimentRepo?.getExperiment()
@@ -186,6 +219,38 @@ class TuneMindViewModel : ViewModel() {
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("TuneMindVM", "observeExperiment notice: ${t.message}")
+            }
+        }
+
+        // Observe musical moments
+        viewModelScope.launch {
+            try {
+                momentDao?.observeAll()?.collect { all ->
+                    val confirmed = all.filter { it.userConfirmed }
+                    val candidates = all.filter { !it.userConfirmed }
+                    _musicalMomentsState.value = MusicalMomentsState(
+                        confirmedMoments = confirmed,
+                        candidateMoments = candidates,
+                        isLoading = false
+                    )
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeMoments notice: ${t.message}")
+            }
+        }
+
+        // Observe audio devices
+        viewModelScope.launch {
+            try {
+                audioDao?.observeRecentSessions()?.collect { sessions ->
+                    val active = sessions.firstOrNull { it.disconnectedAt == null }
+                    _hearingInsightsState.value = _hearingInsightsState.value.copy(
+                        recentAudioDevices = sessions,
+                        activeAudioDevice = active
+                    )
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeAudio notice: ${t.message}")
             }
         }
 
@@ -552,6 +617,54 @@ class TuneMindViewModel : ViewModel() {
             vaultTracks = _vaultState.value,
             preferredProviderId = prefProvider
         )
+    }
+
+    fun saveMusicalMoment(
+        title: String,
+        artist: String,
+        album: String? = null,
+        sourcePkg: String? = null,
+        startMs: Long,
+        endMs: Long,
+        customName: String? = null
+    ) {
+        val duration = maxOf(5_000L, endMs - startMs)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                momentDao?.insertOrUpdate(
+                    MusicalMomentEntity(
+                        momentId = java.util.UUID.randomUUID().toString(),
+                        trackTitle = title,
+                        trackArtist = artist,
+                        trackAlbum = album,
+                        sourcePackage = sourcePkg,
+                        startPositionMs = startMs,
+                        endPositionMs = endMs,
+                        preferredPlaybackDurationMs = duration,
+                        discoveryMethod = "USER_MARKED",
+                        confidence = 1.0f,
+                        userConfirmed = true,
+                        customName = customName ?: "Moment (${startMs / 1000}s - ${endMs / 1000}s)"
+                    )
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun confirmCandidateMoment(momentId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                momentDao?.confirmMoment(momentId)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun deleteMusicalMoment(momentId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                momentDao?.deleteById(momentId)
+            } catch (_: Exception) {}
+        }
     }
 
     fun resetListeningProfile() {

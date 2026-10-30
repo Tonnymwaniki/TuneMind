@@ -24,14 +24,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 class TuneMindListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var observer: MediaSessionObserver
+    private var audioDeviceObserver: com.tunemind.app.domain.audio.AudioDeviceObserver? = null
+    private val momentDiscoveryEngine: com.tunemind.app.domain.moment.MomentDiscoveryEngine by lazy {
+        com.tunemind.app.domain.moment.MomentDiscoveryEngine(db.musicalMomentDao())
+    }
     private val stopEmitted = AtomicBoolean(false)
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         try {
             stopEmitted.set(false)
+            audioDeviceObserver = com.tunemind.app.domain.audio.AudioDeviceObserver(this, serviceScope, db.audioDeviceDao()).also {
+                it.start()
+            }
             observer = MediaSessionObserver(this, serviceScope) { observation ->
                 repository.record(observation)
+                serviceScope.launch {
+                    try {
+                        momentDiscoveryEngine.processObservation(observation)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Moment discovery error: ${t.message}")
+                    }
+                }
                 serviceScope.launch {
                     SyncScheduler.schedule(this@TuneMindListenerService)
                 }
@@ -71,6 +85,8 @@ class TuneMindListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         emitObservationStop()
+        audioDeviceObserver?.stop()
+        audioDeviceObserver = null
         observerOrNull()?.stop()
         isConnected = false
         instance = null
@@ -80,6 +96,8 @@ class TuneMindListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         emitObservationStop()
+        audioDeviceObserver?.stop()
+        audioDeviceObserver = null
         observerOrNull()?.stop()
         isConnected = false
         instance = null
