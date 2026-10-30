@@ -438,9 +438,7 @@ fun HomeScreen(
                             color = AccentCyan,
                             modifier = Modifier
                                 .size(38.dp)
-                                .clickable {
-                                    if (isPlaying) vm.pausePlayback(context) else vm.resumePlayback(context)
-                                }
+                                .clickable { vm.togglePlayback() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -453,7 +451,7 @@ fun HomeScreen(
                         }
 
                         IconButton(
-                            onClick = { vm.skipToNext(context) },
+                            onClick = { vm.skipNext() },
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -1107,96 +1105,4 @@ private fun SleekTrackRow(
     }
 }
 
-@Composable
-fun PersonalOnboardingDialog(
-    vm: TuneMindViewModel,
-    onDismiss: () -> Unit
-) {
-    var step by remember { mutableStateOf(1) }
-    var selectedGenres by remember { mutableStateOf(setOf("Electronic", "Indie Rock")) }
-    var selectedWorkStyle by remember { mutableStateOf("Deep Coding") }
 
-    AlertDialog(
-        onDismissRequest = { },
-        containerColor = Color(0xFF0F172A),
-        title = {
-            Text(
-                text = if (step == 1) "Calibrate Sonic Genome" else "Acoustic Receptor Calibration",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (step == 1) {
-                    Text(
-                        "TuneMind runs background neuro-acoustic observations to protect you from song burnout and optimize focus flow.",
-                        fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Text("Select primary genres you listen to:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
-                    listOf("Electronic", "Indie Rock", "Ambient / Lo-Fi", "Hip-Hop", "Classical").forEach { genre ->
-                        val isSelected = selectedGenres.contains(genre)
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color(0xFF020617),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentCyan else Color(0xFF334155)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedGenres = if (isSelected) selectedGenres - genre else selectedGenres + genre
-                                }
-                        ) {
-                            Text(
-                                text = genre,
-                                fontSize = 12.sp,
-                                color = if (isSelected) AccentCyanBright else Color(0xFFCBD5E1),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        "What is your primary daytime cognitive state?",
-                        fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
-                    )
-                    listOf("Deep Coding & Engineering", "High-Energy Workout", "Creative Writing", "Relaxation").forEach { style ->
-                        val isSelected = selectedWorkStyle == style
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color(0xFF020617),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentGreen else Color(0xFF334155)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedWorkStyle = style }
-                        ) {
-                            Text(
-                                text = style,
-                                fontSize = 12.sp,
-                                color = if (isSelected) AccentGreen else Color(0xFFCBD5E1),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (step == 1) {
-                        step = 2
-                    } else {
-                        vm.completeOnboarding()
-                        onDismiss()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617))
-            ) {
-                Text(if (step == 1) "Next →" else "Begin Intelligence", fontWeight = FontWeight.Bold)
-            }
-        }
-    )
-}
