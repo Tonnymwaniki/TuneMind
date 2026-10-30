@@ -179,7 +179,7 @@ fun TuneMindTopAppBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (!isRootTab) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             } else {
                 Box(
