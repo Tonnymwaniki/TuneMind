@@ -19,6 +19,7 @@ import com.tunemind.app.domain.coverage.CoverageAssessment
 import com.tunemind.app.domain.experiment.ExperimentRepository
 import com.tunemind.app.domain.experiment.ExperimentStatus
 import com.tunemind.app.domain.experiment.PlaybackIntervalEstimator
+import com.tunemind.app.domain.model.PlaybackObservation
 import com.tunemind.app.domain.audio.AudioDeviceSessionEntity
 import com.tunemind.app.domain.audio.VolumeObservationEntity
 import com.tunemind.app.domain.moment.MusicalMomentEntity
