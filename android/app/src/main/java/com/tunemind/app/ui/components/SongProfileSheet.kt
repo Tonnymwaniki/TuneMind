@@ -33,6 +33,7 @@ import com.tunemind.app.ui.theme.*
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 /**
  * Perceptual Auditory Anchor weight for a specific track.
@@ -357,6 +358,11 @@ fun SongProfile(
     val playMinutes = totalSec / 60
     val playSeconds = totalSec % 60
 
+    var geminiDossierText by remember { mutableStateOf<String?>(null) }
+    var isDossierLoading by remember { mutableStateOf(false) }
+    val isGeminiConfigured = remember(context) { com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(context) }
+    val coroutineScope = rememberCoroutineScope()
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -576,6 +582,100 @@ fun SongProfile(
                     color = Color(0xFF94A3B8),
                     lineHeight = 16.sp
                 )
+            }
+        }
+
+        // Gemini AI Neuro-Acoustic Reasoning Dossier
+        if (isGeminiConfigured) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = "GEMINI ACOUSTIC DOSSIER",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyanBright,
+                                letterSpacing = 1.sp
+                            )
+                        }
+
+                        if (geminiDossierText != null) {
+                            IconButton(
+                                onClick = {
+                                    isDossierLoading = true
+                                    coroutineScope.launch {
+                                        val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
+                                            context = context,
+                                            title = profile.title,
+                                            artist = profile.artist,
+                                            playCount = profile.appearanceCount,
+                                            satietyPercent = profile.satietyScore
+                                        )
+                                        isDossierLoading = false
+                                        geminiDossierText = result.getOrNull()
+                                    }
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Regenerate", tint = Color(0xFF94A3B8), modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+
+                    if (isDossierLoading) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            Text("Gemini is analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
+                    } else if (geminiDossierText != null) {
+                        Text(
+                            text = geminiDossierText ?: "",
+                            fontSize = 12.sp,
+                            color = Color(0xFFCBD5E1),
+                            lineHeight = 18.sp
+                        )
+                    } else {
+                        Button(
+                            onClick = {
+                                isDossierLoading = true
+                                coroutineScope.launch {
+                                    val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
+                                        context = context,
+                                        title = profile.title,
+                                        artist = profile.artist,
+                                        playCount = profile.appearanceCount,
+                                        satietyPercent = profile.satietyScore
+                                    )
+                                    isDossierLoading = false
+                                    geminiDossierText = result.getOrNull() ?: "Unable to complete AI synthesis. Check connection."
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Synthesize Acoustic Dossier with Gemini", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
             }
         }
 

@@ -16,7 +16,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.theme.*
@@ -39,6 +42,15 @@ fun SettingsScreen(
     var chronoReceptivity by remember { mutableStateOf(true) }
     var cloakingSession by remember { mutableStateOf(false) }
     var deduplicateLogs by remember { mutableStateOf(true) }
+
+    var geminiApiKeyInput by remember {
+        mutableStateOf(com.tunemind.app.domain.ai.GeminiReasoningEngine.getApiKey(context))
+    }
+    var isKeyObscured by remember { mutableStateOf(true) }
+    var testStatusText by remember { mutableStateOf<String?>(null) }
+    var isTestingConnection by remember { mutableStateOf(false) }
+    val isGeminiConfigured by vm?.isGeminiConfigured?.collectAsState()
+        ?: remember { mutableStateOf(com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(context)) }
 
     val scrollState = rememberScrollState()
 
@@ -106,6 +118,177 @@ fun SettingsScreen(
                         Text("Confidence", fontSize = 10.sp, color = TextMuted)
                     }
                 }
+            }
+        }
+
+        // GOOGLE GEMINI REASONING INTELLIGENCE ENGINE
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isGeminiConfigured) AccentCyan.copy(alpha = 0.5f) else Color(0xFF1E293B)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AccentCyan.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(18.dp))
+                        }
+                        Column {
+                            Text(
+                                text = "GEMINI REASONING ENGINE",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Cognitive AI Integration",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isGeminiConfigured) Color(0x3310B981) else Color(0x33F59E0B),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isGeminiConfigured) AccentGreen else AccentAmber)
+                    ) {
+                        Text(
+                            text = if (isGeminiConfigured) "● ACTIVE" else "○ AWAITING KEY",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isGeminiConfigured) AccentGreen else AccentAmber,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Runs real-time cognitive reasoning over your playback logs to prevent song burnout, synthesize satiety dynamics, and curate AI-guided recommendations.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8),
+                    lineHeight = 16.sp
+                )
+
+                // Key Input
+                OutlinedTextField(
+                    value = geminiApiKeyInput,
+                    onValueChange = {
+                        geminiApiKeyInput = it
+                        testStatusText = null
+                    },
+                    label = { Text("Gemini API Key", fontSize = 12.sp) },
+                    placeholder = { Text("AIzaSy...", fontSize = 11.sp, color = Color(0xFF64748B)) },
+                    visualTransformation = if (isKeyObscured) PasswordVisualTransformation() else VisualTransformation.None,
+                    trailingIcon = {
+                        IconButton(onClick = { isKeyObscured = !isKeyObscured }) {
+                            Icon(
+                                if (isKeyObscured) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle Visibility",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF020617),
+                        unfocusedContainerColor = Color(0xFF020617),
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Action buttons: Save & Test
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (vm != null) {
+                                vm.saveGeminiApiKey(geminiApiKeyInput)
+                            } else {
+                                com.tunemind.app.domain.ai.GeminiReasoningEngine.saveApiKey(context, geminiApiKeyInput)
+                            }
+                            testStatusText = "API Key saved successfully ✓"
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Save & Activate", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            isTestingConnection = true
+                            testStatusText = "Pinging Google Gemini API..."
+                            if (vm != null) {
+                                vm.testGeminiApiKey(geminiApiKeyInput) { success, msg ->
+                                    isTestingConnection = false
+                                    testStatusText = if (success) "✓ $msg" else "✗ Error: $msg"
+                                }
+                            } else {
+                                kotlinx.coroutines.GlobalScope.let {
+                                    // Fallback test
+                                    isTestingConnection = false
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        Text(if (isTestingConnection) "Testing..." else "Test Connection", fontSize = 11.sp, color = Color.White)
+                    }
+                }
+
+                testStatusText?.let { status ->
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF020617),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = status,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (status.startsWith("✓")) AccentGreen else if (status.startsWith("✗")) Color(0xFFEF4444) else AccentCyanBright,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Tip: You can also set GEMINI_API_KEY in local.properties or your system environment variables to bake it into the Gradle build.",
+                    fontSize = 10.sp,
+                    color = Color(0xFF64748B)
+                )
             }
         }
 

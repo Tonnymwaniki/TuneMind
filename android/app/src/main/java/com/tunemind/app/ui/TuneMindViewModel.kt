@@ -256,6 +256,8 @@ class TuneMindViewModel : ViewModel() {
         }
 
         refreshReadiness()
+        refreshGeminiState()
+        requestGeminiSessionReasoning()
 
         viewModelScope.launch {
             try {
@@ -558,6 +560,63 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
+    // Gemini Cognitive AI Reasoning State
+    private val _geminiSessionInsight = MutableStateFlow<String?>(null)
+    val geminiSessionInsight: StateFlow<String?> = _geminiSessionInsight.asStateFlow()
+
+    private val _isGeminiConfigured = MutableStateFlow<Boolean>(false)
+    val isGeminiConfigured: StateFlow<Boolean> = _isGeminiConfigured.asStateFlow()
+
+    private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
+    val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
+
+    fun refreshGeminiState() {
+        val ctx = AppHolder.context ?: return
+        _isGeminiConfigured.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)
+    }
+
+    fun requestGeminiSessionReasoning() {
+        val ctx = AppHolder.context ?: return
+        if (!com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)) {
+            _geminiSessionInsight.value = null
+            return
+        }
+        viewModelScope.launch {
+            _isReasoningLoading.value = true
+            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.analyzeActiveSession(
+                context = ctx,
+                recentTracks = _homeState.value.recentTracks,
+                nowPlaying = _homeState.value.nowPlaying,
+                vaultTracks = _vaultState.value,
+                timeSlot = currentTimeSlot.label
+            )
+            _isReasoningLoading.value = false
+            result.onSuccess { insight ->
+                _geminiSessionInsight.value = insight
+            }
+        }
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        val ctx = AppHolder.context ?: return
+        com.tunemind.app.domain.ai.GeminiReasoningEngine.saveApiKey(ctx, key)
+        refreshGeminiState()
+        refreshRecommendations()
+        requestGeminiSessionReasoning()
+    }
+
+    fun testGeminiApiKey(candidateKey: String, onResult: (Boolean, String) -> Unit) {
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch {
+            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.testConnection(ctx, candidateKey)
+            result.onSuccess { text ->
+                onResult(true, text)
+            }.onFailure { err ->
+                onResult(false, err.message ?: "Connection test failed.")
+            }
+        }
+    }
+
     // Agent Recommendations & Music Provider Playback
     private val _recommendations = MutableStateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>>(emptyList())
     val recommendations: StateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>> = _recommendations.asStateFlow()
@@ -613,11 +672,29 @@ class TuneMindViewModel : ViewModel() {
     fun refreshRecommendations() {
         val ctx = AppHolder.context
         val prefProvider = if (ctx != null) getPreferredProviderId(ctx) else "spotify"
-        _recommendations.value = com.tunemind.app.domain.recommendation.RecommendationEngine.generateRecommendations(
+
+        // Local evidence-based baseline
+        val baseline = com.tunemind.app.domain.recommendation.RecommendationEngine.generateRecommendations(
             tracks = _historyState.value.tracks,
             vaultTracks = _vaultState.value,
             preferredProviderId = prefProvider
         )
+        _recommendations.value = baseline
+
+        // If Gemini is active, asynchronously elevate with real reasoning
+        if (ctx != null && com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)) {
+            viewModelScope.launch {
+                val aiRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateReasonedRecommendations(
+                    context = ctx,
+                    recentTracks = _historyState.value.tracks,
+                    vaultTracks = _vaultState.value,
+                    preferredProviderId = prefProvider
+                )
+                if (!aiRecs.isNullOrEmpty()) {
+                    _recommendations.value = aiRecs
+                }
+            }
+        }
     }
 
     fun saveMusicalMoment(

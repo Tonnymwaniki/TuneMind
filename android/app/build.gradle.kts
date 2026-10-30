@@ -9,6 +9,16 @@ android {
     compileSdk = 36
     buildToolsVersion = "36.1.0"
 
+    val localProps = java.util.Properties()
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) {
+        localPropsFile.inputStream().use { localProps.load(it) }
+    }
+    val geminiKey = localProps.getProperty("GEMINI_API_KEY")
+        ?: (project.findProperty("GEMINI_API_KEY") as? String)
+        ?: System.getenv("GEMINI_API_KEY")
+        ?: ""
+
     defaultConfig {
         applicationId = "com.tunemind.app"
         minSdk = 26
@@ -19,6 +29,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"https://ais-dev-j7hrc5mfe5abbddivox3ii-740908901963.europe-west2.run.app\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 
     buildTypes {

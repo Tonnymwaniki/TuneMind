@@ -58,6 +58,9 @@ fun HomeScreen(
     val vaultTracks by vm.vaultState.collectAsState()
     val recommendations by vm.recommendations.collectAsState()
     val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
+    val geminiInsight by vm.geminiSessionInsight.collectAsState()
+    val isGeminiConfigured by vm.isGeminiConfigured.collectAsState()
+    val isReasoningLoading by vm.isReasoningLoading.collectAsState()
 
     // Real Live Media Playback telemetry from Spotify / active players
     val nowPlaying = state.nowPlaying
@@ -456,6 +459,52 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
+                    }
+                }
+            }
+        }
+
+        // Gemini AI Cognitive Synthesis
+        if (isGeminiConfigured) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF0F172A),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = "GEMINI REASONING SYNTHESIS",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyanBright,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                        IconButton(onClick = { vm.requestGeminiSessionReasoning() }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh Reasoning", tint = Color(0xFF94A3B8), modifier = Modifier.size(13.dp))
+                        }
+                    }
+                    if (isReasoningLoading) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = AccentCyan, strokeWidth = 1.5.dp)
+                            Text("Gemini is synthesizing your acoustic receptivity...", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
+                    } else {
+                        Text(
+                            text = geminiInsight ?: "Analyzing your listening trajectory against neuro-acoustic models...",
+                            fontSize = 11.sp,
+                            color = Color(0xFFCBD5E1),
+                            lineHeight = 16.sp
+                        )
                     }
                 }
             }
