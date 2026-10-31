@@ -121,6 +121,9 @@ fun SettingsScreen(
             }
         }
 
+        // ADAPTIVE PERSONAL ATMOSPHERE ENGINE
+        AdaptiveAtmosphereSection(vm = vm)
+
         // GOOGLE GEMINI REASONING INTELLIGENCE ENGINE
         Card(
             shape = RoundedCornerShape(16.dp),

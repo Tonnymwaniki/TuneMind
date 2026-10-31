@@ -1,22 +1,83 @@
 package com.tunemind.app.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-// TuneMind Palette (Deep Slate-950 Acoustic Cyber Dark)
-val Surface = Color(0xFF020617)
-val SurfaceContainerLowest = Color(0xFF020617)
-val SurfaceContainerLow = Color(0xFF090D16)
-val SurfaceContainer = Color(0xFF0F172A)
-val SurfaceContainerHigh = Color(0xFF1E293B)
-val SurfaceContainerHighest = Color(0xFF334155)
-val SurfaceBright = Color(0xFF475569)
+/**
+ * Composition local providing the active Adaptive Personal Atmosphere state.
+ */
+val LocalAdaptiveTheme = staticCompositionLocalOf {
+    AdaptiveThemeState.defaultForNight()
+}
 
-// Primary & Accents
+/**
+ * Central theme accessor.
+ */
+object TuneMindTheme {
+    val colors: AdaptiveThemeState
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalAdaptiveTheme.current
+
+    val typography
+        @Composable
+        @ReadOnlyComposable
+        get() = TuneMindTypography
+
+    val shapes
+        @Composable
+        @ReadOnlyComposable
+        get() = TuneMindShapes
+}
+
+// ─────────────────────────────────────────────────────────────
+// Legacy token bridges to maintain backwards compatibility while
+// delegating to the dynamic adaptive theme colors.
+// ─────────────────────────────────────────────────────────────
+val Surface: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.primaryBackground
+
+val SurfaceContainerLowest: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.primaryBackground
+
+val SurfaceContainerLow: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.secondaryBackground
+
+val SurfaceContainer: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.cardSurface
+
+val SurfaceContainerHigh: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.elevatedSurface
+
+val SurfaceContainerHighest: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.border
+
+val SurfaceBright: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.highlight
+
+// Accents
 val PrimaryViolet = Color(0xFF8B5CF6)
 val PrimaryVioletDark = Color(0xFF7C3AED)
 val PrimaryVioletBright = Color(0xFFA78BFA)
@@ -28,52 +89,101 @@ val AccentCrimson = Color(0xFFEF4444)
 val AccentGreen = Color(0xFF10B981)
 
 // Text & Monochromes
-val TextPrimary = Color(0xFFF8FAFC)
-val TextSecondary = Color(0xFF94A3B8)
-val TextMuted = Color(0xFF64748B)
-val BorderSubtle = Color(0xFF1E293B)
-val BorderHighlight = Color(0xFF334155)
+val TextPrimary: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.primaryText
+
+val TextSecondary: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.secondaryText
+
+val TextMuted: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.secondaryText.copy(alpha = 0.7f)
+
+val BorderSubtle: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.border
+
+val BorderHighlight: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalAdaptiveTheme.current.highlight
 
 // Gradients
 val PrimaryGradient = Brush.horizontalGradient(
     colors = listOf(PrimaryViolet, AccentCyan)
 )
 val CardGlowGradient = Brush.verticalGradient(
-    colors = listOf(SurfaceContainerHighest.copy(alpha = 0.5f), SurfaceContainer)
+    colors = listOf(Color(0xFF334155).copy(alpha = 0.5f), Color(0xFF0F172A))
 )
 val BurnoutShieldGradient = Brush.linearGradient(
     colors = listOf(Color(0xFF1E1B4B), Color(0xFF0F172A))
 )
 
-val DarkColorScheme = darkColorScheme(
-    primary = PrimaryViolet,
-    onPrimary = Color.White,
-    primaryContainer = SurfaceContainerHigh,
-    onPrimaryContainer = PrimaryVioletBright,
-    secondary = AccentCyan,
-    onSecondary = Color.Black,
-    secondaryContainer = SurfaceContainerHighest,
-    onSecondaryContainer = AccentCyanBright,
-    tertiary = AccentAmber,
-    background = Surface,
-    onBackground = TextPrimary,
-    surface = SurfaceContainer,
-    onSurface = TextPrimary,
-    surfaceVariant = SurfaceContainerHigh,
-    onSurfaceVariant = TextSecondary,
-    outline = BorderSubtle,
-    error = AccentCrimson
-)
-
 @Composable
 fun TuneMindTheme(
-    darkTheme: Boolean = true, // TuneMind is natively an immersive dark experience
+    adaptiveState: AdaptiveThemeState = AdaptiveThemeState.defaultForNight(),
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = DarkColorScheme,
-        typography = TuneMindTypography,
-        shapes = TuneMindShapes,
-        content = content
+    // 500-900ms smooth gradual transition between palettes without flashing
+    val animDuration = adaptiveState.animationDurationMs
+    val animSpec = tween<Color>(durationMillis = animDuration)
+
+    val animatedBg = animateColorAsState(targetValue = adaptiveState.primaryBackground, animationSpec = animSpec, label = "bg").value
+    val animatedSecondaryBg = animateColorAsState(targetValue = adaptiveState.secondaryBackground, animationSpec = animSpec, label = "secBg").value
+    val animatedCard = animateColorAsState(targetValue = adaptiveState.cardSurface, animationSpec = animSpec, label = "card").value
+    val animatedElevated = animateColorAsState(targetValue = adaptiveState.elevatedSurface, animationSpec = animSpec, label = "elevated").value
+    val animatedTextPrimary = animateColorAsState(targetValue = adaptiveState.primaryText, animationSpec = animSpec, label = "textPrimary").value
+    val animatedTextSecondary = animateColorAsState(targetValue = adaptiveState.secondaryText, animationSpec = animSpec, label = "textSecondary").value
+    val animatedAccentPrimary = animateColorAsState(targetValue = adaptiveState.primaryAccent, animationSpec = animSpec, label = "accentPrimary").value
+    val animatedAccentSecondary = animateColorAsState(targetValue = adaptiveState.secondaryAccent, animationSpec = animSpec, label = "accentSecondary").value
+    val animatedHighlight = animateColorAsState(targetValue = adaptiveState.highlight, animationSpec = animSpec, label = "highlight").value
+    val animatedBorder = animateColorAsState(targetValue = adaptiveState.border, animationSpec = animSpec, label = "border").value
+
+    val animatedState = adaptiveState.copy(
+        primaryBackground = animatedBg,
+        secondaryBackground = animatedSecondaryBg,
+        cardSurface = animatedCard,
+        elevatedSurface = animatedElevated,
+        primaryText = animatedTextPrimary,
+        secondaryText = animatedTextSecondary,
+        primaryAccent = animatedAccentPrimary,
+        secondaryAccent = animatedAccentSecondary,
+        highlight = animatedHighlight,
+        border = animatedBorder
     )
+
+    val colorScheme = darkColorScheme(
+        primary = animatedAccentPrimary,
+        onPrimary = animatedBg,
+        primaryContainer = animatedElevated,
+        onPrimaryContainer = animatedHighlight,
+        secondary = animatedAccentSecondary,
+        onSecondary = animatedBg,
+        secondaryContainer = animatedCard,
+        onSecondaryContainer = animatedTextPrimary,
+        tertiary = animatedHighlight,
+        background = animatedBg,
+        onBackground = animatedTextPrimary,
+        surface = animatedCard,
+        onSurface = animatedTextPrimary,
+        surfaceVariant = animatedElevated,
+        onSurfaceVariant = animatedTextSecondary,
+        outline = animatedBorder,
+        error = AccentCrimson
+    )
+
+    CompositionLocalProvider(LocalAdaptiveTheme provides animatedState) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = TuneMindTypography,
+            shapes = TuneMindShapes,
+            content = content
+        )
+    }
 }

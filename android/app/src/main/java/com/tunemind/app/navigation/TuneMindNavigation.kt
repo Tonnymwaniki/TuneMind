@@ -55,7 +55,7 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
     val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
-        containerColor = Color(0xFF020617), // Deep slate-950
+        containerColor = TuneMindTheme.colors.primaryBackground,
         topBar = {
             TuneMindTopAppBar(
                 currentRoute = currentRoute,
@@ -171,7 +171,7 @@ fun TuneMindTopAppBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .background(Color(0xFF020617))
+            .background(TuneMindTheme.colors.secondaryBackground)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -179,20 +179,20 @@ fun TuneMindTopAppBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (!isRootTab) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TuneMindTheme.colors.primaryText)
                 }
             } else {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF0F172A)),
+                        .background(TuneMindTheme.colors.cardSurface),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.GraphicEq,
                         contentDescription = "TuneMind Logo",
-                        tint = AccentCyan,
+                        tint = TuneMindTheme.colors.primaryAccent,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -205,7 +205,7 @@ fun TuneMindTopAppBar(
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = AccentCyan,
+                        color = TuneMindTheme.colors.primaryAccent,
                         letterSpacing = 1.5.sp
                     )
                     Box(
@@ -234,7 +234,7 @@ fun TuneMindTopAppBar(
                     },
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = TuneMindTheme.colors.primaryText
                 )
             }
         }
@@ -243,12 +243,12 @@ fun TuneMindTopAppBar(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Musical Moments quick shortcut
             IconButton(onClick = { onNavigate(Screen.MusicalMoments.route) }, modifier = Modifier.size(30.dp)) {
-                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = AccentCyan, modifier = Modifier.size(19.dp))
+                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = TuneMindTheme.colors.primaryAccent, modifier = Modifier.size(19.dp))
             }
 
             // Hearing Insights quick shortcut
             IconButton(onClick = { onNavigate(Screen.HearingInsights.route) }, modifier = Modifier.size(30.dp)) {
-                Icon(Icons.Outlined.Headphones, contentDescription = "Hearing Insights", tint = AccentCyanBright, modifier = Modifier.size(19.dp))
+                Icon(Icons.Outlined.Headphones, contentDescription = "Hearing Insights", tint = TuneMindTheme.colors.secondaryAccent, modifier = Modifier.size(19.dp))
             }
 
             // Live Daemon Pill Button (opens Ingest & Daemon screen)
@@ -283,7 +283,7 @@ fun TuneMindTopAppBar(
             }
 
             IconButton(onClick = { onNavigate(Screen.Settings.route) }, modifier = Modifier.size(30.dp)) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color(0xFF94A3B8), modifier = Modifier.size(19.dp))
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TuneMindTheme.colors.secondaryText, modifier = Modifier.size(19.dp))
             }
         }
     }
@@ -302,7 +302,7 @@ fun TuneMindBottomNavigationBar(
     )
 
     NavigationBar(
-        containerColor = Color(0xFF090D16),
+        containerColor = TuneMindTheme.colors.secondaryBackground,
         tonalElevation = 8.dp,
         modifier = Modifier.navigationBarsPadding()
     ) {
@@ -322,7 +322,7 @@ fun TuneMindBottomNavigationBar(
                     Icon(
                         screen.icon,
                         contentDescription = screen.title,
-                        tint = if (selected) AccentCyan else Color(0xFF64748B),
+                        tint = if (selected) TuneMindTheme.colors.primaryAccent else TuneMindTheme.colors.secondaryText,
                         modifier = Modifier.size(22.dp)
                     )
                 },
@@ -331,11 +331,11 @@ fun TuneMindBottomNavigationBar(
                         screen.title,
                         fontSize = 11.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) AccentCyanBright else Color(0xFF64748B)
+                        color = if (selected) TuneMindTheme.colors.highlight else TuneMindTheme.colors.secondaryText
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    indicatorColor = Color(0xFF1E293B)
+                    indicatorColor = TuneMindTheme.colors.cardSurface
                 )
             )
         }

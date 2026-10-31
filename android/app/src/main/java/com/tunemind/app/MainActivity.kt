@@ -39,7 +39,12 @@ open class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            TuneMindTheme(darkTheme = true) {
+            val vm: com.tunemind.app.ui.TuneMindViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                factory = com.tunemind.app.ui.TuneMindViewModelFactory()
+            )
+            val adaptiveState by vm.adaptiveThemeState.collectAsState()
+
+            TuneMindTheme(adaptiveState = adaptiveState) {
                 var interceptedError by remember { mutableStateOf<Throwable?>(null) }
 
                 if (interceptedError != null) {

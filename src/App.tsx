@@ -35,8 +35,18 @@ import {
   Download,
   Trash2,
   Eye,
-  Server
+  Server,
+  Palette
 } from 'lucide-react';
+
+import {
+  computeTheme,
+  applyThemeToCssVariables,
+  ThemePreferences,
+  DEFAULT_THEME_PREFERENCES,
+  PALETTES,
+  MOOD_PROFILES
+} from './theme/adaptiveTheme';
 
 import SongProfileModal, { getTrackEmoji, getTrackVibe } from './components/SongProfileModal';
 
@@ -94,6 +104,31 @@ export default function App() {
   const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
+
+  // Adaptive Personal Atmosphere Theme Engine
+  const [themePreferences, setThemePreferences] = useState<ThemePreferences>(() => {
+    try {
+      const saved = localStorage.getItem('tunemind_web_theme_prefs');
+      return saved ? JSON.parse(saved) : DEFAULT_THEME_PREFERENCES;
+    } catch {
+      return DEFAULT_THEME_PREFERENCES;
+    }
+  });
+
+  const activeTheme = React.useMemo(() => {
+    return computeTheme(themePreferences, {
+      title: currentTrack?.title,
+      artist: currentTrack?.artist,
+      isPlaying: isPlaying,
+    });
+  }, [themePreferences, currentTrack?.title, currentTrack?.artist, isPlaying]);
+
+  useEffect(() => {
+    applyThemeToCssVariables(activeTheme, themePreferences.reducedMotion);
+    try {
+      localStorage.setItem('tunemind_web_theme_prefs', JSON.stringify(themePreferences));
+    } catch {}
+  }, [activeTheme, themePreferences]);
 
   // Gemini Telemetry Reasoning Report & Poller States
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
@@ -2547,6 +2582,191 @@ export default function App() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Adaptive Personal Atmosphere — Theme & Visual Identity Engine */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+                <Palette className="h-5 w-5" />
+              </div>
+              <div>
+                <span className="text-[10px] font-mono tracking-widest text-indigo-400 font-bold uppercase block">
+                  Adaptive Personal Atmosphere
+                </span>
+                <h3 className="text-base font-bold text-white">Visual Atmosphere & Adaptive Identity</h3>
+              </div>
+            </div>
+            <span className="text-xs font-mono px-3 py-1 rounded-full bg-slate-950 border border-slate-800 text-slate-300 font-bold">
+              {activeTheme.palette.name} • {activeTheme.timePeriod.toUpperCase()}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
+            TuneMind adapts its foundational palette to your local circadian time of day, while listening mood and
+            dynamic energy gently shape accent illumination—preserving our midnight-indigo core identity without
+            flashy glows or generic dashboards.
+          </p>
+
+          {/* Active Palette Swatch Strip */}
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-300">
+                Active Theme: {activeTheme.palette.name} ({activeTheme.timePeriod})
+              </span>
+              <span className="text-slate-400 font-mono text-[11px]">
+                Mood Layer: {MOOD_PROFILES[activeTheme.mood].label} ({activeTheme.visualMovement})
+              </span>
+            </div>
+            <div className="h-7 w-full rounded-lg overflow-hidden flex shadow-inner">
+              <div className="flex-1" style={{ backgroundColor: activeTheme.primaryBackground }} title="Primary Background" />
+              <div className="flex-1" style={{ backgroundColor: activeTheme.secondaryBackground }} title="Secondary Background" />
+              <div className="flex-1" style={{ backgroundColor: activeTheme.cardSurface }} title="Card Surface" />
+              <div className="flex-1" style={{ backgroundColor: activeTheme.primaryAccent }} title="Primary Accent" />
+              <div className="flex-1" style={{ backgroundColor: activeTheme.secondaryAccent }} title="Secondary Accent" />
+              <div className="flex-1" style={{ backgroundColor: activeTheme.highlight }} title="Highlight" />
+            </div>
+          </div>
+
+          {/* Theme Behavior Selector */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Theme Behavior</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { id: 'ADAPTIVE', label: 'Adaptive', desc: 'Syncs with time of day and musical mood characteristics' },
+                { id: 'TIME_BASED', label: 'Time-Based', desc: 'Transitions strictly with 4 circadian time periods' },
+                { id: 'FIXED', label: 'Fixed', desc: 'Locks to a single chosen TuneMind foundational atmosphere' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setThemePreferences({ ...themePreferences, behavior: item.id as any })}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    themePreferences.behavior === item.id
+                      ? 'bg-indigo-500/15 border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="text-sm font-bold">{item.label}</div>
+                  <div className="text-[11px] text-slate-400 mt-1 leading-snug">{item.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fixed Palette Selector */}
+          {themePreferences.behavior === 'FIXED' && (
+            <div className="space-y-3 pt-2">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Select Fixed Palette</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {Object.values(PALETTES).map((pal) => (
+                  <button
+                    key={pal.id}
+                    onClick={() => setThemePreferences({ ...themePreferences, fixedPaletteId: pal.id })}
+                    className={`p-3 rounded-xl border text-center transition-all ${
+                      themePreferences.fixedPaletteId === pal.id
+                        ? 'border-indigo-400 ring-1 ring-indigo-400/50'
+                        : 'border-slate-800 hover:border-slate-700'
+                    }`}
+                    style={{ backgroundColor: pal.cardSurface }}
+                  >
+                    <div className="h-4 w-4 rounded-full mx-auto mb-1.5" style={{ backgroundColor: pal.primaryAccent }} />
+                    <div className="text-xs font-bold text-white">{pal.name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{pal.id}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Music Atmosphere Layer & Accessibility */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Musical Atmosphere</h4>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">Musical Mood Adaptation</div>
+                  <div className="text-[11px] text-slate-400">Modulates accents based on track genre & acoustic vibe</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={themePreferences.enableMoodAdaptation}
+                  onChange={(e) => setThemePreferences({ ...themePreferences, enableMoodAdaptation: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700 text-indigo-500 focus:ring-0 h-4 w-4"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">Musical Energy Dynamics</div>
+                  <div className="text-[11px] text-slate-400">Modulates subtle gradient depth and atmospheric movement</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={themePreferences.enableEnergyAdaptation}
+                  onChange={(e) => setThemePreferences({ ...themePreferences, enableEnergyAdaptation: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700 text-indigo-500 focus:ring-0 h-4 w-4"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-xs font-semibold text-slate-200">Visual Intensity</div>
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {(['SUBTLE', 'BALANCED', 'EXPRESSIVE'] as const).map((intensity) => (
+                    <button
+                      key={intensity}
+                      onClick={() => setThemePreferences({ ...themePreferences, visualIntensity: intensity })}
+                      className={`py-1.5 px-2 rounded-lg text-xs font-semibold border ${
+                        themePreferences.visualIntensity === intensity
+                          ? 'bg-indigo-600 text-white border-indigo-500'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {intensity}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Accessibility & Contrast</h4>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">Reduced Motion</div>
+                  <div className="text-[11px] text-slate-400">Eliminates gradual atmospheric transitions</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={themePreferences.reducedMotion}
+                  onChange={(e) => setThemePreferences({ ...themePreferences, reducedMotion: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700 text-indigo-500 focus:ring-0 h-4 w-4"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">High Contrast Mode</div>
+                  <div className="text-[11px] text-slate-400">Enforces high-contrast surface borders and pure white text</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={themePreferences.highContrast}
+                  onChange={(e) => setThemePreferences({ ...themePreferences, highContrast: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-700 text-indigo-500 focus:ring-0 h-4 w-4"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => setThemePreferences(DEFAULT_THEME_PREFERENCES)}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Reset to TuneMind Defaults
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

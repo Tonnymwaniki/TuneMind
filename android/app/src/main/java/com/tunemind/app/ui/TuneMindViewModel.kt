@@ -203,6 +203,44 @@ class TuneMindViewModel : ViewModel() {
     private val _hasCompletedOnboarding = MutableStateFlow(loadOnboardingState())
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
+    // Adaptive Personal Atmosphere Theme Engine
+    private val themePrefsRepo: com.tunemind.app.ui.theme.ThemePreferencesRepository? by lazy {
+        AppHolder.context?.let { com.tunemind.app.ui.theme.ThemePreferencesRepository(it) }
+    }
+    private val _themePreferences = MutableStateFlow(
+        themePrefsRepo?.loadPreferences() ?: com.tunemind.app.ui.theme.ThemePreferences()
+    )
+    val themePreferences: StateFlow<com.tunemind.app.ui.theme.ThemePreferences> = _themePreferences.asStateFlow()
+
+    private val _adaptiveThemeState = MutableStateFlow(
+        com.tunemind.app.ui.theme.AdaptiveThemeEngine.composeTheme(
+            preferences = _themePreferences.value
+        )
+    )
+    val adaptiveThemeState: StateFlow<com.tunemind.app.ui.theme.AdaptiveThemeState> = _adaptiveThemeState.asStateFlow()
+
+    fun updateThemePreferences(newPrefs: com.tunemind.app.ui.theme.ThemePreferences) {
+        _themePreferences.value = newPrefs
+        themePrefsRepo?.savePreferences(newPrefs)
+        recomputeAdaptiveTheme()
+    }
+
+    fun resetThemePreferencesToDefaults() {
+        val defaults = themePrefsRepo?.resetToDefaults() ?: com.tunemind.app.ui.theme.ThemePreferences()
+        _themePreferences.value = defaults
+        recomputeAdaptiveTheme()
+    }
+
+    fun recomputeAdaptiveTheme() {
+        val currentNowPlaying = _homeState.value.nowPlaying
+        _adaptiveThemeState.value = com.tunemind.app.ui.theme.AdaptiveThemeEngine.composeTheme(
+            preferences = _themePreferences.value,
+            trackTitle = currentNowPlaying?.title,
+            trackArtist = currentNowPlaying?.artist,
+            trackEnergy = if (currentNowPlaying?.isPlaying == true) 0.7f else 0.45f
+        )
+    }
+
     val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()
 
     fun refreshCrossAppData() {
@@ -296,6 +334,15 @@ class TuneMindViewModel : ViewModel() {
             com.tunemind.app.domain.ai.GeminiTelemetryReasoningWorker.schedulePeriodic(ctx)
         }
         refreshTelemetryReasoningReport()
+        recomputeAdaptiveTheme()
+
+        // 60-second periodic time-period transition watcher
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000L)
+                recomputeAdaptiveTheme()
+            }
+        }
 
         viewModelScope.launch {
             try {
@@ -342,6 +389,7 @@ class TuneMindViewModel : ViewModel() {
                     coverage = coverage,
                     isLoading = false,
                 )
+                recomputeAdaptiveTheme()
 
                 _historyState.value = HistoryState(
                     tracks = memory.tracks.sortedByDescending { it.lastObservedAppearanceAtMs },
