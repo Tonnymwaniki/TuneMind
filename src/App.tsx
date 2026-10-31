@@ -49,6 +49,12 @@ import {
 } from './theme/adaptiveTheme';
 
 import SongProfileModal, { getTrackEmoji, getTrackVibe } from './components/SongProfileModal';
+import { StudioPulseView } from './components/StudioPulseView';
+import { SatietyLabVaultView } from './components/SatietyLabVaultView';
+import { MusicalMomentsView } from './components/MusicalMomentsView';
+import { HearingHealthView } from './components/HearingHealthView';
+import { CircadianIntelligenceView } from './components/CircadianIntelligenceView';
+import { StudioSwitchboardView } from './components/StudioSwitchboardView';
 
 import {
   TrackItem,
@@ -81,7 +87,9 @@ type TabType =
   | 'profile'
   | 'cross_app'
   | 'weekly_report'
-  | 'settings';
+  | 'settings'
+  | 'moments'
+  | 'hearing';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
@@ -560,6 +568,40 @@ export default function App() {
             </button>
 
             <button
+              onClick={() => setCurrentTab('moments')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                currentTab === 'moments'
+                  ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Music2 className="h-4 w-4 text-purple-400" />
+                Musical Moments
+              </div>
+              <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                DSP-02
+              </span>
+            </button>
+
+            <button
+              onClick={() => setCurrentTab('hearing')}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                currentTab === 'hearing'
+                  ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Volume2 className="h-4 w-4 text-cyan-400" />
+                Hearing Insights
+              </div>
+              <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                72 dBA
+              </span>
+            </button>
+
+            <button
               onClick={() => setCurrentTab('study')}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 currentTab === 'study'
@@ -716,6 +758,20 @@ export default function App() {
           {currentTab === 'cross_app' && renderCrossAppView()}
           {currentTab === 'weekly_report' && renderWeeklyReportView()}
           {currentTab === 'settings' && renderSettingsView()}
+          {currentTab === 'moments' && (
+            <div className="flex justify-center py-4">
+              <div className="w-full max-w-[420px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-2xl">
+                <MusicalMomentsView onBack={() => setCurrentTab('home')} />
+              </div>
+            </div>
+          )}
+          {currentTab === 'hearing' && (
+            <div className="flex justify-center py-4">
+              <div className="w-full max-w-[420px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-2xl">
+                <HearingHealthView />
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
@@ -918,6 +974,30 @@ export default function App() {
           >
             Open Phone Ingest Hub <ChevronRight className="h-4 w-4" />
           </button>
+        </div>
+
+        {/* Stitch Precision Studio Hardware Phone Simulator (390 x 844 px) */}
+        <div className="flex flex-col items-center justify-center p-4 sm:p-6 bg-[#080e1c] rounded-3xl border border-[#1C2940] shadow-2xl">
+          <div className="flex items-center justify-between w-full max-w-[390px] mb-3">
+            <span className="font-mono text-xs font-bold text-[#A997D8] uppercase tracking-wider">
+              TM-01 // STUDIO PULSE DECK
+            </span>
+            <span className="font-mono text-[10px] text-[#83B9BD] bg-[#131D30] px-2 py-0.5 rounded border border-[#25344D]/50">
+              STITCH DSP-01
+            </span>
+          </div>
+          <div className="w-full max-w-[390px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-[0_20px_50px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.1)] overflow-hidden">
+            <StudioPulseView
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              onTogglePlay={() => setIsPlaying(!isPlaying)}
+              onOpenMoments={() => setCurrentTab('moments')}
+              onOpenHearing={() => setCurrentTab('hearing')}
+              onOpenFatigue={() => setCurrentTab('fatigue')}
+              onOpenSwitchboard={() => setCurrentTab('settings')}
+              isDaemonLive={serverStatus === 'connected'}
+            />
+          </div>
         </div>
 
         {/* Hero Section: Now Playing & Live Acoustic Intelligence Bar */}
@@ -1850,6 +1930,17 @@ export default function App() {
           </button>
         </div>
 
+        {/* Stitch Precision Studio Hardware Satiety Lab & Cooldown Vault */}
+        <div className="flex flex-col items-center justify-center p-4 sm:p-6 bg-[#080e1c] rounded-3xl border border-[#1C2940] shadow-2xl">
+          <div className="w-full max-w-[420px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden">
+            <SatietyLabVaultView
+              cooldownTracks={highSatietyList}
+              onReleaseTrack={(id) => handleReactivateTrack(id)}
+              onAddTrack={() => setShowManualCooldownModal(true)}
+            />
+          </div>
+        </div>
+
         {/* Active Resting Tracks */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -2445,6 +2536,13 @@ export default function App() {
           </p>
         </div>
 
+        {/* Stitch Precision Studio Hardware Circadian Intelligence */}
+        <div className="flex flex-col items-center justify-center p-4 sm:p-6 bg-[#080e1c] rounded-3xl border border-[#1C2940] shadow-2xl">
+          <div className="w-full max-w-[420px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden">
+            <CircadianIntelligenceView />
+          </div>
+        </div>
+
         {/* 7 Daily Tiles */}
         <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
           {studyTiles.map((day) => (
@@ -2609,6 +2707,16 @@ export default function App() {
             dynamic energy gently shape accent illumination—preserving our midnight-indigo core identity without
             flashy glows or generic dashboards.
           </p>
+
+          {/* Stitch Precision Studio Switchboard */}
+          <div className="flex flex-col items-center justify-center p-4 sm:p-6 bg-[#080e1c] rounded-3xl border border-[#1C2940] shadow-2xl">
+            <div className="w-full max-w-[420px] rounded-[32px] p-4 bg-[#0C1220] border-2 border-[#25344D] shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden">
+              <StudioSwitchboardView
+                preferences={themePreferences}
+                onUpdatePreferences={(upd) => setThemePreferences((prev) => ({ ...prev, ...upd }))}
+              />
+            </div>
+          </div>
 
           {/* Active Palette Swatch Strip */}
           <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">

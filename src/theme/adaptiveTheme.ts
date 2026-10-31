@@ -164,6 +164,9 @@ export type VisualIntensity = 'SUBTLE' | 'BALANCED' | 'EXPRESSIVE';
 export interface ThemePreferences {
   behavior: ThemeBehavior;
   fixedPaletteId: 'morning' | 'afternoon' | 'evening' | 'night';
+  forcedPaletteId?: 'morning' | 'afternoon' | 'evening' | 'night' | null;
+  musicalInfluenceWeight: number;
+  energySensitivity: number;
   enableMoodAdaptation: boolean;
   enableEnergyAdaptation: boolean;
   visualIntensity: VisualIntensity;
@@ -174,6 +177,9 @@ export interface ThemePreferences {
 export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   behavior: 'ADAPTIVE',
   fixedPaletteId: 'night',
+  forcedPaletteId: null,
+  musicalInfluenceWeight: 0.8,
+  energySensitivity: 0.65,
   enableMoodAdaptation: true,
   enableEnergyAdaptation: true,
   visualIntensity: 'BALANCED',
@@ -243,7 +249,7 @@ export function computeTheme(
   nowPlaying?: { title?: string; artist?: string; isPlaying?: boolean }
 ): ComputedThemeState {
   const currentPeriod = resolveTimePeriod();
-  const paletteKey = prefs.behavior === 'FIXED' ? prefs.fixedPaletteId : currentPeriod;
+  const paletteKey = prefs.forcedPaletteId || (prefs.behavior === 'FIXED' ? prefs.fixedPaletteId : currentPeriod);
   const basePalette = PALETTES[paletteKey] || PALETTES.night;
 
   const mood = (prefs.behavior === 'ADAPTIVE' && prefs.enableMoodAdaptation)

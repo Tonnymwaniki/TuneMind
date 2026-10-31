@@ -54,10 +54,12 @@ fun SettingsScreen(
 
     val scrollState = rememberScrollState()
 
+    val colors = TuneMindTheme.colors
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Surface)
+            .background(colors.primaryBackground)
             .verticalScroll(scrollState)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -65,8 +67,8 @@ fun SettingsScreen(
         // User Identity Card
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceContainer),
-            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+            colors = CardDefaults.cardColors(containerColor = colors.secondaryBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp)) {

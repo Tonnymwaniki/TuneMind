@@ -3,9 +3,7 @@ package com.tunemind.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -16,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -33,479 +32,380 @@ fun AdaptiveAtmosphereSection(
     val activeThemeState by vm?.adaptiveThemeState?.collectAsState()
         ?: remember { mutableStateOf(AdaptiveThemeState.defaultForNight()) }
 
-    var previewMood by remember { mutableStateOf<MusicalMood?>(null) }
-    var previewPaletteId by remember { mutableStateOf<String?>(null) }
-
     val colors = TuneMindTheme.colors
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.cardSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+        // 1. HARDWARE BUS CONSOLE HEADER
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = colors.secondaryBackground,
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Header
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.primaryAccent.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Outlined.Palette,
-                            contentDescription = null,
-                            tint = colors.primaryAccent,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = "ADAPTIVE PERSONAL ATMOSPHERE",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primaryAccent,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "Atmosphere & Theme Engine",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primaryText
-                        )
-                    }
-                }
-
-                // Active Time Badge
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = colors.elevatedSurface,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
-                ) {
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10B981))
+                    )
                     Text(
-                        text = activeThemeState.timePeriod.label.uppercase(),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        text = "HARDWARE BUS // CONSOLE CONFIG",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = colors.highlight
+                        color = colors.secondaryText,
+                        letterSpacing = 1.sp
+                    )
+                }
+                Text(
+                    text = "DSP LINK: SYNCED",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF83B9BD)
+                )
+            }
+        }
+
+        // Section Title
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "STUDIO SWITCHBOARD // ADAPTIVE ATMOSPHERE",
+                fontSize = 15.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = colors.primaryText,
+                letterSpacing = 0.5.sp
+            )
+            Text(
+                text = "Physical channel strip routing and acoustic luminance calibration.",
+                fontSize = 12.sp,
+                color = colors.secondaryText,
+                lineHeight = 17.sp
+            )
+        }
+
+        // Active State Pill / Telemetry Bar
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = colors.secondaryBackground,
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(colors.primaryAccent)
+                    )
+                    Text(
+                        text = "${activeThemeState.timePeriod.label.uppercase()} // ACTIVE CHROMA",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Outlined.Bedtime, contentDescription = null, tint = colors.secondaryAccent, modifier = Modifier.size(13.dp))
+                    Text(
+                        text = "CIRCADIAN LOCK",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.secondaryAccent
                     )
                 }
             }
+        }
 
-            Text(
-                text = "Intelligence that feels personal. Adapts seamlessly to time of day, musical mood, and listening energy without losing TuneMind's core midnight-indigo identity.",
-                fontSize = 11.sp,
-                color = colors.secondaryText,
-                lineHeight = 16.sp
-            )
-
-            // Current Active Atmosphere Swatches
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = colors.elevatedSurface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
-                modifier = Modifier.fillMaxWidth()
+        // 2. CHROMA ENGINE 4-CHANNEL MATRIX (Tactile Channel Strip Matrix)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                "Active Foundational Palette: ${activeThemeState.activePalette.name}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.primaryText
-                            )
-                            Text(
-                                "Movement: ${activeThemeState.visualMovement} • Mood: ${activeThemeState.musicMood.label}",
-                                fontSize = 10.sp,
-                                color = colors.secondaryText
-                            )
-                        }
-                    }
-
-                    // 5-Color Atmosphere Swatch Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(26.dp)
-                            .clip(RoundedCornerShape(6.dp)),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.primaryBackground))
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.secondaryBackground))
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.cardSurface))
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.primaryAccent))
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.secondaryAccent))
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().background(colors.highlight))
-                    }
-                }
+                Text(
+                    text = "CHROMA ENGINE // HARDWARE PALETTE SELECTORS",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.secondaryText,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "4-CH MATRIX",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colors.primaryAccent
+                )
             }
 
-            Divider(color = colors.border)
-
-            // 1. THEME BEHAVIOR
-            Text(
-                "Theme Behavior",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText
+            val channels = listOf(
+                Triple("CH 01 // DAWN", "First Light", "#E5B879"),
+                Triple("CH 02 // NOON", "Clarity", "#83B9BD"),
+                Triple("CH 03 // DUSK", "Transition", "#D99A69"),
+                Triple("CH 04 // NIGHT", "Deep Focus", "#A997D8")
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ThemeBehavior.values().forEach { behavior ->
-                    val isSelected = themePreferences.behavior == behavior
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // CH 01 & CH 02
+                for (i in 0..1) {
+                    val (chLabel, name, accentHex) = channels[i]
+                    val paletteId = when (i) {
+                        0 -> "morning"
+                        1 -> "afternoon"
+                        else -> "night"
+                    }
+                    val isSelected = themePreferences.forcedPaletteId == paletteId
+
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) colors.primaryAccent.copy(alpha = 0.15f) else colors.elevatedSurface,
+                        color = if (isSelected) colors.cardSurface else colors.secondaryBackground,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            if (isSelected) colors.primaryAccent else colors.border
+                            if (isSelected) colors.primaryAccent else colors.border.copy(alpha = 0.4f)
                         ),
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .weight(1f)
                             .clickable {
-                                vm?.updateThemePreferences(themePreferences.copy(behavior = behavior))
+                                vm?.updateThemePreferences {
+                                    copy(forcedPaletteId = if (isSelected) null else paletteId)
+                                }
                             }
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            RadioButton(
-                                selected = isSelected,
-                                onClick = {
-                                    vm?.updateThemePreferences(themePreferences.copy(behavior = behavior))
-                                },
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = colors.primaryAccent,
-                                    unselectedColor = colors.secondaryText
-                                ),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = behavior.label,
-                                    fontSize = 12.sp,
+                                    text = chLabel,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) colors.primaryText else colors.secondaryText
-                                )
-                                Text(
-                                    text = behavior.description,
-                                    fontSize = 10.sp,
                                     color = colors.secondaryText
                                 )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fixed Palette Picker (visible when FIXED behavior is selected)
-            if (themePreferences.behavior == ThemeBehavior.FIXED) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Selected Fixed Palette",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TuneMindPalettes.AllPalettes.forEach { palette ->
-                        val isCurrent = themePreferences.fixedPaletteId == palette.id
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = palette.cardSurface,
-                            border = androidx.compose.foundation.BorderStroke(
-                                if (isCurrent) 2.dp else 1.dp,
-                                if (isCurrent) palette.primaryAccent else palette.border
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    vm?.updateThemePreferences(themePreferences.copy(fixedPaletteId = palette.id))
-                                }
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(6.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(16.dp)
+                                        .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(palette.primaryAccent)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = palette.name,
-                                    fontSize = 9.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                    color = palette.primaryText
+                                        .background(if (isSelected) colors.primaryAccent else colors.border)
                                 )
                             }
+
+                            // Swatch Bar
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(18.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(android.graphics.Color.parseColor(accentHex)))
+                            )
+
+                            Text(
+                                text = name,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryText
+                            )
                         }
                     }
                 }
             }
 
-            Divider(color = colors.border)
-
-            // 2. MUSICAL MOOD & ENERGY ADAPTATION
-            Text(
-                "Musical Atmosphere Layer",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText
-            )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Musical Mood Adaptation", fontSize = 12.sp, color = colors.primaryText)
-                    Text("Gently shifts accent tones with track characteristics", fontSize = 10.sp, color = colors.secondaryText)
-                }
-                Switch(
-                    checked = themePreferences.enableMoodAdaptation,
-                    onCheckedChange = {
-                        vm?.updateThemePreferences(themePreferences.copy(enableMoodAdaptation = it))
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = colors.primaryAccent,
-                        checkedTrackColor = colors.primaryAccent.copy(alpha = 0.5f)
-                    )
-                )
-            }
+                // CH 03 & CH 04
+                for (i in 2..3) {
+                    val (chLabel, name, accentHex) = channels[i]
+                    val paletteId = when (i) {
+                        2 -> "evening"
+                        3 -> "night"
+                        else -> "night"
+                    }
+                    val isSelected = (themePreferences.forcedPaletteId == paletteId) ||
+                            (themePreferences.forcedPaletteId == null && i == 3)
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Musical Energy Dynamics", fontSize = 12.sp, color = colors.primaryText)
-                    Text("Modulates visual movement & subtle gradient depth", fontSize = 10.sp, color = colors.secondaryText)
-                }
-                Switch(
-                    checked = themePreferences.enableEnergyAdaptation,
-                    onCheckedChange = {
-                        vm?.updateThemePreferences(themePreferences.copy(enableEnergyAdaptation = it))
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = colors.primaryAccent,
-                        checkedTrackColor = colors.primaryAccent.copy(alpha = 0.5f)
-                    )
-                )
-            }
-
-            // Visual Intensity Selector
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "Visual Adaptation Intensity",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryText
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    VisualIntensity.values().forEach { intensity ->
-                        val isSelected = themePreferences.visualIntensity == intensity
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) colors.primaryAccent else colors.elevatedSurface,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    vm?.updateThemePreferences(themePreferences.copy(visualIntensity = intensity))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) colors.cardSurface else colors.secondaryBackground,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isSelected) colors.primaryAccent else colors.border.copy(alpha = 0.4f)
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                vm?.updateThemePreferences {
+                                    copy(forcedPaletteId = if (isSelected && i != 3) null else paletteId)
                                 }
+                            }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Box(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = intensity.label,
-                                    fontSize = 11.sp,
+                                    text = chLabel,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) colors.primaryBackground else colors.primaryText
+                                    color = colors.secondaryText
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) colors.primaryAccent else colors.border)
                                 )
                             }
+
+                            // Swatch Bar
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(18.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(android.graphics.Color.parseColor(accentHex)))
+                            )
+
+                            Text(
+                                text = name,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryText
+                            )
                         }
                     }
                 }
             }
+        }
 
-            Divider(color = colors.border)
-
-            // 3. PALETTE & MOOD PREVIEW LAB
-            Text(
-                "Palette & Mood Preview",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText
-            )
-
-            // Time Periods Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TuneMindPalettes.AllPalettes.forEach { p ->
-                    val isPreviewing = previewPaletteId == p.id
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = p.cardSurface,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isPreviewing) p.primaryAccent else p.border
-                        ),
-                        modifier = Modifier
-                            .clickable {
-                                previewPaletteId = if (previewPaletteId == p.id) null else p.id
-                            }
-                            .padding(vertical = 2.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(p.primaryAccent))
-                            Text(p.name, fontSize = 10.sp, color = p.primaryText)
-                        }
-                    }
-                }
-            }
-
-            // Mood Accents Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                TuneMindPalettes.MoodProfiles.values.forEach { mp ->
-                    val isMoodPreviewing = previewMood == mp.mood
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = colors.elevatedSurface,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isMoodPreviewing) mp.moodAccent else colors.border
-                        ),
-                        modifier = Modifier
-                            .clickable {
-                                previewMood = if (previewMood == mp.mood) null else mp.mood
-                            }
-                            .padding(vertical = 2.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(mp.moodAccent))
-                            Text(mp.mood.label, fontSize = 10.sp, color = colors.primaryText)
-                        }
-                    }
-                }
-            }
-
-            Divider(color = colors.border)
-
-            // 4. ACCESSIBILITY & CONTRAST
-            Text(
-                "Accessibility & Contrast",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = colors.primaryText
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Reduced Motion", fontSize = 12.sp, color = colors.primaryText)
-                    Text("Instant palette transitions (0ms) and static gradients", fontSize = 10.sp, color = colors.secondaryText)
-                }
-                Switch(
-                    checked = themePreferences.reducedMotion,
-                    onCheckedChange = {
-                        vm?.updateThemePreferences(themePreferences.copy(reducedMotion = it))
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = colors.primaryAccent,
-                        checkedTrackColor = colors.primaryAccent.copy(alpha = 0.5f)
-                    )
+        // 3. ADAPTIVE INTENSITY & MOTION CONTROLS
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = colors.secondaryBackground,
+            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "ACOUSTIC LUMINANCE & MODULATION",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.secondaryText,
+                    letterSpacing = 1.sp
                 )
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("High Contrast Mode", fontSize = 12.sp, color = colors.primaryText)
-                    Text("Pure white text and high-contrast card surface outlines", fontSize = 10.sp, color = colors.secondaryText)
-                }
-                Switch(
-                    checked = themePreferences.highContrast,
-                    onCheckedChange = {
-                        vm?.updateThemePreferences(themePreferences.copy(highContrast = it))
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = colors.primaryAccent,
-                        checkedTrackColor = colors.primaryAccent.copy(alpha = 0.5f)
+                // Musical Mood Influence Slider
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Musical Mood Influence",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = "${(themePreferences.musicalInfluenceWeight * 100).toInt()}%",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryAccent
+                        )
+                    }
+
+                    Slider(
+                        value = themePreferences.musicalInfluenceWeight,
+                        onValueChange = { newWeight ->
+                            vm?.updateThemePreferences { copy(musicalInfluenceWeight = newWeight) }
+                        },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = colors.primaryAccent,
+                            activeTrackColor = colors.primaryAccent,
+                            inactiveTrackColor = colors.border
+                        )
                     )
-                )
-            }
+                }
 
-            // 5. RESET BUTTON
-            OutlinedButton(
-                onClick = {
-                    vm?.resetThemePreferencesToDefaults()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp), tint = colors.secondaryText)
-                Spacer(Modifier.width(6.dp))
-                Text("Reset Theme to TuneMind Defaults", fontSize = 11.sp, color = colors.secondaryText)
+                // Energy Sensitivity Slider
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Energy Modulation Depth",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = "${(themePreferences.energySensitivity * 100).toInt()}%",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.secondaryAccent
+                        )
+                    }
+
+                    Slider(
+                        value = themePreferences.energySensitivity,
+                        onValueChange = { newSens ->
+                            vm?.updateThemePreferences { copy(energySensitivity = newSens) }
+                        },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = colors.secondaryAccent,
+                            activeTrackColor = colors.secondaryAccent,
+                            inactiveTrackColor = colors.border
+                        )
+                    )
+                }
             }
         }
     }
