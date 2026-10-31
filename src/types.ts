@@ -101,3 +101,55 @@ export interface ReconstructedEpisode {
   hasTimestampAmbiguity: boolean;
   notices: string[];
 }
+
+export interface ReasoningReport {
+  reportId: string;
+  userId: string;
+  generatedAt: string;
+  analyzedEventCount: number;
+  timeWindow: {
+    start: string | null;
+    end: string | null;
+  };
+  auditoryReceptorStatus: {
+    receptivityScore: number;
+    state: 'OPTIMAL_FLOW' | 'MILD_SATURATION' | 'ELEVATED_BURNOUT';
+    statusLabel: string;
+  };
+  flowStateNarrative: string;
+  acousticShiftRecommendations: Array<{
+    shiftType: string;
+    recommendation: string;
+    targetBpmRange?: string;
+    rationale: string;
+  }>;
+  fatigueSignals: Array<{
+    trackKey: string;
+    estimatedFatigue: number;
+    confidence: number;
+    basedOnPlayCount: number;
+    completionTrend: string;
+  }>;
+  probabilisticInferences: Array<{
+    type: string;
+    description: string;
+    confidence: number;
+    evidenceSummary: string;
+    isFactual: boolean;
+  }>;
+  anchorsAssessed: {
+    grooveRhythm: number;
+    vocalMelody: number;
+    dropStructuralDynamics: number;
+    confidence: number;
+  };
+  keyObservedTracks: Array<{
+    title: string;
+    artist: string;
+    playCount: number;
+    estimatedSatietyPercent: number;
+    fatigueRisk: 'LOW' | 'MODERATE' | 'HIGH';
+  }>;
+  isAiGenerated: boolean;
+  modelUsed?: string;
+}

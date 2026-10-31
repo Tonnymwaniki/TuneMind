@@ -323,4 +323,151 @@ object GeminiReasoningEngine {
             maxTokens = 350
         )
     }
+
+    private const val PREFS_REPORT = "tunemind_telemetry_reasoning_prefs"
+    private const val KEY_LATEST_REPORT = "latest_reasoning_report_json"
+
+    fun saveLatestReport(context: Context, report: ReasoningReport) {
+        try {
+            context.getSharedPreferences(PREFS_REPORT, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LATEST_REPORT, report.toJson())
+                .apply()
+        } catch (_: Exception) {}
+    }
+
+    fun getLatestReport(context: Context): ReasoningReport? {
+        return try {
+            val json = context.getSharedPreferences(PREFS_REPORT, Context.MODE_PRIVATE)
+                .getString(KEY_LATEST_REPORT, null) ?: return null
+            ReasoningReport.fromJson(json)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Periodically synthesizes a deep Cognitive Reasoning Report from telemetry database events.
+     */
+    suspend fun generateTelemetryReasoningReport(
+        context: Context,
+        eventCount: Int,
+        topSourceApp: String,
+        recentTracks: List<TrackMemoryEntry>,
+        vaultTracks: List<VaultTrack>,
+        nowPlaying: NowPlayingObservation?,
+        timeSlot: String
+    ): Result<ReasoningReport> {
+        val key = getApiKey(context)
+        val currentTrackName = nowPlaying?.title ?: recentTracks.firstOrNull()?.title
+        val currentTrackArtist = nowPlaying?.artist ?: recentTracks.firstOrNull()?.artist
+        val currentTrackPlays = recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
+        val estSatiety = minOf(95, maxOf(15, currentTrackPlays * 22))
+
+        if (key.isBlank()) {
+            val fallback = ReasoningReport.createHeuristicBaseline(
+                eventCount = eventCount,
+                topSource = topSourceApp,
+                satietyPercent = estSatiety,
+                currentTrack = currentTrackName
+            )
+            saveLatestReport(context, fallback)
+            return Result.success(fallback)
+        }
+
+        val topTracksSummary = recentTracks.take(6).joinToString("\n") {
+            "- '${it.title}' by ${it.artist} (${it.distinctAppearanceCount} plays, satiety ~${minOf(95, it.distinctAppearanceCount * 22)}%)"
+        }.ifEmpty { "- No prior track signatures logged yet." }
+
+        val nowPlayingDesc = if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
+            "'${nowPlaying.title}' by ${nowPlaying.artist} [${if (nowPlaying.isPlaying) "Playing" else "Paused"}, ${nowPlaying.sourcePackage ?: topSourceApp}]"
+        } else "None currently active"
+
+        val vaultSummary = vaultTracks.joinToString(", ") { "${it.title} (${(it.recoveryProgress * 100).toInt()}% restored)" }
+            .ifEmpty { "Vault is clear." }
+
+        val prompt = """
+            Telemetry Context:
+            - Database Events Ingested: $eventCount
+            - Active Source App: $topSourceApp
+            - Time Context: $timeSlot
+            - Current Playback: $nowPlayingDesc
+            - Recent Frequency Patterns:
+            $topTracksSummary
+            - Quarantined in Vault: $vaultSummary
+
+            Act as TuneMind's Chief Cognitive Audio AI. Synthesize a structured Cognitive Reasoning Report on user's auditory receptor state, fatigue risk, and focus stability.
+            Return ONLY a valid JSON object matching exactly this schema (no markdown, no backticks, no wrap):
+            {
+              "receptorPotencyScore": 86,
+              "fatigueRiskLevel": "OPTIMAL_FLOW",
+              "fatigueRiskLabel": "Optimal Cognitive Flow",
+              "flowStateDescription": "2 concise sentences explaining the listener's neural engagement, habituation rate, and focus stability based on real tracks.",
+              "acousticShiftRecommendation": "1 sentence proposing specific acoustic or tempo changes (e.g. shift from 130bpm kick drums to organic ambient or 70bpm lo-fi).",
+              "steerAction": "1 short imperative action recommendation (e.g. 'Rest [Track] in Vault', 'Take 10m acoustic pause', 'Shift to acoustic strings').",
+              "observedTrackContext": "${currentTrackName ?: "General Telemetry"}"
+            }
+        """.trimIndent()
+
+        val rawResult = callGemini(
+            apiKey = key,
+            prompt = prompt,
+            systemInstruction = "You are TuneMind's Cognitive Audio AI engine. Output strictly raw JSON only. Valid values for fatigueRiskLevel: OPTIMAL_FLOW, SENSITIZED, ELEVATED_BURNOUT.",
+            temperature = 0.5f,
+            maxTokens = 450
+        )
+
+        return rawResult.fold(
+            onSuccess = { rawText ->
+                try {
+                    val cleanJson = rawText.replace("```json", "").replace("```", "").trim()
+                    val obj = JSONObject(cleanJson)
+                    val report = ReasoningReport(
+                        id = UUID.randomUUID().toString(),
+                        generatedAtMs = System.currentTimeMillis(),
+                        analyzedEventCount = maxOf(eventCount, 1),
+                        topSourceApp = topSourceApp,
+                        receptorPotencyScore = obj.optInt("receptorPotencyScore", 85).coerceIn(5, 100),
+                        fatigueRiskLevel = obj.optString("fatigueRiskLevel", "OPTIMAL_FLOW"),
+                        fatigueRiskLabel = obj.optString("fatigueRiskLabel", "Optimal Cognitive Flow"),
+                        flowStateDescription = obj.optString(
+                            "flowStateDescription",
+                            "Auditory receptor recovery is balanced with dopamine engagement."
+                        ),
+                        acousticShiftRecommendation = obj.optString(
+                            "acousticShiftRecommendation",
+                            "Maintain moderate tempo (95-115 BPM) with wide dynamic range."
+                        ),
+                        steerAction = obj.optString(
+                            "steerAction",
+                            "Continue current listening curve; receptor fatigue remains low."
+                        ),
+                        observedTrackContext = obj.optString("observedTrackContext", currentTrackName),
+                        isGeminiGenerated = true
+                    )
+                    saveLatestReport(context, report)
+                    Result.success(report)
+                } catch (e: Exception) {
+                    val fallback = ReasoningReport.createHeuristicBaseline(
+                        eventCount = eventCount,
+                        topSource = topSourceApp,
+                        satietyPercent = estSatiety,
+                        currentTrack = currentTrackName
+                    )
+                    saveLatestReport(context, fallback)
+                    Result.success(fallback)
+                }
+            },
+            onFailure = { err ->
+                val fallback = ReasoningReport.createHeuristicBaseline(
+                    eventCount = eventCount,
+                    topSource = topSourceApp,
+                    satietyPercent = estSatiety,
+                    currentTrack = currentTrackName
+                )
+                saveLatestReport(context, fallback)
+                Result.success(fallback)
+            }
+        )
+    }
 }

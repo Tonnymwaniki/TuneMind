@@ -45,7 +45,8 @@ import {
   AnalyticsSummary,
   ReconstructedEpisode,
   DailyStudyTile,
-  StoredRawEvent
+  StoredRawEvent,
+  ReasoningReport
 } from './types';
 
 import {
@@ -93,6 +94,19 @@ export default function App() {
   const [telemetryMessage, setTelemetryMessage] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
+
+  // Gemini Telemetry Reasoning Report & Poller States
+  const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
+  const [isTriggeringReasoning, setIsTriggeringReasoning] = useState(false);
+  const [pollerStatus, setPollerStatus] = useState<{
+    isRunning: boolean;
+    pollIntervalMs: number;
+    lastPolledAt: string | null;
+    lastAnalyzedEventCount: number;
+    totalReportsGenerated: number;
+    isGeminiConfigured: boolean;
+    activeUsersObserved: string[];
+  } | null>(null);
 
   // Custom Simulator Form Inputs
   const [customTitle, setCustomTitle] = useState('Espresso');
@@ -201,9 +215,51 @@ export default function App() {
           setEpisodesData(data.episodes);
         }
       }
+
+      // Latest Gemini Telemetry Reasoning Report
+      try {
+        const reasoningRes = await fetch('/api/v1/reasoning/latest?userId=tunemind-dev');
+        if (reasoningRes.ok) {
+          const data = await reasoningRes.json();
+          if (data.report) {
+            setReasoningReport(data.report);
+          }
+        }
+        const pollerStatusRes = await fetch('/api/v1/reasoning/status');
+        if (pollerStatusRes.ok) {
+          const statusData = await pollerStatusRes.json();
+          setPollerStatus(statusData);
+        }
+      } catch (err) {
+        console.warn('Reasoning API fetch warning:', err);
+      }
     } catch (err) {
       console.warn('Backend query error:', err);
       setServerStatus('offline');
+    }
+  };
+
+  // Trigger Gemini Telemetry Reasoning Analysis on demand
+  const handleTriggerReasoning = async () => {
+    setIsTriggeringReasoning(true);
+    try {
+      const res = await fetch('/api/v1/reasoning/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'tunemind-dev' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.report) {
+          setReasoningReport(data.report);
+          setTelemetryMessage('Gemini reasoning analysis completed from database telemetry.');
+          setTimeout(() => setTelemetryMessage(null), 3500);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to trigger Gemini reasoning:', err);
+    } finally {
+      setIsTriggeringReasoning(false);
     }
   };
 
@@ -1041,6 +1097,183 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* Section: Gemini Telemetry Reasoning Report */}
+        {reasoningReport && (
+          <div className="bg-gradient-to-br from-slate-900/95 via-slate-900/70 to-slate-950 rounded-2xl border border-cyan-500/40 p-6 shadow-xl relative overflow-hidden space-y-5">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-cyan-500/10 via-indigo-500/5 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+
+            {/* Header with status & refresh button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20 shrink-0">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white tracking-tight">
+                      Gemini Telemetry Reasoning Report
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                      {reasoningReport.isAiGenerated ? (reasoningReport.modelUsed || 'gemini-3.1-flash-lite') : 'Heuristic Baseline'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Analyzed {reasoningReport.analyzedEventCount} database telemetry events • Auto-polling backend active
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  {pollerStatus?.isRunning ? 'Poller 30s' : 'Live Sync'}
+                </span>
+
+                <button
+                  onClick={handleTriggerReasoning}
+                  disabled={isTriggeringReasoning}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  title="Force immediate Gemini reasoning re-analysis"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isTriggeringReasoning ? 'animate-spin' : ''}`} />
+                  <span>{isTriggeringReasoning ? 'Analyzing...' : 'Re-analyze Now'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Metric Capsules Strip */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Metric 1: Receptor Receptivity */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-mono">RECEPTOR POTENCY</span>
+                  <span className="font-mono font-bold text-cyan-400">
+                    {reasoningReport.auditoryReceptorStatus.receptivityScore}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                  <div
+                    className={`h-2 rounded-full transition-all duration-500 ${
+                      reasoningReport.auditoryReceptorStatus.receptivityScore >= 75
+                        ? 'bg-emerald-400'
+                        : reasoningReport.auditoryReceptorStatus.receptivityScore >= 45
+                        ? 'bg-cyan-400'
+                        : 'bg-amber-400'
+                    }`}
+                    style={{ width: `${reasoningReport.auditoryReceptorStatus.receptivityScore}%` }}
+                  ></div>
+                </div>
+                <div className="flex justify-between items-center text-[11px] text-slate-500">
+                  <span>Sensory Threshold</span>
+                  <span className="text-slate-300 font-medium">
+                    {reasoningReport.auditoryReceptorStatus.receptivityScore >= 75 ? 'Optimal Flow' : 'Mild Fatigue'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Metric 2: Cognitive State */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
+                <span className="text-xs text-slate-400 font-mono">COGNITIVE FLOW STATE</span>
+                <div className="pt-1">
+                  <span
+                    className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-bold font-mono border ${
+                      reasoningReport.auditoryReceptorStatus.state === 'OPTIMAL_FLOW'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : reasoningReport.auditoryReceptorStatus.state === 'MILD_SATURATION'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {reasoningReport.auditoryReceptorStatus.statusLabel}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 pt-0.5">
+                  Inferred from session repeat rates & skip velocity
+                </p>
+              </div>
+
+              {/* Metric 3: Anchors Assessed */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+                <span className="text-xs text-slate-400 font-mono">BEHAVIOURAL ANCHORS</span>
+                <div className="grid grid-cols-3 gap-1 pt-1 text-center">
+                  <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-[10px] text-slate-400">Groove</div>
+                    <div className="text-xs font-bold text-cyan-300 font-mono mt-0.5">
+                      {Math.round(reasoningReport.anchorsAssessed.grooveRhythm * 100)}%
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-[10px] text-slate-400">Vocal</div>
+                    <div className="text-xs font-bold text-purple-300 font-mono mt-0.5">
+                      {Math.round(reasoningReport.anchorsAssessed.vocalMelody * 100)}%
+                    </div>
+                  </div>
+                  <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800/80">
+                    <div className="text-[10px] text-slate-400">Drop</div>
+                    <div className="text-xs font-bold text-amber-300 font-mono mt-0.5">
+                      {Math.round(reasoningReport.anchorsAssessed.dropStructuralDynamics * 100)}%
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Cognitive Flow Narrative */}
+            <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800/90 space-y-1.5">
+              <div className="text-xs font-mono font-bold text-cyan-400 flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5" />
+                NEURO-ACOUSTIC COGNITIVE SYNTHESIS
+              </div>
+              <p className="text-sm text-slate-200 leading-relaxed italic">
+                "{reasoningReport.flowStateNarrative}"
+              </p>
+            </div>
+
+            {/* Acoustic Steering & Inferences */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Recommendations */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                <div className="text-xs font-mono font-bold text-purple-400 flex items-center gap-1.5">
+                  <Sliders className="h-3.5 w-3.5" />
+                  ACOUSTIC STEERING GUIDANCE
+                </div>
+                {reasoningReport.acousticShiftRecommendations.map((rec, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-200">{rec.recommendation}</span>
+                      {rec.targetBpmRange && (
+                        <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono">
+                          {rec.targetBpmRange}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400">{rec.rationale}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Inferences */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                <div className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5" />
+                  PROBABILISTIC INFERENCES
+                </div>
+                {reasoningReport.probabilisticInferences.slice(0, 2).map((inf, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-200">{inf.description}</span>
+                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                        {Math.round(inf.confidence * 100)}% conf
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">{inf.evidenceSummary}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section: Auditory Anchor Snapshot & Circadian Receptivity */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

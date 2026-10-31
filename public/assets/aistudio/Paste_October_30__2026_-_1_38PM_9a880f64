@@ -1,0 +1,1463 @@
+# TUNEMIND — MASTER PRODUCT & ENGINEERING IMPLEMENTATION DIRECTIVE
+
+## YOUR ROLE
+
+You are the principal software architect, senior Android engineer, AI engineer, database architect, privacy engineer, and product designer responsible for evolving an existing application called TuneMind.
+
+You have authority to inspect the entire existing repository, evaluate its architecture, identify weaknesses, make appropriate engineering decisions, and implement the product professionally.
+
+Do not behave like a code generator that blindly follows instructions.
+
+Think like an experienced engineering team building a serious consumer technology product.
+
+Your responsibility is to understand the existing application first, decide how the new capabilities should be implemented, and then execute the work incrementally.
+
+You must preserve working functionality, avoid unnecessary rewrites, and never invent technical capabilities that Android or external music providers do not support.
+
+---
+
+# PART 1 — THE PRODUCT VISION
+
+## 1. What is TuneMind?
+
+TuneMind is a Personal Music Intelligence Agent.
+
+It is NOT another music streaming platform.
+
+It does not need to own a music catalogue, build its own streaming infrastructure, or force users to abandon their existing music applications.
+
+Instead, TuneMind operates as an intelligent layer across supported music applications installed on the user's Android device.
+
+It observes available listening behaviour, builds a continuously evolving personal memory, understands musical preferences, discovers meaningful patterns, recommends suitable music, and helps users play that music through their existing music services.
+
+The fundamental principle:
+
+**The intelligence belongs to TuneMind. The music can come from any supported music service.**
+
+TuneMind should gradually understand:
+
+- What the user listens to.
+- When the user listens.
+- Which artists and tracks they repeatedly enjoy.
+- Which specific parts of songs they return to.
+- What listening patterns change over time.
+- Which headphones and audio devices they use.
+- What volume information is available.
+- Which music applications they use.
+- Which recommendations they accept, reject, replay or skip.
+- How their preferences evolve.
+
+TuneMind should become more useful the longer someone uses it.
+
+Seven days is an initial learning period, not the end of the learning process.
+
+The long-term product is a personal music intelligence agent that understands the user's listening life.
+
+---
+
+# PART 2 — FIRST TASK: INSPECT THE EXISTING REPOSITORY
+
+THIS IS MANDATORY.
+
+Before changing code, thoroughly inspect the existing repository.
+
+Do not assume that the architecture described in this prompt perfectly matches the current implementation.
+
+Inspect:
+
+### Android application
+
+- Project structure.
+- Gradle configuration.
+- Kotlin version.
+- Android Gradle Plugin.
+- Minimum and target SDK.
+- Jetpack Compose configuration.
+- Navigation architecture.
+- Existing screens.
+- ViewModels.
+- Repositories.
+- Room database.
+- Database migrations.
+- Existing tests.
+- Android manifest.
+- Permissions.
+- Notification-listener service.
+- Media-session implementation.
+- Playback-control implementation.
+- Background services.
+- Existing UI design system.
+
+### Existing media observation architecture
+
+Inspect these components where they exist:
+
+- MediaSessionObserver.kt
+- GenericMediaAdapter.kt
+- TuneMindListenerService.kt
+- PlaybackObservation.kt
+- EventBufferRepository.kt
+- EventQueueEntity.kt
+- EventQueueDao.kt
+- TuneMindViewModel.kt
+- TuneMindNavigation.kt
+- HomeScreen.kt
+- Existing playback controls and related components.
+
+Understand exactly how the current application:
+
+1. Detects music applications.
+2. Observes media sessions.
+3. Reads playback metadata.
+4. Records playback state.
+5. Stores observations in Room.
+6. Displays observations.
+7. Controls playback from TuneMind.
+
+Do not replace an existing working playback-control implementation without a clear technical reason.
+
+### Backend
+
+Inspect:
+
+- Node.js and TypeScript configuration.
+- Existing Express application.
+- API routes.
+- Authentication.
+- Database integration.
+- Event ingestion.
+- Existing synchronization mechanisms.
+- Existing environment configuration.
+- Tests.
+
+Do not assume the backend must handle all intelligence.
+
+The Android application must remain capable of collecting, storing and using its personal listening memory locally.
+
+### Repository audit output
+
+Before implementation, create a technical audit containing:
+
+1. Existing architecture.
+2. Working features.
+3. Incomplete features.
+4. Architectural weaknesses.
+5. Existing reusable components.
+6. Database limitations.
+7. Android platform limitations.
+8. Security and privacy concerns.
+9. Proposed implementation structure.
+10. Recommended implementation phases.
+
+You are authorized to make engineering decisions after this inspection.
+
+Do not stop after the audit unless a genuinely blocking decision or missing credential requires user input.
+
+---
+
+# PART 3 — THE CORE ARCHITECTURE
+
+Design TuneMind around a shared Personal Listening Memory.
+
+The conceptual architecture is:
+
+ANDROID OBSERVATION SOURCES
+- Media sessions.
+- Track metadata.
+- Playback state.
+- Available playback positions.
+- Audio-device connections.
+- Available volume information.
+- User actions.
+- Provider integration results.
+
+↓
+
+RAW EVIDENCE STORE
+- Versioned observations.
+- Event timestamps.
+- Source application.
+- Track identity.
+- Device context.
+- Provenance.
+- Uncertainty.
+
+↓
+
+RECONSTRUCTION ENGINE
+- Listening episodes.
+- Track appearances.
+- Time contexts.
+- Playback transitions.
+- Musical moment evidence.
+- Audio-device sessions.
+
+↓
+
+PERSONAL INTELLIGENCE ENGINE
+
+1. Time intelligence.
+2. Musical moment intelligence.
+3. Hearing exposure intelligence.
+4. Music ecosystem intelligence.
+5. Personal listening profile.
+6. Recommendation engine.
+
+↓
+
+PERSONAL MUSIC AGENT
+
+- Understand the current context.
+- Recommend music.
+- Resolve tracks across providers.
+- Launch supported playback.
+- Control accessible active sessions.
+- Manage musical moment playlists.
+- Learn from subsequent behaviour.
+
+↓
+
+USER INTERFACE
+
+↓
+
+OPTIONAL ENCRYPTED CLOUD SYNCHRONIZATION
+
+The architecture must be modular, maintainable, testable and extensible.
+
+Do not create unnecessary layers simply for architectural decoration.
+
+---
+
+# PART 4 — TIME-OF-DAY INTELLIGENCE
+
+This is a core capability.
+
+TuneMind must understand when the user listens to different types of music.
+
+## 4.1 Capture listening timestamps
+
+For every available playback observation, capture:
+
+- Event ID.
+- Track identity.
+- Track title.
+- Artist.
+- Album.
+- Source application.
+- UTC timestamp.
+- Local timestamp.
+- Timezone identifier.
+- Local date.
+- Day of week.
+- Playback position.
+- Playback state.
+- Available playback duration.
+- Observer session.
+- Device context, where available.
+
+Use both wall-clock timestamps and monotonic elapsed time where appropriate.
+
+Preserve the original observation timestamp.
+
+Do not derive exact listening duration from isolated callbacks without considering gaps and uncertainty.
+
+## 4.2 Learn temporal preferences
+
+Create a TimePatternEngine.
+
+It should identify:
+
+- Frequently played tracks in the morning.
+- Frequently played tracks in the afternoon.
+- Evening listening preferences.
+- Night listening preferences.
+- Favourite artists by time of day.
+- Genres associated with particular time periods, where metadata supports this.
+- Differences between weekdays and weekends.
+- Changes in listening habits.
+- Recurring listening patterns.
+
+Suggested configurable time categories:
+
+- Early morning.
+- Morning.
+- Afternoon.
+- Evening.
+- Night.
+- Late night.
+
+Do not assume these categories describe the user's routine.
+
+Learn from evidence.
+
+## 4.3 Contextual recommendations
+
+When a user opens TuneMind, use their current local time to influence recommendations.
+
+For example:
+
+At 6:30 AM, consider what the user historically listens to around that time.
+
+At 8:00 PM, consider the user's evening listening patterns.
+
+Combine time context with:
+
+- Recent listening history.
+- Favourite artists.
+- Favourite tracks.
+- Musical moments.
+- Repetition frequency.
+- User feedback.
+- Provider availability.
+- New discovery opportunities.
+
+Do not recommend only familiar songs.
+
+Balance familiarity and discovery.
+
+The user should be able to understand why a recommendation was made.
+
+---
+
+# PART 5 — MUSICAL MOMENT INTELLIGENCE
+
+THIS IS ONE OF THE MOST IMPORTANT FEATURES.
+
+TuneMind must understand that a user may love a particular section of a song rather than the entire track.
+
+For example:
+
+A song lasts five minutes.
+
+The user repeatedly returns to the section between 00:35 and 01:10.
+
+TuneMind should be capable of remembering that specific musical moment.
+
+However, do not claim to measure dopamine or biological reward responses from playback events.
+
+Use evidence-based terminology such as:
+
+- Favourite musical moments.
+- Repeatedly enjoyed sections.
+- Preferred song segments.
+- User-confirmed moments.
+- Automatically discovered candidate moments.
+
+## 5.1 Passive musical moment discovery
+
+Build a MomentDiscoveryEngine.
+
+Use available evidence such as:
+
+- Repeated backward seeks.
+- Replaying similar track sections.
+- Repeated playback around similar positions.
+- Track replays.
+- Position changes.
+- User interactions.
+- Explicitly saved moments.
+
+Do not assume every skip means dislike.
+
+Do not assume a user enjoyed a section simply because the track was played.
+
+Generate candidate moments with confidence levels.
+
+Allow the user to confirm or reject them.
+
+## 5.2 Explicit favourite moment creation
+
+Users must also be able to manually mark favourite song sections.
+
+Create an interface where the user can:
+
+1. Select a currently playing song.
+2. Choose a start position.
+3. Choose an end position.
+4. Preview the selected section where supported.
+5. Save it as a favourite moment.
+6. Give it a custom name.
+7. Choose its preferred playback duration.
+8. Edit or delete it later.
+
+Allow moment creation through an interactive timeline.
+
+## 5.3 MusicalMoment data model
+
+Design a robust model similar to:
+
+```kotlin
+data class MusicalMoment(
+    val momentId: String,
+    val trackIdentityId: String,
+    val providerTrackId: String?,
+    val startPositionMs: Long,
+    val endPositionMs: Long,
+    val preferredPlaybackDurationMs: Long,
+    val discoveryMethod: String,
+    val confidence: Float?,
+    val userConfirmed: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+```
+
+The actual implementation may improve this model.
+
+Keep musical moments separate from their supporting evidence.
+
+Create a MomentEvidence entity containing:
+
+- Evidence ID.
+- Moment ID.
+- Observation ID.
+- Evidence type.
+- Observed playback position.
+- Timestamp.
+- Confidence.
+- Evidence origin.
+
+Support these discovery methods:
+
+- USER_MARKED.
+- REPLAY_PATTERN.
+- SEEK_BACK_PATTERN.
+- INFERRED_PATTERN.
+
+Only user-confirmed moments should be presented as explicitly chosen favourites.
+
+## 5.4 My Musical Moments
+
+Create a dedicated frontend section named:
+
+MY MUSICAL MOMENTS
+
+It should display:
+
+- Saved moments.
+- Track and artist.
+- Music provider.
+- Start and end positions.
+- Preferred playback duration.
+- Discovery method.
+- User confirmation status.
+- Last played time.
+
+Allow users to:
+
+- Play a moment.
+- Edit its duration.
+- Edit its boundaries.
+- Repeat it.
+- Delete it.
+- Add it to a collection.
+- Build a moment playlist.
+
+## 5.5 Automatic moment playback
+
+This feature must allow users to build a continuous listening experience from selected musical moments.
+
+Example:
+
+Moment 1:
+00:35–01:10.
+
+Moment 2:
+02:15–02:50.
+
+Moment 3:
+01:20–02:00.
+
+TuneMind should attempt to:
+
+1. Open the selected track in a supported provider.
+2. Seek to the selected start position.
+3. Monitor playback position.
+4. Play for the user's chosen duration.
+5. Advance to the next moment.
+6. Repeat or stop according to the user's queue settings.
+
+The user should be able to configure:
+
+- Duration of each moment.
+- Order of moments.
+- Repeat mode.
+- Transition policy.
+- Whether to continue automatically.
+- Whether to allow moments from different music providers.
+
+IMPORTANT TECHNICAL LIMITATION:
+
+Not every music application supports seeking to arbitrary positions or precise playback control through third-party applications.
+
+Do not pretend that all providers support this feature.
+
+Implement a provider capability interface.
+
+If a provider supports opening tracks but not seeking, offer a fallback.
+
+If a provider supports seeking but not reliable timed transitions, explain the limitation.
+
+Never claim that a moment was played successfully unless playback was actually confirmed.
+
+---
+
+# PART 6 — AUDIO DEVICE INTELLIGENCE
+
+TuneMind should understand the user's listening environment.
+
+Create an AudioDeviceObserver.
+
+Use Android-supported audio device callbacks and APIs.
+
+## 6.1 Device connection tracking
+
+Where Android exposes the relevant information, record:
+
+- Device connected.
+- Device disconnected.
+- Connection timestamp.
+- Disconnection timestamp.
+- Device type.
+- Device name.
+- Bluetooth or wired connection.
+- Audio output category.
+- Associated listening episode.
+- Identification confidence.
+
+Support categories such as:
+
+- Wired headphones.
+- Bluetooth headphones.
+- Bluetooth earbuds.
+- USB audio devices.
+- Built-in speakers.
+- Unknown audio devices.
+
+Do not assume the device name always identifies the commercial model.
+
+Do not assume every media session is audible.
+
+## 6.2 AudioDeviceSession model
+
+Design a model similar to:
+
+```kotlin
+data class AudioDeviceSession(
+    val deviceSessionId: String,
+    val episodeId: String?,
+    val deviceType: String,
+    val deviceName: String?,
+    val connectionType: String,
+    val connectedAt: Long,
+    val disconnectedAt: Long?,
+    val identificationConfidence: String
+)
+```
+
+Adapt it to the actual Android APIs and existing architecture.
+
+## 6.3 Listening environment insights
+
+Allow the user to see:
+
+- Most frequently used listening device.
+- Time spent using each device, based on observed intervals.
+- Listening sessions associated with each device.
+- Device connection history.
+- Available volume information.
+- Hearing exposure indicators where supported.
+
+Clearly distinguish observed device connection from proven audio output or actual listening.
+
+---
+
+# PART 7 — VOLUME AND HEARING EXPOSURE INTELLIGENCE
+
+Create a dedicated feature:
+
+TUNEMIND HEARING INSIGHTS
+
+The goal is to help users understand their listening exposure and develop safer listening habits.
+
+This is NOT a medical diagnosis tool.
+
+It must not pretend to simulate the user's actual eardrum or diagnose hearing damage.
+
+## 7.1 Volume observation
+
+Where Android exposes relevant information, capture:
+
+- Media volume index.
+- Maximum media volume index.
+- Volume change timestamp.
+- Output device type.
+- Associated audio-device session.
+- Playback episode.
+- Available measurement method.
+
+Create a model similar to:
+
+```kotlin
+data class VolumeObservation(
+    val volumeObservationId: String,
+    val deviceSessionId: String?,
+    val occurredAt: Long,
+    val streamType: String,
+    val volumeIndex: Int?,
+    val maximumVolumeIndex: Int?,
+    val outputDeviceType: String?,
+    val estimatedExposureDb: Float?,
+    val measurementMethod: String
+)
+```
+
+Use nullable fields.
+
+Do not assume a volume percentage equals a particular decibel level.
+
+Do not invent calibrated sound-pressure measurements.
+
+## 7.2 Hearing exposure estimator
+
+Create an AudioExposureEstimator.
+
+It should distinguish:
+
+1. Directly measured sound exposure.
+2. Manufacturer-reported exposure.
+3. Calibrated estimates.
+4. Uncalibrated volume indicators.
+
+Only use a defensible measurement source for decibel-based exposure estimates.
+
+Record measurement provenance and confidence.
+
+Use scientifically responsible hearing-safety guidance.
+
+Consider both exposure intensity and duration.
+
+Provide appropriate recommendations such as taking breaks and reducing excessive volume.
+
+Do not issue medical diagnoses or claims of actual eardrum damage.
+
+## 7.3 HearingExposureSummary
+
+Create an aggregated model that stores:
+
+- Period start and end.
+- Observed listening duration.
+- Measured exposure duration.
+- Estimated exposure duration.
+- Available exposure level.
+- Measurement source.
+- Confidence.
+- Recommendation.
+- Data completeness.
+
+If the data is insufficient to estimate exposure, explicitly show that it is unavailable.
+
+## 7.4 Hearing Insights frontend
+
+Display:
+
+- Listening duration.
+- Connected headphone history.
+- Volume history where available.
+- Exposure estimates where defensible.
+- Listening breaks.
+- Daily and weekly summaries.
+- Practical hearing-safety guidance.
+
+Make limitations visible to the user.
+
+---
+
+# PART 8 — MUSIC ECOSYSTEM INTELLIGENCE
+
+TuneMind must identify the music applications from which it actually observes media sessions.
+
+This is a core capability.
+
+## 8.1 Music provider discovery
+
+Use the existing MediaSessionObserver and available Android media-session metadata.
+
+Where available, record:
+
+- Application package name.
+- Display name.
+- First observed timestamp.
+- Last observed timestamp.
+- Number of observed sessions.
+- Number of observed track appearances.
+- Estimated active playback time.
+- Supported integration capabilities.
+- Provider authorization status.
+
+Do not confuse installed applications with observed applications.
+
+Respect Android package visibility and privacy requirements.
+
+## 8.2 MusicProvider model
+
+Design a model similar to:
+
+```kotlin
+data class MusicProvider(
+    val providerId: String,
+    val packageName: String,
+    val displayName: String,
+    val firstObservedAt: Long?,
+    val lastObservedAt: Long?,
+    val totalObservedEpisodes: Int,
+    val totalObservedPlaybackMs: Long,
+    val integrationStatus: String,
+    val capabilitiesJson: String
+)
+```
+
+Keep provider observations and aggregated summaries separate.
+
+## 8.3 My Music Ecosystem frontend
+
+Create a screen named:
+
+MY MUSIC ECOSYSTEM
+
+It should display actual music applications observed by TuneMind.
+
+For every provider, display:
+
+- App name.
+- App icon where available.
+- First observed date.
+- Last observed date.
+- Number of observed tracks.
+- Number of observed listening episodes.
+- Estimated listening time.
+- Integration status.
+- Available playback capabilities.
+
+Support filtering by provider and date range.
+
+Show clear empty states when no provider has been observed.
+
+Do not fabricate Spotify, YouTube Music, Apple Music or other provider statistics.
+
+Only display actual collected data.
+
+---
+
+# PART 9 — PERSONAL LISTENING MEMORY
+
+This is the central intelligence foundation.
+
+Create a Personal Listening Profile that evolves as the user continues using TuneMind.
+
+It should combine:
+
+- Track preferences.
+- Artist preferences.
+- Time-of-day patterns.
+- Favourite musical moments.
+- Repetition patterns.
+- Listening environment.
+- Music ecosystem.
+- User feedback.
+- Recommendation outcomes.
+
+Every inference should retain:
+
+- Evidence references.
+- Confidence.
+- Creation time.
+- Last updated time.
+- Whether the user confirmed it.
+- Whether the user corrected it.
+
+Do not turn probabilistic patterns into absolute claims.
+
+The profile should support user corrections and deletion.
+
+## 9.1 ListenerProfile model
+
+Design a suitable model similar to:
+
+```kotlin
+data class ListenerProfile(
+    val profileId: String,
+    val profileVersion: Int,
+    val createdAt: Long,
+    val updatedAt: Long
+)
+```
+
+Do not put every preference into one oversized JSON field if normalized records are more appropriate.
+
+The final database design is your engineering decision.
+
+---
+
+# PART 10 — RECOMMENDATION ENGINE
+
+Create a modular RecommendationEngine.
+
+It should use the Personal Listening Memory to produce personalized recommendations.
+
+Consider:
+
+- Current local time.
+- Time-specific preferences.
+- Favourite artists.
+- Favourite tracks.
+- Musical moments.
+- Recent listening history.
+- Repetition frequency.
+- Recently skipped tracks.
+- User feedback.
+- New discovery opportunities.
+- Available providers.
+- Track availability.
+
+Implement a sensible local recommendation baseline before introducing expensive AI services.
+
+Do not require a cloud LLM for basic recommendations.
+
+The engine should produce a recommendation result containing:
+
+- Recommended track.
+- Artist.
+- Available metadata.
+- Provider match.
+- Recommendation reason.
+- Ranking score.
+- Confidence.
+- Supporting evidence.
+- Availability status.
+
+Do not invent track metadata or fabricate provider availability.
+
+## 10.1 Learning after recommendations
+
+Record whether the user:
+
+- Played the recommendation.
+- Opened the provider.
+- Rejected the recommendation.
+- Skipped the track.
+- Repeated the track.
+- Saved a musical moment.
+- Added it to a collection.
+
+Use these outcomes to improve subsequent recommendations.
+
+Do not treat opening an application as proof that a track was played.
+
+---
+
+# PART 11 — CROSS-APPLICATION PLAYBACK AGENT
+
+TuneMind must help users play recommendations through their existing music applications.
+
+It is not required to own the music player or stream the audio itself.
+
+Build a provider-independent integration architecture.
+
+## 11.1 MusicProvider interface
+
+Create a suitable interface, adapting to the existing project:
+
+```kotlin
+interface MusicProvider {
+
+    val providerId: String
+    val displayName: String
+
+    suspend fun isAvailable(): Boolean
+
+    suspend fun searchTracks(
+        query: String
+    ): List<TrackMatch>
+
+    suspend fun resolveTrack(
+        track: RecommendedTrack
+    ): TrackMatch?
+
+    suspend fun openTrack(
+        track: TrackMatch
+    ): PlaybackLaunchResult
+}
+```
+
+Add capabilities for:
+
+- Track search.
+- Track matching.
+- Opening a specific track.
+- Direct playback, if officially supported.
+- Seeking, if supported.
+- Playback-state observation.
+- Pause, play and skip.
+- Timed moment playback, if reliably supported.
+
+The actual interface may be improved based on the repository and provider documentation.
+
+## 11.2 Provider selection
+
+TuneMind should:
+
+1. Discover configured and available music providers.
+2. Determine their actual capabilities.
+3. Resolve the recommended track.
+4. Rank available playback routes.
+5. Use the user's preferred provider when possible.
+6. Offer alternatives when appropriate.
+7. Clearly explain unsupported operations.
+
+Start with the provider that can be integrated and tested most reliably.
+
+Do not fabricate provider APIs, OAuth endpoints, SDK capabilities or permissions.
+
+Use official provider documentation and developer policies.
+
+Do not bypass DRM, subscription restrictions or authentication.
+
+## 11.3 Current playback control
+
+Preserve and improve existing media-session control where working.
+
+Use Android-supported APIs, including MediaController and TransportControls where appropriate.
+
+Do not assume access to one active media session means TuneMind can control every installed application independently.
+
+Distinguish:
+
+- Controlling the currently active session.
+- Opening a specific recommended track.
+- Searching for a track.
+- Seeking to a particular position.
+- Playing a timed musical moment.
+
+These are separate operations.
+
+---
+
+# PART 12 — DATABASE AND EVENT ARCHITECTURE
+
+The current application already has a Room-backed observation system.
+
+Evolve it rather than replacing it unnecessarily.
+
+## 12.1 Raw event store
+
+Create a versioned event contract.
+
+Suggested categories:
+
+PLAYBACK EVENTS
+- PLAYBACK_STATE_CHANGED
+- METADATA_CHANGED
+- SESSION_CREATED
+- SESSION_DESTROYED
+
+AUDIO DEVICE EVENTS
+- AUDIO_DEVICE_CONNECTED
+- AUDIO_DEVICE_DISCONNECTED
+
+VOLUME EVENTS
+- VOLUME_CHANGED
+
+MOMENT EVENTS
+- MOMENT_MARKED
+- MOMENT_UPDATED
+- MOMENT_REMOVED
+
+RECOMMENDATION EVENTS
+- RECOMMENDATION_GENERATED
+- RECOMMENDATION_ACCEPTED
+- RECOMMENDATION_DISMISSED
+
+PLAYBACK AGENT EVENTS
+- TRACK_LAUNCH_REQUESTED
+- TRACK_LAUNCH_RESULT
+
+PRIVACY EVENTS
+- OBSERVATION_ENABLED
+- OBSERVATION_DISABLED
+
+Use distinct event origins:
+
+- ANDROID_OBSERVATION.
+- USER_ACTION.
+- SYSTEM_DERIVED.
+- PROVIDER_RESPONSE.
+
+A user action must never be confused with a raw Android observation.
+
+## 12.2 Required data entities
+
+Design and implement the necessary Room entities, relationships, indices and migrations.
+
+At minimum, evaluate:
+
+1. PlaybackObservation.
+2. ListeningEpisode.
+3. TrackIdentity.
+4. ListeningTimeContext.
+5. MusicalMoment.
+6. MomentEvidence.
+7. MomentQueue.
+8. MomentQueueItem.
+9. AudioDeviceSession.
+10. VolumeObservation.
+11. HearingExposureSummary.
+12. MusicProvider.
+13. ProviderObservation.
+14. ListenerProfile.
+15. Recommendation.
+16. RecommendationFeedback.
+17. SyncQueue.
+18. PrivacyPreference.
+
+These are conceptual requirements. You may consolidate or separate entities when the actual implementation benefits from it.
+
+Use stable identifiers.
+
+Preserve nullable metadata.
+
+Avoid destructive database migrations.
+
+Write migration tests.
+
+## 12.3 Data retention
+
+The existing implementation may have a limited observation retention cap.
+
+Do not retain an arbitrary 500-record maximum as the permanent personal memory.
+
+Implement a suitable strategy for:
+
+- Durable local event storage.
+- Aggregated listening summaries.
+- Derived memory.
+- User-controlled deletion.
+- Configurable retention.
+- Database indexing.
+- Storage management.
+- Rebuilding derived intelligence.
+
+Keep raw evidence separate from derived summaries.
+
+---
+
+# PART 13 — PRIVACY AND OPTIONAL ENCRYPTED CLOUD SYNCHRONIZATION
+
+TuneMind must be local-first.
+
+Its core functionality must work without a cloud account.
+
+## 13.1 Local-first processing
+
+Prefer:
+
+- Local event capture.
+- Local Room storage.
+- Local listening profile.
+- Local recommendation engine.
+- Local musical moment storage.
+- Local provider history.
+- Local hearing exposure calculations.
+
+Do not send raw listening history to the backend by default.
+
+## 13.2 Encryption
+
+Evaluate an appropriate database encryption approach and encrypted field storage.
+
+Use Android Keystore to protect encryption keys.
+
+Protect credentials and tokens.
+
+Never log sensitive listening history or secrets unnecessarily.
+
+## 13.3 Optional cloud synchronization
+
+Cloud synchronization must be explicitly enabled by the user.
+
+When enabled:
+
+1. Serialize the permitted data.
+2. Encrypt it on the device.
+3. Transmit ciphertext through an authenticated connection.
+4. Store encrypted payloads remotely.
+5. Support synchronization and conflict resolution.
+6. Allow users to disable synchronization.
+7. Provide a clear recovery strategy.
+
+The backend should not need plaintext listening history for encrypted storage.
+
+If a feature requires server-side analysis of plaintext data, explain the privacy implications and request separate informed consent.
+
+Do not silently upload personal listening information.
+
+---
+
+# PART 14 — FRONTEND EXPERIENCE
+
+Build a premium, coherent Jetpack Compose experience.
+
+The product should feel like a personal intelligence assistant, not an ordinary music analytics dashboard.
+
+Use a consistent visual system, strong typography, purposeful motion, meaningful empty states and accessible controls.
+
+Preserve existing working UI where appropriate, but improve it where necessary.
+
+Create these main destinations:
+
+## 14.1 FOR YOU
+
+The primary intelligence dashboard.
+
+Show:
+
+- Personalized greeting.
+- Current listening context.
+- Recommendations for the current time.
+- Recommended tracks.
+- Why each track was recommended.
+- Continue listening.
+- Favourite musical moments.
+- Recently observed music.
+- Current learning progress.
+- Listening insights.
+
+## 14.2 MY MUSICAL MOMENTS
+
+Show:
+
+- Favourite moments.
+- Automatically discovered candidates.
+- User-confirmed moments.
+- Timeline selection.
+- Playback duration.
+- Moment collections.
+- Automatic moment queue.
+
+## 14.3 LISTENING INSIGHTS
+
+Show:
+
+- Daily listening duration.
+- Weekly and monthly listening summaries.
+- Time-of-day patterns.
+- Favourite artists.
+- Frequently played tracks.
+- Repetition trends.
+- Listening history.
+
+Use charts only when the underlying data is sufficient.
+
+## 14.4 HEARING INSIGHTS
+
+Show:
+
+- Connected audio devices.
+- Device history.
+- Available volume information.
+- Listening duration.
+- Defensible exposure estimates.
+- Safety guidance.
+- Measurement limitations.
+
+## 14.5 MY MUSIC ECOSYSTEM
+
+Show:
+
+- Detected music applications.
+- Observed listening sessions by provider.
+- Track counts.
+- Listening duration.
+- Last observed date.
+- Integration status.
+- Playback capabilities.
+
+## 14.6 PROFILE AND PRIVACY
+
+Show:
+
+- Learned music preferences.
+- Profile corrections.
+- Observation controls.
+- Permission status.
+- Local data management.
+- Export and deletion.
+- Encryption status.
+- Optional cloud synchronization.
+
+## 14.7 NOW PLAYING
+
+Show:
+
+- Current track.
+- Artist.
+- Music provider.
+- Available playback controls.
+- Current playback position.
+- Favourite moment action.
+- Open source music app action.
+
+Only show controls that are actually supported.
+
+---
+
+# PART 15 — THE SEVEN-DAY LEARNING EXPERIENCE
+
+Implement a seven-day initial onboarding and learning experience.
+
+Day 1–7:
+
+- Observe available media sessions.
+- Record timestamps.
+- Build track and artist memory.
+- Identify source applications.
+- Record audio-device events where supported.
+- Build preliminary time patterns.
+- Collect explicit favourite moments.
+- Generate initial recommendations when sufficient data exists.
+
+At the end of day seven:
+
+- Generate an initial listening profile.
+- Display the strongest observed patterns.
+- Show the data coverage and confidence.
+- Present initial recommendations.
+- Introduce My Musical Moments.
+- Introduce My Music Ecosystem.
+- Introduce Hearing Insights.
+
+Do not invent insights when there is insufficient evidence.
+
+If a user has very little listening history, explain that more data is needed.
+
+After day seven, continue updating the profile indefinitely.
+
+The user must be able to pause observation, disable individual collection categories and delete their personal data.
+
+---
+
+# PART 16 — ENGINEERING QUALITY AND TESTING
+
+You are responsible for producing working software, not merely an attractive prototype.
+
+Requirements:
+
+- Preserve existing working features.
+- Use Kotlin coroutines appropriately.
+- Follow the existing Jetpack Compose architecture.
+- Use repositories and ViewModels consistently.
+- Implement proper dependency injection if the existing architecture uses it.
+- Keep Android-specific APIs out of pure domain logic.
+- Handle missing metadata.
+- Handle provider unavailability.
+- Handle service interruptions.
+- Handle database migrations.
+- Handle background execution restrictions.
+- Avoid duplicate collectors and callbacks.
+- Avoid unnecessary polling.
+- Avoid memory leaks.
+- Avoid expensive work on the main thread.
+- Use structured logging without exposing sensitive information.
+
+## Required tests
+
+Create tests for:
+
+- Playback observation parsing.
+- Listening episode reconstruction.
+- Timestamp and timezone handling.
+- Time-pattern calculations.
+- Track identity matching.
+- Moment creation.
+- Moment candidate discovery.
+- Moment duration handling.
+- Provider capability selection.
+- Track resolution.
+- Playback launch results.
+- Audio-device event processing.
+- Volume observations.
+- Exposure-estimation safeguards.
+- Recommendation ranking.
+- Recommendation feedback.
+- Database migrations.
+- Encryption and synchronization boundaries.
+
+Test unavailable and partially supported providers.
+
+Test uncertain or incomplete observations.
+
+Do not assume an Android unit test proves real device behaviour.
+
+Where real hardware or external provider credentials are required, report the remaining manual tests.
+
+---
+
+# PART 17 — IMPLEMENTATION STRATEGY
+
+You have authority to decide the best engineering sequence.
+
+However, use this recommended roadmap unless your audit demonstrates a better approach.
+
+PHASE 0 — REPOSITORY AUDIT
+Inspect the complete existing repository and document the architecture.
+
+PHASE 1 — DATA FOUNDATION
+Establish the versioned event contract, durable local storage, new entities and safe migrations.
+
+PHASE 2 — LISTENING INTELLIGENCE
+Implement listening episode reconstruction and accurate time-of-day context.
+
+PHASE 3 — MUSIC ECOSYSTEM
+Implement provider detection, provider summaries and the frontend dashboard.
+
+PHASE 4 — AUDIO ENVIRONMENT
+Implement audio-device observation, volume information and responsible exposure estimation.
+
+PHASE 5 — MUSICAL MOMENTS
+Implement manual favourite sections, automatic candidate discovery and moment collections.
+
+PHASE 6 — MOMENT PLAYBACK
+Implement provider-dependent seeking, timed playback and automatic transitions where supported.
+
+PHASE 7 — PERSONAL INTELLIGENCE
+Implement the personal listening profile, time-aware recommendations and recommendation feedback.
+
+PHASE 8 — PRIVACY
+Implement local encryption, user-controlled data management and optional encrypted synchronization.
+
+PHASE 9 — PRODUCT POLISH
+Complete frontend integration, loading states, charts, accessibility and real-device validation.
+
+Do not attempt to complete every phase in one uncontrolled code-generation operation.
+
+Work in small, coherent implementation milestones.
+
+After each milestone:
+
+1. Review the changes.
+2. Run relevant tests.
+3. Build the application.
+4. Fix failures.
+5. Update documentation.
+6. Summarize completed work.
+7. Identify remaining work.
+
+---
+
+# PART 18 — YOUR AUTONOMY AND ENGINEERING DECISION-MAKING
+
+This section is particularly important.
+
+You are not expected to implement every conceptual detail exactly as written.
+
+You must inspect, reason and make decisions.
+
+For every major technical choice:
+
+1. Examine the existing implementation.
+2. Evaluate available Android APIs.
+3. Consider external provider limitations.
+4. Consider privacy.
+5. Consider battery and performance.
+6. Consider data accuracy.
+7. Consider maintainability.
+8. Choose the most reliable implementation.
+9. Document significant deviations from this proposal.
+
+If a requested capability is impossible through public Android APIs, identify the limitation and propose the best legitimate alternative.
+
+If a provider does not support a feature, implement a fallback.
+
+If a feature requires credentials, explain what is needed.
+
+If the architecture would benefit from a different database design, propose and implement the better design.
+
+Do not add technologies merely because they sound advanced.
+
+Do not introduce unnecessary cloud infrastructure.
+
+Do not use fake data as if it were real.
+
+Do not create nonfunctional UI buttons.
+
+Do not claim that a feature is complete until its functionality has been implemented and tested.
+
+If the available coding environment cannot complete the entire project in one run, finish the current milestone cleanly and document the exact next steps.
+
+---
+
+# PART 19 — REQUIRED DELIVERABLES
+
+The project should eventually contain:
+
+1. A stable Android application.
+2. A versioned listening event contract.
+3. A durable local evidence store.
+4. A listening episode reconstruction engine.
+5. Time-of-day intelligence.
+6. Musical moment discovery.
+7. Favourite moment collections.
+8. Provider-dependent automatic moment playback.
+9. Audio-device tracking.
+10. Volume observation.
+11. Hearing exposure insights.
+12. Music ecosystem tracking.
+13. Personal listening memory.
+14. A local recommendation engine.
+15. Cross-application playback integrations.
+16. Optional encrypted cloud synchronization.
+17. A polished Jetpack Compose frontend.
+18. Automated tests.
+19. Technical documentation.
+20. A clear list of capabilities that still require provider credentials or physical-device testing.
+
+---
+
+# PART 20 — START NOW
+
+Begin with the repository inspection.
+
+Do not immediately generate a new application.
+
+Do not delete existing files before understanding their purpose.
+
+Do not rewrite the working media-session observer unnecessarily.
+
+First establish what is already working, what needs to change, and what can be reused.
+
+Then make your own engineering decisions and begin implementing Phase 1.
+
+Your first implementation report must contain:
+
+- Existing architecture discovered.
+- Current functionality verified.
+- Main architectural gaps.
+- Recommended data model.
+- Recommended migration strategy.
+- Android API limitations.
+- Provider integration strategy.
+- First milestone to implement.
+- Files you intend to create or modify.
+
+Then proceed with implementation.
+
+Remember the product vision:
+
+TuneMind should not merely tell users what they listened to.
+
+It should gradually understand their musical lives, remember the moments they love, recognize their listening patterns, understand their music ecosystem, and help them experience the right music at the right time.
+
+**TUNEMIND — PERSONAL MUSIC INTELLIGENCE.**
+
+**Observe. Understand. Remember. Recommend. Act.**

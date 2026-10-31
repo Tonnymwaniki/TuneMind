@@ -61,6 +61,8 @@ fun HomeScreen(
     val geminiInsight by vm.geminiSessionInsight.collectAsState()
     val isGeminiConfigured by vm.isGeminiConfigured.collectAsState()
     val isReasoningLoading by vm.isReasoningLoading.collectAsState()
+    val reasoningReport by vm.reasoningReport.collectAsState()
+    val isGeneratingReport by vm.isGeneratingReport.collectAsState()
 
     // Real Live Media Playback telemetry from Spotify / active players
     val nowPlaying = state.nowPlaying
@@ -464,47 +466,280 @@ fun HomeScreen(
             }
         }
 
-        // Gemini AI Cognitive Synthesis
-        if (isGeminiConfigured) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.35f)),
-                modifier = Modifier.fillMaxWidth()
+        // 2.5 DEDICATED GEMINI TELEMETRY REASONING REPORT SECTION
+        val report = reasoningReport
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF0F172A),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Brush.horizontalGradient(listOf(Color(0xFF06B6D4).copy(alpha = 0.45f), Color(0xFF8B5CF6).copy(alpha = 0.45f)))
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Header Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(AccentCyan, PrimaryViolet))),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "REASONING REPORT & INSIGHTS",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                text = if (report != null && report.isGeminiGenerated)
+                                    "Gemini 2.5 • ${report.analyzedEventCount} Events Ingested • ${report.topSourceApp}"
+                                else if (isGeminiConfigured)
+                                    "Gemini 2.5 Active • Analyzing Telemetry"
+                                else
+                                    "Heuristic Engine Active • Key Optional",
+                                fontSize = 9.sp,
+                                color = AccentCyanBright
+                            )
+                        }
+                    }
+
+                    // Re-synthesize Trigger Button
+                    IconButton(
+                        onClick = {
+                            vm.refreshTelemetryReasoningReport()
+                            vm.requestGeminiSessionReasoning()
+                        },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E293B)),
+                        enabled = !isGeneratingReport
+                    ) {
+                        if (isGeneratingReport) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(15.dp),
+                                color = AccentCyan,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Re-synthesize Reasoning",
+                                tint = AccentCyanBright,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (isGeneratingReport && report == null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = AccentCyan,
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            "Synthesizing database telemetry through Gemini 2.5 Flash...",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                } else if (report != null) {
+                    // Metrics Strip
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF020617))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(14.dp))
+                        // Metric 1: Receptor Potency Score
+                        Column {
                             Text(
-                                text = "GEMINI REASONING SYNTHESIS",
-                                fontSize = 9.sp,
+                                "RECEPTOR POTENCY",
+                                fontSize = 8.sp,
                                 fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentCyanBright,
-                                letterSpacing = 1.sp
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Bold
                             )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    "${report.receptorPotencyScore}%",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = when {
+                                        report.receptorPotencyScore >= 75 -> AccentGreen
+                                        report.receptorPotencyScore >= 45 -> AccentCyan
+                                        else -> AccentAmber
+                                    }
+                                )
+                                Text(
+                                    when {
+                                        report.receptorPotencyScore >= 75 -> "Unfatigued"
+                                        report.receptorPotencyScore >= 45 -> "Steady"
+                                        else -> "Sensitized"
+                                    },
+                                    fontSize = 9.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
                         }
-                        IconButton(onClick = { vm.requestGeminiSessionReasoning() }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh Reasoning", tint = Color(0xFF94A3B8), modifier = Modifier.size(13.dp))
+
+                        Box(modifier = Modifier.width(1.dp).height(22.dp).background(Color(0xFF1E293B)))
+
+                        // Metric 2: Cognitive Flow State Label
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                "COGNITIVE STATE",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(5.dp),
+                                color = when (report.fatigueRiskLevel) {
+                                    "ELEVATED_BURNOUT" -> Color(0x33EF4444)
+                                    "SENSITIZED" -> Color(0x33F59E0B)
+                                    else -> Color(0x3310B981)
+                                }
+                            ) {
+                                Text(
+                                    text = report.fatigueRiskLabel,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = when (report.fatigueRiskLevel) {
+                                        "ELEVATED_BURNOUT" -> AccentCrimson
+                                        "SENSITIZED" -> AccentAmber
+                                        else -> AccentGreen
+                                    },
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
-                    if (isReasoningLoading) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = AccentCyan, strokeWidth = 1.5.dp)
-                            Text("Gemini is synthesizing your acoustic receptivity...", fontSize = 11.sp, color = Color(0xFF94A3B8))
+
+                    // Cognitive Flow Narrative
+                    Text(
+                        text = report.flowStateDescription,
+                        fontSize = 11.sp,
+                        color = Color(0xFFE2E8F0),
+                        lineHeight = 16.sp
+                    )
+
+                    // Acoustic Steer Card
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF020617),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = null,
+                                    tint = PrimaryVioletBright,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "ACOUSTIC STEERING GUIDANCE",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PrimaryVioletBright
+                                )
+                            }
+                            Text(
+                                text = report.acousticShiftRecommendation,
+                                fontSize = 11.sp,
+                                color = Color(0xFFCBD5E1)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.DirectionsRun,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = report.steerAction,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccentCyanBright,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                if (report.observedTrackContext != null) {
+                                    Button(
+                                        onClick = {
+                                            vm.addToVault(report.observedTrackContext, nowPlayingArtist)
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0x3306B6D4),
+                                            contentColor = AccentCyanBright
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Text("Rest Track", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        Text(
-                            text = geminiInsight ?: "Analyzing your listening trajectory against neuro-acoustic models...",
-                            fontSize = 11.sp,
-                            color = Color(0xFFCBD5E1),
-                            lineHeight = 16.sp
-                        )
                     }
                 }
             }

@@ -1,23 +1,27 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.compose)
 }
 
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.inputStream().use { stream ->
+        localProps.load(stream)
+    }
+}
+val geminiKey: String = localProps.getProperty("GEMINI_API_KEY")
+    ?: (project.findProperty("GEMINI_API_KEY") as? String)
+    ?: System.getenv("GEMINI_API_KEY")
+    ?: ""
+
 android {
     namespace = "com.tunemind.app"
     compileSdk = 36
     buildToolsVersion = "36.1.0"
-
-    val localProps = java.util.Properties()
-    val localPropsFile = rootProject.file("local.properties")
-    if (localPropsFile.exists()) {
-        localPropsFile.inputStream().use { localProps.load(it) }
-    }
-    val geminiKey = localProps.getProperty("GEMINI_API_KEY")
-        ?: (project.findProperty("GEMINI_API_KEY") as? String)
-        ?: System.getenv("GEMINI_API_KEY")
-        ?: ""
 
     defaultConfig {
         applicationId = "com.tunemind.app"

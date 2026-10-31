@@ -259,6 +259,13 @@ class TuneMindViewModel : ViewModel() {
         refreshGeminiState()
         requestGeminiSessionReasoning()
 
+        // Initialize Telemetry Reasoning Report & schedule periodic Worker
+        AppHolder.context?.let { ctx ->
+            _reasoningReport.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.getLatestReport(ctx)
+            com.tunemind.app.domain.ai.GeminiTelemetryReasoningWorker.schedulePeriodic(ctx)
+        }
+        refreshTelemetryReasoningReport()
+
         viewModelScope.launch {
             try {
                 repo?.observeRecent()?.collect { rows ->
@@ -570,6 +577,12 @@ class TuneMindViewModel : ViewModel() {
     private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
     val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
 
+    private val _reasoningReport = MutableStateFlow<com.tunemind.app.domain.ai.ReasoningReport?>(null)
+    val reasoningReport: StateFlow<com.tunemind.app.domain.ai.ReasoningReport?> = _reasoningReport.asStateFlow()
+
+    private val _isGeneratingReport = MutableStateFlow<Boolean>(false)
+    val isGeneratingReport: StateFlow<Boolean> = _isGeneratingReport.asStateFlow()
+
     fun refreshGeminiState() {
         val ctx = AppHolder.context ?: return
         _isGeminiConfigured.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)
@@ -597,12 +610,38 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
+    fun refreshTelemetryReasoningReport() {
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch {
+            _isGeneratingReport.value = true
+            val rowsCount = maxOf(
+                _homeState.value.identifiableTrackCount + _homeState.value.distinctAppearanceCount,
+                _profileState.value.observationCount
+            )
+            val currentSource = _homeState.value.nowPlaying?.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
+            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateTelemetryReasoningReport(
+                context = ctx,
+                eventCount = maxOf(rowsCount, 12),
+                topSourceApp = currentSource,
+                recentTracks = _homeState.value.recentTracks,
+                vaultTracks = _vaultState.value,
+                nowPlaying = _homeState.value.nowPlaying,
+                timeSlot = currentTimeSlot.label
+            )
+            _isGeneratingReport.value = false
+            result.onSuccess { report ->
+                _reasoningReport.value = report
+            }
+        }
+    }
+
     fun saveGeminiApiKey(key: String) {
         val ctx = AppHolder.context ?: return
         com.tunemind.app.domain.ai.GeminiReasoningEngine.saveApiKey(ctx, key)
         refreshGeminiState()
         refreshRecommendations()
         requestGeminiSessionReasoning()
+        refreshTelemetryReasoningReport()
     }
 
     fun testGeminiApiKey(candidateKey: String, onResult: (Boolean, String) -> Unit) {

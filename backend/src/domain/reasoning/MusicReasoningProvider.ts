@@ -91,16 +91,60 @@ export interface ReasoningResult {
   rawProviderResponse?: unknown;
 }
 
+export interface AuditoryReceptorStatus {
+  receptivityScore: number; // 0-100%
+  state: 'OPTIMAL_FLOW' | 'MILD_SATURATION' | 'ELEVATED_BURNOUT';
+  statusLabel: string; // e.g. "Optimal Cognitive Flow"
+}
+
+export interface AcousticShiftRecommendation {
+  shiftType: 'TEMPO_ADAPTATION' | 'TIMBRE_CLEANSE' | 'GENRE_VARIATION' | 'SILENCE_INTERVAL';
+  recommendation: string;
+  targetBpmRange?: string;
+  rationale: string;
+}
+
+export interface ReasoningReport {
+  reportId: string;
+  userId: string;
+  generatedAt: string; // ISO 8601
+  analyzedEventCount: number;
+  timeWindow: {
+    start: string | null;
+    end: string | null;
+  };
+  auditoryReceptorStatus: AuditoryReceptorStatus;
+  flowStateNarrative: string;
+  acousticShiftRecommendations: AcousticShiftRecommendation[];
+  fatigueSignals: TrackFatigueSignal[];
+  probabilisticInferences: ProbabilisticInference[];
+  anchorsAssessed: {
+    grooveRhythm: number;
+    vocalMelody: number;
+    dropStructuralDynamics: number;
+    confidence: number;
+  };
+  keyObservedTracks: Array<{
+    title: string;
+    artist: string;
+    playCount: number;
+    estimatedSatietyPercent: number;
+    fatigueRisk: 'LOW' | 'MODERATE' | 'HIGH';
+  }>;
+  isAiGenerated: boolean;
+  modelUsed?: string;
+}
+
 // ─── Interface ────────────────────────────────────────────────────────────────
 
 /**
  * Plug-in interface for the external AI reasoning provider.
  *
- * The actual provider is injected at runtime in Phase 3.
- * No implementation exists in Phase 1 or Phase 2.
+ * Implemented by GeminiMusicReasoningProvider using @google/genai.
  */
 export interface MusicReasoningProvider {
   readonly providerId: string;
   isAvailable(): Promise<boolean>;
   reason(context: UserMusicContext): Promise<ReasoningResult>;
+  generateReport?(context: UserMusicContext, rawEventsSummary?: string): Promise<ReasoningReport>;
 }

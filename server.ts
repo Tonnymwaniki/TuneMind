@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
+import rawReasoningRouter from './backend/src/api/v1/reasoning';
+import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
 
 process.env['NODE_ENV'] = process.env['NODE_ENV'] || 'development';
 
@@ -13,6 +15,7 @@ const __dirname = path.dirname(__filename);
 const getRouter = (r: any) => (typeof r === 'function' ? r : r?.default || r);
 const eventsRouter = getRouter(rawEventsRouter);
 const analyticsRouter = getRouter(rawAnalyticsRouter);
+const reasoningRouter = getRouter(rawReasoningRouter);
 
 async function startServer() {
   const app = express();
@@ -25,6 +28,7 @@ async function startServer() {
   // Mount API routes
   app.use('/api/v1/events', eventsRouter);
   app.use('/api/v1/analytics', analyticsRouter);
+  app.use('/api/v1/reasoning', reasoningRouter);
 
   app.get('/health', (_req, res) => {
     res.json({
@@ -70,6 +74,12 @@ async function startServer() {
 
   app.listen(PORT, HOST, () => {
     console.log(`TuneMind server running on http://${HOST}:${PORT} [${process.env['NODE_ENV']}]`);
+    // Start background telemetry reasoning poller
+    try {
+      TelemetryReasoningPoller.getInstance().start(30000);
+    } catch (e) {
+      console.warn('Could not start TelemetryReasoningPoller:', e);
+    }
   });
 }
 

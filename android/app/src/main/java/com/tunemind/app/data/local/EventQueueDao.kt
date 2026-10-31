@@ -41,6 +41,9 @@ interface EventQueueDao {
     @Query("SELECT * FROM event_queue ORDER BY sequence_number DESC LIMIT :limit")
     fun observeRecent(limit: Int = 200): Flow<List<EventQueueEntity>>
 
+    @Query("SELECT * FROM event_queue ORDER BY sequence_number DESC LIMIT :limit")
+    suspend fun getRecentEvents(limit: Int = 100): List<EventQueueEntity>
+
     @Query("SELECT COUNT(*) FROM event_queue")
     fun observeCount(): Flow<Int>
 
