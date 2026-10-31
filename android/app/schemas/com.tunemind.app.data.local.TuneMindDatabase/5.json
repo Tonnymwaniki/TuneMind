@@ -1,0 +1,560 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 5,
+    "identityHash": "114c8090bc834c66ff8ebd664fe11b96",
+    "entities": [
+      {
+        "tableName": "event_queue",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sequence_number` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `event_id` TEXT NOT NULL, `payload_json` TEXT NOT NULL, `synced` INTEGER NOT NULL, `event_time_ms` INTEGER NOT NULL, `saved_at_ms` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "sequenceNumber",
+            "columnName": "sequence_number",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payload_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "synced",
+            "columnName": "synced",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventTimeMs",
+            "columnName": "event_time_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAtMs",
+            "columnName": "saved_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "sequence_number"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_queue_event_id",
+            "unique": true,
+            "columnNames": [
+              "event_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_event_queue_event_id` ON `${TABLE_NAME}` (`event_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "listening_study",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`studyId` TEXT NOT NULL, `status` TEXT NOT NULL, `startDateMs` INTEGER, `endDateMs` INTEGER, `completedDays` INTEGER NOT NULL, `totalDays` INTEGER NOT NULL, PRIMARY KEY(`studyId`))",
+        "fields": [
+          {
+            "fieldPath": "studyId",
+            "columnName": "studyId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startDateMs",
+            "columnName": "startDateMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "endDateMs",
+            "columnName": "endDateMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedDays",
+            "columnName": "completedDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalDays",
+            "columnName": "totalDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "studyId"
+          ]
+        }
+      },
+      {
+        "tableName": "experiment",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`experimentId` TEXT NOT NULL, `status` TEXT NOT NULL, `startDateMs` INTEGER, `endDateMs` INTEGER, `lastObservationMs` INTEGER, `observationCount` INTEGER NOT NULL, `totalDays` INTEGER NOT NULL, PRIMARY KEY(`experimentId`))",
+        "fields": [
+          {
+            "fieldPath": "experimentId",
+            "columnName": "experimentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startDateMs",
+            "columnName": "startDateMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "endDateMs",
+            "columnName": "endDateMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastObservationMs",
+            "columnName": "lastObservationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "observationCount",
+            "columnName": "observationCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalDays",
+            "columnName": "totalDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "experimentId"
+          ]
+        }
+      },
+      {
+        "tableName": "experiment_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `experimentId` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `eventTimeMs` INTEGER NOT NULL, `savedAtMs` INTEGER NOT NULL, `sourcePackage` TEXT NOT NULL, PRIMARY KEY(`eventId`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "experimentId",
+            "columnName": "experimentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventTimeMs",
+            "columnName": "eventTimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAtMs",
+            "columnName": "savedAtMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourcePackage",
+            "columnName": "sourcePackage",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId"
+          ]
+        }
+      },
+      {
+        "tableName": "musical_moments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`momentId` TEXT NOT NULL, `trackTitle` TEXT NOT NULL, `trackArtist` TEXT NOT NULL, `trackAlbum` TEXT, `sourcePackage` TEXT, `providerTrackId` TEXT, `startPositionMs` INTEGER NOT NULL, `endPositionMs` INTEGER NOT NULL, `preferredPlaybackDurationMs` INTEGER NOT NULL, `discoveryMethod` TEXT NOT NULL, `confidence` REAL, `userConfirmed` INTEGER NOT NULL, `customName` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `lastPlayedAt` INTEGER, PRIMARY KEY(`momentId`))",
+        "fields": [
+          {
+            "fieldPath": "momentId",
+            "columnName": "momentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackTitle",
+            "columnName": "trackTitle",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackArtist",
+            "columnName": "trackArtist",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackAlbum",
+            "columnName": "trackAlbum",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourcePackage",
+            "columnName": "sourcePackage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "providerTrackId",
+            "columnName": "providerTrackId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startPositionMs",
+            "columnName": "startPositionMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endPositionMs",
+            "columnName": "endPositionMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "preferredPlaybackDurationMs",
+            "columnName": "preferredPlaybackDurationMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "discoveryMethod",
+            "columnName": "discoveryMethod",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "userConfirmed",
+            "columnName": "userConfirmed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customName",
+            "columnName": "customName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPlayedAt",
+            "columnName": "lastPlayedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "momentId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_musical_moments_trackTitle_trackArtist",
+            "unique": false,
+            "columnNames": [
+              "trackTitle",
+              "trackArtist"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_musical_moments_trackTitle_trackArtist` ON `${TABLE_NAME}` (`trackTitle`, `trackArtist`)"
+          },
+          {
+            "name": "index_musical_moments_userConfirmed",
+            "unique": false,
+            "columnNames": [
+              "userConfirmed"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_musical_moments_userConfirmed` ON `${TABLE_NAME}` (`userConfirmed`)"
+          },
+          {
+            "name": "index_musical_moments_createdAt",
+            "unique": false,
+            "columnNames": [
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_musical_moments_createdAt` ON `${TABLE_NAME}` (`createdAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "audio_device_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`deviceSessionId` TEXT NOT NULL, `episodeId` TEXT, `deviceType` TEXT NOT NULL, `deviceName` TEXT, `connectionType` TEXT NOT NULL, `connectedAt` INTEGER NOT NULL, `disconnectedAt` INTEGER, `identificationConfidence` TEXT NOT NULL, PRIMARY KEY(`deviceSessionId`))",
+        "fields": [
+          {
+            "fieldPath": "deviceSessionId",
+            "columnName": "deviceSessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deviceType",
+            "columnName": "deviceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceName",
+            "columnName": "deviceName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "connectionType",
+            "columnName": "connectionType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectedAt",
+            "columnName": "connectedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "disconnectedAt",
+            "columnName": "disconnectedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "identificationConfidence",
+            "columnName": "identificationConfidence",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "deviceSessionId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_audio_device_sessions_deviceType",
+            "unique": false,
+            "columnNames": [
+              "deviceType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_audio_device_sessions_deviceType` ON `${TABLE_NAME}` (`deviceType`)"
+          },
+          {
+            "name": "index_audio_device_sessions_connectedAt",
+            "unique": false,
+            "columnNames": [
+              "connectedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_audio_device_sessions_connectedAt` ON `${TABLE_NAME}` (`connectedAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "volume_observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`volumeObservationId` TEXT NOT NULL, `deviceSessionId` TEXT, `occurredAt` INTEGER NOT NULL, `streamType` TEXT NOT NULL, `volumeIndex` INTEGER NOT NULL, `maximumVolumeIndex` INTEGER NOT NULL, `outputDeviceType` TEXT, `estimatedExposureDb` REAL, `measurementMethod` TEXT NOT NULL, PRIMARY KEY(`volumeObservationId`))",
+        "fields": [
+          {
+            "fieldPath": "volumeObservationId",
+            "columnName": "volumeObservationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceSessionId",
+            "columnName": "deviceSessionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "occurredAt",
+            "columnName": "occurredAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "streamType",
+            "columnName": "streamType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "volumeIndex",
+            "columnName": "volumeIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maximumVolumeIndex",
+            "columnName": "maximumVolumeIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "outputDeviceType",
+            "columnName": "outputDeviceType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "estimatedExposureDb",
+            "columnName": "estimatedExposureDb",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "measurementMethod",
+            "columnName": "measurementMethod",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "volumeObservationId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_volume_observations_occurredAt",
+            "unique": false,
+            "columnNames": [
+              "occurredAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_volume_observations_occurredAt` ON `${TABLE_NAME}` (`occurredAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "music_provider_summaries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`packageName` TEXT NOT NULL, `displayName` TEXT NOT NULL, `firstObservedAt` INTEGER NOT NULL, `lastObservedAt` INTEGER NOT NULL, `totalObservedEpisodes` INTEGER NOT NULL, `totalObservedPlaybackMs` INTEGER NOT NULL, `integrationStatus` TEXT NOT NULL, `capabilitiesJson` TEXT NOT NULL, PRIMARY KEY(`packageName`))",
+        "fields": [
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstObservedAt",
+            "columnName": "firstObservedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastObservedAt",
+            "columnName": "lastObservedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalObservedEpisodes",
+            "columnName": "totalObservedEpisodes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalObservedPlaybackMs",
+            "columnName": "totalObservedPlaybackMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "integrationStatus",
+            "columnName": "integrationStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capabilitiesJson",
+            "columnName": "capabilitiesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "packageName"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '114c8090bc834c66ff8ebd664fe11b96')"
+    ]
+  }
+}

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "studio-body-dark": "#0C1220",
+        "surface-dark": "#0E1626",
+        "recessed-console-surface": "#131D30",
+        "hardware-module-faceplate": "#1C2940",
+        "elevated-control-bezel": "#25344D",
+        "matte-border": "#2D3B53",
+        "laser-lavender": "#A997D8",
+        "studio-cyan": "#83B9BD",
+        "warm-amber": "#D5A66F",
+        "safety-green": "#10B981",
+        "clip-red": "#CF7778",
+        "primary-typography": "#E9EDF5",
+        "secondary-labels": "#A1AEC2",
+        "on-surface-variant": "#8E9BAE"
+      },
+      fontFamily: {
+        "headline-lg": ["Plus Jakarta Sans", "sans-serif"],
+        "headline-md": ["Plus Jakarta Sans", "sans-serif"],
+        "body-md": ["Plus Jakarta Sans", "sans-serif"],
+        "label-mono-sm": ["JetBrains Mono", "monospace"],
+        "label-mono-lg": ["JetBrains Mono", "monospace"],
+        "readout-numeric": ["JetBrains Mono", "monospace"]
+      }
+    }
+  }
+};</script><style>
+    @layer base {
+      html, body {
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+        background-color: #0C1220;
+      }
+      body {
+        overscroll-behavior: none;
+      }
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    }
+    ::-webkit-scrollbar { display: none; }
+    body {
+      min-height: max(844px, 100dvh);
+    }
+  </style></head><body class="bg-studio-body-dark text-primary-typography font-body-md text-sm flex flex-col min-h-screen antialiased selection:bg-laser-lavender/30 select-none"><!-- Top Hardware Telemetry Header --><header class="fixed top-0 inset-x-0 z-50 bg-[#0C1220]/90 backdrop-blur-xl pt-safe border-b border-[#1C2940] shadow-[0_2px_12px_rgba(0,0,0,0.5)]"><div class="h-14 px-4 flex items-center justify-between"><div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-safety-green shadow-[0_0_8px_#10B981] animate-pulse"></div><div class="flex flex-col"><span class="font-label-mono-sm text-[10px] text-secondary-labels tracking-widest uppercase leading-tight">CIRCADIAN</span><span class="font-label-mono-sm text-[11px] text-studio-cyan font-bold tracking-wider leading-tight">DSP-07</span></div></div><div class="flex flex-col items-center justify-center"><span class="font-headline-md text-[17px] font-bold tracking-tight text-primary-typography leading-tight">TuneMind</span><span class="font-label-mono-sm text-[9px] text-secondary-labels -mt-0.5 tracking-[0.2em] uppercase">INTEL</span></div><div class="flex items-center gap-2"><div class="h-7 px-2 bg-recessed-console-surface border border-matte-border/50 rounded flex items-center justify-center shadow-inner"><span class="font-readout-numeric text-[11px] text-warm-amber font-semibold tracking-wider">432Hz</span></div><div class="w-7 h-7 rounded-full bg-elevated-control-bezel border border-matte-border flex items-center justify-center text-primary-typography shadow-sm"><span class="material-symbols-outlined text-[16px]">person</span></div></div></div></header><!-- Main Telemetry Console --><main class="flex flex-col relative w-full px-4 pt-16 pb-28 bg-[#0C1220] min-h-screen"><div class="flex flex-col w-full gap-3.5 pt-2">
+<!-- Header Section -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<div class="w-1.5 h-1.5 rounded-full bg-safety-green shadow-[0_0_6px_#10B981]"></div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels tracking-widest uppercase">CIRCADIAN // NEURO-ACOUSTIC DRIFT</span>
+</div>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-recessed-console-surface border border-matte-border/60">
+<span class="w-1.5 h-1.5 rounded-full bg-laser-lavender animate-pulse"></span>
+<span class="font-label-mono-sm text-[9px] text-laser-lavender font-bold tracking-widest uppercase">BUFFER // 7D SYNC</span>
+</div>
+</div>
+<h1 class="font-headline-lg text-[22px] text-primary-typography font-bold tracking-tight uppercase leading-snug mt-0.5">
+        CIRCADIAN INTELLIGENCE // 7-DAY BASELINE
+      </h1>
+<p class="font-body-md text-[13px] text-secondary-labels leading-relaxed">
+        Calibrating auditory attention drift across circadian cycles.
+      </p>
+</div>
+<!-- Interactive 7-Day Matrix Module (Pill Vacuum Tubes) -->
+<div class="flex flex-col bg-recessed-console-surface border border-[#1C2940] rounded-lg p-3.5 shadow-[inset_0_2px_8px_rgba(0,0,0,0.65)] relative overflow-hidden">
+<!-- Module Top Strip -->
+<div class="flex items-center justify-between pb-2 border-b border-matte-border/40">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-studio-cyan text-[15px]">graphic_eq</span>
+<span class="font-label-mono-sm text-[10px] text-primary-typography font-semibold tracking-wider uppercase">WEEKLY NEURO-ACOUSTIC CYCLE</span>
+</div>
+<div class="px-2 py-0.5 rounded bg-studio-body-dark border border-matte-border/50">
+<span class="font-label-mono-sm text-[10px] text-warm-amber font-medium tracking-widest uppercase">CURRENT CYCLE: W38</span>
+</div>
+</div>
+<!-- 7 Slim Vacuum Pill Tubes Grid -->
+<div class="relative w-full pt-4 pb-2">
+<!-- Circadian Wave Scrim -->
+<svg class="absolute inset-x-0 top-3 w-full h-36 pointer-events-none opacity-20" preserveaspectratio="none" viewbox="0 0 350 140">
+<defs>
+<lineargradient id="circadianWaveLine" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#83B9BD"></stop>
+<stop offset="55%" stop-color="#A997D8"></stop>
+<stop offset="100%" stop-color="#D5A66F"></stop>
+</lineargradient>
+</defs>
+<path d="M 0,95 C 40,40 90,20 185,40 C 235,55 295,115 350,110" fill="none" stroke="url(#circadianWaveLine)" stroke-dasharray="3 3" stroke-width="1.5"></path>
+</svg>
+<div class="grid grid-cols-7 gap-1.5 relative z-10 items-end h-40">
+<!-- MON (Completed) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('MON', '2.4h', 'Optimum Focus Zone', 60)">
+<span class="font-readout-numeric text-[11px] text-primary-typography font-medium mb-1.5">2.4h</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark p-1 flex flex-col justify-end shadow-inner border border-matte-border/40 relative">
+<div class="w-full bg-[#1C2940] rounded-full h-full absolute inset-0 opacity-40"></div>
+<div class="w-full bg-studio-cyan/85 rounded-full h-[58%] relative shadow-[0_0_8px_rgba(131,185,189,0.35)] flex justify-center">
+<div class="w-2 h-1 bg-white rounded-full absolute -top-0.5 shadow-[0_0_4px_#fff]"></div>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels mt-2 font-medium">M</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/40 rounded-full mt-0.5"></div>
+</div>
+<!-- TUE (Completed) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('TUE', '4.1h', 'Deep Flow Acoustic Lock', 92)">
+<span class="font-readout-numeric text-[11px] text-primary-typography font-medium mb-1.5">4.1h</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark p-1 flex flex-col justify-end shadow-inner border border-matte-border/40 relative">
+<div class="w-full bg-[#1C2940] rounded-full h-full absolute inset-0 opacity-40"></div>
+<div class="w-full bg-studio-cyan/90 rounded-full h-[90%] relative shadow-[0_0_10px_rgba(131,185,189,0.45)] flex justify-center">
+<div class="w-2 h-1 bg-white rounded-full absolute -top-0.5 shadow-[0_0_4px_#fff]"></div>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels mt-2 font-medium">T</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/40 rounded-full mt-0.5"></div>
+</div>
+<!-- WED (Completed) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('WED', '3.2h', 'Harmonic Balance Sustained', 75)">
+<span class="font-readout-numeric text-[11px] text-primary-typography font-medium mb-1.5">3.2h</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark p-1 flex flex-col justify-end shadow-inner border border-matte-border/40 relative">
+<div class="w-full bg-[#1C2940] rounded-full h-full absolute inset-0 opacity-40"></div>
+<div class="w-full bg-studio-cyan/85 rounded-full h-[72%] relative shadow-[0_0_8px_rgba(131,185,189,0.35)] flex justify-center">
+<div class="w-2 h-1 bg-white rounded-full absolute -top-0.5 shadow-[0_0_4px_#fff]"></div>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels mt-2 font-medium">W</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/40 rounded-full mt-0.5"></div>
+</div>
+<!-- THU (Active Day: Luminous Vertical Gradient) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer relative" onclick="inspectDay('THU', '3.8h', 'Twilight Saturation Phase', 85)">
+<div class="flex items-center gap-1 mb-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-laser-lavender shadow-[0_0_6px_#A997D8] animate-ping"></span>
+<span class="font-readout-numeric text-[11px] text-laser-lavender font-bold">3.8h</span>
+</div>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark p-1 flex flex-col justify-end shadow-[inset_0_2px_10px_rgba(0,0,0,0.9)] border border-laser-lavender/50 relative">
+<div class="w-full bg-gradient-to-t from-studio-cyan via-laser-lavender to-[#C4B5FD] rounded-full h-[84%] relative shadow-[0_0_14px_rgba(169,151,216,0.7)] flex justify-center">
+<!-- Glowing active meniscus bead -->
+<div class="w-3 h-1.5 bg-white rounded-full absolute -top-1 shadow-[0_0_8px_#ffffff,0_0_14px_#A997D8]"></div>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-laser-lavender font-bold mt-2">T</span>
+<div class="w-2 h-1 bg-laser-lavender shadow-[0_0_6px_#A997D8] rounded-full mt-0.5"></div>
+</div>
+<!-- FRI (Pending: Subtle Matte Border & Muted Dashes) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('FRI', 'Proj 2.8h', 'Predicted Alpha-Wave Cycle', 55)">
+<span class="font-readout-numeric text-[11px] text-secondary-labels/60 font-medium mb-1.5">--</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark/90 p-1 flex flex-col justify-end shadow-inner border border-matte-border relative">
+<!-- Muted micro dashes inside -->
+<div class="w-full h-full flex flex-col justify-evenly items-center py-2 opacity-35">
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels/70 mt-2 font-medium">F</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/20 rounded-full mt-0.5"></div>
+</div>
+<!-- SAT (Pending) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('SAT', 'Proj 3.5h', 'Weekend Low-Entropy Window', 40)">
+<span class="font-readout-numeric text-[11px] text-secondary-labels/60 font-medium mb-1.5">--</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark/80 p-1 flex flex-col justify-end shadow-inner border border-matte-border relative">
+<div class="w-full h-full flex flex-col justify-evenly items-center py-2 opacity-25">
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels/60 mt-2 font-medium">S</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/20 rounded-full mt-0.5"></div>
+</div>
+<!-- SUN (Pending) -->
+<div class="flex flex-col items-center h-full justify-end cursor-pointer group" onclick="inspectDay('SUN', 'Proj 1.8h', 'Reset Buffer Cycle', 20)">
+<span class="font-readout-numeric text-[11px] text-secondary-labels/60 font-medium mb-1.5">--</span>
+<div class="w-full max-w-[28px] h-28 rounded-full bg-studio-body-dark/70 p-1 flex flex-col justify-end shadow-inner border border-matte-border relative">
+<div class="w-full h-full flex flex-col justify-evenly items-center py-2 opacity-20">
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+<span class="w-2.5 h-[1px] bg-secondary-labels"></span>
+</div>
+</div>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels/60 mt-2 font-medium">S</span>
+<div class="w-1.5 h-0.5 bg-secondary-labels/20 rounded-full mt-0.5"></div>
+</div>
+</div>
+</div>
+<!-- Inspection Status Readout Sub-Bar -->
+<div class="mt-2 pt-2 border-t border-matte-border/40 flex items-center justify-between" id="cycleInspectionStrip">
+<div class="flex items-center gap-1.5">
+<span class="font-label-mono-sm text-[10px] text-secondary-labels uppercase">INSPECT:</span>
+<span class="font-label-mono-sm text-[10px] text-laser-lavender font-bold" id="inspectDayName">THU (3.8h)</span>
+</div>
+<span class="font-label-mono-sm text-[10px] text-studio-cyan truncate max-w-[200px]" id="inspectNote">Twilight Saturation Phase</span>
+</div>
+</div>
+<!-- Acoustic Anchor Analysis (Industrial Metering Console) -->
+<div class="flex flex-col bg-recessed-console-surface border border-[#1C2940] rounded-lg p-3.5 shadow-[inset_0_2px_8px_rgba(0,0,0,0.65)] gap-3">
+<div class="flex items-center justify-between pb-2 border-b border-matte-border/40">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-sm bg-studio-cyan shadow-[0_0_6px_#83B9BD]"></span>
+<span class="font-label-mono-sm text-[10px] text-primary-typography font-bold tracking-wider uppercase">ACOUSTIC ANCHOR ANALYSIS // SPECTRAL WEIGHT</span>
+</div>
+<span class="font-label-mono-sm text-[9px] text-secondary-labels tracking-widest uppercase">RMS EQUILIBRIUM</span>
+</div>
+<div class="flex flex-col gap-2.5">
+<!-- Balance Track 1: Tempo Locking Anchor -->
+<div class="flex flex-col gap-1.5 bg-hardware-module-faceplate/90 border border-matte-border/70 p-2.5 rounded">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-[11px] text-primary-typography">
+            Tempo Locking Anchor: <span class="font-readout-numeric text-studio-cyan font-bold">74%</span>
+</span>
+<span class="font-label-mono-sm text-[10px] text-secondary-labels">Optimal 115-128 BPM</span>
+</div>
+<!-- Recessed Track with Etched Numerical Scale & Micro-Notches -->
+<div class="relative w-full pt-1">
+<div class="relative w-full h-3 bg-studio-body-dark rounded-sm border border-[#131D30] overflow-hidden shadow-inner flex items-center px-0.5">
+<div class="h-2 rounded-sm bg-studio-cyan shadow-[0_0_8px_rgba(131,185,189,0.8)]" style="width: 74%;"></div>
+<!-- Etched indicator marker bead -->
+<div class="absolute w-1.5 h-3.5 bg-white rounded-none shadow-[0_0_4px_#fff]" style="left: calc(74% - 3px);"></div>
+</div>
+<!-- Etched Scale & Micro-notches -->
+<div class="flex justify-between items-center px-0.5 mt-1">
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">0</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1 bg-matte-border/50"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/50">25</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">50</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-studio-cyan/80"></span><span class="font-readout-numeric text-[8px] text-studio-cyan font-semibold">74</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">100</span></div>
+</div>
+</div>
+<div class="flex items-center justify-between text-secondary-labels pt-0.5">
+<span class="font-label-mono-sm text-[9px] uppercase tracking-wider">TARGET: 120 BPM • DELTA: +2.1%</span>
+<span class="font-label-mono-sm text-[9px] uppercase text-safety-green font-semibold tracking-wider">SYNCHRONIZED</span>
+</div>
+</div>
+<!-- Balance Track 2: Melodic Novelty Exploration -->
+<div class="flex flex-col gap-1.5 bg-hardware-module-faceplate/90 border border-matte-border/70 p-2.5 rounded">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-[11px] text-primary-typography">
+            Melodic Novelty Exploration: <span class="font-readout-numeric text-laser-lavender font-bold">82%</span>
+</span>
+<span class="font-label-mono-sm text-[10px] text-warm-amber font-semibold">High Variety</span>
+</div>
+<!-- Recessed Track with Etched Scale -->
+<div class="relative w-full pt-1">
+<div class="relative w-full h-3 bg-studio-body-dark rounded-sm border border-[#131D30] overflow-hidden shadow-inner flex items-center px-0.5">
+<div class="h-2 rounded-sm bg-gradient-to-r from-laser-lavender to-warm-amber shadow-[0_0_8px_rgba(169,151,216,0.8)]" style="width: 82%;"></div>
+<div class="absolute w-1.5 h-3.5 bg-warm-amber rounded-none shadow-[0_0_4px_#D5A66F]" style="left: calc(82% - 3px);"></div>
+</div>
+<div class="flex justify-between items-center px-0.5 mt-1">
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">0</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1 bg-matte-border/50"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/50">25</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">50</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-laser-lavender/80"></span><span class="font-readout-numeric text-[8px] text-laser-lavender font-semibold">82</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">100</span></div>
+</div>
+</div>
+<div class="flex items-center justify-between text-secondary-labels pt-0.5">
+<span class="font-label-mono-sm text-[9px] uppercase tracking-wider">84 DISCOVERIES • ENTROPY: 0.82</span>
+<span class="font-label-mono-sm text-[9px] uppercase text-laser-lavender font-semibold tracking-wider">EXPANDING</span>
+</div>
+</div>
+<!-- Balance Track 3: Dynamic Vocal Fatigue -->
+<div class="flex flex-col gap-1.5 bg-hardware-module-faceplate/90 border border-matte-border/70 p-2.5 rounded">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-[11px] text-primary-typography">
+            Dynamic Vocal Fatigue: <span class="font-readout-numeric text-safety-green font-bold">22%</span>
+</span>
+<span class="font-label-mono-sm text-[10px] text-safety-green font-semibold">Low Burnout</span>
+</div>
+<!-- Recessed Track with Etched Scale -->
+<div class="relative w-full pt-1">
+<div class="relative w-full h-3 bg-studio-body-dark rounded-sm border border-[#131D30] overflow-hidden shadow-inner flex items-center px-0.5">
+<div class="h-2 rounded-sm bg-safety-green shadow-[0_0_8px_rgba(16,185,129,0.7)]" style="width: 22%;"></div>
+<div class="absolute w-1.5 h-3.5 bg-safety-green rounded-none shadow-[0_0_4px_#10B981]" style="left: calc(22% - 3px);"></div>
+</div>
+<div class="flex justify-between items-center px-0.5 mt-1">
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">0</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-safety-green/80"></span><span class="font-readout-numeric text-[8px] text-safety-green font-semibold">22</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">50</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1 bg-matte-border/50"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/50">75</span></div>
+<div class="flex flex-col items-center"><span class="w-[1px] h-1.5 bg-matte-border"></span><span class="font-readout-numeric text-[8px] text-secondary-labels/70">100</span></div>
+</div>
+</div>
+<div class="flex items-center justify-between text-secondary-labels pt-0.5">
+<span class="font-label-mono-sm text-[9px] uppercase tracking-wider">HEADROOM: +14dB • NOMINAL LEVEL</span>
+<span class="font-label-mono-sm text-[9px] uppercase text-safety-green font-semibold tracking-wider">RESTFUL</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Current Phase Card -->
+<div class="flex flex-col bg-recessed-console-surface border border-[#1C2940] rounded-lg p-3.5 shadow-[inset_0_2px_8px_rgba(0,0,0,0.65)] gap-2.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-warm-amber text-[16px]">bedtime</span>
+<span class="font-label-mono-sm text-[10px] text-primary-typography font-bold tracking-wider uppercase">
+          CURRENT PHASE: REFLECTIVE TWILIGHT (21:40)
+        </span>
+</div>
+<div class="px-2 py-0.5 rounded bg-studio-body-dark border border-matte-border/60 shadow-inner">
+<span class="font-label-mono-sm text-[10px] text-safety-green font-bold tracking-wider">MELATONIN +18%</span>
+</div>
+</div>
+<!-- Acoustic Adjustment Advice Block -->
+<div class="bg-studio-body-dark/85 border border-matte-border/50 rounded p-2.5 flex items-start gap-2 shadow-inner">
+<span class="material-symbols-outlined text-laser-lavender text-[17px] shrink-0 mt-0.5">tune</span>
+<p class="font-body-md text-[12px] text-secondary-labels leading-relaxed">
+<span class="text-primary-typography font-semibold">Recommended Shift:</span> Dampen 4kHz treble shelf by <span class="font-readout-numeric text-warm-amber font-bold">-2.0dB</span> • Shift to ambient analog pads.
+      </p>
+</div>
+<!-- Tactile Precision Hardware Button -->
+<button class="w-full mt-1 py-3 px-3.5 rounded bg-elevated-control-bezel hover:bg-[#2A3B57] active:bg-[#1A263B] border border-matte-border flex items-center justify-between shadow-[0_2px_6px_rgba(0,0,0,0.5)] active:shadow-inner transition-all duration-100" id="dspPresetBtn" onclick="toggleDspPreset()">
+<div class="flex items-center gap-2">
+<div class="w-2.5 h-2.5 rounded-full bg-laser-lavender shadow-[0_0_8px_#A997D8] animate-pulse" id="dspLed"></div>
+<span class="font-label-mono-sm text-[11px] text-primary-typography font-bold tracking-wider uppercase">
+          ENGAGE CIRCADIAN DSP PRESET
+        </span>
+</div>
+<div class="flex items-center gap-1">
+<span class="font-label-mono-sm text-[11px] text-studio-cyan font-bold tracking-wider" id="dspStatusLabel">ACTIVE</span>
+<span class="material-symbols-outlined text-secondary-labels text-[15px]">chevron_right</span>
+</div>
+</button>
+</div>
+<!-- Telemetry Footer Note -->
+<div class="flex flex-col items-center justify-center pt-2 pb-1 gap-1 opacity-70">
+<div class="w-10 h-0.5 bg-matte-border rounded-full mb-1"></div>
+<span class="font-label-mono-sm text-[9px] text-secondary-labels tracking-widest text-center uppercase">
+      TUNEMIND CIRCADIAN ENGINE V4.8 • BIO-ACOUSTIC FIR KERNEL
+    </span>
+<span class="font-label-mono-sm text-[8.5px] text-secondary-labels/70 tracking-widest text-center uppercase">
+      ISO 226 EQUAL-LOUDNESS CONTOUR // ANALOG DRIFT CALIBRATED
+    </span>
+</div>
+</div>
+</main><!-- Bottom Hardware Console Navigation Bar --><nav class="fixed bottom-0 inset-x-0 z-50 pb-safe bg-[#0C1220]/95 backdrop-blur-xl border-t border-[#1C2940] shadow-[0_-4px_20px_rgba(0,0,0,0.6)]"><div class="grid grid-cols-4 items-center h-16 px-2 gap-1"><a class="flex flex-col items-center justify-center h-12 rounded text-secondary-labels hover:text-primary-typography transition-colors" href="#"><span class="material-symbols-outlined text-[20px]">equalizer</span><span class="font-label-mono-sm text-[9px] mt-0.5 tracking-wider uppercase">PULSE</span></a><a class="flex flex-col items-center justify-center h-12 rounded text-secondary-labels hover:text-primary-typography transition-colors" href="#"><span class="material-symbols-outlined text-[20px]">ac_unit</span><span class="font-label-mono-sm text-[9px] mt-0.5 tracking-wider uppercase">LAB</span></a><a class="flex flex-col items-center justify-center h-12 rounded text-secondary-labels hover:text-primary-typography transition-colors" href="#"><span class="material-symbols-outlined text-[20px]">graphic_eq</span><span class="font-label-mono-sm text-[9px] mt-0.5 tracking-wider uppercase">LEDGER</span></a><a aria-current="page" class="flex flex-col items-center justify-center h-12 rounded bg-hardware-module-faceplate border border-matte-border text-laser-lavender shadow-[inset_0_1px_0_rgba(169,151,216,0.3),0_0_12px_rgba(169,151,216,0.2)]" href="#"><span class="material-symbols-outlined text-[20px]">ssid_chart</span><span class="font-label-mono-sm text-[9px] mt-0.5 tracking-wider uppercase font-bold">INTEL</span></a></div></nav><script>
+  function inspectDay(day, hours, note, loadPercent) {
+    var dayLabel = document.getElementById('inspectDayName');
+    var noteLabel = document.getElementById('inspectNote');
+    if (dayLabel && noteLabel) {
+      dayLabel.innerText = day + ' (' + hours + ')';
+      noteLabel.innerText = note;
+    }
+  }
+
+  function toggleDspPreset() {
+    var led = document.getElementById('dspLed');
+    var label = document.getElementById('dspStatusLabel');
+    if (!led || !label) return;
+
+    if (label.innerText === 'ACTIVE') {
+      label.innerText = 'BYPASS';
+      label.className = 'font-label-mono-sm text-[11px] text-secondary-labels tracking-wider font-semibold';
+      led.className = 'w-2.5 h-2.5 rounded-full bg-matte-border shadow-none';
+    } else {
+      label.innerText = 'ACTIVE';
+      label.className = 'font-label-mono-sm text-[11px] text-studio-cyan font-bold tracking-wider';
+      led.className = 'w-2.5 h-2.5 rounded-full bg-laser-lavender shadow-[0_0_8px_#A997D8] animate-pulse';
+    }
+  }
+</script></body></html>

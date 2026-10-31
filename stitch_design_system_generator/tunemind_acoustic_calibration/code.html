@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_blank" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { colors: { "secondary-fixed": "#ffddb8", "on-secondary-fixed": "#2b1700", "surface-container": "#1a1f2e", "outline-variant": "#49454f", "surface-bright": "#333949", "on-tertiary-container": "#003e42", "inverse-on-surface": "#2a303f", "tertiary": "#99d0d4", "on-tertiary-fixed": "#002022", "surface-container-highest": "#2f3544", "on-surface": "#dde2f6", "on-primary-fixed": "#200f49", "primary-fixed": "#e9ddff", "surface-container-lowest": "#080e1c", "on-secondary": "#472a00", "warning-amber": "#F59E0B", "on-error": "#690005", "tertiary-fixed": "#b5ecf0", "hardware-module-faceplate": "#1C2940", "clip-red": "#CF7778", "on-primary-container": "#3d2d67", "primary-typography": "#E9EDF5", "surface-dim": "#0d1321", "warm-amber": "#D5A66F", "error-container": "#93000a", "secondary": "#efbe85", "primary-container": "#a997d8", "safety-green": "#10B981", "on-secondary-container": "#e0b078", "surface-container-low": "#151b2a", "background": "#0d1321", "on-error-container": "#ffdad6", "on-secondary-fixed-variant": "#614012", "on-primary": "#36265f", "surface-container-high": "#242a39", "tertiary-fixed-dim": "#99d0d4", "studio-body-dark": "#0C1220", "on-background": "#dde2f6", "surface": "#0d1321", "inverse-surface": "#dde2f6", "elevated-control-bezel": "#25344D", "inverse-primary": "#655591", "on-primary-fixed-variant": "#4d3d77", "secondary-container": "#644214", "primary": "#cfbcff", "on-tertiary": "#00373a", "on-surface-variant": "#cac4d0", "secondary-labels": "#A1AEC2", "surface-tint": "#cfbcff", "primary-fixed-dim": "#cfbcff", "tertiary-container": "#74aaae", "error": "#ffb4ab", "surface-variant": "#2f3544", "laser-lavender": "#A997D8", "on-tertiary-fixed-variant": "#124e52", "outline": "#948f9a", "recessed-console-surface": "#131D30", "secondary-fixed-dim": "#efbe85", "studio-cyan": "#83B9BD" }, borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, spacing: { "space-xl": "2.5rem", "space-lg": "1.5rem", "space-sm": "0.5rem", "space-md": "1rem", "gutter": "1rem", "space-xs": "0.25rem", "margin": "1.25rem" }, fontFamily: { "label-mono-sm": ["JetBrains Mono"], "label-mono-lg": ["JetBrains Mono"], "body-lg": ["Plus Jakarta Sans"], "display-xl": ["Plus Jakarta Sans"], "readout-numeric": ["JetBrains Mono"], "headline-md": ["Plus Jakarta Sans"], "body-md": ["Plus Jakarta Sans"], "headline-lg": ["Plus Jakarta Sans"] }, fontSize: { "label-mono-sm": ["11px", { lineHeight: "16px", letterSpacing: "0.08em", fontWeight: "500" }], "label-mono-lg": ["13px", { lineHeight: "18px", letterSpacing: "0.05em", fontWeight: "500" }], "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }], "display-xl": ["36px", { lineHeight: "44px", letterSpacing: "-0.02em", fontWeight: "600" }], "readout-numeric": ["28px", { lineHeight: "32px", letterSpacing: "0.02em", fontWeight: "700" }], "headline-md": ["18px", { lineHeight: "24px", fontWeight: "500" }], "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }], "headline-lg": ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }] } } } };</script><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-studio-body-dark text-on-surface font-body-md text-body-md min-h-screen flex flex-col antialiased selection:bg-primary selection:text-on-primary"><main class="flex-1 flex flex-col relative w-full bg-studio-body-dark pt-safe pb-safe"><div class="flex flex-col w-full text-on-surface select-none pb-8">
+<!-- TOP TELEMETRY STRIP -->
+<div class="px-margin pt-4 pb-3 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-safety-green shadow-[0_0_8px_rgba(16,185,129,0.85)] animate-pulse"></span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-widest uppercase">
+        TUNEMIND // CALIBRATION PROTOCOL 1.0
+      </span>
+</div>
+<div class="px-2 py-0.5 rounded-DEFAULT bg-recessed-console-surface flex items-center">
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan font-bold tracking-wider">
+        SYNC: READY 48kHz / 24-BIT
+      </span>
+</div>
+</div>
+<!-- RECESSED CHASSIS GROOVE -->
+<div class="mx-margin h-[1px] bg-surface-container-high/60 my-2"></div>
+<!-- ACOUSTIC SENSOR DIAL MODULE (Bespoke Hardware Dial) -->
+<div class="relative w-full flex flex-col items-center justify-center py-5">
+<!-- Knurled Bezel Well Container -->
+<div class="relative w-[240px] h-[240px] rounded-full p-2.5 bg-gradient-to-b from-elevated-control-bezel to-surface-container-lowest shadow-[inset_0_3px_8px_rgba(0,0,0,0.85),0_1px_2px_rgba(255,255,255,0.06)] flex items-center justify-center">
+<!-- Outer Radial Scale Marks SVG -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none" viewbox="0 0 240 240">
+<!-- 60 Radial Calibration Ticks -->
+<g transform="translate(120, 120)">
+<!-- Generated via systematic geometry -->
+<circle class="text-surface-container-highest" cx="0" cy="0" fill="none" r="108" stroke="currentColor" stroke-dasharray="2 9.5" stroke-width="0.75"></circle>
+<circle class="text-surface-container-high" cx="0" cy="0" fill="none" opacity="0.8" r="102" stroke="currentColor" stroke-dasharray="1 17.5" stroke-width="1.5"></circle>
+</g>
+<!-- Frequency Anchors (Etched Micro Labels) -->
+<text class="font-label-mono-sm fill-secondary-labels text-[8px] tracking-wider uppercase" text-anchor="middle" x="120" y="22">0 dB</text>
+<text class="font-label-mono-sm fill-secondary-labels text-[8px] tracking-wider" text-anchor="middle" x="214" y="123">5kHz</text>
+<text class="font-label-mono-sm fill-secondary-labels text-[8px] tracking-wider uppercase" text-anchor="middle" x="120" y="225">+12 dB</text>
+<text class="font-label-mono-sm fill-secondary-labels text-[8px] tracking-wider" text-anchor="middle" x="26" y="123">100Hz</text>
+</svg>
+<!-- Recessed Aluminum Well (Knurled Cavity) -->
+<div class="relative w-[190px] h-[190px] rounded-full bg-recessed-console-surface shadow-[inset_0_4px_16px_rgba(0,0,0,0.9),inset_0_0_2px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden">
+<!-- Subtle Machined Circular Grooves -->
+<div class="absolute inset-2 rounded-full border border-surface-container-high/40 pointer-events-none"></div>
+<div class="absolute inset-5 rounded-full border border-surface-container-highest/20 pointer-events-none"></div>
+<!-- Lissajous / Soundwave Vector Visualization -->
+<div class="relative w-28 h-20 flex items-center justify-center">
+<svg class="w-full h-full" fill="none" viewbox="0 0 120 80">
+<!-- Ambient Glow filter -->
+<defs>
+<filter height="140%" id="laser-glow" width="140%" x="-20%" y="-20%">
+<fegaussianblur result="blur" stddeviation="2.5"></fegaussianblur>
+<femerge>
+<femergenode in="blur"></femergenode>
+<femergenode in="SourceGraphic"></femergenode>
+</femerge>
+</filter>
+</defs>
+<!-- Harmonics Lissajous Path -->
+<path class="text-laser-lavender" d="M 10,40 Q 25,12 40,40 T 70,40 T 100,40 T 110,40" filter="url(#laser-glow)" id="lissajous-wave" stroke="currentColor" stroke-linecap="round" stroke-width="1.75">
+<animate attributename="d" dur="4.5s" repeatcount="indefinite" values="
+                  M 10,40 Q 25,10 40,40 T 70,40 T 100,40 T 110,40;
+                  M 10,40 Q 30,68 55,36 T 85,44 T 102,38 T 110,40;
+                  M 10,40 Q 38,18 60,42 T 90,38 T 105,42 T 110,40;
+                  M 10,40 Q 25,10 40,40 T 70,40 T 100,40 T 110,40"></animate>
+</path>
+<!-- Cyan Resonance Harmonic Underlay -->
+<path class="text-studio-cyan" d="M 12,40 C 28,58 45,22 62,40 C 78,56 94,24 108,40" opacity="0.75" stroke="currentColor" stroke-linecap="round" stroke-width="1.2">
+<animate attributename="d" dur="3.2s" repeatcount="indefinite" values="
+                  M 12,40 C 28,58 45,22 62,40 C 78,56 94,24 108,40;
+                  M 12,40 C 32,24 50,56 68,40 C 84,26 98,54 108,40;
+                  M 12,40 C 28,58 45,22 62,40 C 78,56 94,24 108,40"></animate>
+</path>
+<!-- Phase Zero Center Mark -->
+<circle class="fill-laser-lavender" cx="60" cy="40" opacity="0.6" r="1.5"></circle>
+</svg>
+</div>
+<!-- Telemetry Floor Readout Inside Recess -->
+<div class="mt-1 flex flex-col items-center">
+<div class="flex items-center gap-1">
+<span class="font-label-mono-sm text-[10px] tracking-widest text-secondary-labels uppercase">FLOOR:</span>
+<span class="font-readout-numeric text-[13px] text-primary-typography tracking-tight" id="noise-floor-readout">-42.8 dBFS</span>
+</div>
+<span class="font-label-mono-sm text-[9px] text-studio-cyan tracking-widest uppercase">RES: 99.4% OPTIMAL</span>
+</div>
+</div>
+</div>
+<!-- Micro Hardware Calibration Index Pointer -->
+<div class="flex items-center gap-1.5 mt-3">
+<div class="w-1.5 h-1.5 bg-laser-lavender rounded-full shadow-[0_0_6px_rgba(169,151,216,0.8)]"></div>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-widest uppercase">AWA-28 ACOUSTIC SENSOR BUS</span>
+</div>
+</div>
+<!-- RECESSED CHASSIS GROOVE -->
+<div class="mx-margin h-[1px] bg-surface-container-high/60 my-2"></div>
+<!-- CONTENT & HARDWARE NARRATIVE -->
+<div class="px-margin pt-2 flex flex-col gap-2">
+<h2 class="font-headline-lg text-headline-lg text-primary-typography font-semibold tracking-tight">
+      Calibrate Your Auditory Anchor
+    </h2>
+<p class="font-body-md text-body-md text-secondary-labels leading-relaxed">
+      TuneMind monitors song fatigue, peak spectral density, and acoustic saturation across your music players in real-time.
+    </p>
+</div>
+<!-- SOURCE SELECTOR MODULE (Continuous Recessed Strip & Tactile Pills) -->
+<div class="px-margin pt-5 flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-widest uppercase">
+        ACTIVE STREAM INGESTION
+      </span>
+<span class="font-label-mono-sm text-[10px] text-safety-green tracking-wider uppercase">
+        AUTO-HOOK
+      </span>
+</div>
+<!-- Recessed Switch Bay with 3 PBT Toggle Pills -->
+<div class="w-full bg-surface-container-lowest p-1.5 rounded-lg flex items-center justify-between gap-1.5 shadow-[inset_0_2px_6px_rgba(0,0,0,0.85)]">
+<!-- Option 1: Spotify (Active Deboss State) -->
+<button class="source-pill flex-1 py-2.5 px-2 rounded bg-hardware-module-faceplate shadow-[inset_0_2px_4px_rgba(0,0,0,0.65)] flex items-center justify-center gap-1.5 transition-all text-left group" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,1)]"></span>
+<span class="font-label-mono-lg text-label-mono-lg text-primary-typography font-medium tracking-tight">Spotify</span>
+</button>
+<!-- Option 2: Apple Music (Resting Brushed State) -->
+<button class="source-pill flex-1 py-2.5 px-2 rounded bg-surface-container-high/30 hover:bg-surface-container-high/60 active:bg-hardware-module-faceplate flex items-center justify-center gap-1.5 transition-all text-left" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-variant"></span>
+<span class="font-label-mono-lg text-label-mono-lg text-secondary-labels tracking-tight">Apple Music</span>
+</button>
+<!-- Option 3: YouTube Music (Resting Brushed State) -->
+<button class="source-pill flex-1 py-2.5 px-2 rounded bg-surface-container-high/30 hover:bg-surface-container-high/60 active:bg-hardware-module-faceplate flex items-center justify-center gap-1.5 transition-all text-left" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-variant"></span>
+<span class="font-label-mono-lg text-label-mono-lg text-secondary-labels tracking-tight">YouTube</span>
+</button>
+</div>
+</div>
+<!-- REAL-TIME TELEMETRY STRIP (LED Spectrum Meters) -->
+<div class="px-margin pt-4 flex flex-col gap-1.5">
+<div class="flex items-center justify-between text-secondary-labels font-label-mono-sm text-[10px] tracking-wider uppercase">
+<span>HARMONIC WEIGHT</span>
+<span class="text-warm-amber">94.2 dB DYN</span>
+</div>
+<!-- Segmented VU Micro-Meter -->
+<div class="w-full h-2 rounded bg-surface-container-lowest p-0.5 flex gap-1 shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]">
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-studio-cyan/80"></div>
+<div class="flex-1 rounded-DEFAULT bg-warm-amber/90 shadow-[0_0_4px_rgba(213,166,111,0.6)]"></div>
+<div class="flex-1 rounded-DEFAULT bg-warm-amber/90 shadow-[0_0_4px_rgba(213,166,111,0.6)]"></div>
+<div class="flex-1 rounded-DEFAULT bg-surface-container-high/40"></div>
+<div class="flex-1 rounded-DEFAULT bg-surface-container-high/40"></div>
+<div class="flex-1 rounded-DEFAULT bg-clip-red/30"></div>
+<div class="flex-1 rounded-DEFAULT bg-clip-red/20"></div>
+</div>
+</div>
+<!-- RECESSED CHASSIS GROOVE -->
+<div class="mx-margin h-[1px] bg-surface-container-high/60 my-4"></div>
+<!-- PRIMARY ACTION BUTTON (Tactile Industrial Switch) -->
+<div class="px-margin pt-1 flex flex-col items-center gap-3">
+<button class="w-full relative group overflow-hidden rounded-xl bg-gradient-to-b from-elevated-control-bezel to-hardware-module-faceplate p-0.5 transition-transform duration-100 active:scale-[0.98] shadow-[0_4px_14px_rgba(0,0,0,0.6)]" id="initialize-daemon-btn" type="button">
+<!-- Knurled Texture Border Emulation -->
+<div class="w-full py-3.5 px-4 rounded-[10px] bg-recessed-console-surface flex items-center justify-center gap-2 relative transition-all group-active:bg-surface-container-lowest">
+<!-- Amber Ambient Backlight Glow behind Text -->
+<div class="absolute inset-0 bg-warm-amber/5 opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity pointer-events-none"></div>
+<!-- Micro Mechanical Icon -->
+<span class="material-symbols-outlined text-warm-amber text-lg" style="font-variation-settings: 'FILL' 1;">
+          settings_input_component
+        </span>
+<!-- Switch Headline Label -->
+<span class="font-label-mono-lg text-label-mono-lg text-primary-typography font-bold tracking-wider uppercase group-active:text-warm-amber transition-colors">
+          INITIALIZE ACOUSTIC DAEMON
+        </span>
+<!-- Status Dot Indicator -->
+<span class="w-2 h-2 rounded-full bg-warm-amber shadow-[0_0_8px_rgba(213,166,111,0.9)] ml-1"></span>
+</div>
+</button>
+<!-- SECONDARY TACTILE FOOTER SPECIFICATION ENGRAVING -->
+<div class="flex items-center gap-2 pt-1 text-outline-variant">
+<span class="material-symbols-outlined text-[13px] text-secondary-labels">
+        memory
+      </span>
+<span class="font-label-mono-sm text-[9px] text-secondary-labels tracking-widest uppercase">
+        HARDWARE ENGINE READY • LATENCY &lt; 1.2MS
+      </span>
+</div>
+</div>
+<!-- CLIENT-SIDE TACTILE FEEDBACK INTERACTION SCRIPT -->
+<script>
+    (function() {
+      // Toggle logic for source pills
+      const pills = document.querySelectorAll('.source-pill');
+      pills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          pills.forEach(p => {
+            p.className = 'source-pill flex-1 py-2.5 px-2 rounded bg-surface-container-high/30 hover:bg-surface-container-high/60 active:bg-hardware-module-faceplate flex items-center justify-center gap-1.5 transition-all text-left';
+            const dot = p.querySelector('span:first-child');
+            const txt = p.querySelector('span:last-child');
+            if (dot) dot.className = 'w-1.5 h-1.5 rounded-full bg-surface-variant';
+            if (txt) txt.className = 'font-label-mono-lg text-label-mono-lg text-secondary-labels tracking-tight';
+          });
+          pill.className = 'source-pill flex-1 py-2.5 px-2 rounded bg-hardware-module-faceplate shadow-[inset_0_2px_4px_rgba(0,0,0,0.65)] flex items-center justify-center gap-1.5 transition-all text-left';
+          const activeDot = pill.querySelector('span:first-child');
+          const activeTxt = pill.querySelector('span:last-child');
+          if (activeDot) activeDot.className = 'w-1.5 h-1.5 rounded-full bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,1)]';
+          if (activeTxt) activeTxt.className = 'font-label-mono-lg text-label-mono-lg text-primary-typography font-medium tracking-tight';
+        });
+      });
+
+      // Subtle fluctuation on noise floor readout to mimic live DSP hardware telemetry
+      const floorEl = document.getElementById('noise-floor-readout');
+      if (floorEl) {
+        setInterval(() => {
+          const val = (-42.8 + (Math.random() * 0.8 - 0.4)).toFixed(1);
+          floorEl.textContent = val + ' dBFS';
+        }, 1800);
+      }
+
+      // Initialize Button tactile feedback
+      const initBtn = document.getElementById('initialize-daemon-btn');
+      if (initBtn) {
+        initBtn.addEventListener('click', function() {
+          const label = this.querySelector('span:nth-child(2)');
+          if (label) {
+            const originalText = label.textContent;
+            label.textContent = "DAEMON ENGAGED // 48kHz ACTIVE";
+            setTimeout(() => {
+              label.textContent = originalText;
+            }, 2400);
+          }
+        });
+      }
+    })();
+  </script>
+</div></main></body></html>

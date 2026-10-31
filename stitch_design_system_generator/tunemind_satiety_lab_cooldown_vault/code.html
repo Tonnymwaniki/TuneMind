@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100%;margin:0;padding:0;background-color:#0d1321;}body{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { colors: { "surface-container-low": "#151b2a", "secondary-labels": "#A1AEC2", "surface-container": "#1a1f2e", "safety-green": "#10B981", "laser-lavender": "#A997D8", "on-tertiary-fixed-variant": "#124e52", "surface-bright": "#333949", "surface-tint": "#cfbcff", "on-error-container": "#ffdad6", "on-secondary-fixed-variant": "#614012", "on-secondary-fixed": "#2b1700", "on-primary-fixed": "#200f49", "primary-typography": "#E9EDF5", "on-tertiary": "#00373a", "hardware-module-faceplate": "#1C2940", "primary-fixed-dim": "#cfbcff", "studio-cyan": "#83B9BD", "studio-body-dark": "#0C1220", "secondary": "#efbe85", "primary-container": "#a997d8", "on-primary-fixed-variant": "#4d3d77", "on-surface-variant": "#cac4d0", "surface-container-highest": "#2f3544", "surface": "#0d1321", "tertiary-fixed": "#b5ecf0", "secondary-container": "#644214", "on-primary": "#36265f", "surface-container-high": "#242a39", "primary-fixed": "#e9ddff", "tertiary-fixed-dim": "#99d0d4", "on-surface": "#dde2f6", "clip-red": "#CF7778", "tertiary": "#99d0d4", "tertiary-container": "#74aaae", "surface-container-lowest": "#080e1c", "outline-variant": "#49454f", "secondary-fixed": "#ffddb8", "on-tertiary-fixed": "#002022", "warning-amber": "#F59E0B", "inverse-surface": "#dde2f6", "inverse-primary": "#655591", "on-primary-container": "#3d2d67", "on-background": "#dde2f6", "outline": "#948f9a", "on-tertiary-container": "#003e42", "inverse-on-surface": "#2a303f", "surface-variant": "#2f3544", "background": "#0d1321", "error": "#ffb4ab", "error-container": "#93000a", "warm-amber": "#D5A66F", "surface-dim": "#0d1321", "primary": "#cfbcff", "recessed-console-surface": "#131D30", "on-secondary": "#472a00", "on-error": "#690005", "secondary-fixed-dim": "#efbe85", "on-secondary-container": "#e0b078", "elevated-control-bezel": "#25344D" }, borderRadius: { DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "0.75rem" }, spacing: { "space-md": "1rem", "margin": "1.25rem", "space-sm": "0.5rem", "space-xl": "2.5rem", "gutter": "1rem", "space-lg": "1.5rem", "space-xs": "0.25rem" }, fontFamily: { "label-mono-sm": ["JetBrains Mono"], "readout-numeric": ["JetBrains Mono"], "display-xl": ["Plus Jakarta Sans"], "body-lg": ["Plus Jakarta Sans"], "label-mono-lg": ["JetBrains Mono"], "body-md": ["Plus Jakarta Sans"], "headline-lg": ["Plus Jakarta Sans"], "headline-md": ["Plus Jakarta Sans"] }, fontSize: { "label-mono-sm": ["11px", { lineHeight: "16px", letterSpacing: "0.08em", fontWeight: "500" }], "readout-numeric": ["28px", { lineHeight: "32px", letterSpacing: "0.02em", fontWeight: "700" }], "display-xl": ["36px", { lineHeight: "44px", letterSpacing: "-0.02em", fontWeight: "600" }], "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }], "label-mono-lg": ["13px", { lineHeight: "18px", letterSpacing: "0.05em", fontWeight: "500" }], "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }], "headline-lg": ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }], "headline-md": ["18px", { lineHeight: "24px", fontWeight: "500" }] } } } }</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col antialiased selection:bg-laser-lavender/20 selection:text-laser-lavender"><header class="fixed top-0 w-full z-50 pt-safe bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.35)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><div class="w-2 h-2 rounded-full bg-studio-cyan animate-pulse"></div><div class="flex flex-col"><span class="font-label-mono-sm text-label-mono-sm text-studio-cyan uppercase">SAT_LAB // TELEMETRY</span><h1 class="font-headline-md text-headline-md tracking-tight text-primary-typography uppercase">Cooldown Vault</h1></div></div><div class="flex items-center gap-space-sm"><div class="flex items-center px-space-xs py-0.5 rounded bg-surface-container-lowest text-studio-cyan font-label-mono-sm text-label-mono-sm"><span class="material-symbols-outlined text-[14px] mr-1">graphic_eq</span><span>432Hz</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 w-full bg-surface pt-16 pb-24"><div class="flex flex-col w-full pb-8 select-none">
+<!-- Top Telemetry Status Rail -->
+<div class="px-margin pt-4 pb-2 flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-studio-cyan animate-ping"></span>
+<span class="w-1.5 h-1.5 rounded-full bg-studio-cyan -ml-3"></span>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan tracking-wider uppercase">CRYOGENIC COOLDOWN PROTOCOL</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase tracking-widest opacity-80">VAULT // 48kHz ISO</span>
+</div>
+<div class="mt-1">
+<h2 class="font-headline-md text-headline-md text-primary-typography uppercase tracking-wider font-semibold">
+        SATIETY LAB // AUDITORY REST
+      </h2>
+<p class="font-body-md text-body-md text-secondary-labels mt-0.5 opacity-90">
+        Preventing melodic burnout by quarantining overplayed tracks.
+      </p>
+</div>
+</div>
+<!-- Centerpiece: Tachometer Gauge Module (Integrated Recessed Well) -->
+<div class="px-margin my-3">
+<div class="relative bg-hardware-module-faceplate/60 rounded-xl p-4 shadow-[inset_0_2px_8px_rgba(0,0,0,0.6),inset_0_-1px_0_rgba(131,185,189,0.15)] overflow-hidden">
+<!-- Ambient Backlight Field -->
+<div class="absolute -top-12 left-1/2 -translate-x-1/2 w-48 h-32 bg-studio-cyan/10 blur-2xl pointer-events-none rounded-full"></div>
+<!-- Tachometer SVG Arc & Etchings -->
+<div class="relative flex flex-col items-center">
+<div class="w-full max-w-[280px] h-[138px] relative flex items-end justify-center">
+<svg class="w-full h-full overflow-visible" viewbox="0 0 240 130">
+<defs>
+<lineargradient id="gaugeSweep" x1="0%" x2="100%" y1="100%" y2="100%">
+<stop offset="0%" stop-color="#83B9BD"></stop>
+<stop offset="55%" stop-color="#83B9BD"></stop>
+<stop offset="85%" stop-color="#A997D8"></stop>
+<stop offset="100%" stop-color="#CF7778"></stop>
+</lineargradient>
+<filter height="140%" id="cyanGlow" width="140%" x="-20%" y="-20%">
+<fegaussianblur result="blur" stddeviation="3"></fegaussianblur>
+<fecomposite in="SourceGraphic" in2="blur" operator="over"></fecomposite>
+</filter>
+</defs>
+<!-- Base Gauge Track -->
+<path d="M 25 120 A 95 95 0 0 1 215 120" fill="none" stroke="#131D30" stroke-linecap="round" stroke-width="12"></path>
+<!-- Tick Marks -->
+<!-- 0% -->
+<line opacity="0.4" stroke="#A1AEC2" stroke-width="1.5" x1="25" x2="35" y1="120" y2="120"></line>
+<!-- 25% -->
+<line opacity="0.4" stroke="#A1AEC2" stroke-width="1.5" x1="53" x2="60" y1="53" y2="60"></line>
+<!-- 50% -->
+<line opacity="0.4" stroke="#A1AEC2" stroke-width="1.5" x1="120" x2="120" y1="25" y2="35"></line>
+<!-- 75% -->
+<line opacity="0.4" stroke="#A1AEC2" stroke-width="1.5" x1="187" x2="180" y1="53" y2="60"></line>
+<!-- 100% -->
+<line opacity="0.7" stroke="#CF7778" stroke-width="1.5" x1="215" x2="205" y1="120" y2="120"></line>
+<!-- Active Low Velocity Arc (0 to ~32%) -->
+<path d="M 25 120 A 95 95 0 0 1 78 46" fill="none" filter="url(#cyanGlow)" stroke="url(#gaugeSweep)" stroke-linecap="round" stroke-width="12"></path>
+<!-- Hub Ring & Center Needle Anchor -->
+<circle cx="120" cy="120" fill="#0C1220" r="14"></circle>
+<circle cx="120" cy="120" fill="#83B9BD" r="7"></circle>
+<!-- Needle pointer locked at low velocity (~28 deg) -->
+<g transform="rotate(-52 120 120)">
+<polygon fill="#83B9BD" points="118.5,120 121.5,120 120.5,38 119.5,38"></polygon>
+<line stroke="#E9EDF5" stroke-linecap="round" stroke-width="2" x1="120" x2="120" y1="36" y2="28"></line>
+</g>
+</svg>
+<!-- Floating Readout Hub at bottom arc -->
+<div class="absolute bottom-0 text-center pb-1">
+<div class="flex items-center justify-center gap-1.5 mb-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.9)]"></span>
+<span class="font-label-mono-sm text-label-mono-sm text-primary-typography uppercase tracking-wider font-bold">BURNOUT VELOCITY: LOW</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan opacity-80">STABLE EQUILIBRIUM</span>
+</div>
+</div>
+<!-- Telemetry Data Strip -->
+<div class="w-full mt-3 pt-3 flex items-center justify-between bg-recessed-console-surface/80 px-3 py-2 rounded-lg shadow-inner">
+<div class="flex flex-col">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">RECOVERY QUEUE</span>
+<span class="font-label-mono-lg text-label-mono-lg text-primary-typography font-medium">8 Tracks • 4.2d Avg</span>
+</div>
+<div class="h-6 w-px bg-elevated-control-bezel"></div>
+<div class="flex flex-col items-end">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">DELTA FATIGUE</span>
+<span class="font-label-mono-lg text-label-mono-lg text-studio-cyan font-bold tracking-tight">-14.2% [1.1x]</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Vault Carousel Section Header -->
+<div class="px-margin mt-3 mb-2 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan tracking-wider font-medium">QUARANTINED CARTRIDGES</span>
+<span class="px-1.5 py-0.2 rounded bg-surface-container-highest font-label-mono-sm text-label-mono-sm text-primary-typography">8 ACTIVE</span>
+</div>
+<div class="flex items-center gap-2 text-secondary-labels">
+<span class="font-label-mono-sm text-label-mono-sm tracking-widest uppercase opacity-70">AUTO-REVIVE</span>
+<span class="w-2 h-2 rounded-full bg-safety-green"></span>
+</div>
+</div>
+<!-- Quarantined Vault Cartridges (Tactile Horizontal Rail) -->
+<div class="w-full overflow-x-auto flex gap-3 px-margin py-1 no-scrollbar scroll-smooth">
+<!-- Cartridge 1: The Weeknd -->
+<div class="min-w-[260px] max-w-[260px] bg-hardware-module-faceplate/75 rounded-xl p-3.5 flex flex-col justify-between shadow-[inset_0_1px_1px_rgba(131,185,189,0.3),inset_0_-2px_6px_rgba(0,0,0,0.8)] relative overflow-hidden backdrop-blur-md">
+<!-- Frost condensation accent overlay -->
+<div class="absolute -right-6 -bottom-6 w-28 h-28 bg-studio-cyan/5 rounded-full blur-xl pointer-events-none"></div>
+<!-- Top Row: Artwork + Identity -->
+<div>
+<div class="flex items-start gap-3">
+<div class="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-surface-container-lowest shadow-inner">
+<img class="w-full h-full object-cover opacity-85" data-alt="Album art for Blinding Lights by The Weeknd, featuring a dimly lit neon red cinematic city night scene with moody crimson reflections and aesthetic grain, styled with a cool icy studio telemetry glare." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCz2duX7OouGbwP9k_ywjfIDSCSPFR5FiIxJRct2gkwP6RZaSgERUngzWuLhQ3oPlVkR0UNt9yirROXZyekireQwtr2rLAuJotGHzkD0ZT8oCkihr3ajLnth72ouV4N4cmixBZLtmXJYN6MNvLiPdtTsYZ05GFb8-gtwiX5OEjSREqXUMUKH6v7j2dgWWcYC1DQWVuuN2obhl0DYXcPodkntObG09xtYzItmYJrVvvz"/>
+<!-- Frost scanline effect -->
+<div class="absolute inset-0 bg-gradient-to-t from-studio-cyan/20 via-transparent to-transparent pointer-events-none"></div>
+</div>
+<div class="flex flex-col min-w-0 pr-1">
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender uppercase tracking-wider">CELL // 01</span>
+<h3 class="font-headline-md text-headline-md text-primary-typography truncate font-medium text-[15px] leading-tight mt-0.5">Blinding Lights</h3>
+<span class="font-body-md text-body-md text-secondary-labels text-[12px] truncate">The Weeknd</span>
+</div>
+</div>
+<!-- Cooldown Radial Progress Center -->
+<div class="my-4 flex items-center justify-between bg-recessed-console-surface/90 rounded-lg p-2.5 shadow-inner">
+<div class="flex flex-col">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">REMAINING</span>
+<span class="font-readout-numeric text-readout-numeric text-[20px] text-primary-typography leading-tight font-bold">3.5<span class="text-secondary-labels text-label-mono-sm font-normal"> / 5.0d</span></span>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan mt-0.5 font-medium">70% Recovered</span>
+</div>
+<!-- Circular Radial Progress -->
+<div class="relative w-12 h-12 flex items-center justify-center">
+<svg class="w-12 h-12 -rotate-90" viewbox="0 0 36 36">
+<path class="text-surface-bright" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3"></path>
+<path class="text-studio-cyan" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-dasharray="70, 100" stroke-linecap="round" stroke-width="3.2"></path>
+</svg>
+<span class="absolute font-label-mono-sm text-[10px] text-primary-typography font-bold">70%</span>
+</div>
+</div>
+</div>
+<!-- Tactile Release Button -->
+<button class="w-full active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-elevated-control-bezel hover:bg-surface-bright shadow-[0_2px_4px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.08)]" onclick="this.classList.toggle('bg-safety-green/20'); this.querySelector('.label').textContent = this.querySelector('.label').textContent === 'RELEASE FROM VAULT' ? 'RESTORED TO ROTATION' : 'RELEASE FROM VAULT'">
+<span class="material-symbols-outlined text-[15px] text-studio-cyan">lock_open</span>
+<span class="label font-label-mono-sm text-label-mono-sm text-primary-typography uppercase tracking-wider font-medium">RELEASE FROM VAULT</span>
+</button>
+</div>
+<!-- Cartridge 2: Harry Styles -->
+<div class="min-w-[260px] max-w-[260px] bg-hardware-module-faceplate/75 rounded-xl p-3.5 flex flex-col justify-between shadow-[inset_0_1px_1px_rgba(131,185,189,0.3),inset_0_-2px_6px_rgba(0,0,0,0.8)] relative overflow-hidden backdrop-blur-md">
+<div class="absolute -right-6 -bottom-6 w-28 h-28 bg-laser-lavender/5 rounded-full blur-xl pointer-events-none"></div>
+<div>
+<div class="flex items-start gap-3">
+<div class="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-surface-container-lowest shadow-inner">
+<img class="w-full h-full object-cover opacity-85" data-alt="Album art for As It Was by Harry Styles, minimalist retro red and blue abstract architecture geometry with soft pastel depth and subtle cool frosted glass texture." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-VqXKf55ZXQjWdkRtvCfhICiaS1KcO2hZU1GjKiTerSgp9H7HCHOQO4tNiD4YUush0Zn9NBpvdN9leL9W4J9uHo-hO-kBb-Ko0pHyEtHQZ2EGwZBXQn4HSbssls_JZYAiIh70RPge9w6EM3Eusw0ij4OuVvVWtUeKd0Lnc904idZyqOrwx0M2gV5uEFmCZxeglovqZ8794xaL_WLTMGG8GU6egpESjRG3DD-YVODf"/>
+<div class="absolute inset-0 bg-gradient-to-t from-studio-cyan/20 via-transparent to-transparent pointer-events-none"></div>
+</div>
+<div class="flex flex-col min-w-0 pr-1">
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender uppercase tracking-wider">CELL // 02</span>
+<h3 class="font-headline-md text-headline-md text-primary-typography truncate font-medium text-[15px] leading-tight mt-0.5">As It Was</h3>
+<span class="font-body-md text-body-md text-secondary-labels text-[12px] truncate">Harry Styles</span>
+</div>
+</div>
+<div class="my-4 flex items-center justify-between bg-recessed-console-surface/90 rounded-lg p-2.5 shadow-inner">
+<div class="flex flex-col">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">REMAINING</span>
+<span class="font-readout-numeric text-readout-numeric text-[20px] text-primary-typography leading-tight font-bold">1.0<span class="text-secondary-labels text-label-mono-sm font-normal"> / 7.0d</span></span>
+<span class="font-label-mono-sm text-label-mono-sm text-safety-green mt-0.5 font-medium">85% Recovered</span>
+</div>
+<div class="relative w-12 h-12 flex items-center justify-center">
+<svg class="w-12 h-12 -rotate-90" viewbox="0 0 36 36">
+<path class="text-surface-bright" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3"></path>
+<path class="text-safety-green" fill="none" stroke="currentColor" stroke-dasharray="85, 100" stroke-linecap="round" stroke-width="3.2"></path>
+</svg>
+<span class="absolute font-label-mono-sm text-[10px] text-primary-typography font-bold">85%</span>
+</div>
+</div>
+</div>
+<button class="w-full active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-elevated-control-bezel hover:bg-surface-bright shadow-[0_2px_4px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.08)]" onclick="this.classList.toggle('bg-safety-green/20'); this.querySelector('.label').textContent = this.querySelector('.label').textContent === 'RELEASE FROM VAULT' ? 'RESTORED TO ROTATION' : 'RELEASE FROM VAULT'">
+<span class="material-symbols-outlined text-[15px] text-studio-cyan">lock_open</span>
+<span class="label font-label-mono-sm text-label-mono-sm text-primary-typography uppercase tracking-wider font-medium">RELEASE FROM VAULT</span>
+</button>
+</div>
+<!-- Cartridge 3: Dua Lipa -->
+<div class="min-w-[260px] max-w-[260px] bg-hardware-module-faceplate/75 rounded-xl p-3.5 flex flex-col justify-between shadow-[inset_0_1px_1px_rgba(131,185,189,0.3),inset_0_-2px_6px_rgba(0,0,0,0.8)] relative overflow-hidden backdrop-blur-md">
+<div class="absolute -right-6 -bottom-6 w-28 h-28 bg-studio-cyan/5 rounded-full blur-xl pointer-events-none"></div>
+<div>
+<div class="flex items-start gap-3">
+<div class="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-surface-container-lowest shadow-inner">
+<img class="w-full h-full object-cover opacity-85" data-alt="Album art for Levitating by Dua Lipa, space disco aesthetic with iridescent deep purple starry cosmos and futuristic automotive gloss highlights framed in cold tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCgEKjd2fhoXoLjc_4Wh727SOg5-zO-53dmARF1B6j8NP5VAjBMjlt_jh6QTDkXLJ1CUYKUeiq8IWdLE6zIafsotOYfx7QXXfk7bHfq-8CXEDVSjg0q23hdihwVSRZdGwpwY_YRsSOs95c59qDOF343gxjXsp3It-WSFwUrZeRNbPRfB4h-EQR0lcdpQpGijEYpRlASBh11WLvAOJKMtPtK839l4pIBfwt09RTqkp9"/>
+<div class="absolute inset-0 bg-gradient-to-t from-studio-cyan/20 via-transparent to-transparent pointer-events-none"></div>
+</div>
+<div class="flex flex-col min-w-0 pr-1">
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender uppercase tracking-wider">CELL // 03</span>
+<h3 class="font-headline-md text-headline-md text-primary-typography truncate font-medium text-[15px] leading-tight mt-0.5">Levitating</h3>
+<span class="font-body-md text-body-md text-secondary-labels text-[12px] truncate">Dua Lipa</span>
+</div>
+</div>
+<div class="my-4 flex items-center justify-between bg-recessed-console-surface/90 rounded-lg p-2.5 shadow-inner">
+<div class="flex flex-col">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">REMAINING</span>
+<span class="font-readout-numeric text-readout-numeric text-[20px] text-primary-typography leading-tight font-bold">3.8<span class="text-secondary-labels text-label-mono-sm font-normal"> / 5.0d</span></span>
+<span class="font-label-mono-sm text-label-mono-sm text-warning-amber mt-0.5 font-medium">24% Recovered</span>
+</div>
+<div class="relative w-12 h-12 flex items-center justify-center">
+<svg class="w-12 h-12 -rotate-90" viewbox="0 0 36 36">
+<path class="text-surface-bright" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3"></path>
+<path class="text-studio-cyan" fill="none" stroke="currentColor" stroke-dasharray="24, 100" stroke-linecap="round" stroke-width="3.2"></path>
+</svg>
+<span class="absolute font-label-mono-sm text-[10px] text-primary-typography font-bold">24%</span>
+</div>
+</div>
+</div>
+<button class="w-full active:translate-y-0.5 transition-all flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-elevated-control-bezel hover:bg-surface-bright shadow-[0_2px_4px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.08)]" onclick="this.classList.toggle('bg-safety-green/20'); this.querySelector('.label').textContent = this.querySelector('.label').textContent === 'RELEASE FROM VAULT' ? 'RESTORED TO ROTATION' : 'RELEASE FROM VAULT'">
+<span class="material-symbols-outlined text-[15px] text-studio-cyan">lock_open</span>
+<span class="label font-label-mono-sm text-label-mono-sm text-primary-typography uppercase tracking-wider font-medium">RELEASE FROM VAULT</span>
+</button>
+</div>
+</div>
+<!-- Manual Rest & Quarantine Duration Hardware Module -->
+<div class="px-margin mt-4">
+<div class="bg-recessed-console-surface rounded-xl p-4 shadow-[inset_0_2px_6px_rgba(0,0,0,0.7)] flex flex-col gap-3">
+<!-- Action Prompt Row -->
+<div class="flex items-center justify-between">
+<div>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan tracking-wider uppercase">MANUAL OVERRIDE</span>
+<h4 class="font-headline-md text-headline-md text-primary-typography uppercase text-[16px] font-semibold mt-0.5">MANUALLY REST A TRACK</h4>
+</div>
+<!-- Machined "+" Rest Button -->
+<button class="flex items-center gap-1 px-3 py-1.5 rounded-full bg-studio-cyan text-studio-body-dark active:scale-95 transition-transform shadow-[0_2px_8px_rgba(131,185,189,0.35)]" id="restBtn">
+<span class="material-symbols-outlined text-[18px] font-bold">add</span>
+<span class="font-label-mono-sm text-label-mono-sm font-bold tracking-wider uppercase">QUEUE</span>
+</button>
+</div>
+<!-- Tactile Duration Stepper / Slider -->
+<div class="bg-hardware-module-faceplate/50 rounded-lg p-3 shadow-inner flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">ISOLATION WINDOW</span>
+<span class="font-label-mono-lg text-label-mono-lg text-studio-cyan font-bold tracking-wide" id="cooldownLabel">7 DAYS COOLDOWN</span>
+</div>
+<!-- Slider Bar with Knurled Steps -->
+<div class="relative w-full pt-1 pb-2">
+<input class="w-full h-1.5 bg-surface-container-lowest rounded-lg appearance-none cursor-pointer accent-studio-cyan" id="durationRange" max="14" min="3" step="1" type="range" value="7"/>
+</div>
+<!-- Step Markers -->
+<div class="flex justify-between items-center px-1 font-label-mono-sm text-[10px] text-secondary-labels">
+<button class="duration-step hover:text-studio-cyan transition-colors" data-val="3" type="button">3d</button>
+<button class="duration-step hover:text-studio-cyan transition-colors" data-val="5" type="button">5d</button>
+<button class="duration-step text-studio-cyan font-bold" data-val="7" type="button">7d</button>
+<button class="duration-step hover:text-studio-cyan transition-colors" data-val="10" type="button">10d</button>
+<button class="duration-step hover:text-studio-cyan transition-colors" data-val="14" type="button">14d</button>
+</div>
+</div>
+<!-- Micro-Engraving Badge -->
+<div class="flex items-center justify-center gap-1.5 pt-1 text-secondary-labels opacity-60">
+<span class="material-symbols-outlined text-[12px] text-studio-cyan">verified</span>
+<span class="font-label-mono-sm text-[9.5px] uppercase tracking-widest text-center">TUNEMIND CRYOGENIC SATIETY ENGINE • ZERO ACOUSTIC FATIGUE BUFFER</span>
+</div>
+</div>
+</div>
+<script>
+    // Stepper Slider Sync
+    const slider = document.getElementById('durationRange');
+    const label = document.getElementById('cooldownLabel');
+    const stepButtons = document.querySelectorAll('.duration-step');
+
+    function updateDuration(val) {
+      slider.value = val;
+      label.textContent = `${val} DAYS COOLDOWN`;
+      stepButtons.forEach(btn => {
+        if (btn.dataset.val === String(val)) {
+          btn.classList.add('text-studio-cyan', 'font-bold');
+        } else {
+          btn.classList.remove('text-studio-cyan', 'font-bold');
+        }
+      });
+    }
+
+    if (slider) {
+      slider.addEventListener('input', (e) => {
+        updateDuration(e.target.value);
+      });
+    }
+
+    stepButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        updateDuration(btn.dataset.val);
+      });
+    });
+
+    // Machined Queue Button Microfeedback
+    const restBtn = document.getElementById('restBtn');
+    if (restBtn) {
+      restBtn.addEventListener('click', () => {
+        restBtn.classList.add('bg-safety-green');
+        const icon = restBtn.querySelector('.material-symbols-outlined');
+        const text = restBtn.querySelector('span:last-child');
+        icon.textContent = 'check';
+        text.textContent = 'RESTED';
+        setTimeout(() => {
+          restBtn.classList.remove('bg-safety-green');
+          icon.textContent = 'add';
+          text.textContent = 'QUEUE';
+        }, 1500);
+      });
+    }
+  </script>
+</div></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-recessed-console-surface/90 backdrop-blur-xl shadow-[0_-2px_16px_rgba(0,0,0,0.5)]" data-active-classes="text-laser-lavender bg-elevated-control-bezel/40"><div class="h-20 px-space-xs flex items-center justify-around"><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="chamber-overview" href="#"><span class="material-symbols-outlined text-[22px]">bedtime</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Chamber</span></a><a aria-current="page" class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-laser-lavender bg-elevated-control-bezel/40" data-path="cooldown-vault" href="#"><span class="material-symbols-outlined text-[22px]">ac_unit</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Vault</span></a><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="acoustic-telemetry" href="#"><span class="material-symbols-outlined text-[22px]">equalizer</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Telemetry</span></a><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="console-matrix" href="#"><span class="material-symbols-outlined text-[22px]">tune</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Matrix</span></a></div></nav></body></html>

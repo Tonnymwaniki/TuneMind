@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100%;margin:0;padding:0;background-color:#0d1321;}body{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { colors: { "surface-container-low": "#151b2a", "secondary-labels": "#A1AEC2", "surface-container": "#1a1f2e", "safety-green": "#10B981", "laser-lavender": "#A997D8", "on-tertiary-fixed-variant": "#124e52", "surface-bright": "#333949", "surface-tint": "#cfbcff", "on-error-container": "#ffdad6", "on-secondary-fixed-variant": "#614012", "on-secondary-fixed": "#2b1700", "on-primary-fixed": "#200f49", "primary-typography": "#E9EDF5", "on-tertiary": "#00373a", "hardware-module-faceplate": "#1C2940", "primary-fixed-dim": "#cfbcff", "studio-cyan": "#83B9BD", "studio-body-dark": "#0C1220", "secondary": "#efbe85", "primary-container": "#a997d8", "on-primary-fixed-variant": "#4d3d77", "on-surface-variant": "#cac4d0", "surface-container-highest": "#2f3544", "surface": "#0d1321", "tertiary-fixed": "#b5ecf0", "secondary-container": "#644214", "on-primary": "#36265f", "surface-container-high": "#242a39", "primary-fixed": "#e9ddff", "tertiary-fixed-dim": "#99d0d4", "on-surface": "#dde2f6", "clip-red": "#CF7778", "tertiary": "#99d0d4", "tertiary-container": "#74aaae", "surface-container-lowest": "#080e1c", "outline-variant": "#49454f", "secondary-fixed": "#ffddb8", "on-tertiary-fixed": "#002022", "warning-amber": "#F59E0B", "inverse-surface": "#dde2f6", "inverse-primary": "#655591", "on-primary-container": "#3d2d67", "on-background": "#dde2f6", "outline": "#948f9a", "on-tertiary-container": "#003e42", "inverse-on-surface": "#2a303f", "surface-variant": "#2f3544", "background": "#0d1321", "error": "#ffb4ab", "error-container": "#93000a", "warm-amber": "#D5A66F", "surface-dim": "#0d1321", "primary": "#cfbcff", "recessed-console-surface": "#131D30", "on-secondary": "#472a00", "on-error": "#690005", "secondary-fixed-dim": "#efbe85", "on-secondary-container": "#e0b078", "elevated-control-bezel": "#25344D" }, borderRadius: { DEFAULT: "0.125rem", lg: "0.25rem", xl: "0.5rem", full: "0.75rem" }, spacing: { "space-md": "1rem", "margin": "1.25rem", "space-sm": "0.5rem", "space-xl": "2.5rem", "gutter": "1rem", "space-lg": "1.5rem", "space-xs": "0.25rem" }, fontFamily: { "label-mono-sm": ["JetBrains Mono"], "readout-numeric": ["JetBrains Mono"], "display-xl": ["Plus Jakarta Sans"], "body-lg": ["Plus Jakarta Sans"], "label-mono-lg": ["JetBrains Mono"], "body-md": ["Plus Jakarta Sans"], "headline-lg": ["Plus Jakarta Sans"], "headline-md": ["Plus Jakarta Sans"] }, fontSize: { "label-mono-sm": ["11px", { lineHeight: "16px", letterSpacing: "0.08em", fontWeight: "500" }], "readout-numeric": ["28px", { lineHeight: "32px", letterSpacing: "0.02em", fontWeight: "700" }], "display-xl": ["36px", { lineHeight: "44px", letterSpacing: "-0.02em", fontWeight: "600" }], "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }], "label-mono-lg": ["13px", { lineHeight: "18px", letterSpacing: "0.05em", fontWeight: "500" }], "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }], "headline-lg": ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }], "headline-md": ["18px", { lineHeight: "24px", fontWeight: "500" }] } } } }</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface text-on-surface font-body-md min-h-screen flex flex-col antialiased selection:bg-laser-lavender/20 selection:text-laser-lavender"><header class="fixed top-0 w-full z-50 pt-safe bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.35)]"><div class="h-16 px-margin flex items-center justify-between"><div class="flex items-center gap-space-sm"><div class="w-2 h-2 rounded-full bg-studio-cyan animate-pulse"></div><div class="flex flex-col"><span class="font-label-mono-sm text-label-mono-sm text-studio-cyan uppercase">SAT_LAB // TELEMETRY</span><h1 class="font-headline-md text-headline-md tracking-tight text-primary-typography uppercase">Cooldown Vault</h1></div></div><div class="flex items-center gap-space-sm"><div class="flex items-center px-space-xs py-0.5 rounded bg-surface-container-lowest text-studio-cyan font-label-mono-sm text-label-mono-sm"><span class="material-symbols-outlined text-[14px] mr-1">graphic_eq</span><span>432Hz</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex-1 w-full bg-surface pt-16 pb-24"><div class="flex flex-col w-full text-on-surface">
+<!-- Top Hardware Telemetry Strip & Device Bridge -->
+<div class="px-margin pt-2 pb-3 flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-safety-green shadow-[0_0_8px_rgba(16,185,129,0.7)] animate-pulse"></span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-widest uppercase">HEARING HEALTH // EXPOSURE ENGINE</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan bg-surface-container-lowest px-1.5 py-0.5 rounded tracking-wider">DSP BUS • 48kHz</span>
+</div>
+<!-- Active Transducer Recessed Pill -->
+<div class="bg-recessed-console-surface px-space-md py-2 rounded flex items-center justify-between shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]">
+<div class="flex items-center gap-space-sm min-w-0">
+<span class="material-symbols-outlined text-[16px] text-laser-lavender shrink-0">headphones</span>
+<span class="font-body-md text-body-md text-primary-typography truncate font-medium">Sony WH-1000XM5</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels shrink-0 hidden sm:inline">(A2DP • LDAC)</span>
+</div>
+<div class="flex items-center gap-1 shrink-0">
+<span class="material-symbols-outlined text-[14px] text-safety-green" style="font-variation-settings: 'FILL' 1;">bluetooth_connected</span>
+<span class="font-label-mono-sm text-label-mono-sm text-safety-green font-semibold">SYNCED</span>
+</div>
+</div>
+</div>
+<!-- Main Centerpiece: Analog / Digital Precision Arc VU Faceplate -->
+<div class="px-margin py-space-sm">
+<div class="bg-hardware-module-faceplate rounded-xl p-space-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_12px_28px_rgba(0,0,0,0.7)] flex flex-col items-center relative overflow-hidden">
+<!-- Machined Screws Detailing -->
+<div class="absolute top-2 left-2.5 w-1.5 h-1.5 rounded-full bg-elevated-control-bezel shadow-[inset_0_1px_1px_rgba(0,0,0,0.8)]"></div>
+<div class="absolute top-2 right-2.5 w-1.5 h-1.5 rounded-full bg-elevated-control-bezel shadow-[inset_0_1px_1px_rgba(0,0,0,0.8)]"></div>
+<div class="absolute bottom-2 left-2.5 w-1.5 h-1.5 rounded-full bg-elevated-control-bezel shadow-[inset_0_1px_1px_rgba(0,0,0,0.8)]"></div>
+<div class="absolute bottom-2 right-2.5 w-1.5 h-1.5 rounded-full bg-elevated-control-bezel shadow-[inset_0_1px_1px_rgba(0,0,0,0.8)]"></div>
+<!-- Meter Calibration Legend -->
+<div class="w-full flex items-center justify-between font-label-mono-sm text-label-mono-sm text-secondary-labels mb-1">
+<span>RANGE: 40-120 dBA</span>
+<span class="text-studio-cyan font-bold">MONITOR: CONTINUOUS</span>
+</div>
+<!-- Precision Arc SVG Visualizer -->
+<div class="relative w-full max-w-[310px] aspect-[310/165] flex items-center justify-center">
+<svg class="w-full h-full select-none" fill="none" viewbox="0 0 310 165" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<lineargradient id="arcTrackGrad" x1="0%" x2="100%" y1="0%" y2="0%">
+<stop offset="0%" stop-color="#83B9BD"></stop>
+<stop offset="55%" stop-color="#83B9BD"></stop>
+<stop offset="70%" stop-color="#F59E0B"></stop>
+<stop offset="100%" stop-color="#CF7778"></stop>
+</lineargradient>
+<radialgradient cx="50%" cy="50%" id="pivotGrad" r="50%">
+<stop offset="0%" stop-color="#cfbcff"></stop>
+<stop offset="60%" stop-color="#25344D"></stop>
+<stop offset="100%" stop-color="#080e1c"></stop>
+</radialgradient>
+<filter height="160%" id="needleGlow" width="160%" x="-30%" y="-30%">
+<fedropshadow dx="0" dy="0" flood-color="#83B9BD" flood-opacity="0.9" stddeviation="2.5"></fedropshadow>
+</filter>
+</defs>
+<!-- Dial Plate Backing Bed -->
+<path d="M 25 155 A 130 130 0 0 1 285 155" stroke="#131D30" stroke-linecap="round" stroke-width="18"></path>
+<!-- Active Gauge Zone Arc -->
+<path d="M 25 155 A 130 130 0 0 1 285 155" opacity="0.85" stroke="url(#arcTrackGrad)" stroke-linecap="round" stroke-width="6"></path>
+<!-- Ticks & Decibel Scale Markers (Angles from -180 deg to 0 deg) -->
+<!-- 40 dB (-180deg) -->
+<line stroke="#A1AEC2" stroke-width="1.5" x1="25" x2="35" y1="155" y2="155"></line>
+<text fill="#A1AEC2" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle" x="26" y="142">40</text>
+<!-- 60 dB (-135deg) -->
+<line stroke="#A1AEC2" stroke-width="1.5" x1="63.1" x2="70.2" y1="63.1" y2="70.2"></line>
+<text fill="#83B9BD" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle" x="60" y="56">60</text>
+<!-- 72 dB (Current Target Marker: -108deg approx) -->
+<line stroke="#83B9BD" stroke-width="2" x1="114.8" x2="119.5" y1="31.4" y2="44.7"></line>
+<!-- 80 dB (-90deg) -->
+<line stroke="#A1AEC2" stroke-width="1.5" x1="155" x2="155" y1="25" y2="37"></line>
+<text fill="#A1AEC2" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle" x="155" y="20">80</text>
+<!-- 85 dB Threshold Marker (-78.75deg) -->
+<line stroke="#F59E0B" stroke-width="2" x1="180.3" x2="178" y1="27.5" y2="39.2"></line>
+<text fill="#F59E0B" font-family="'JetBrains Mono', monospace" font-size="8" font-weight="bold" x="187" y="22">85 CRIT</text>
+<!-- 100 dB (-45deg) -->
+<line stroke="#F59E0B" stroke-width="1.5" x1="246.9" x2="239.8" y1="63.1" y2="70.2"></line>
+<text fill="#F59E0B" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle" x="254" y="58">100</text>
+<!-- 120 dB (0deg) -->
+<line stroke="#CF7778" stroke-width="2" x1="285" x2="275" y1="155" y2="155"></line>
+<text fill="#CF7778" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle" x="286" y="142">120</text>
+<!-- Micro Sub-divisions -->
+<line stroke="#49454f" stroke-width="1" x1="42.3" x2="49.9" y1="105.2" y2="108.3"></line>
+<line stroke="#49454f" stroke-width="1" x1="90.5" x2="95.5" y1="42.8" y2="52.4"></line>
+<line stroke="#49454f" stroke-width="1" x1="219.5" x2="214.5" y1="42.8" y2="52.4"></line>
+<line stroke="#49454f" stroke-width="1" x1="267.7" x2="260.1" y1="105.2" y2="108.3"></line>
+<!-- Dynamic Needle at 72 dB (-108deg from origin 155, 155) -->
+<!-- End coordinate: cos(-108)*115 + 155 = -35.5 + 155 = 119.5, sin(-108)*115 + 155 = -109.3 + 155 = 45.6 -->
+<g filter="url(#needleGlow)" id="vuNeedleGroup">
+<line stroke="#83B9BD" stroke-linecap="round" stroke-width="2" x1="155" x2="119.5" y1="155" y2="45.6"></line>
+<polygon fill="#83B9BD" points="119.5,45.6 116.5,58 122.5,58"></polygon>
+</g>
+<!-- Pivot Bushing & Center Knurled Cap -->
+<circle cx="155" cy="155" fill="#080e1c" r="16"></circle>
+<circle cx="155" cy="155" fill="url(#pivotGrad)" r="12"></circle>
+<circle cx="155" cy="155" fill="#1C2940" r="5"></circle>
+<circle cx="155" cy="155" fill="#83B9BD" r="2"></circle>
+</svg>
+<!-- Current Output Value Monospace Overlay -->
+<div class="absolute bottom-2 flex flex-col items-center">
+<div class="flex items-baseline gap-1">
+<span class="font-readout-numeric text-readout-numeric text-primary-typography tracking-tight">72.4</span>
+<span class="font-label-mono-lg text-label-mono-lg text-studio-cyan font-semibold">dB SPL</span>
+</div>
+<div class="mt-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-lowest text-safety-green font-label-mono-sm text-label-mono-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-safety-green"></span>
+<span>SAFE HEADROOM</span>
+</div>
+</div>
+</div>
+<!-- Fine Telemetry Readout Grid -->
+<div class="w-full mt-3 pt-3 bg-surface-container-lowest rounded p-space-sm flex items-center justify-between text-secondary-labels">
+<div class="flex flex-col">
+<span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider text-secondary-labels/70">Measured Output</span>
+<span class="font-label-mono-lg text-label-mono-lg text-primary-typography font-medium">72.4 dB SPL <span class="text-[10px] text-studio-cyan">(A-wgt)</span></span>
+</div>
+<div class="h-6 w-[1px] bg-elevated-control-bezel"></div>
+<div class="flex flex-col text-right">
+<span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider text-secondary-labels/70">DAC Ceiling</span>
+<span class="font-label-mono-lg text-label-mono-lg text-warm-amber font-medium">68% <span class="text-[10px] text-secondary-labels">HEADROOM</span></span>
+</div>
+</div>
+</div>
+</div>
+<!-- Daily Auditory Dosage Progress Rack -->
+<div class="px-margin py-space-xs">
+<div class="bg-recessed-console-surface rounded-xl p-space-md shadow-[inset_0_2px_5px_rgba(0,0,0,0.65)] flex flex-col gap-space-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-laser-lavender">vital_signs</span>
+<span class="font-label-mono-sm text-label-mono-sm text-primary-typography uppercase tracking-wider">DAILY SOUND DOSE (LEQ)</span>
+</div>
+<span class="font-label-mono-lg text-label-mono-lg text-laser-lavender font-bold">38% USED</span>
+</div>
+<!-- Segmented Multi-LED Dosage Array (24 discrete hardware bars) -->
+<div class="w-full flex items-center gap-1 bg-surface-container-lowest p-1.5 rounded">
+<!-- 38% of 24 = 9 illuminated bars (gradient from cyan to lavender) -->
+<div class="h-3.5 flex-1 rounded-[1px] bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,0.8)]"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-laser-lavender shadow-[0_0_6px_rgba(169,151,216,0.8)]"></div>
+<!-- Inactive dimmed dark slots -->
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+<div class="h-3.5 flex-1 rounded-[1px] bg-surface-container-high/40"></div>
+</div>
+<!-- Time Remaining and Health Benchmark Specs -->
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-1.5 text-primary-typography">
+<span class="material-symbols-outlined text-[16px] text-safety-green">hourglass_bottom</span>
+<span class="font-body-md text-body-md">Safe Time Left: <strong class="font-label-mono-lg text-safety-green font-semibold">6h 24m</strong></span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels bg-surface-container-high/40 px-1.5 py-0.5 rounded">ISO 1999 • NIOSH</span>
+</div>
+</div>
+</div>
+<!-- Hardware Acoustic Matrix & Physical Tactile Switches -->
+<div class="px-margin pt-space-sm pb-space-xs flex flex-col gap-space-sm">
+<div class="flex items-center justify-between px-0.5">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase tracking-widest">ACOUSTIC SAFEGUARD BUS</span>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan">PBT SOLID-STATE</span>
+</div>
+<!-- Switch Module 1: Chrono-Receptivity Profiling -->
+<div class="bg-hardware-module-faceplate rounded-xl p-space-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.04),0_4px_12px_rgba(0,0,0,0.5)] flex items-center justify-between gap-space-md">
+<div class="flex flex-col min-w-0 pr-space-xs">
+<div class="flex items-center gap-2 mb-0.5">
+<span class="material-symbols-outlined text-[18px] text-warm-amber">schedule</span>
+<h2 class="font-headline-md text-headline-md text-primary-typography leading-tight truncate">Chrono-Receptivity Profiling</h2>
+</div>
+<p class="font-body-md text-body-md text-secondary-labels line-clamp-2">
+          Dampens harsh 3.5kHz–6kHz bands after 22:00 to reduce auditory fatigue and sleep disruption.
+        </p>
+<span class="font-label-mono-sm text-label-mono-sm text-warm-amber mt-1 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-warm-amber"></span>
+          ARMED: ENGAGES IN 1h 42m
+        </span>
+</div>
+<!-- Machined Physical Slide Toggle -->
+<button aria-pressed="true" class="shrink-0 w-14 h-8 bg-surface-container-lowest rounded-full p-1 relative shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)] transition-colors focus:outline-none" id="toggle-chrono" type="button">
+<span class="w-6 h-6 rounded-full bg-laser-lavender shadow-[0_0_8px_rgba(169,151,216,0.9)] flex items-center justify-center translate-x-6 transition-transform">
+<span class="w-2 h-2 rounded-full bg-surface-container-lowest"></span>
+</span>
+</button>
+</div>
+<!-- Switch Module 2: Equal-Loudness Contour (Fletcher-Munson) -->
+<div class="bg-hardware-module-faceplate rounded-xl p-space-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.04),0_4px_12px_rgba(0,0,0,0.5)] flex items-center justify-between gap-space-md">
+<div class="flex flex-col min-w-0 pr-space-xs">
+<div class="flex items-center gap-2 mb-0.5">
+<span class="material-symbols-outlined text-[18px] text-studio-cyan">equalizer</span>
+<h2 class="font-headline-md text-headline-md text-primary-typography leading-tight truncate">Fletcher-Munson Compensator</h2>
+</div>
+<p class="font-body-md text-body-md text-secondary-labels line-clamp-2">
+          Restores perceived bass clarity at low volumes without risking cochlear hair overdrive.
+        </p>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan mt-1 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-studio-cyan"></span>
+          ACTIVE // +1.5dB SUB-BASS SHELF
+        </span>
+</div>
+<!-- Machined Physical Slide Toggle -->
+<button aria-pressed="true" class="shrink-0 w-14 h-8 bg-surface-container-lowest rounded-full p-1 relative shadow-[inset_0_2px_4px_rgba(0,0,0,0.8)] transition-colors focus:outline-none" id="toggle-fletcher" type="button">
+<span class="w-6 h-6 rounded-full bg-studio-cyan shadow-[0_0_8px_rgba(131,185,189,0.9)] flex items-center justify-center translate-x-6 transition-transform">
+<span class="w-2 h-2 rounded-full bg-surface-container-lowest"></span>
+</span>
+</button>
+</div>
+</div>
+<!-- Hardware Chassis Engraving & Audio Certification Footer -->
+<div class="px-margin pt-space-md pb-space-lg flex flex-col items-center justify-center text-center">
+<div class="flex items-center gap-2 text-secondary-labels/60 font-label-mono-sm text-label-mono-sm">
+<span class="material-symbols-outlined text-[13px]">shield</span>
+<span class="tracking-widest">TUNEMIND ACOUSTIC SHIELD // 0.2ms ULTRA-LOW LATENCY LIMITER</span>
+</div>
+<div class="mt-1 font-label-mono-sm text-[10px] text-secondary-labels/40 tracking-wider">
+      EAR CANAL IMPEDANCE: 32Ω NOMINAL • FIR CALIBRATION REV 4.8.2
+    </div>
+</div>
+<!-- Micro-Interactions Script for Hardware Toggles -->
+<script>
+    (function() {
+      function attachToggle(buttonId, activeColorClass, glowRgba) {
+        const btn = document.getElementById(buttonId);
+        if (!btn) return;
+        let active = true;
+
+        btn.addEventListener('click', () => {
+          active = !active;
+          btn.setAttribute('aria-pressed', String(active));
+          const thumb = btn.firstElementChild;
+          if (active) {
+            thumb.classList.remove('translate-x-0', 'bg-surface-bright');
+            thumb.classList.add('translate-x-6', activeColorClass);
+            thumb.style.boxShadow = `0 0 8px ${glowRgba}`;
+          } else {
+            thumb.classList.remove('translate-x-6', activeColorClass);
+            thumb.classList.add('translate-x-0', 'bg-surface-bright');
+            thumb.style.boxShadow = 'none';
+          }
+        });
+      }
+
+      attachToggle('toggle-chrono', 'bg-laser-lavender', 'rgba(169,151,216,0.9)');
+      attachToggle('toggle-fletcher', 'bg-studio-cyan', 'rgba(131,185,189,0.9)');
+    })();
+  </script>
+</div></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-recessed-console-surface/90 backdrop-blur-xl shadow-[0_-2px_16px_rgba(0,0,0,0.5)]" data-active-classes="text-laser-lavender bg-elevated-control-bezel/40"><div class="h-20 px-space-xs flex items-center justify-around"><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="chamber-overview" href="#"><span class="material-symbols-outlined text-[22px]">bedtime</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Chamber</span></a><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="cooldown-vault" href="#"><span class="material-symbols-outlined text-[22px]">ac_unit</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Vault</span></a><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="acoustic-telemetry" href="#"><span class="material-symbols-outlined text-[22px]">equalizer</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Telemetry</span></a><a class="flex flex-col items-center justify-center min-w-[44px] min-h-[44px] px-space-sm py-space-xs rounded transition-all text-secondary-labels hover:text-on-surface" data-path="console-matrix" href="#"><span class="material-symbols-outlined text-[22px]">tune</span><span class="font-label-mono-sm text-label-mono-sm mt-0.5 uppercase">Matrix</span></a></div></nav></body></html>

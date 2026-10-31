@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><meta content="mobile_tab" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100vw;margin:0;padding:0;background-color:#0d1321;color:#dde2f6;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { colors: { "tertiary-fixed-dim": "#99d0d4", "hardware-module-faceplate": "#1C2940", "on-background": "#dde2f6", "primary": "#cfbcff", "warning-amber": "#F59E0B", "surface-container-highest": "#2f3544", "studio-body-dark": "#0C1220", "outline": "#948f9a", "surface-container-lowest": "#080e1c", "on-primary-container": "#3d2d67", "studio-cyan": "#83B9BD", "tertiary-container": "#74aaae", "on-tertiary": "#00373a", "surface-container": "#1a1f2e", "inverse-primary": "#655591", "secondary-fixed-dim": "#efbe85", "primary-fixed": "#e9ddff", "inverse-surface": "#dde2f6", "outline-variant": "#49454f", "secondary-fixed": "#ffddb8", "on-secondary": "#472a00", "error-container": "#93000a", "inverse-on-surface": "#2a303f", "secondary-labels": "#A1AEC2", "surface-container-low": "#151b2a", "elevated-control-bezel": "#25344D", "on-tertiary-fixed-variant": "#124e52", "on-secondary-container": "#e0b078", "surface-variant": "#2f3544", "on-primary-fixed": "#200f49", "on-primary": "#36265f", "recessed-console-surface": "#131D30", "primary-fixed-dim": "#cfbcff", "secondary": "#efbe85", "primary-container": "#a997d8", "surface-dim": "#0d1321", "on-error": "#690005", "surface": "#0d1321", "on-surface": "#dde2f6", "on-tertiary-fixed": "#002022", "on-tertiary-container": "#003e42", "error": "#ffb4ab", "on-secondary-fixed-variant": "#614012", "on-secondary-fixed": "#2b1700", "surface-tint": "#cfbcff", "on-error-container": "#ffdad6", "secondary-container": "#644214", "tertiary-fixed": "#b5ecf0", "primary-typography": "#E9EDF5", "safety-green": "#10B981", "surface-bright": "#333949", "warm-amber": "#D5A66F", "background": "#0d1321", "laser-lavender": "#A997D8", "tertiary": "#99d0d4", "on-surface-variant": "#cac4d0", "surface-container-high": "#242a39", "on-primary-fixed-variant": "#4d3d77", "clip-red": "#CF7778" }, borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" }, spacing: { "space-xl": "2.5rem", "margin": "1.25rem", "space-lg": "1.5rem", "space-xs": "0.25rem", "gutter": "1rem", "space-md": "1rem", "space-sm": "0.5rem" }, fontFamily: { "headline-md": ["Plus Jakarta Sans"], "headline-lg": ["Plus Jakarta Sans"], "readout-numeric": ["JetBrains Mono"], "label-mono-lg": ["JetBrains Mono"], "display-xl": ["Plus Jakarta Sans"], "body-md": ["Plus Jakarta Sans"], "body-lg": ["Plus Jakarta Sans"], "label-mono-sm": ["JetBrains Mono"] }, fontSize: { "headline-md": ["18px", { "lineHeight": "24px", "fontWeight": "500" }], "headline-lg": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600" }], "readout-numeric": ["28px", { "lineHeight": "32px", "letterSpacing": "0.02em", "fontWeight": "700" }], "label-mono-lg": ["13px", { "lineHeight": "18px", "letterSpacing": "0.05em", "fontWeight": "500" }], "display-xl": ["36px", { "lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "600" }], "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }], "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }], "label-mono-sm": ["11px", { "lineHeight": "16px", "letterSpacing": "0.08em", "fontWeight": "500" }] } } } }</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-studio-body-dark font-body-md text-on-surface flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-studio-body-dark/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.45)]"><div class="h-16 px-margin flex items-center justify-between gap-space-sm"><div class="flex items-center gap-space-sm"><div class="w-9 h-9 rounded-xl bg-recessed-console-surface flex items-center justify-center shadow-inner"><span class="material-symbols-outlined text-laser-lavender text-[20px]">graphic_eq</span></div><div class="flex flex-col"><span class="font-headline-md text-headline-md font-bold text-primary-typography tracking-tight leading-none">TuneMind</span><span class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-widest uppercase mt-0.5">Intel Matrix</span></div></div><div class="flex items-center gap-space-sm"><div class="h-7 px-2.5 rounded-lg bg-recessed-console-surface flex items-center gap-1.5"><div class="w-1.5 h-1.5 rounded-full bg-safety-green animate-pulse"></div><span class="font-label-mono-sm text-label-mono-sm text-studio-cyan font-semibold tracking-wider">48kHz // 24b</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex flex-col relative w-full pt-16 pb-28 px-margin bg-studio-body-dark min-h-screen"><div class="flex flex-col w-full text-on-surface pb-6 gap-space-lg">
+<!-- Hardware Rack Header / Telemetry Readout -->
+<section class="flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-safety-green shadow-[0_0_8px_rgba(16,185,129,0.9)] animate-pulse"></span>
+<span class="font-label-mono-sm text-label-mono-sm uppercase tracking-widest text-secondary-labels">HARDWARE BUS // CONSOLE CONFIG</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan bg-recessed-console-surface px-2 py-0.5 rounded shadow-inner">DSP LINK: SYNCED</span>
+</div>
+<div class="flex flex-col mt-1">
+<h1 class="font-headline-lg text-headline-lg font-bold text-primary-typography tracking-tight uppercase">STUDIO SWITCHBOARD // ADAPTIVE ATMOSPHERE</h1>
+<p class="font-body-md text-body-md text-secondary-labels">Physical channel strip routing and acoustic luminance calibration.</p>
+</div>
+<!-- Active State Pill / Telemetry Bar -->
+<div class="mt-2 flex items-center justify-between bg-recessed-console-surface px-3 py-2 rounded-xl shadow-inner">
+<div class="flex items-center gap-2">
+<span class="relative flex h-2.5 w-2.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-laser-lavender opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-laser-lavender"></span>
+</span>
+<span class="font-label-mono-sm text-label-mono-sm font-semibold tracking-wider text-primary-typography uppercase">DEEP FOCUS [21:00 - 04:59]</span>
+</div>
+<div class="flex items-center gap-1 font-label-mono-sm text-label-mono-sm text-warm-amber">
+<span class="material-symbols-outlined text-[14px]">bedtime</span>
+<span>CIRCADIAN LOCK</span>
+</div>
+</div>
+</section>
+<!-- Section 1: Chroma Engine 4-Channel Matrix -->
+<section class="flex flex-col gap-space-sm">
+<div class="flex items-baseline justify-between px-1">
+<div>
+<h2 class="font-headline-md text-headline-md font-bold text-primary-typography uppercase tracking-tight">CHROMA ENGINE // HARDWARE PALETTE SELECTORS</h2>
+<p class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">4-Channel Adaptive Spectral Surface</p>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender font-mono">CH-04 ACTV</span>
+</div>
+<!-- Channel Strip Matrix -->
+<div class="grid grid-cols-2 gap-space-sm mt-1" id="palette-grid">
+<!-- Channel 1: First Light -->
+<button class="group relative flex flex-col text-left p-3 rounded-xl bg-recessed-console-surface transition-all duration-150 active:scale-[0.98] shadow-inner" onclick="selectChannel(this, 'CH-01', 'FIRST LIGHT', '#D5A66F')" type="button">
+<div class="flex items-center justify-between w-full mb-2">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase font-semibold">CH 01 // DAWN</span>
+<span class="w-2 h-2 rounded-full bg-surface-container-highest transition-colors channel-led"></span>
+</div>
+<!-- Tactile Color Swatch Well -->
+<div class="h-10 w-full rounded bg-surface-container-lowest p-1 shadow-inner mb-2 flex items-center">
+<div class="w-full h-full rounded-sm bg-gradient-to-r from-[#111C2C] via-[#1A2E47] to-[#E5B879]"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-md text-headline-md font-bold text-primary-typography">First Light</span>
+<span class="font-label-mono-sm text-label-mono-sm text-warm-amber">#E5B879 • Dawn Amber</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels mt-0.5">05:00 - 11:59</span>
+</div>
+<div class="mt-3 flex items-center justify-between pt-2 border-t-0 bg-surface-container-lowest/40 px-2 py-1 rounded">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels">BUS GAIN</span>
+<span class="font-label-mono-sm text-label-mono-sm text-primary-typography">+0.0 dB</span>
+</div>
+</button>
+<!-- Channel 2: Clarity -->
+<button class="group relative flex flex-col text-left p-3 rounded-xl bg-recessed-console-surface transition-all duration-150 active:scale-[0.98] shadow-inner" onclick="selectChannel(this, 'CH-02', 'CLARITY', '#83B9BD')" type="button">
+<div class="flex items-center justify-between w-full mb-2">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase font-semibold">CH 02 // NOON</span>
+<span class="w-2 h-2 rounded-full bg-surface-container-highest transition-colors channel-led"></span>
+</div>
+<!-- Tactile Color Swatch Well -->
+<div class="h-10 w-full rounded bg-surface-container-lowest p-1 shadow-inner mb-2 flex items-center">
+<div class="w-full h-full rounded-sm bg-gradient-to-r from-[#142235] via-[#1A3350] to-[#83B9BD]"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-md text-headline-md font-bold text-primary-typography">Clarity</span>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan">#83B9BD • Studio Cyan</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels mt-0.5">12:00 - 16:59</span>
+</div>
+<div class="mt-3 flex items-center justify-between pt-2 bg-surface-container-lowest/40 px-2 py-1 rounded">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels">BUS GAIN</span>
+<span class="font-label-mono-sm text-label-mono-sm text-primary-typography">+1.2 dB</span>
+</div>
+</button>
+<!-- Channel 3: Transition -->
+<button class="group relative flex flex-col text-left p-3 rounded-xl bg-recessed-console-surface transition-all duration-150 active:scale-[0.98] shadow-inner" onclick="selectChannel(this, 'CH-03', 'TRANSITION', '#D99A69')" type="button">
+<div class="flex items-center justify-between w-full mb-2">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase font-semibold">CH 03 // DUSK</span>
+<span class="w-2 h-2 rounded-full bg-surface-container-highest transition-colors channel-led"></span>
+</div>
+<!-- Tactile Color Swatch Well -->
+<div class="h-10 w-full rounded bg-surface-container-lowest p-1 shadow-inner mb-2 flex items-center">
+<div class="w-full h-full rounded-sm bg-gradient-to-r from-[#151A2A] via-[#2A2333] to-[#D99A69]"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-md text-headline-md font-bold text-primary-typography">Transition</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary">#D99A69 • Terracotta</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels mt-0.5">17:00 - 20:59</span>
+</div>
+<div class="mt-3 flex items-center justify-between pt-2 bg-surface-container-lowest/40 px-2 py-1 rounded">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels">BUS GAIN</span>
+<span class="font-label-mono-sm text-label-mono-sm text-primary-typography">-0.5 dB</span>
+</div>
+</button>
+<!-- Channel 4: Deep Focus (ACTIVE INITIAL STATE) -->
+<button class="group relative flex flex-col text-left p-3 rounded-xl bg-hardware-module-faceplate shadow-[inset_0_2px_8px_rgba(0,0,0,0.8)] outline-none" onclick="selectChannel(this, 'CH-04', 'DEEP FOCUS', '#A997D8')" type="button">
+<div class="flex items-center justify-between w-full mb-2">
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender uppercase font-bold tracking-wider">CH 04 // NIGHT</span>
+<span class="w-2.5 h-2.5 rounded-full bg-laser-lavender shadow-[0_0_10px_rgba(169,151,216,1)] channel-led"></span>
+</div>
+<!-- Tactile Color Swatch Well -->
+<div class="h-10 w-full rounded bg-surface-container-lowest p-1 shadow-inner mb-2 flex items-center">
+<div class="w-full h-full rounded-sm bg-gradient-to-r from-[#0C1220] via-[#1B1930] to-[#A997D8]"></div>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center justify-between">
+<span class="font-headline-md text-headline-md font-bold text-primary-typography">Deep Focus</span>
+<span class="material-symbols-outlined text-laser-lavender text-[18px]">verified</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender font-semibold">#A997D8 • Lavender</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels mt-0.5">21:00 - 04:59</span>
+</div>
+<div class="mt-3 flex items-center justify-between pt-2 bg-surface-container-lowest/70 px-2 py-1 rounded">
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender font-semibold">STATUS</span>
+<span class="font-label-mono-sm text-label-mono-sm text-safety-green font-bold">ENGAGED</span>
+</div>
+</button>
+</div>
+</section>
+<!-- Visual Frequency & Optical Lumens Realtime Monitor -->
+<section class="bg-recessed-console-surface p-3.5 rounded-xl shadow-inner flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-warm-amber text-[16px]">sensors</span>
+<span class="font-label-mono-sm text-label-mono-sm font-semibold tracking-wider text-primary-typography uppercase">SPECTRAL D65 MONITOR</span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels">440Hz / 6500K</span>
+</div>
+<!-- Segmented Hardware VU / Spectral LED Meter -->
+<div class="flex items-end justify-between gap-1 h-12 bg-surface-container-lowest px-2.5 py-1.5 rounded-lg shadow-inner">
+<div class="flex-1 bg-surface-container-high rounded-xs h-3/5 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-studio-cyan h-4/5"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-4/5 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-studio-cyan h-3/4"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-full overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-laser-lavender h-5/6"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-3/4 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-laser-lavender h-2/3"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-4/5 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-warm-amber h-1/2"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-3/5 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-warm-amber h-1/3"></div>
+</div>
+<div class="flex-1 bg-surface-container-high rounded-xs h-2/5 overflow-hidden flex flex-col-reverse justify-start">
+<div class="w-full bg-clip-red h-1/4"></div>
+</div>
+</div>
+<div class="flex justify-between font-label-mono-sm text-label-mono-sm text-secondary-labels px-1">
+<span>SUB-BASS</span>
+<span>MID-LUM</span>
+<span>PRESENCE</span>
+<span>AIR</span>
+</div>
+</section>
+<!-- Section 2: Atmosphere DSP & Accessibility Bus -->
+<section class="flex flex-col gap-space-sm">
+<div class="px-1">
+<h2 class="font-headline-md text-headline-md font-bold text-primary-typography uppercase tracking-tight">ATMOSPHERE DSP &amp; ACCESSIBILITY BUS</h2>
+<p class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase">Analog Signal Filtering &amp; Sensory Shifting</p>
+</div>
+<!-- Continuous Hardware Control Surface -->
+<div class="flex flex-col bg-recessed-console-surface rounded-xl p-3.5 gap-space-md shadow-inner">
+<!-- Control 1: Musical Mood Modulation -->
+<div class="flex items-start justify-between gap-3 pb-3">
+<div class="flex flex-col gap-0.5 max-w-[70%]">
+<div class="flex items-center gap-2">
+<span class="font-body-md text-body-md font-semibold text-primary-typography">Musical Mood Modulation</span>
+<span class="w-1.5 h-1.5 rounded-full bg-studio-cyan shadow-[0_0_6px_rgba(131,185,189,0.8)]"></span>
+</div>
+<p class="font-body-md text-body-md text-secondary-labels">Dynamically filters harmonics based on circadian time of day.</p>
+</div>
+<!-- Tactile Rocker Switch (Active) -->
+<button class="relative w-14 h-8 bg-surface-container-lowest rounded-full p-1 shadow-inner flex items-center transition-colors" data-state="true" onclick="toggleSwitch(this)" type="button">
+<div class="w-6 h-6 rounded-full bg-laser-lavender shadow-[0_0_10px_rgba(169,151,216,0.8)] transform translate-x-6 transition-transform flex items-center justify-center">
+<span class="w-2 h-2 rounded-full bg-studio-body-dark"></span>
+</div>
+</button>
+</div>
+<!-- Control 2: Visual Adaptation Intensity (3-Way Segmented Hardware Rocker) -->
+<div class="flex flex-col gap-2 pt-2 pb-2">
+<div class="flex items-center justify-between">
+<span class="font-body-md text-body-md font-semibold text-primary-typography">Visual Adaptation Intensity</span>
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender" id="intensity-readout">LEVEL: 02 [BALANCED]</span>
+</div>
+<!-- Recessed 3-way Machined Slot -->
+<div class="grid grid-cols-3 p-1 bg-surface-container-lowest rounded-xl shadow-inner gap-1">
+<button class="intensity-btn py-2 px-1 text-center font-label-mono-sm text-label-mono-sm uppercase rounded-lg text-secondary-labels transition-all hover:text-on-surface" onclick="setIntensity(this, 'SUBTLE', 'LEVEL: 01 [SUBTLE]')" type="button">
+            Subtle
+          </button>
+<button class="intensity-btn py-2 px-1 text-center font-label-mono-sm text-label-mono-sm uppercase rounded-lg bg-hardware-module-faceplate text-laser-lavender font-bold shadow-[0_1px_4px_rgba(0,0,0,0.6)]" onclick="setIntensity(this, 'BALANCED', 'LEVEL: 02 [BALANCED]')" type="button">
+            Balanced
+          </button>
+<button class="intensity-btn py-2 px-1 text-center font-label-mono-sm text-label-mono-sm uppercase rounded-lg text-secondary-labels transition-all hover:text-on-surface" onclick="setIntensity(this, 'EXPRESSIVE', 'LEVEL: 03 [EXPRESSIVE]')" type="button">
+            Expressive
+          </button>
+</div>
+</div>
+<!-- Control 3: Reduced Motion Toggle -->
+<div class="flex items-center justify-between pt-2 pb-2">
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary-typography">Reduced Motion</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels" id="motion-status">OFF [STANDARD DYNAMICS]</span>
+</div>
+<!-- Tactile Slider/Toggle -->
+<button class="relative w-14 h-8 bg-surface-container-lowest rounded-full p-1 shadow-inner flex items-center transition-colors" data-state="false" onclick="toggleMotion(this)" type="button">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest shadow transition-transform transform translate-x-0 flex items-center justify-center">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-labels"></span>
+</div>
+</button>
+</div>
+<!-- Control 4: High Contrast Mode Toggle -->
+<div class="flex items-center justify-between pt-2">
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-primary-typography">High Contrast Mode</span>
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels" id="contrast-status">OFF [ANODIZED MATTE]</span>
+</div>
+<!-- Tactile Slider/Toggle -->
+<button class="relative w-14 h-8 bg-surface-container-lowest rounded-full p-1 shadow-inner flex items-center transition-colors" data-state="false" onclick="toggleContrast(this)" type="button">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest shadow transition-transform transform translate-x-0 flex items-center justify-center">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-labels"></span>
+</div>
+</button>
+</div>
+</div>
+</section>
+<!-- Calibration Potentiometer Panel (Mini Rotary Feel) -->
+<section class="bg-recessed-console-surface p-3.5 rounded-xl shadow-inner flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels uppercase font-semibold">ATTENUATOR SENSITIVITY CALIBRATION</span>
+<span class="font-label-mono-sm text-label-mono-sm text-studio-cyan font-bold" id="sens-val">74%</span>
+</div>
+<div class="relative w-full h-6 bg-surface-container-lowest rounded-lg shadow-inner flex items-center px-1">
+<input class="w-full accent-laser-lavender bg-transparent cursor-pointer h-2" max="100" min="0" oninput="document.getElementById('sens-val').innerText = this.value + '%'" type="range" value="74"/>
+</div>
+<div class="flex justify-between font-label-mono-sm text-label-mono-sm text-secondary-labels">
+<span>0 dB (FLAT)</span>
+<span>+6 dB BOOST</span>
+<span>+12 dB PEAK</span>
+</div>
+</section>
+<!-- Studio Hardware Action Footer -->
+<section class="flex flex-col gap-3 pt-2">
+<!-- Push Buttons in Brushed Metallic Bezel Styling -->
+<div class="flex flex-col gap-2">
+<!-- Export Button -->
+<button class="w-full py-3.5 px-4 rounded-xl bg-hardware-module-faceplate active:bg-recessed-console-surface text-primary-typography flex items-center justify-center gap-2 shadow-inner transition-all" onclick="triggerToast('ACOUSTIC LEDGER DUMPED TO TUNEMIND_ATMOSPHERE.JSON')" type="button">
+<span class="material-symbols-outlined text-laser-lavender text-[20px]">download</span>
+<span class="font-headline-md text-headline-md font-semibold tracking-wider uppercase">Export Acoustic Ledger (.JSON)</span>
+</button>
+<!-- Reset Hardware Button -->
+<button class="w-full py-3 px-4 rounded-xl bg-surface-container-lowest active:bg-studio-body-dark text-secondary-labels flex items-center justify-center gap-2 shadow-inner transition-all hover:text-on-surface" onclick="triggerToast('HARDWARE PROFILE RESET TO FACTORY SPEC')" type="button">
+<span class="material-symbols-outlined text-[18px]">restart_alt</span>
+<span class="font-label-mono-sm text-label-mono-sm tracking-wider uppercase font-semibold">Reset Atmosphere to TuneMind Default</span>
+</button>
+</div>
+<!-- Engraved Engineering Telemetry Footer -->
+<div class="flex flex-col items-center justify-center text-center p-3 rounded-lg bg-surface-container-lowest/50 mt-1">
+<div class="font-label-mono-sm text-label-mono-sm text-secondary-labels tracking-wider leading-relaxed">
+        TUNEMIND ATMOSPHERE CORE V4.8 • D65 CALIBRATED COLORIMETRY • ZERO STROBE EMISSION
+      </div>
+<div class="font-label-mono-sm text-label-mono-sm text-studio-cyan font-mono mt-1 opacity-80">
+        SYS_ID: TM-9940-ANALOG-EXP
+      </div>
+</div>
+</section>
+<!-- Interactive Toast Notification Container -->
+<div class="fixed bottom-24 left-margin right-margin bg-elevated-control-bezel text-primary-typography px-4 py-2.5 rounded-xl shadow-2xl flex items-center justify-between transition-all duration-300 transform translate-y-16 opacity-0 pointer-events-none z-50" id="hardware-toast">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-safety-green"></span>
+<span class="font-label-mono-sm text-label-mono-sm uppercase font-semibold" id="toast-message"></span>
+</div>
+<span class="font-label-mono-sm text-label-mono-sm text-laser-lavender">OK</span>
+</div>
+</div>
+<script>
+  function selectChannel(btn, chCode, name, accentColor) {
+    const grid = document.getElementById('palette-grid');
+    const buttons = grid.querySelectorAll('button');
+    
+    buttons.forEach(b => {
+      b.classList.remove('bg-hardware-module-faceplate', 'shadow-[inset_0_2px_8px_rgba(0,0,0,0.8)]');
+      b.classList.add('bg-recessed-console-surface', 'shadow-inner');
+      const led = b.querySelector('.channel-led');
+      if (led) {
+        led.className = 'w-2 h-2 rounded-full bg-surface-container-highest transition-colors channel-led';
+      }
+      const statusBadge = b.querySelector('.text-safety-green');
+      if (statusBadge) {
+        statusBadge.parentElement.innerHTML = '<span class="font-label-mono-sm text-label-mono-sm text-secondary-labels">BUS GAIN</span><span class="font-label-mono-sm text-label-mono-sm text-primary-typography">0.0 dB</span>';
+      }
+    });
+
+    btn.classList.remove('bg-recessed-console-surface');
+    btn.classList.add('bg-hardware-module-faceplate', 'shadow-[inset_0_2px_8px_rgba(0,0,0,0.8)]');
+    
+    const activeLed = btn.querySelector('.channel-led');
+    if (activeLed) {
+      activeLed.className = 'w-2.5 h-2.5 rounded-full bg-laser-lavender shadow-[0_0_10px_rgba(169,151,216,1)] channel-led';
+    }
+
+    triggerToast(chCode + ' // ' + name + ' ROUTED TO MASTER');
+  }
+
+  function toggleSwitch(btn) {
+    const isState = btn.getAttribute('data-state') === 'true';
+    const nextState = !isState;
+    btn.setAttribute('data-state', nextState.toString());
+    const knob = btn.firstElementChild;
+    if (nextState) {
+      knob.className = 'w-6 h-6 rounded-full bg-laser-lavender shadow-[0_0_10px_rgba(169,151,216,0.8)] transform translate-x-6 transition-transform flex items-center justify-center';
+      triggerToast('MOOD MODULATION: ENGAGED');
+    } else {
+      knob.className = 'w-6 h-6 rounded-full bg-surface-container-highest shadow transition-transform transform translate-x-0 flex items-center justify-center';
+      triggerToast('MOOD MODULATION: BYPASS');
+    }
+  }
+
+  function setIntensity(btn, mode, readoutText) {
+    const container = btn.parentElement;
+    const buttons = container.querySelectorAll('.intensity-btn');
+    buttons.forEach(b => {
+      b.className = 'intensity-btn py-2 px-1 text-center font-label-mono-sm text-label-mono-sm uppercase rounded-lg text-secondary-labels transition-all hover:text-on-surface';
+    });
+    btn.className = 'intensity-btn py-2 px-1 text-center font-label-mono-sm text-label-mono-sm uppercase rounded-lg bg-hardware-module-faceplate text-laser-lavender font-bold shadow-[0_1px_4px_rgba(0,0,0,0.6)]';
+    document.getElementById('intensity-readout').innerText = readoutText;
+    triggerToast('OPTICAL INTENSITY: ' + mode);
+  }
+
+  function toggleMotion(btn) {
+    const isState = btn.getAttribute('data-state') === 'true';
+    const nextState = !isState;
+    btn.setAttribute('data-state', nextState.toString());
+    const knob = btn.firstElementChild;
+    const status = document.getElementById('motion-status');
+    if (nextState) {
+      knob.className = 'w-6 h-6 rounded-full bg-safety-green shadow-[0_0_10px_rgba(16,185,129,0.8)] transform translate-x-6 transition-transform flex items-center justify-center';
+      status.innerText = 'ON [DAMPENED ACCEL]';
+      triggerToast('REDUCED MOTION: ACTIVE');
+    } else {
+      knob.className = 'w-6 h-6 rounded-full bg-surface-container-highest shadow transition-transform transform translate-x-0 flex items-center justify-center';
+      status.innerText = 'OFF [STANDARD DYNAMICS]';
+      triggerToast('REDUCED MOTION: DISABLED');
+    }
+  }
+
+  function toggleContrast(btn) {
+    const isState = btn.getAttribute('data-state') === 'true';
+    const nextState = !isState;
+    btn.setAttribute('data-state', nextState.toString());
+    const knob = btn.firstElementChild;
+    const status = document.getElementById('contrast-status');
+    if (nextState) {
+      knob.className = 'w-6 h-6 rounded-full bg-warm-amber shadow-[0_0_10px_rgba(213,166,111,0.8)] transform translate-x-6 transition-transform flex items-center justify-center';
+      status.innerText = 'ON [HIGH RESOLUTION D65]';
+      triggerToast('HIGH CONTRAST: ACTIVE');
+    } else {
+      knob.className = 'w-6 h-6 rounded-full bg-surface-container-highest shadow transition-transform transform translate-x-0 flex items-center justify-center';
+      status.innerText = 'OFF [ANODIZED MATTE]';
+      triggerToast('HIGH CONTRAST: OFF');
+    }
+  }
+
+  let toastTimeout;
+  function triggerToast(message) {
+    const toast = document.getElementById('hardware-toast');
+    const toastMsg = document.getElementById('toast-message');
+    toastMsg.innerText = message;
+    
+    toast.classList.remove('translate-y-16', 'opacity-0', 'pointer-events-none');
+    toast.classList.add('translate-y-0', 'opacity-100');
+    
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      toast.classList.add('translate-y-16', 'opacity-0', 'pointer-events-none');
+      toast.classList.remove('translate-y-0', 'opacity-100');
+    }, 2400);
+  }
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-recessed-console-surface/90 backdrop-blur-xl shadow-[0_-1px_12px_rgba(0,0,0,0.5)]" data-active-classes="text-laser-lavender"><div class="flex justify-around items-center h-20 px-space-xs"><a class="flex flex-col items-center justify-center gap-1 w-16 h-14 text-secondary-labels transition-all hover:text-on-surface" data-path="pulse" href="#"><span class="material-symbols-outlined text-[22px]">radio</span><span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider">Pulse</span></a><a class="flex flex-col items-center justify-center gap-1 w-16 h-14 text-secondary-labels transition-all hover:text-on-surface" data-path="lab" href="#"><span class="material-symbols-outlined text-[22px]">tune</span><span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider">Lab</span></a><a class="flex flex-col items-center justify-center gap-1 w-16 h-14 text-secondary-labels transition-all hover:text-on-surface" data-path="ledger" href="#"><span class="material-symbols-outlined text-[22px]">receipt_long</span><span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider">Ledger</span></a><a aria-current="page" class="flex flex-col items-center justify-center gap-1 w-16 h-14 transition-all text-laser-lavender" data-path="intel-matrix" href="#"><span class="material-symbols-outlined text-[22px]">hub</span><span class="font-label-mono-sm text-label-mono-sm uppercase tracking-wider">Matrix</span></a></div></nav></body></html>
