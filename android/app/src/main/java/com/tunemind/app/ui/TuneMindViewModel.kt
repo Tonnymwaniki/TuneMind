@@ -172,6 +172,37 @@ class TuneMindViewModel : ViewModel() {
     private val _hearingInsightsState = MutableStateFlow(HearingInsightsState())
     val hearingInsightsState: StateFlow<HearingInsightsState> = _hearingInsightsState.asStateFlow()
 
+    // Cooldown Vault Persistence
+    private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
+    val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
+
+    // Gemini Cognitive AI Reasoning State
+    private val _geminiSessionInsight = MutableStateFlow<String?>(null)
+    val geminiSessionInsight: StateFlow<String?> = _geminiSessionInsight.asStateFlow()
+
+    private val _isGeminiConfigured = MutableStateFlow<Boolean>(false)
+    val isGeminiConfigured: StateFlow<Boolean> = _isGeminiConfigured.asStateFlow()
+
+    private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
+    val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
+
+    private val _reasoningReport = MutableStateFlow<com.tunemind.app.domain.ai.ReasoningReport?>(null)
+    val reasoningReport: StateFlow<com.tunemind.app.domain.ai.ReasoningReport?> = _reasoningReport.asStateFlow()
+
+    private val _isGeneratingReport = MutableStateFlow<Boolean>(false)
+    val isGeneratingReport: StateFlow<Boolean> = _isGeneratingReport.asStateFlow()
+
+    // Agent Recommendations & Music Provider Playback
+    private val _recommendations = MutableStateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>>(emptyList())
+    val recommendations: StateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>> = _recommendations.asStateFlow()
+
+    private val _playbackLaunchFeedback = MutableStateFlow<com.tunemind.app.provider.PlaybackLaunchResult?>(null)
+    val playbackLaunchFeedback: StateFlow<com.tunemind.app.provider.PlaybackLaunchResult?> = _playbackLaunchFeedback.asStateFlow()
+
+    // Onboarding State
+    private val _hasCompletedOnboarding = MutableStateFlow(loadOnboardingState())
+    val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
+
     val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()
 
     fun refreshCrossAppData() {
@@ -476,10 +507,6 @@ class TuneMindViewModel : ViewModel() {
         com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
     }
 
-    // Cooldown Vault Persistence
-    private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
-    val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
-
     private fun loadVaultFromPrefs(): List<VaultTrack> {
         val ctx = AppHolder.context ?: return defaultSeedVault()
         val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
@@ -567,21 +594,6 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
-    // Gemini Cognitive AI Reasoning State
-    private val _geminiSessionInsight = MutableStateFlow<String?>(null)
-    val geminiSessionInsight: StateFlow<String?> = _geminiSessionInsight.asStateFlow()
-
-    private val _isGeminiConfigured = MutableStateFlow<Boolean>(false)
-    val isGeminiConfigured: StateFlow<Boolean> = _isGeminiConfigured.asStateFlow()
-
-    private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
-    val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
-
-    private val _reasoningReport = MutableStateFlow<com.tunemind.app.domain.ai.ReasoningReport?>(null)
-    val reasoningReport: StateFlow<com.tunemind.app.domain.ai.ReasoningReport?> = _reasoningReport.asStateFlow()
-
-    private val _isGeneratingReport = MutableStateFlow<Boolean>(false)
-    val isGeneratingReport: StateFlow<Boolean> = _isGeneratingReport.asStateFlow()
 
     fun refreshGeminiState() {
         val ctx = AppHolder.context ?: return
@@ -656,12 +668,6 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    // Agent Recommendations & Music Provider Playback
-    private val _recommendations = MutableStateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>>(emptyList())
-    val recommendations: StateFlow<List<com.tunemind.app.domain.recommendation.RecommendedTrack>> = _recommendations.asStateFlow()
-
-    private val _playbackLaunchFeedback = MutableStateFlow<com.tunemind.app.provider.PlaybackLaunchResult?>(null)
-    val playbackLaunchFeedback: StateFlow<com.tunemind.app.provider.PlaybackLaunchResult?> = _playbackLaunchFeedback.asStateFlow()
 
     fun clearPlaybackLaunchFeedback() {
         _playbackLaunchFeedback.value = null
@@ -691,9 +697,6 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
-    // Onboarding State
-    private val _hasCompletedOnboarding = MutableStateFlow(loadOnboardingState())
-    val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
     private fun loadOnboardingState(): Boolean {
         val ctx = AppHolder.context ?: return true
