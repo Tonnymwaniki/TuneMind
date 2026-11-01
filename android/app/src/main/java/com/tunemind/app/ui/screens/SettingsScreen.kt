@@ -430,16 +430,16 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Song Fatigue Sensitivity", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                    Text("Balanced (75%)", fontSize = 11.sp, color = AccentCyan, fontWeight = FontWeight.Bold)
+                    Text("Balanced (75%)", fontSize = 11.sp, color = DeepObsidianAmber.SecondaryAccent, fontWeight = FontWeight.Bold)
                 }
 
                 Slider(
                     value = fatigueSensitivity,
                     onValueChange = { fatigueSensitivity = it },
                     colors = SliderDefaults.colors(
-                        thumbColor = PrimaryViolet,
-                        activeTrackColor = PrimaryViolet,
-                        inactiveTrackColor = SurfaceContainerHighest
+                        thumbColor = DeepObsidianAmber.PrimaryAccent,
+                        activeTrackColor = DeepObsidianAmber.PrimaryAccent,
+                        inactiveTrackColor = DeepObsidianAmber.RecessedBackground
                     )
                 )
 
@@ -453,7 +453,7 @@ fun SettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = BorderSubtle)
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
@@ -492,7 +492,7 @@ fun SettingsScreen(
                     Switch(checked = cloakingSession, onCheckedChange = { cloakingSession = it })
                 }
 
-                Divider(color = BorderSubtle)
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
