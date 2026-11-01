@@ -184,7 +184,7 @@ fun AdaptiveAtmosphereSection(
                         1 -> "afternoon"
                         else -> "night"
                     }
-                    val isSelected = themePreferences.forcedPaletteId == paletteId
+                    val isSelected = themePreferences.behavior == ThemeBehavior.FIXED && themePreferences.fixedPaletteId == paletteId
 
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -196,9 +196,13 @@ fun AdaptiveAtmosphereSection(
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
-                                vm?.updateThemePreferences {
-                                    copy(forcedPaletteId = if (isSelected) null else paletteId)
-                                }
+                                val nextBehavior = if (isSelected) ThemeBehavior.ADAPTIVE else ThemeBehavior.FIXED
+                                vm?.updateThemePreferences(
+                                    themePreferences.copy(
+                                        behavior = nextBehavior,
+                                        fixedPaletteId = paletteId
+                                    )
+                                )
                             }
                     ) {
                         Column(
@@ -257,8 +261,8 @@ fun AdaptiveAtmosphereSection(
                         3 -> "night"
                         else -> "night"
                     }
-                    val isSelected = (themePreferences.forcedPaletteId == paletteId) ||
-                            (themePreferences.forcedPaletteId == null && i == 3)
+                    val isSelected = (themePreferences.behavior == ThemeBehavior.FIXED && themePreferences.fixedPaletteId == paletteId) ||
+                            (themePreferences.behavior == ThemeBehavior.ADAPTIVE && i == 3)
 
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -270,9 +274,13 @@ fun AdaptiveAtmosphereSection(
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
-                                vm?.updateThemePreferences {
-                                    copy(forcedPaletteId = if (isSelected && i != 3) null else paletteId)
-                                }
+                                val nextBehavior = if (isSelected && i != 3) ThemeBehavior.ADAPTIVE else ThemeBehavior.FIXED
+                                vm?.updateThemePreferences(
+                                    themePreferences.copy(
+                                        behavior = nextBehavior,
+                                        fixedPaletteId = paletteId
+                                    )
+                                )
                             }
                     ) {
                         Column(
@@ -337,20 +345,78 @@ fun AdaptiveAtmosphereSection(
                     letterSpacing = 1.sp
                 )
 
-                // Musical Mood Influence Slider
+                // Musical Mood Influence Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Musical Mood Adaptation",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (themePreferences.enableMoodAdaptation) "Harmonic palette shifts enabled" else "Palette locked to time of day",
+                            fontSize = 10.sp,
+                            color = colors.secondaryText
+                        )
+                    }
+                    Switch(
+                        checked = themePreferences.enableMoodAdaptation,
+                        onCheckedChange = { checked ->
+                            vm?.updateThemePreferences(themePreferences.copy(enableMoodAdaptation = checked))
+                        }
+                    )
+                }
+
+                // Energy Sensitivity & Modulation Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Energy Modulation Depth",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (themePreferences.enableEnergyAdaptation) "Dynamic luminescence follows playback intensity" else "Static luminescence",
+                            fontSize = 10.sp,
+                            color = colors.secondaryText
+                        )
+                    }
+                    Switch(
+                        checked = themePreferences.enableEnergyAdaptation,
+                        onCheckedChange = { checked ->
+                            vm?.updateThemePreferences(themePreferences.copy(enableEnergyAdaptation = checked))
+                        }
+                    )
+                }
+
+                // Spectral Warm / Cool Bias Slider
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Musical Mood Influence",
+                            text = "Spectral Warm/Cool Tone Bias",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = colors.primaryText
                         )
                         Text(
-                            text = "${(themePreferences.musicalInfluenceWeight * 100).toInt()}%",
+                            text = when {
+                                themePreferences.observedWarmCoolBias < -0.1f -> "COOL // CYAN"
+                                themePreferences.observedWarmCoolBias > 0.1f -> "WARM // AMBER"
+                                else -> "BALANCED"
+                            },
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -359,49 +425,14 @@ fun AdaptiveAtmosphereSection(
                     }
 
                     Slider(
-                        value = themePreferences.musicalInfluenceWeight,
-                        onValueChange = { newWeight ->
-                            vm?.updateThemePreferences { copy(musicalInfluenceWeight = newWeight) }
+                        value = themePreferences.observedWarmCoolBias,
+                        onValueChange = { newBias ->
+                            vm?.updateThemePreferences(themePreferences.copy(observedWarmCoolBias = newBias))
                         },
-                        valueRange = 0f..1f,
+                        valueRange = -1f..1f,
                         colors = SliderDefaults.colors(
                             thumbColor = colors.primaryAccent,
                             activeTrackColor = colors.primaryAccent,
-                            inactiveTrackColor = colors.border
-                        )
-                    )
-                }
-
-                // Energy Sensitivity Slider
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Energy Modulation Depth",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.primaryText
-                        )
-                        Text(
-                            text = "${(themePreferences.energySensitivity * 100).toInt()}%",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.secondaryAccent
-                        )
-                    }
-
-                    Slider(
-                        value = themePreferences.energySensitivity,
-                        onValueChange = { newSens ->
-                            vm?.updateThemePreferences { copy(energySensitivity = newSens) }
-                        },
-                        valueRange = 0f..1f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = colors.secondaryAccent,
-                            activeTrackColor = colors.secondaryAccent,
                             inactiveTrackColor = colors.border
                         )
                     )

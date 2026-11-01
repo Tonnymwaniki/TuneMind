@@ -227,7 +227,7 @@ fun PersonalOnboardingDialog(
                 )
 
                 installedProviders.forEach { provider ->
-                    val isSelected = provider.id == selectedProviderId
+                    val isSelected = provider.providerId == selectedProviderId
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = if (isSelected) colors.cardSurface else colors.secondaryBackground,
@@ -238,8 +238,8 @@ fun PersonalOnboardingDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                selectedProviderId = provider.id
-                                vm.setPreferredProviderId(context, provider.id)
+                                selectedProviderId = provider.providerId
+                                vm.setPreferredProviderId(context, provider.providerId)
                             }
                     ) {
                         Row(
@@ -321,7 +321,7 @@ fun PersonalOnboardingDialog(
             // 6. INITIALIZE CALIBRATION BUTTON
             Button(
                 onClick = {
-                    vm.completeOnboarding()
+                    vm.completeOnboarding(context, selectedProviderId)
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),

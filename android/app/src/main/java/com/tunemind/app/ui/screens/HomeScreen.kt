@@ -46,6 +46,7 @@ fun HomeScreen(
     onOpenHearing: () -> Unit = {}
 ) {
     val state by vm.homeState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
     var isRestTrackActive by remember { mutableStateOf(false) }
@@ -478,7 +479,7 @@ fun HomeScreen(
 
                     // Stepper: Previous
                     IconButton(
-                        onClick = { vm.playPrevious() },
+                        onClick = { vm.skipPrev() },
                         modifier = Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(8.dp))
@@ -499,7 +500,7 @@ fun HomeScreen(
                             .clip(CircleShape)
                             .background(colors.primaryAccent)
                             .clickable {
-                                if (isPlaying) vm.pauseTrack() else vm.resumeTrack()
+                                vm.togglePlayback()
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -513,7 +514,7 @@ fun HomeScreen(
 
                     // Stepper: Next
                     IconButton(
-                        onClick = { vm.playNext() },
+                        onClick = { vm.skipNext() },
                         modifier = Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(8.dp))
@@ -582,7 +583,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        recommendations.firstOrNull()?.let { vm.launchTrackPlayback(it) }
+                        recommendations.firstOrNull()?.let { vm.playRecommendation(context, it) }
                     }
             ) {
                 Row(
@@ -657,7 +658,7 @@ fun HomeScreen(
 
                     IconButton(
                         onClick = {
-                            recommendations.firstOrNull()?.let { vm.launchTrackPlayback(it) }
+                            recommendations.firstOrNull()?.let { vm.playRecommendation(context, it) }
                         },
                         modifier = Modifier
                             .size(34.dp)
@@ -682,7 +683,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        recommendations.getOrNull(1)?.let { vm.launchTrackPlayback(it) }
+                        recommendations.getOrNull(1)?.let { vm.playRecommendation(context, it) }
                     }
             ) {
                 Row(
@@ -756,7 +757,7 @@ fun HomeScreen(
 
                     IconButton(
                         onClick = {
-                            recommendations.getOrNull(1)?.let { vm.launchTrackPlayback(it) }
+                            recommendations.getOrNull(1)?.let { vm.playRecommendation(context, it) }
                         },
                         modifier = Modifier
                             .size(34.dp)
@@ -804,7 +805,8 @@ fun HomeScreen(
                         }
                     }
 
-                    val reportSummary = reasoningReport?.executiveSummary
+                    val reportSummary = reasoningReport?.flowStateDescription
+                        ?: reasoningReport?.fatigueRiskLabel
                         ?: geminiInsight
                         ?: "Real-time acoustic patterns indicate stable receptivity across current listening cycle."
 
@@ -849,9 +851,9 @@ fun HomeScreen(
 
     selectedProfileData?.let { data ->
         SongProfileSheet(
-            data = data,
-            onDismiss = { selectedProfileData = null },
-            onAddToCooldown = { vm.addToVault(data.title, data.artist, 5) }
+            profile = data,
+            vm = vm,
+            onDismiss = { selectedProfileData = null }
         )
     }
 }

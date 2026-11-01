@@ -386,7 +386,7 @@ fun SongFatigueScreen(
                                             color = colors.cardSurface
                                         ) {
                                             Text(
-                                                text = "${track.daysRemaining}d RECOVERY REMAINING",
+                                                text = "${track.cooldownDaysRemaining}d RECOVERY REMAINING",
                                                 fontSize = 8.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontWeight = FontWeight.Bold,
@@ -399,7 +399,7 @@ fun SongFatigueScreen(
                             }
 
                             IconButton(
-                                onClick = { vm.releaseFromVault(track.title) },
+                                onClick = { vm.restoreFromVault(track.id) },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(RoundedCornerShape(6.dp))

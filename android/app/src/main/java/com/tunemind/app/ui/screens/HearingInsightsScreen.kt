@@ -33,7 +33,7 @@ fun HearingInsightsScreen(
     val hearingState by vm.hearingInsightsState.collectAsState()
     val colors = TuneMindTheme.colors
     val avgDb = hearingState.estimatedAverageDb.takeIf { it > 0f } ?: 72f
-    val activeDevice = hearingState.activeAudioDevice ?: "Bluetooth Headset (A2DP • LDAC)"
+    val activeDevice = hearingState.activeAudioDevice?.deviceName ?: "Bluetooth Headset (A2DP • LDAC)"
 
     val isSafe = avgDb < 85f
     val headroomDb = (85f - avgDb).coerceAtLeast(0f)

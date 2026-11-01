@@ -362,13 +362,14 @@ fun MusicalMomentsScreen(
 
                 Button(
                     onClick = {
-                        vm.bookmarkCurrentMoment(
+                        vm.saveMusicalMoment(
                             title = currentTrackTitle,
                             artist = currentTrackArtist,
+                            album = null,
+                            sourcePkg = nowPlaying?.sourcePackage,
                             startMs = activeScrubStartMs,
                             endMs = activeScrubEndMs,
-                            customName = "Hook: $currentTrackTitle",
-                            vibeTag = "Chorus"
+                            customName = "Hook: $currentTrackTitle"
                         )
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),
@@ -492,7 +493,7 @@ fun MusicalMomentsScreen(
 
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
-                                        text = moment.momentName,
+                                        text = moment.customName ?: "Moment Hook",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = colors.primaryText,
@@ -500,7 +501,7 @@ fun MusicalMomentsScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${moment.trackTitle} • ${moment.artist}",
+                                        text = "${moment.trackTitle} • ${moment.trackArtist}",
                                         fontSize = 11.sp,
                                         color = colors.secondaryText,
                                         maxLines = 1,
@@ -515,7 +516,7 @@ fun MusicalMomentsScreen(
                                             color = colors.cardSurface
                                         ) {
                                             Text(
-                                                text = "${formatDuration(moment.startMs)} - ${formatDuration(moment.endMs)}",
+                                                text = "${formatDuration(moment.startPositionMs)} - ${formatDuration(moment.endPositionMs)}",
                                                 fontSize = 8.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontWeight = FontWeight.Bold,
@@ -524,7 +525,7 @@ fun MusicalMomentsScreen(
                                             )
                                         }
                                         Text(
-                                            text = "PLAYED ${moment.loopCount}x",
+                                            text = "${moment.preferredPlaybackDurationMs / 1000}s HOOK",
                                             fontSize = 8.sp,
                                             fontFamily = FontFamily.Monospace,
                                             color = colors.secondaryText
@@ -534,7 +535,7 @@ fun MusicalMomentsScreen(
                             }
 
                             IconButton(
-                                onClick = { vm.deleteMoment(moment.id) },
+                                onClick = { vm.deleteMusicalMoment(moment.momentId) },
                                 modifier = Modifier
                                     .size(30.dp)
                                     .clip(RoundedCornerShape(6.dp))
