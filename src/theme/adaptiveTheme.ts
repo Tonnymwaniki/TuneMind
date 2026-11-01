@@ -36,68 +36,68 @@ export const PALETTES: Record<'morning' | 'afternoon' | 'evening' | 'night', Pal
   morning: {
     id: 'morning',
     name: 'First Light',
-    description: 'Clean light porcelain chalk with glowing Nixie Amber & Acid Lime.',
-    primaryBackground: '#F7F8FA',
-    secondaryBackground: '#EDEFF4',
-    cardSurface: '#FFFFFF',
-    elevatedSurface: '#F1F3F7',
-    primaryText: '#0F172A',
-    secondaryText: '#64748B',
-    primaryAccent: '#F59E0B', // Nixie Amber-Gold
-    secondaryAccent: '#84CC16', // Electric Acid Lime
-    highlight: '#FEF3C7',
-    border: '#D6DBE5',
+    description: 'Warm vintage parchment with glowing vacuum tube amber & turquoise VU indicator.',
+    primaryBackground: '#EBD8BB',
+    secondaryBackground: '#DFCCAA',
+    cardSurface: '#F5EAD4',
+    elevatedSurface: '#EFE2CA',
+    primaryText: '#382314',
+    secondaryText: '#7A5B3E',
+    primaryAccent: '#D97706', // Glowing Vacuum Tube Amber
+    secondaryAccent: '#0D9488', // Vintage Turquoise VU needle
+    highlight: '#FFF1D0',
+    border: '#CCB895',
   },
 
   // B. AFTERNOON — CLARITY (12:00 - 16:59)
   afternoon: {
     id: 'afternoon',
     name: 'Clarity',
-    description: 'Clean light porcelain chalk with high-contrast Nixie Amber & Acid Lime.',
-    primaryBackground: '#F5F6F9',
-    secondaryBackground: '#EBECEF',
-    cardSurface: '#FFFFFF',
-    elevatedSurface: '#F0F2F5',
-    primaryText: '#0F172A',
-    secondaryText: '#64748B',
-    primaryAccent: '#F59E0B', // Nixie Amber-Gold
-    secondaryAccent: '#84CC16', // Electric Acid Lime
-    highlight: '#FEF3C7',
-    border: '#D4DAE4',
+    description: 'Warm flax amber chassis with raw honey well & aged linen module cards.',
+    primaryBackground: '#E8D5B5',
+    secondaryBackground: '#DECA9E',
+    cardSurface: '#F3E8CE',
+    elevatedSurface: '#ECE0C4',
+    primaryText: '#382314',
+    secondaryText: '#7A5B3E',
+    primaryAccent: '#D97706', // Glowing Vacuum Tube Amber
+    secondaryAccent: '#0D9488', // Vintage Turquoise VU needle
+    highlight: '#FFF3D6',
+    border: '#C8B490',
   },
 
   // C. EVENING — TRANSITION (17:00 - 20:59)
   evening: {
     id: 'evening',
     name: 'Transition',
-    description: 'Warm light porcelain chalk with Sunset Nixie Amber & Acid Lime.',
-    primaryBackground: '#F6F5F8',
-    secondaryBackground: '#ECEBF0',
-    cardSurface: '#FFFFFF',
-    elevatedSurface: '#F1F0F5',
-    primaryText: '#0F172A',
-    secondaryText: '#64748B',
-    primaryAccent: '#EA580C', // Sunset Nixie Amber
-    secondaryAccent: '#84CC16', // Electric Acid Lime
-    highlight: '#FFEDD5',
-    border: '#D8D6E2',
+    description: 'Golden hour amber with warm toasted honey and rich sunset ember glow.',
+    primaryBackground: '#E4CFAC',
+    secondaryBackground: '#D8C194',
+    cardSurface: '#EFE2C5',
+    elevatedSurface: '#E8D7B8',
+    primaryText: '#331E10',
+    secondaryText: '#735235',
+    primaryAccent: '#C2410C', // Sunset Ember Glow
+    secondaryAccent: '#0D9488', // Turquoise Indicator
+    highlight: '#FFE7BA',
+    border: '#C2AC85',
   },
 
   // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
   night: {
     id: 'night',
     name: 'Deep Focus',
-    description: 'Pure Light OP-1 Field porcelain chalk with glowing Nixie amber & acid lime.',
-    primaryBackground: '#F4F5F8',
-    secondaryBackground: '#E9EBF1',
-    cardSurface: '#FFFFFF',
-    elevatedSurface: '#EFF1F5',
-    primaryText: '#0F172A',
-    secondaryText: '#64748B',
-    primaryAccent: '#F59E0B', // Nixie Amber-Gold
-    secondaryAccent: '#84CC16', // Electric Acid Lime
-    highlight: '#FEF3C7',
-    border: '#D4D9E2',
+    description: 'Mellow amber-oak chassis with antique parchment and radiant vacuum tube filament.',
+    primaryBackground: '#DFC9A3',
+    secondaryBackground: '#D3BC8E',
+    cardSurface: '#EBDCBA',
+    elevatedSurface: '#E2D0AB',
+    primaryText: '#2E1A0E',
+    secondaryText: '#6B4B30',
+    primaryAccent: '#D97706', // Radiant Vacuum Tube Filament
+    secondaryAccent: '#0D9488', // Turquoise VU needle
+    highlight: '#FFECBF',
+    border: '#BFA77D',
   },
 };
 

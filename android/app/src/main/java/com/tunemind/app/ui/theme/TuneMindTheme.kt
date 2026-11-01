@@ -119,10 +119,10 @@ val PrimaryGradient = Brush.horizontalGradient(
     colors = listOf(PrimaryViolet, AccentCyan)
 )
 val CardGlowGradient = Brush.verticalGradient(
-    colors = listOf(Color(0xFFFFFFFF), Color(0xFFEDEFF4))
+    colors = listOf(Color(0xFFF5EAD4), Color(0xFFDFCCAA))
 )
 val BurnoutShieldGradient = Brush.linearGradient(
-    colors = listOf(Color(0xFFFEF3C7), Color(0xFFF1F3F7))
+    colors = listOf(Color(0xFFFFF1D0), Color(0xFFEFE2CA))
 )
 
 @Composable
