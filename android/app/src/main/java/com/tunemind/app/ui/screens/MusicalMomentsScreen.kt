@@ -271,7 +271,7 @@ fun MusicalMomentsScreen(
                         val barColor = when {
                             !isInsideActiveRegion -> colors.cardSurface
                             index % 2 == 0 -> colors.primaryAccent
-                            else -> Color(0xFF83B9BD)
+                            else -> DeepObsidianAmber.SecondaryAccent
                         }
                         Box(
                             modifier = Modifier
@@ -325,14 +325,14 @@ fun MusicalMomentsScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Surface(
                             shape = RoundedCornerShape(3.dp),
-                            color = Color(0xFF83B9BD)
+                            color = DeepObsidianAmber.SecondaryAccent
                         ) {
                             Text(
                                 text = formatDuration(activeScrubEndMs),
                                 fontSize = 8.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.primaryBackground,
+                                color = DeepObsidianAmber.AppBackground,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                         }
@@ -340,7 +340,7 @@ fun MusicalMomentsScreen(
                             modifier = Modifier
                                 .width(1.5.dp)
                                 .weight(1f)
-                                .background(Color(0xFF83B9BD))
+                                .background(DeepObsidianAmber.SecondaryAccent)
                         )
                     }
                 }
@@ -520,7 +520,7 @@ fun MusicalMomentsScreen(
                                                 fontSize = 8.sp,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF83B9BD),
+                                                color = DeepObsidianAmber.SecondaryAccent,
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                             )
                                         }

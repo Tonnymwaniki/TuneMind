@@ -391,7 +391,7 @@ fun HomeScreen(
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (dynamicSatietyPercent < 70) colors.primaryAccent else Color(0xFFF59E0B)
+                        color = if (dynamicSatietyPercent < 70) colors.primaryAccent else DeepObsidianAmber.Warning
                     )
                 }
 
@@ -540,6 +540,96 @@ fun HomeScreen(
                             contentDescription = "Loop",
                             tint = if (isAcousticLoopActive) colors.primaryAccent else colors.secondaryText,
                             modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // CONTINUOUS LISTENING INTELLIGENCE LIVE TILE (Unlocked & Evolving)
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenStudy() }
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(DeepObsidianAmber.Success)
+                        )
+                        Text(
+                            text = "CONTINUOUS ACOUSTIC INTELLIGENCE",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.TextPrimary,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "ACTIVE LEARNING",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.Success,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Neural Plasticity: 94.2%",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.TextPrimary
+                        )
+                        Text(
+                            text = "Actively learning and adapting across all listening sessions.",
+                            fontSize = 11.sp,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "VIEW MATRIX",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                        Icon(
+                            Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }

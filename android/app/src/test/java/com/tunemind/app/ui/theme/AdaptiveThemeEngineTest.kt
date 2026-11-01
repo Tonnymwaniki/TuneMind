@@ -38,21 +38,18 @@ class AdaptiveThemeEngineTest {
 
     @Test
     fun testPaletteHexValuesMatchSpecification() {
-        // Morning — First Light
-        assertEquals(0xFF111C2C, TuneMindColors.MorningPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.MorningPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
-        assertEquals(0xFFE5B879, TuneMindColors.MorningPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.MorningPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
+        // Deep Obsidian Amber — Fixed Foundational Palette
+        assertEquals(0xFF652814, TuneMindColors.MorningPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.MorningPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFFC68A46, TuneMindColors.MorningPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.MorningPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
 
-        // Afternoon — Clarity
-        assertEquals(0xFF142235, TuneMindColors.AfternoonPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.AfternoonPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
-        assertEquals(0xFF83B9BD, TuneMindColors.AfternoonPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.AfternoonPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFF652814, TuneMindColors.AfternoonPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.AfternoonPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFFC68A46, TuneMindColors.AfternoonPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.AfternoonPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
 
-        // Evening — Transition
-        assertEquals(0xFF151A2A, TuneMindColors.EveningPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.EveningPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
-        assertEquals(0xFFD99A69, TuneMindColors.EveningPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.EveningPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFF652814, TuneMindColors.EveningPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.EveningPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFFC68A46, TuneMindColors.EveningPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.EveningPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
 
-        // Night — Deep Focus
-        assertEquals(0xFF0C1220, TuneMindColors.NightPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.NightPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
-        assertEquals(0xFFA997D8, TuneMindColors.NightPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.NightPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFF652814, TuneMindColors.NightPrimaryBackground.value.toLong() shr 32 or (TuneMindColors.NightPrimaryBackground.value.toLong() and 0xFFFFFFFFL))
+        assertEquals(0xFFC68A46, TuneMindColors.NightPrimaryAccent.value.toLong() shr 32 or (TuneMindColors.NightPrimaryAccent.value.toLong() and 0xFFFFFFFFL))
     }
 
     @Test

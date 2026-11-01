@@ -76,14 +76,14 @@ fun SongFatigueScreen(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF83B9BD))
+                            .background(DeepObsidianAmber.CopperAccent)
                     )
                     Text(
                         text = "CRYOGENIC COOLDOWN PROTOCOL",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF83B9BD),
+                        color = DeepObsidianAmber.SecondaryAccent,
                         letterSpacing = 1.sp
                     )
                 }
@@ -141,10 +141,11 @@ fun SongFatigueScreen(
                         .background(
                             Brush.sweepGradient(
                                 listOf(
-                                    Color(0xFF83B9BD),
-                                    colors.primaryAccent,
-                                    Color(0xFFCF7778),
-                                    Color(0xFF83B9BD)
+                                    DeepObsidianAmber.Success,
+                                    DeepObsidianAmber.PrimaryAccent,
+                                    DeepObsidianAmber.Warning,
+                                    DeepObsidianAmber.Error,
+                                    DeepObsidianAmber.Success
                                 )
                             )
                         )
@@ -168,7 +169,7 @@ fun SongFatigueScreen(
                         modifier = Modifier
                             .size(16.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF83B9BD))
+                            .background(DeepObsidianAmber.CopperAccent)
                             .border(2.dp, colors.primaryBackground, CircleShape)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -184,7 +185,7 @@ fun SongFatigueScreen(
                         text = "STABLE EQUILIBRIUM",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF83B9BD)
+                        color = DeepObsidianAmber.SecondaryAccent
                     )
                 }
             }
@@ -238,7 +239,7 @@ fun SongFatigueScreen(
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF83B9BD)
+                            color = DeepObsidianAmber.Success
                         )
                     }
                 }
@@ -261,7 +262,7 @@ fun SongFatigueScreen(
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF83B9BD),
+                        color = DeepObsidianAmber.SecondaryAccent,
                         letterSpacing = 1.sp
                     )
                     Surface(
@@ -310,7 +311,7 @@ fun SongFatigueScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = Color(0xFF83B9BD), modifier = Modifier.size(24.dp))
+                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.CopperAccent, modifier = Modifier.size(24.dp))
                         Text(
                             text = "CRYO-CHAMBER EMPTY",
                             fontSize = 11.sp,
@@ -356,7 +357,7 @@ fun SongFatigueScreen(
                                     Icon(
                                         Icons.Outlined.AcUnit,
                                         contentDescription = null,
-                                        tint = Color(0xFF83B9BD),
+                                        tint = DeepObsidianAmber.CopperAccent,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }

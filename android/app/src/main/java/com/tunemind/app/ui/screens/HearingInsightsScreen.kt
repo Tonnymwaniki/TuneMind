@@ -81,7 +81,7 @@ fun HearingInsightsScreen(
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF83B9BD)
+                    color = DeepObsidianAmber.SecondaryAccent
                 )
             }
         }
@@ -161,7 +161,7 @@ fun HearingInsightsScreen(
                     fontSize = 8.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF83B9BD)
+                    color = DeepObsidianAmber.SecondaryAccent
                 )
             }
 
@@ -180,11 +180,11 @@ fun HearingInsightsScreen(
                         .background(
                             Brush.sweepGradient(
                                 listOf(
-                                    Color(0xFF83B9BD),
-                                    Color(0xFF83B9BD),
-                                    Color(0xFFF59E0B),
-                                    Color(0xFFCF7778),
-                                    Color(0xFF83B9BD)
+                                    DeepObsidianAmber.Success,
+                                    DeepObsidianAmber.PrimaryAccent,
+                                    DeepObsidianAmber.Warning,
+                                    DeepObsidianAmber.Error,
+                                    DeepObsidianAmber.Success
                                 )
                             )
                         )
@@ -209,7 +209,7 @@ fun HearingInsightsScreen(
                         fontSize = 28.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (isSafe) Color(0xFF83B9BD) else Color(0xFFF59E0B),
+                        color = if (isSafe) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
                         letterSpacing = 0.5.sp
                     )
                     Text(
@@ -217,7 +217,7 @@ fun HearingInsightsScreen(
                         fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (isSafe) Color(0xFF10B981) else Color(0xFFF59E0B)
+                        color = if (isSafe) DeepObsidianAmber.Success else DeepObsidianAmber.Warning
                     )
                 }
             }
@@ -228,11 +228,11 @@ fun HearingInsightsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("40", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = colors.secondaryText)
-                Text("60", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF83B9BD))
+                Text("60", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.Success)
                 Text("80", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = colors.secondaryText)
-                Text("85 CRIT", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
-                Text("100", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = Color(0xFFF59E0B))
-                Text("120 dB", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color(0xFFCF7778))
+                Text("85 CRIT", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Warning)
+                Text("100", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.Warning)
+                Text("120 dB", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Error)
             }
         }
 
