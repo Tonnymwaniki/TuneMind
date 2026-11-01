@@ -10,63 +10,63 @@ object TuneMindColors {
 
     // ─────────────────────────────────────────────────────────────
     // A. MORNING — FIRST LIGHT (05:00 - 11:59)
-    // Freshness, clarity, a new beginning and gentle energy.
+    // Deep Midnight Indigo base with fresh solar amber glow.
     // ─────────────────────────────────────────────────────────────
-    val MorningPrimaryBackground   = Color(0xFF111C2C)
-    val MorningSecondaryBackground = Color(0xFF1C2B40)
-    val MorningCardSurface         = Color(0xFF263951)
-    val MorningElevatedSurface     = Color(0xFF30445D)
-    val MorningPrimaryText         = Color(0xFFF2F4F8)
-    val MorningSecondaryText       = Color(0xFFB5C1D0)
-    val MorningPrimaryAccent       = Color(0xFFE5B879)
-    val MorningSecondaryAccent     = Color(0xFF9CB9D5)
-    val MorningHighlight           = Color(0xFFF3D9A6)
-    val MorningBorder              = Color(0xFF3B5069)
+    val MorningPrimaryBackground   = Color(0xFF090D18)
+    val MorningSecondaryBackground = Color(0xFF101526)
+    val MorningCardSurface         = Color(0xFF161E34)
+    val MorningElevatedSurface     = Color(0xFF202A46)
+    val MorningPrimaryText         = Color(0xFFF8FAFC)
+    val MorningSecondaryText       = Color(0xFFA1AEC2)
+    val MorningPrimaryAccent       = Color(0xFFF59E0B) // Radiant Warm Amber
+    val MorningSecondaryAccent     = Color(0xFF818CF8) // Midnight Indigo Sky
+    val MorningHighlight           = Color(0xFFFDE68A) // Soft Golden Warmth
+    val MorningBorder              = Color(0xFF283552)
 
     // ─────────────────────────────────────────────────────────────
     // B. AFTERNOON — CLARITY (12:00 - 16:59)
-    // Clarity, balance, focus and visual openness.
+    // Deep Midnight Indigo base with high-clarity amber and precision cyan.
     // ─────────────────────────────────────────────────────────────
-    val AfternoonPrimaryBackground   = Color(0xFF142235)
-    val AfternoonSecondaryBackground = Color(0xFF1E3047)
-    val AfternoonCardSurface         = Color(0xFF293D55)
-    val AfternoonElevatedSurface     = Color(0xFF354B64)
-    val AfternoonPrimaryText         = Color(0xFFF3F5F8)
-    val AfternoonSecondaryText       = Color(0xFFBAC6D3)
-    val AfternoonPrimaryAccent       = Color(0xFF83B9BD)
-    val AfternoonSecondaryAccent     = Color(0xFFA9C7D8)
-    val AfternoonHighlight           = Color(0xFFD5E7E5)
-    val AfternoonBorder              = Color(0xFF40556C)
+    val AfternoonPrimaryBackground   = Color(0xFF080C16)
+    val AfternoonSecondaryBackground = Color(0xFF0F1424)
+    val AfternoonCardSurface         = Color(0xFF151C30)
+    val AfternoonElevatedSurface     = Color(0xFF1E2842)
+    val AfternoonPrimaryText         = Color(0xFFF8FAFC)
+    val AfternoonSecondaryText       = Color(0xFFA1AEC2)
+    val AfternoonPrimaryAccent       = Color(0xFFE5A857) // Warm Studio Amber
+    val AfternoonSecondaryAccent     = Color(0xFF38BDF8) // Precision Cyan
+    val AfternoonHighlight           = Color(0xFFFCD34D)
+    val AfternoonBorder              = Color(0xFF26324E)
 
     // ─────────────────────────────────────────────────────────────
     // C. EVENING — TRANSITION (17:00 - 20:59)
-    // Warmth, depth, transition and a more intimate atmosphere.
+    // Deep Midnight Indigo base with warm sunset copper and violet dusk.
     // ─────────────────────────────────────────────────────────────
-    val EveningPrimaryBackground   = Color(0xFF151A2A)
-    val EveningSecondaryBackground = Color(0xFF24283B)
-    val EveningCardSurface         = Color(0xFF303348)
-    val EveningElevatedSurface     = Color(0xFF3C4054)
-    val EveningPrimaryText         = Color(0xFFF3EFF1)
-    val EveningSecondaryText       = Color(0xFFC0B9C4)
-    val EveningPrimaryAccent       = Color(0xFFD99A69)
-    val EveningSecondaryAccent     = Color(0xFFB77E82)
-    val EveningHighlight           = Color(0xFFF0C49A)
-    val EveningBorder              = Color(0xFF4A485A)
+    val EveningPrimaryBackground   = Color(0xFF090D1A)
+    val EveningSecondaryBackground = Color(0xFF111628)
+    val EveningCardSurface         = Color(0xFF171E36)
+    val EveningElevatedSurface     = Color(0xFF212B48)
+    val EveningPrimaryText         = Color(0xFFF8FAFC)
+    val EveningSecondaryText       = Color(0xFFA6B3C8)
+    val EveningPrimaryAccent       = Color(0xFFF97316) // Sunset Copper Amber
+    val EveningSecondaryAccent     = Color(0xFF8B5CF6) // Deep Indigo Violet
+    val EveningHighlight           = Color(0xFFFED7AA)
+    val EveningBorder              = Color(0xFF2A3756)
 
     // ─────────────────────────────────────────────────────────────
     // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
-    // Privacy, calmness, immersion and reduced visual intensity.
+    // Ultimate Midnight Indigo with glowing analog tube amber & laser lavender.
     // ─────────────────────────────────────────────────────────────
-    val NightPrimaryBackground   = Color(0xFF0C1220)
-    val NightSecondaryBackground = Color(0xFF131D30)
-    val NightCardSurface         = Color(0xFF1C2940)
-    val NightElevatedSurface     = Color(0xFF25344D)
-    val NightPrimaryText         = Color(0xFFE9EDF5)
-    val NightSecondaryText       = Color(0xFFA1AEC2)
-    val NightPrimaryAccent       = Color(0xFFA997D8)
-    val NightSecondaryAccent     = Color(0xFFD5A66F)
-    val NightHighlight           = Color(0xFFC3B6E8)
-    val NightBorder              = Color(0xFF2D3B53)
+    val NightPrimaryBackground   = Color(0xFF070B14)
+    val NightSecondaryBackground = Color(0xFF0E1322)
+    val NightCardSurface         = Color(0xFF141A2D)
+    val NightElevatedSurface     = Color(0xFF1D253E)
+    val NightPrimaryText         = Color(0xFFF8FAFC)
+    val NightSecondaryText       = Color(0xFF94A3B8)
+    val NightPrimaryAccent       = Color(0xFFF59E0B) // Glowing Tube Filament Amber
+    val NightSecondaryAccent     = Color(0xFFA997D8) // Laser Lavender Indigo
+    val NightHighlight           = Color(0xFFFDE68A)
+    val NightBorder              = Color(0xFF242F4A)
 
     // ─────────────────────────────────────────────────────────────
     // MUSICAL MOOD PROFILES
