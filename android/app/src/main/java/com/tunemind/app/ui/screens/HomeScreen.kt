@@ -46,7 +46,6 @@ fun HomeScreen(
     onOpenHearing: () -> Unit = {}
 ) {
     val state by vm.homeState.collectAsState()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
     var isRestTrackActive by remember { mutableStateOf(false) }
