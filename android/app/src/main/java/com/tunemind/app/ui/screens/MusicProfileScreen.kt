@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.ui.TuneMindDemoData
+import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
 

@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.tunemind.app.BuildConfig
 import com.tunemind.app.data.local.EventQueueEntity
 import com.tunemind.app.data.local.TuneMindDatabase
-import com.tunemind.app.data.sync.SyncScheduler
+import com.tunemind.app.sync.SyncScheduler
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
