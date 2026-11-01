@@ -9,56 +9,57 @@ import androidx.compose.ui.graphics.Color
 object TuneMindColors {
 
     // ─────────────────────────────────────────────────────────────
-    // VINTAGE VACUUM TUBE (Warm Honey Amber + Aged Linen + Espresso Ink)
+    // ABLETON STUDIO SLATE (Neutral Anodized Steel + Amber OLED)
+    // Mid-tone balance: neither blinding bright nor suffocating dark.
     // ─────────────────────────────────────────────────────────────
 
     // A. MORNING — FIRST LIGHT (05:00 - 11:59)
-    val MorningPrimaryBackground   = Color(0xFFEBD8BB) // Warm vintage parchment
-    val MorningSecondaryBackground = Color(0xFFDFCCAA) // Honey acoustic well
-    val MorningCardSurface         = Color(0xFFF5EAD4) // Aged linen surface card
-    val MorningElevatedSurface     = Color(0xFFEFE2CA) // Soft illuminated pad
-    val MorningPrimaryText         = Color(0xFF382314) // Deep espresso roast ink
-    val MorningSecondaryText       = Color(0xFF7A5B3E) // Aged tobacco amber
-    val MorningPrimaryAccent       = Color(0xFFD97706) // Glowing Vacuum Tube Filament Amber
-    val MorningSecondaryAccent     = Color(0xFF0D9488) // Vintage turquoise VU meter needle
-    val MorningHighlight           = Color(0xFFFFF1D0) // Radiant warm tube glow
-    val MorningBorder              = Color(0xFFCCB895) // Warm brass hairline border
+    val MorningPrimaryBackground   = Color(0xFF474D58) // Mid-tone neutral morning steel
+    val MorningSecondaryBackground = Color(0xFF3B404A) // Recessed machined groove well
+    val MorningCardSurface         = Color(0xFF555C6A) // Elevated brushed aluminum plate
+    val MorningElevatedSurface     = Color(0xFF616979) // Soft tactile pad
+    val MorningPrimaryText         = Color(0xFFF8FAFC) // Crisp studio silver-white
+    val MorningSecondaryText       = Color(0xFFAFB8C7) // Muted laser-etched aluminum
+    val MorningPrimaryAccent       = Color(0xFFF59E0B) // Tactile Warm Amber OLED
+    val MorningSecondaryAccent     = Color(0xFF10B981) // Precision emerald level indicator
+    val MorningHighlight           = Color(0xFFFEF3C7) // Soft amber halo
+    val MorningBorder              = Color(0xFF666E7F) // Precision 1px hairline border
 
     // B. AFTERNOON — CLARITY (12:00 - 16:59)
-    val AfternoonPrimaryBackground   = Color(0xFFE8D5B5) // Warm flax amber chassis
-    val AfternoonSecondaryBackground = Color(0xFFDECA9E) // Raw honey deck
-    val AfternoonCardSurface         = Color(0xFFF3E8CE) // Clotted cream / aged linen card
-    val AfternoonElevatedSurface     = Color(0xFFECE0C4) // Tactile pad
-    val AfternoonPrimaryText         = Color(0xFF382314) // Deep espresso roast ink
-    val AfternoonSecondaryText       = Color(0xFF7A5B3E) // Aged tobacco amber
-    val AfternoonPrimaryAccent       = Color(0xFFD97706) // Glowing vacuum tube filament
-    val AfternoonSecondaryAccent     = Color(0xFF0D9488) // Vintage turquoise VU needle
-    val AfternoonHighlight           = Color(0xFFFFF3D6) // Soft golden tube glow
-    val AfternoonBorder              = Color(0xFFC8B490) // Muted brass border
+    val AfternoonPrimaryBackground   = Color(0xFF434852) // Balanced anodized studio steel
+    val AfternoonSecondaryBackground = Color(0xFF373C45) // Recessed console well
+    val AfternoonCardSurface         = Color(0xFF515764) // Elevated aluminum plate card
+    val AfternoonElevatedSurface     = Color(0xFF5D6473) // Tactile pad
+    val AfternoonPrimaryText         = Color(0xFFF3F4F6) // Crisp studio silver-white
+    val AfternoonSecondaryText       = Color(0xFFA9B2C0) // Muted laser-etched aluminum
+    val AfternoonPrimaryAccent       = Color(0xFFF59E0B) // Warm Amber OLED dial
+    val AfternoonSecondaryAccent     = Color(0xFF10B981) // Precision emerald level indicator
+    val AfternoonHighlight           = Color(0xFFFDE68A) // Soft amber halo
+    val AfternoonBorder              = Color(0xFF626A7A) // Clean hairline border
 
     // C. EVENING — TRANSITION (17:00 - 20:59)
-    val EveningPrimaryBackground   = Color(0xFFE4CFAC) // Golden hour amber
-    val EveningSecondaryBackground = Color(0xFFD8C194) // Toasted honey well
-    val EveningCardSurface         = Color(0xFFEFE2C5) // Rich parchment card
-    val EveningElevatedSurface     = Color(0xFFE8D7B8) // Warm elevated pad
-    val EveningPrimaryText         = Color(0xFF331E10) // Deep espresso ink
-    val EveningSecondaryText       = Color(0xFF735235) // Rich tobacco
-    val EveningPrimaryAccent       = Color(0xFFC2410C) // Sunset ember glow
-    val EveningSecondaryAccent     = Color(0xFF0D9488) // Turquoise indicator
-    val EveningHighlight           = Color(0xFFFFE7BA) // Radiant amber highlight
-    val EveningBorder              = Color(0xFFC2AC85) // Burnished brass border
+    val EveningPrimaryBackground   = Color(0xFF454752) // Twilight-tinted studio steel
+    val EveningSecondaryBackground = Color(0xFF393B44) // Recessed console well
+    val EveningCardSurface         = Color(0xFF535564) // Studio slate card
+    val EveningElevatedSurface     = Color(0xFF5F6172) // Elevated pad
+    val EveningPrimaryText         = Color(0xFFF3F4F6) // Studio silver-white
+    val EveningSecondaryText       = Color(0xFFAAAEC0) // Muted slate text
+    val EveningPrimaryAccent       = Color(0xFFEA580C) // Sunset Amber-Orange OLED
+    val EveningSecondaryAccent     = Color(0xFF10B981) // Emerald indicator
+    val EveningHighlight           = Color(0xFFFFEDD5) // Warm sunset glow
+    val EveningBorder              = Color(0xFF656778) // Clean hairline border
 
     // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
-    val NightPrimaryBackground   = Color(0xFFDFC9A3) // Mellow amber-oak chassis
-    val NightSecondaryBackground = Color(0xFFD3BC8E) // Deep honey console well
-    val NightCardSurface         = Color(0xFFEBDCBA) // Antique parchment module card
-    val NightElevatedSurface     = Color(0xFFE2D0AB) // Elevated tactile surface
-    val NightPrimaryText         = Color(0xFF2E1A0E) // Dark roasted coffee ink
-    val NightSecondaryText       = Color(0xFF6B4B30) // Muted amber tobacco
-    val NightPrimaryAccent       = Color(0xFFD97706) // Radiant vacuum tube filament
-    val NightSecondaryAccent     = Color(0xFF0D9488) // Turquoise VU needle
-    val NightHighlight           = Color(0xFFFFECBF) // Warm luminous halo
-    val NightBorder              = Color(0xFFBFA77D) // Antique brass hairline edge
+    val NightPrimaryBackground   = Color(0xFF3E434D) // Mellow fatigue-free mid-slate
+    val NightSecondaryBackground = Color(0xFF333740) // Deep console well
+    val NightCardSurface         = Color(0xFF4C525E) // Studio aluminum plate card
+    val NightElevatedSurface     = Color(0xFF575E6C) // Tactile pad
+    val NightPrimaryText         = Color(0xFFF1F5F9) // Silver-white text
+    val NightSecondaryText       = Color(0xFFA3ACBA) // Muted slate text
+    val NightPrimaryAccent       = Color(0xFFF59E0B) // Tactile Warm Amber OLED
+    val NightSecondaryAccent     = Color(0xFF10B981) // Emerald indicator
+    val NightHighlight           = Color(0xFFFDE68A) // Soft amber halo
+    val NightBorder              = Color(0xFF5D6473) // Hairline border
 
     // ─────────────────────────────────────────────────────────────
     // MUSICAL MOOD PROFILES

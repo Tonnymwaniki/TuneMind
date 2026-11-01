@@ -119,10 +119,10 @@ val PrimaryGradient = Brush.horizontalGradient(
     colors = listOf(PrimaryViolet, AccentCyan)
 )
 val CardGlowGradient = Brush.verticalGradient(
-    colors = listOf(Color(0xFFF5EAD4), Color(0xFFDFCCAA))
+    colors = listOf(Color(0xFF5A6170), Color(0xFF434852))
 )
 val BurnoutShieldGradient = Brush.linearGradient(
-    colors = listOf(Color(0xFFFFF1D0), Color(0xFFEFE2CA))
+    colors = listOf(Color(0xFF585F6E), Color(0xFF373C45))
 )
 
 @Composable
@@ -158,13 +158,13 @@ fun TuneMindTheme(
         border = animatedBorder
     )
 
-    val colorScheme = androidx.compose.material3.lightColorScheme(
+    val colorScheme = androidx.compose.material3.darkColorScheme(
         primary = animatedAccentPrimary,
-        onPrimary = Color.White,
+        onPrimary = Color(0xFF1E2128),
         primaryContainer = animatedElevated,
         onPrimaryContainer = animatedTextPrimary,
         secondary = animatedAccentSecondary,
-        onSecondary = Color.White,
+        onSecondary = Color(0xFF1E2128),
         secondaryContainer = animatedCard,
         onSecondaryContainer = animatedTextPrimary,
         tertiary = animatedHighlight,

@@ -36,68 +36,68 @@ export const PALETTES: Record<'morning' | 'afternoon' | 'evening' | 'night', Pal
   morning: {
     id: 'morning',
     name: 'First Light',
-    description: 'Warm vintage parchment with glowing vacuum tube amber & turquoise VU indicator.',
-    primaryBackground: '#EBD8BB',
-    secondaryBackground: '#DFCCAA',
-    cardSurface: '#F5EAD4',
-    elevatedSurface: '#EFE2CA',
-    primaryText: '#382314',
-    secondaryText: '#7A5B3E',
-    primaryAccent: '#D97706', // Glowing Vacuum Tube Amber
-    secondaryAccent: '#0D9488', // Vintage Turquoise VU needle
-    highlight: '#FFF1D0',
-    border: '#CCB895',
+    description: 'Mid-tone neutral morning steel with elevated aluminum and tactile Amber OLED.',
+    primaryBackground: '#474D58',
+    secondaryBackground: '#3B404A',
+    cardSurface: '#555C6A',
+    elevatedSurface: '#616979',
+    primaryText: '#F8FAFC',
+    secondaryText: '#AFB8C7',
+    primaryAccent: '#F59E0B', // Tactile Warm Amber OLED
+    secondaryAccent: '#10B981', // Precision emerald level indicator
+    highlight: '#FEF3C7',
+    border: '#666E7F',
   },
 
   // B. AFTERNOON — CLARITY (12:00 - 16:59)
   afternoon: {
     id: 'afternoon',
     name: 'Clarity',
-    description: 'Warm flax amber chassis with raw honey well & aged linen module cards.',
-    primaryBackground: '#E8D5B5',
-    secondaryBackground: '#DECA9E',
-    cardSurface: '#F3E8CE',
-    elevatedSurface: '#ECE0C4',
-    primaryText: '#382314',
-    secondaryText: '#7A5B3E',
-    primaryAccent: '#D97706', // Glowing Vacuum Tube Amber
-    secondaryAccent: '#0D9488', // Vintage Turquoise VU needle
-    highlight: '#FFF3D6',
-    border: '#C8B490',
+    description: 'Balanced anodized studio steel with laser-etched lettering and amber OLED dial.',
+    primaryBackground: '#434852',
+    secondaryBackground: '#373C45',
+    cardSurface: '#515764',
+    elevatedSurface: '#5D6473',
+    primaryText: '#F3F4F6',
+    secondaryText: '#A9B2C0',
+    primaryAccent: '#F59E0B', // Warm Amber OLED dial
+    secondaryAccent: '#10B981', // Precision emerald level indicator
+    highlight: '#FDE68A',
+    border: '#626A7A',
   },
 
   // C. EVENING — TRANSITION (17:00 - 20:59)
   evening: {
     id: 'evening',
     name: 'Transition',
-    description: 'Golden hour amber with warm toasted honey and rich sunset ember glow.',
-    primaryBackground: '#E4CFAC',
-    secondaryBackground: '#D8C194',
-    cardSurface: '#EFE2C5',
-    elevatedSurface: '#E8D7B8',
-    primaryText: '#331E10',
-    secondaryText: '#735235',
-    primaryAccent: '#C2410C', // Sunset Ember Glow
-    secondaryAccent: '#0D9488', // Turquoise Indicator
-    highlight: '#FFE7BA',
-    border: '#C2AC85',
+    description: 'Twilight-tinted studio steel with warm sunset amber OLED and emerald meter.',
+    primaryBackground: '#454752',
+    secondaryBackground: '#393B44',
+    cardSurface: '#535564',
+    elevatedSurface: '#5F6172',
+    primaryText: '#F3F4F6',
+    secondaryText: '#AAAEC0',
+    primaryAccent: '#EA580C', // Sunset Amber-Orange OLED
+    secondaryAccent: '#10B981', // Emerald indicator
+    highlight: '#FFEDD5',
+    border: '#656778',
   },
 
   // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
   night: {
     id: 'night',
     name: 'Deep Focus',
-    description: 'Mellow amber-oak chassis with antique parchment and radiant vacuum tube filament.',
-    primaryBackground: '#DFC9A3',
-    secondaryBackground: '#D3BC8E',
-    cardSurface: '#EBDCBA',
-    elevatedSurface: '#E2D0AB',
-    primaryText: '#2E1A0E',
-    secondaryText: '#6B4B30',
-    primaryAccent: '#D97706', // Radiant Vacuum Tube Filament
-    secondaryAccent: '#0D9488', // Turquoise VU needle
-    highlight: '#FFECBF',
-    border: '#BFA77D',
+    description: 'Mellow fatigue-free mid-slate aluminum console with glowing amber OLED.',
+    primaryBackground: '#3E434D',
+    secondaryBackground: '#333740',
+    cardSurface: '#4C525E',
+    elevatedSurface: '#575E6C',
+    primaryText: '#F1F5F9',
+    secondaryText: '#A3ACBA',
+    primaryAccent: '#F59E0B', // Tactile Warm Amber OLED
+    secondaryAccent: '#10B981', // Emerald indicator
+    highlight: '#FDE68A',
+    border: '#5D6473',
   },
 };
 
