@@ -506,7 +506,7 @@ fun HomeScreen(
                         Icon(
                             if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
-                            tint = colors.primaryBackground,
+                            tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )
                     }

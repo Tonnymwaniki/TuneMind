@@ -1120,13 +1120,13 @@ fun SongProfileSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF020617), // Deep slate-950
-        tonalElevation = 16.dp,
+        containerColor = TuneMindTheme.colors.cardSurface,
+        tonalElevation = 8.dp,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = {
             Surface(
                 modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                color = Color(0xFF334155),
+                color = TuneMindTheme.colors.border,
                 shape = CircleShape
             ) {
                 Box(Modifier.size(width = 40.dp, height = 4.dp))

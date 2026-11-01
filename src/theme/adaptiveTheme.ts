@@ -36,68 +36,68 @@ export const PALETTES: Record<'morning' | 'afternoon' | 'evening' | 'night', Pal
   morning: {
     id: 'morning',
     name: 'First Light',
-    description: 'Deep Charcoal base with glowing Nixie Amber & Acid Lime.',
-    primaryBackground: '#090A0D',
-    secondaryBackground: '#121419',
-    cardSurface: '#191B22',
-    elevatedSurface: '#22252E',
-    primaryText: '#F3F4F6',
-    secondaryText: '#9096A5',
-    primaryAccent: '#FFA800', // Nixie Amber-Gold
-    secondaryAccent: '#D4F01A', // Acid Lime
-    highlight: '#FFE277',
-    border: '#2B2E3A',
+    description: 'Clean light porcelain chalk with glowing Nixie Amber & Acid Lime.',
+    primaryBackground: '#F7F8FA',
+    secondaryBackground: '#EDEFF4',
+    cardSurface: '#FFFFFF',
+    elevatedSurface: '#F1F3F7',
+    primaryText: '#0F172A',
+    secondaryText: '#64748B',
+    primaryAccent: '#F59E0B', // Nixie Amber-Gold
+    secondaryAccent: '#84CC16', // Electric Acid Lime
+    highlight: '#FEF3C7',
+    border: '#D6DBE5',
   },
 
   // B. AFTERNOON — CLARITY (12:00 - 16:59)
   afternoon: {
     id: 'afternoon',
     name: 'Clarity',
-    description: 'Deep Charcoal base with high-contrast Nixie Amber & Acid Lime.',
-    primaryBackground: '#08090C',
-    secondaryBackground: '#111318',
-    cardSurface: '#181A21',
-    elevatedSurface: '#21242D',
-    primaryText: '#F3F4F6',
-    secondaryText: '#9096A5',
-    primaryAccent: '#FFA800', // Nixie Amber-Gold
-    secondaryAccent: '#D4F01A', // Acid Lime
-    highlight: '#FFE277',
-    border: '#292C37',
+    description: 'Clean light porcelain chalk with high-contrast Nixie Amber & Acid Lime.',
+    primaryBackground: '#F5F6F9',
+    secondaryBackground: '#EBECEF',
+    cardSurface: '#FFFFFF',
+    elevatedSurface: '#F0F2F5',
+    primaryText: '#0F172A',
+    secondaryText: '#64748B',
+    primaryAccent: '#F59E0B', // Nixie Amber-Gold
+    secondaryAccent: '#84CC16', // Electric Acid Lime
+    highlight: '#FEF3C7',
+    border: '#D4DAE4',
   },
 
   // C. EVENING — TRANSITION (17:00 - 20:59)
   evening: {
     id: 'evening',
     name: 'Transition',
-    description: 'Deep Charcoal base with Sunset Nixie Amber & Acid Lime.',
-    primaryBackground: '#09090C',
-    secondaryBackground: '#121318',
-    cardSurface: '#191A22',
-    elevatedSurface: '#22242F',
-    primaryText: '#F3F4F6',
-    secondaryText: '#9499A8',
-    primaryAccent: '#FF9400', // Deep Sunset Nixie Amber
-    secondaryAccent: '#D4F01A', // Acid Lime
-    highlight: '#FFD466',
-    border: '#2B2D3A',
+    description: 'Warm light porcelain chalk with Sunset Nixie Amber & Acid Lime.',
+    primaryBackground: '#F6F5F8',
+    secondaryBackground: '#ECEBF0',
+    cardSurface: '#FFFFFF',
+    elevatedSurface: '#F1F0F5',
+    primaryText: '#0F172A',
+    secondaryText: '#64748B',
+    primaryAccent: '#EA580C', // Sunset Nixie Amber
+    secondaryAccent: '#84CC16', // Electric Acid Lime
+    highlight: '#FFEDD5',
+    border: '#D8D6E2',
   },
 
   // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
   night: {
     id: 'night',
     name: 'Deep Focus',
-    description: 'Pure Obsidian Charcoal with glowing Nixie tube filament & razor Acid Lime.',
-    primaryBackground: '#07080A',
-    secondaryBackground: '#0F1014',
-    cardSurface: '#16171F',
-    elevatedSurface: '#1F202B',
-    primaryText: '#F3F4F6',
-    secondaryText: '#888E9E',
-    primaryAccent: '#FFA800', // Glowing Vacuum Nixie Amber
-    secondaryAccent: '#D4F01A', // Precision Acid Lime
-    highlight: '#FFE277',
-    border: '#262835',
+    description: 'Pure Light OP-1 Field porcelain chalk with glowing Nixie amber & acid lime.',
+    primaryBackground: '#F4F5F8',
+    secondaryBackground: '#E9EBF1',
+    cardSurface: '#FFFFFF',
+    elevatedSurface: '#EFF1F5',
+    primaryText: '#0F172A',
+    secondaryText: '#64748B',
+    primaryAccent: '#F59E0B', // Nixie Amber-Gold
+    secondaryAccent: '#84CC16', // Electric Acid Lime
+    highlight: '#FEF3C7',
+    border: '#D4D9E2',
   },
 };
 

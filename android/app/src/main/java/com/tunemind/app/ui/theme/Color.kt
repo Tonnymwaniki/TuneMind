@@ -9,56 +9,56 @@ import androidx.compose.ui.graphics.Color
 object TuneMindColors {
 
     // ─────────────────────────────────────────────────────────────
-    // COMBINATION 1: OBSIDIAN TUBE (Deep Charcoal + Nixie Amber + Acid Lime)
+    // LIGHT OP-1 FIELD STUDIO (Porcelain Chalk + Nixie Amber + Acid Lime)
     // ─────────────────────────────────────────────────────────────
 
     // A. MORNING — FIRST LIGHT (05:00 - 11:59)
-    val MorningPrimaryBackground   = Color(0xFF090A0D)
-    val MorningSecondaryBackground = Color(0xFF121419)
-    val MorningCardSurface         = Color(0xFF191B22)
-    val MorningElevatedSurface     = Color(0xFF22252E)
-    val MorningPrimaryText         = Color(0xFFF3F4F6)
-    val MorningSecondaryText       = Color(0xFF9096A5)
-    val MorningPrimaryAccent       = Color(0xFFFFA800) // Nixie Amber-Gold
-    val MorningSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime / Electric Citron
-    val MorningHighlight           = Color(0xFFFFE277) // Radiant Warm Glow
-    val MorningBorder              = Color(0xFF2B2E3A)
+    val MorningPrimaryBackground   = Color(0xFFF7F8FA) // Clean light porcelain chalk
+    val MorningSecondaryBackground = Color(0xFFEDEFF4) // Light frosted aluminum
+    val MorningCardSurface         = Color(0xFFFFFFFF) // Crisp studio white card
+    val MorningElevatedSurface     = Color(0xFFF1F3F7) // Elevated tactile pad
+    val MorningPrimaryText         = Color(0xFF0F172A) // Crisp dark industrial ink
+    val MorningSecondaryText       = Color(0xFF64748B) // Engineering steel gray
+    val MorningPrimaryAccent       = Color(0xFFF59E0B) // Nixie Amber-Gold
+    val MorningSecondaryAccent     = Color(0xFF84CC16) // Electric Acid Lime
+    val MorningHighlight           = Color(0xFFFEF3C7) // Soft amber champagne glow
+    val MorningBorder              = Color(0xFFD6DBE5) // Clean 1px micro-border
 
     // B. AFTERNOON — CLARITY (12:00 - 16:59)
-    val AfternoonPrimaryBackground   = Color(0xFF08090C)
-    val AfternoonSecondaryBackground = Color(0xFF111318)
-    val AfternoonCardSurface         = Color(0xFF181A21)
-    val AfternoonElevatedSurface     = Color(0xFF21242D)
-    val AfternoonPrimaryText         = Color(0xFFF3F4F6)
-    val AfternoonSecondaryText       = Color(0xFF9096A5)
-    val AfternoonPrimaryAccent       = Color(0xFFFFA800) // Nixie Amber-Gold
-    val AfternoonSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime
-    val AfternoonHighlight           = Color(0xFFFFE277)
-    val AfternoonBorder              = Color(0xFF292C37)
+    val AfternoonPrimaryBackground   = Color(0xFFF5F6F9)
+    val AfternoonSecondaryBackground = Color(0xFFEBECEF)
+    val AfternoonCardSurface         = Color(0xFFFFFFFF)
+    val AfternoonElevatedSurface     = Color(0xFFF0F2F5)
+    val AfternoonPrimaryText         = Color(0xFF0F172A)
+    val AfternoonSecondaryText       = Color(0xFF64748B)
+    val AfternoonPrimaryAccent       = Color(0xFFF59E0B) // Nixie Amber-Gold
+    val AfternoonSecondaryAccent     = Color(0xFF84CC16) // Electric Acid Lime
+    val AfternoonHighlight           = Color(0xFFFEF3C7)
+    val AfternoonBorder              = Color(0xFFD4DAE4)
 
     // C. EVENING — TRANSITION (17:00 - 20:59)
-    val EveningPrimaryBackground   = Color(0xFF09090C)
-    val EveningSecondaryBackground = Color(0xFF121318)
-    val EveningCardSurface         = Color(0xFF191A22)
-    val EveningElevatedSurface     = Color(0xFF22242F)
-    val EveningPrimaryText         = Color(0xFFF3F4F6)
-    val EveningSecondaryText       = Color(0xFF9499A8)
-    val EveningPrimaryAccent       = Color(0xFFFF9400) // Deep Sunset Nixie Amber
-    val EveningSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime
-    val EveningHighlight           = Color(0xFFFFD466)
-    val EveningBorder              = Color(0xFF2B2D3A)
+    val EveningPrimaryBackground   = Color(0xFFF6F5F8)
+    val EveningSecondaryBackground = Color(0xFFECEBF0)
+    val EveningCardSurface         = Color(0xFFFFFFFF)
+    val EveningElevatedSurface     = Color(0xFFF1F0F5)
+    val EveningPrimaryText         = Color(0xFF0F172A)
+    val EveningSecondaryText       = Color(0xFF64748B)
+    val EveningPrimaryAccent       = Color(0xFFEA580C) // Sunset Nixie Amber
+    val EveningSecondaryAccent     = Color(0xFF84CC16) // Electric Acid Lime
+    val EveningHighlight           = Color(0xFFFFEDD5)
+    val EveningBorder              = Color(0xFFD8D6E2)
 
     // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
-    val NightPrimaryBackground   = Color(0xFF07080A)
-    val NightSecondaryBackground = Color(0xFF0F1014)
-    val NightCardSurface         = Color(0xFF16171F)
-    val NightElevatedSurface     = Color(0xFF1F202B)
-    val NightPrimaryText         = Color(0xFFF3F4F6)
-    val NightSecondaryText       = Color(0xFF888E9E)
-    val NightPrimaryAccent       = Color(0xFFFFA800) // Glowing Vacuum Nixie Amber
-    val NightSecondaryAccent     = Color(0xFFD4F01A) // Precision Acid Lime
-    val NightHighlight           = Color(0xFFFFE277)
-    val NightBorder              = Color(0xFF262835)
+    val NightPrimaryBackground   = Color(0xFFF4F5F8)
+    val NightSecondaryBackground = Color(0xFFE9EBF1)
+    val NightCardSurface         = Color(0xFFFFFFFF)
+    val NightElevatedSurface     = Color(0xFFEFF1F5)
+    val NightPrimaryText         = Color(0xFF0F172A)
+    val NightSecondaryText       = Color(0xFF64748B)
+    val NightPrimaryAccent       = Color(0xFFF59E0B) // Nixie Amber-Gold
+    val NightSecondaryAccent     = Color(0xFF84CC16) // Electric Acid Lime
+    val NightHighlight           = Color(0xFFFEF3C7)
+    val NightBorder              = Color(0xFFD4D9E2)
 
     // ─────────────────────────────────────────────────────────────
     // MUSICAL MOOD PROFILES
