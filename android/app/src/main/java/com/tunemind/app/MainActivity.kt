@@ -90,9 +90,9 @@ private fun CrashDiagnosticsScreen(error: Throwable, onReset: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617))
+            .background(com.tunemind.app.ui.theme.DeepObsidianAmber.AppBackground)
             .padding(24.dp),
-        color = Color(0xFF020617)
+        color = com.tunemind.app.ui.theme.DeepObsidianAmber.AppBackground
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -100,18 +100,19 @@ private fun CrashDiagnosticsScreen(error: Throwable, onReset: () -> Unit) {
         ) {
             Text(
                 "TuneMind Diagnostics",
-                color = Color(0xFFEF4444),
+                color = com.tunemind.app.ui.theme.DeepObsidianAmber.Error,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
                 "An unexpected condition occurred during startup:",
-                color = Color.White,
+                color = com.tunemind.app.ui.theme.DeepObsidianAmber.TextPrimary,
                 fontSize = 13.sp
             )
             Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF0F172A),
+                color = com.tunemind.app.ui.theme.DeepObsidianAmber.CardBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, com.tunemind.app.ui.theme.DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -119,7 +120,7 @@ private fun CrashDiagnosticsScreen(error: Throwable, onReset: () -> Unit) {
                 Text(
                     text = "${error::class.java.simpleName}: ${error.message}\n\n" +
                             error.stackTrace.take(12).joinToString("\n"),
-                    color = Color(0xFFCBD5E1),
+                    color = com.tunemind.app.ui.theme.DeepObsidianAmber.TextSecondary,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(14.dp)
@@ -127,7 +128,10 @@ private fun CrashDiagnosticsScreen(error: Throwable, onReset: () -> Unit) {
             }
             Button(
                 onClick = onReset,
-                colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = com.tunemind.app.ui.theme.DeepObsidianAmber.PrimaryAccent,
+                    contentColor = com.tunemind.app.ui.theme.DeepObsidianAmber.AppBackground
+                ),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {

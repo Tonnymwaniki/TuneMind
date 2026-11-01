@@ -3,90 +3,122 @@ package com.tunemind.app.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * TuneMind Adaptive Personal Atmosphere — Foundational Color Definitions.
- * Strict implementation of the exact specification palettes.
+ * TUNEMIND — DEEP OBSIDIAN AMBER
+ * Permanent Visual Identity System Tokens
+ *
+ * Implements the approved fixed foundational color palette.
+ */
+object DeepObsidianAmber {
+    // Primary backgrounds
+    val AppBackground         = Color(0xFF652814)
+    val SecondaryBackground   = Color(0xFF713019)
+    val RecessedBackground    = Color(0xFF4F2012)
+
+    // Layered surfaces
+    val CardBackground        = Color(0xFF78351E)
+    val CardElevated          = Color(0xFF854126)
+    val SurfaceHighlight      = Color(0xFF914725)
+    val SurfaceBorder         = Color(0xFF985B3C)
+
+    // Gold and copper accents
+    val PrimaryAccent         = Color(0xFFC68A46)
+    val SecondaryAccent       = Color(0xFFD9A054)
+    val AccentLight           = Color(0xFFE9A84F)
+    val AccentSoft            = Color(0xFFF3C77D)
+    val CopperAccent          = Color(0xFFC2763F)
+
+    // Typography
+    val TextPrimary           = Color(0xFFF5E5D0)
+    val TextSecondary         = Color(0xFFCFAE91)
+    val TextMuted             = Color(0xFFB99578)
+    val TextDisabled          = Color(0xFF99745C)
+
+    // Functional colors
+    val Success               = Color(0xFF8FAF83)
+    val Warning               = Color(0xFFE2B46B)
+    val Error                 = Color(0xFFD77C69)
+    val Info                  = Color(0xFFB6A0C9)
+}
+
+/**
+ * Centralized theme color bridge.
+ * All palette periods use the approved fixed Deep Obsidian Amber theme.
  */
 object TuneMindColors {
 
     // ─────────────────────────────────────────────────────────────
-    // ABLETON STUDIO SLATE (Neutral Anodized Steel + Amber OLED)
-    // Mid-tone balance: neither blinding bright nor suffocating dark.
+    // DEEP OBSIDIAN AMBER — FIXED FOUNDATIONAL PALETTE
     // ─────────────────────────────────────────────────────────────
 
-    // A. MORNING — FIRST LIGHT (05:00 - 11:59)
-    val MorningPrimaryBackground   = Color(0xFF474D58) // Mid-tone neutral morning steel
-    val MorningSecondaryBackground = Color(0xFF3B404A) // Recessed machined groove well
-    val MorningCardSurface         = Color(0xFF555C6A) // Elevated brushed aluminum plate
-    val MorningElevatedSurface     = Color(0xFF616979) // Soft tactile pad
-    val MorningPrimaryText         = Color(0xFFF8FAFC) // Crisp studio silver-white
-    val MorningSecondaryText       = Color(0xFFAFB8C7) // Muted laser-etched aluminum
-    val MorningPrimaryAccent       = Color(0xFFF59E0B) // Tactile Warm Amber OLED
-    val MorningSecondaryAccent     = Color(0xFF10B981) // Precision emerald level indicator
-    val MorningHighlight           = Color(0xFFFEF3C7) // Soft amber halo
-    val MorningBorder              = Color(0xFF666E7F) // Precision 1px hairline border
+    // A. MORNING (05:00 - 11:59)
+    val MorningPrimaryBackground   = DeepObsidianAmber.AppBackground
+    val MorningSecondaryBackground = DeepObsidianAmber.SecondaryBackground
+    val MorningCardSurface         = DeepObsidianAmber.CardBackground
+    val MorningElevatedSurface     = DeepObsidianAmber.CardElevated
+    val MorningPrimaryText         = DeepObsidianAmber.TextPrimary
+    val MorningSecondaryText       = DeepObsidianAmber.TextSecondary
+    val MorningPrimaryAccent       = DeepObsidianAmber.PrimaryAccent
+    val MorningSecondaryAccent     = DeepObsidianAmber.SecondaryAccent
+    val MorningHighlight           = DeepObsidianAmber.SurfaceHighlight
+    val MorningBorder              = DeepObsidianAmber.SurfaceBorder
 
-    // B. AFTERNOON — CLARITY (12:00 - 16:59)
-    val AfternoonPrimaryBackground   = Color(0xFF434852) // Balanced anodized studio steel
-    val AfternoonSecondaryBackground = Color(0xFF373C45) // Recessed console well
-    val AfternoonCardSurface         = Color(0xFF515764) // Elevated aluminum plate card
-    val AfternoonElevatedSurface     = Color(0xFF5D6473) // Tactile pad
-    val AfternoonPrimaryText         = Color(0xFFF3F4F6) // Crisp studio silver-white
-    val AfternoonSecondaryText       = Color(0xFFA9B2C0) // Muted laser-etched aluminum
-    val AfternoonPrimaryAccent       = Color(0xFFF59E0B) // Warm Amber OLED dial
-    val AfternoonSecondaryAccent     = Color(0xFF10B981) // Precision emerald level indicator
-    val AfternoonHighlight           = Color(0xFFFDE68A) // Soft amber halo
-    val AfternoonBorder              = Color(0xFF626A7A) // Clean hairline border
+    // B. AFTERNOON (12:00 - 16:59)
+    val AfternoonPrimaryBackground   = DeepObsidianAmber.AppBackground
+    val AfternoonSecondaryBackground = DeepObsidianAmber.SecondaryBackground
+    val AfternoonCardSurface         = DeepObsidianAmber.CardBackground
+    val AfternoonElevatedSurface     = DeepObsidianAmber.CardElevated
+    val AfternoonPrimaryText         = DeepObsidianAmber.TextPrimary
+    val AfternoonSecondaryText       = DeepObsidianAmber.TextSecondary
+    val AfternoonPrimaryAccent       = DeepObsidianAmber.PrimaryAccent
+    val AfternoonSecondaryAccent     = DeepObsidianAmber.SecondaryAccent
+    val AfternoonHighlight           = DeepObsidianAmber.SurfaceHighlight
+    val AfternoonBorder              = DeepObsidianAmber.SurfaceBorder
 
-    // C. EVENING — TRANSITION (17:00 - 20:59)
-    val EveningPrimaryBackground   = Color(0xFF454752) // Twilight-tinted studio steel
-    val EveningSecondaryBackground = Color(0xFF393B44) // Recessed console well
-    val EveningCardSurface         = Color(0xFF535564) // Studio slate card
-    val EveningElevatedSurface     = Color(0xFF5F6172) // Elevated pad
-    val EveningPrimaryText         = Color(0xFFF3F4F6) // Studio silver-white
-    val EveningSecondaryText       = Color(0xFFAAAEC0) // Muted slate text
-    val EveningPrimaryAccent       = Color(0xFFEA580C) // Sunset Amber-Orange OLED
-    val EveningSecondaryAccent     = Color(0xFF10B981) // Emerald indicator
-    val EveningHighlight           = Color(0xFFFFEDD5) // Warm sunset glow
-    val EveningBorder              = Color(0xFF656778) // Clean hairline border
+    // C. EVENING (17:00 - 20:59)
+    val EveningPrimaryBackground   = DeepObsidianAmber.AppBackground
+    val EveningSecondaryBackground = DeepObsidianAmber.SecondaryBackground
+    val EveningCardSurface         = DeepObsidianAmber.CardBackground
+    val EveningElevatedSurface     = DeepObsidianAmber.CardElevated
+    val EveningPrimaryText         = DeepObsidianAmber.TextPrimary
+    val EveningSecondaryText       = DeepObsidianAmber.TextSecondary
+    val EveningPrimaryAccent       = DeepObsidianAmber.PrimaryAccent
+    val EveningSecondaryAccent     = DeepObsidianAmber.SecondaryAccent
+    val EveningHighlight           = DeepObsidianAmber.SurfaceHighlight
+    val EveningBorder              = DeepObsidianAmber.SurfaceBorder
 
-    // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
-    val NightPrimaryBackground   = Color(0xFF3E434D) // Mellow fatigue-free mid-slate
-    val NightSecondaryBackground = Color(0xFF333740) // Deep console well
-    val NightCardSurface         = Color(0xFF4C525E) // Studio aluminum plate card
-    val NightElevatedSurface     = Color(0xFF575E6C) // Tactile pad
-    val NightPrimaryText         = Color(0xFFF1F5F9) // Silver-white text
-    val NightSecondaryText       = Color(0xFFA3ACBA) // Muted slate text
-    val NightPrimaryAccent       = Color(0xFFF59E0B) // Tactile Warm Amber OLED
-    val NightSecondaryAccent     = Color(0xFF10B981) // Emerald indicator
-    val NightHighlight           = Color(0xFFFDE68A) // Soft amber halo
-    val NightBorder              = Color(0xFF5D6473) // Hairline border
+    // D. NIGHT (21:00 - 04:59)
+    val NightPrimaryBackground   = DeepObsidianAmber.AppBackground
+    val NightSecondaryBackground = DeepObsidianAmber.SecondaryBackground
+    val NightCardSurface         = DeepObsidianAmber.CardBackground
+    val NightElevatedSurface     = DeepObsidianAmber.CardElevated
+    val NightPrimaryText         = DeepObsidianAmber.TextPrimary
+    val NightSecondaryText       = DeepObsidianAmber.TextSecondary
+    val NightPrimaryAccent       = DeepObsidianAmber.PrimaryAccent
+    val NightSecondaryAccent     = DeepObsidianAmber.SecondaryAccent
+    val NightHighlight           = DeepObsidianAmber.SurfaceHighlight
+    val NightBorder              = DeepObsidianAmber.SurfaceBorder
 
     // ─────────────────────────────────────────────────────────────
-    // MUSICAL MOOD PROFILES
+    // MUSICAL MOOD ACCENTS (Tuned to harmonize with Deep Amber)
     // ─────────────────────────────────────────────────────────────
-    // Calm / Peaceful
-    val MoodCalmAccent          = Color(0xFF8FAFC8)
-    val MoodCalmSecondaryAccent = Color(0xFFA9B8D0)
+    val MoodCalmAccent          = DeepObsidianAmber.AccentSoft
+    val MoodCalmSecondaryAccent = DeepObsidianAmber.CopperAccent
 
-    // Energetic
-    val MoodEnergeticAccent          = Color(0xFFE39A55)
-    val MoodEnergeticSecondaryAccent = Color(0xFFD96F62)
+    val MoodEnergeticAccent          = DeepObsidianAmber.AccentLight
+    val MoodEnergeticSecondaryAccent = DeepObsidianAmber.SecondaryAccent
 
-    // Reflective
-    val MoodReflectiveAccent          = Color(0xFF9889C7)
-    val MoodReflectiveSecondaryAccent = Color(0xFF7889B8)
+    val MoodReflectiveAccent          = DeepObsidianAmber.PrimaryAccent
+    val MoodReflectiveSecondaryAccent = DeepObsidianAmber.CopperAccent
 
-    // Uplifting
-    val MoodUpliftingAccent          = Color(0xFFE2BD73)
-    val MoodUpliftingSecondaryAccent = Color(0xFF82B9B1)
+    val MoodUpliftingAccent          = DeepObsidianAmber.AccentSoft
+    val MoodUpliftingSecondaryAccent = DeepObsidianAmber.SecondaryAccent
 
-    // Intense
-    val MoodIntenseAccent          = Color(0xFFCF7778)
-    val MoodIntenseSecondaryAccent = Color(0xFFD69A69)
+    val MoodIntenseAccent          = DeepObsidianAmber.CopperAccent
+    val MoodIntenseSecondaryAccent = DeepObsidianAmber.AccentLight
 
     // Status & Utility Colors
-    val SafetyGreen = Color(0xFF10B981)
-    val SafetyAmber = Color(0xFFF59E0B)
-    val SafetyRed   = Color(0xFFEF4444)
-    val BrandIndigo = Color(0xFF6366F1)
+    val SafetyGreen = DeepObsidianAmber.Success
+    val SafetyAmber = DeepObsidianAmber.Warning
+    val SafetyRed   = DeepObsidianAmber.Error
+    val BrandIndigo = DeepObsidianAmber.Info
 }

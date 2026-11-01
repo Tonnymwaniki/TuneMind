@@ -269,7 +269,7 @@ fun TuneMindTopAppBar(
                 color = colors.elevatedSurface,
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (isDaemonConnected) colors.primaryAccent.copy(alpha = 0.5f) else Color(0xFFF59E0B).copy(alpha = 0.5f)
+                    if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.5f) else DeepObsidianAmber.Warning.copy(alpha = 0.5f)
                 ),
                 modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
             ) {
@@ -282,14 +282,14 @@ fun TuneMindTopAppBar(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(if (isDaemonConnected) Color(0xFF10B981) else Color(0xFFF59E0B))
+                            .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
                     )
                     Text(
                         text = if (isDaemonConnected) "LIVE" else "OFFLINE",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (isDaemonConnected) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
                         letterSpacing = 0.8.sp
                     )
                 }

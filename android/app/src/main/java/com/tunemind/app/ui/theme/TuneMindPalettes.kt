@@ -4,23 +4,25 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 /**
- * Cohesive palette model representing the 10 core surface, text, and accent tokens.
+ * Cohesive palette model representing the core surface, text, and accent tokens.
  */
 @Immutable
 data class PaletteColors(
     val id: String,
     val name: String,
     val description: String,
-    val primaryBackground: Color,
-    val secondaryBackground: Color,
-    val cardSurface: Color,
-    val elevatedSurface: Color,
-    val primaryText: Color,
-    val secondaryText: Color,
-    val primaryAccent: Color,
-    val secondaryAccent: Color,
-    val highlight: Color,
-    val border: Color
+    val primaryBackground: Color = DeepObsidianAmber.AppBackground,
+    val secondaryBackground: Color = DeepObsidianAmber.SecondaryBackground,
+    val cardSurface: Color = DeepObsidianAmber.CardBackground,
+    val elevatedSurface: Color = DeepObsidianAmber.CardElevated,
+    val primaryText: Color = DeepObsidianAmber.TextPrimary,
+    val secondaryText: Color = DeepObsidianAmber.TextSecondary,
+    val primaryAccent: Color = DeepObsidianAmber.PrimaryAccent,
+    val secondaryAccent: Color = DeepObsidianAmber.SecondaryAccent,
+    val highlight: Color = DeepObsidianAmber.SurfaceHighlight,
+    val border: Color = DeepObsidianAmber.SurfaceBorder,
+    val recessedBackground: Color = DeepObsidianAmber.RecessedBackground,
+    val copperAccent: Color = DeepObsidianAmber.CopperAccent
 )
 
 @Immutable
@@ -30,7 +32,7 @@ data class MoodProfile(
     val secondaryAccent: Color,
     val visualMovement: String,
     val gradientIntensity: Float, // 0.0f - 1.0f
-    val animationSpeedFactor: Float // 1.0f is standard, > 1 faster, < 1 slower
+    val animationSpeedFactor: Float // 1.0f is standard
 )
 
 enum class MusicalMood(val label: String) {
@@ -46,77 +48,71 @@ object TuneMindPalettes {
 
     val Morning = PaletteColors(
         id = "morning",
-        name = "First Light",
-        description = "Freshness, clarity, and gentle morning energy.",
-        primaryBackground = TuneMindColors.MorningPrimaryBackground,
-        secondaryBackground = TuneMindColors.MorningSecondaryBackground,
-        cardSurface = TuneMindColors.MorningCardSurface,
-        elevatedSurface = TuneMindColors.MorningElevatedSurface,
-        primaryText = TuneMindColors.MorningPrimaryText,
-        secondaryText = TuneMindColors.MorningSecondaryText,
-        primaryAccent = TuneMindColors.MorningPrimaryAccent,
-        secondaryAccent = TuneMindColors.MorningSecondaryAccent,
-        highlight = TuneMindColors.MorningHighlight,
-        border = TuneMindColors.MorningBorder
+        name = "Deep Obsidian Amber (Dawn)",
+        description = "Deep concentrated reddish-amber foundation with copper and gold accents.",
+        primaryBackground = DeepObsidianAmber.AppBackground,
+        secondaryBackground = DeepObsidianAmber.SecondaryBackground,
+        cardSurface = DeepObsidianAmber.CardBackground,
+        elevatedSurface = DeepObsidianAmber.CardElevated,
+        primaryText = DeepObsidianAmber.TextPrimary,
+        secondaryText = DeepObsidianAmber.TextSecondary,
+        primaryAccent = DeepObsidianAmber.PrimaryAccent,
+        secondaryAccent = DeepObsidianAmber.SecondaryAccent,
+        highlight = DeepObsidianAmber.SurfaceHighlight,
+        border = DeepObsidianAmber.SurfaceBorder
     )
 
     val Afternoon = PaletteColors(
         id = "afternoon",
-        name = "Clarity",
-        description = "Clarity, balance, focus, and visual openness.",
-        primaryBackground = TuneMindColors.AfternoonPrimaryBackground,
-        secondaryBackground = TuneMindColors.AfternoonSecondaryBackground,
-        cardSurface = TuneMindColors.AfternoonCardSurface,
-        elevatedSurface = TuneMindColors.AfternoonElevatedSurface,
-        primaryText = TuneMindColors.AfternoonPrimaryText,
-        secondaryText = TuneMindColors.AfternoonSecondaryText,
-        primaryAccent = TuneMindColors.AfternoonPrimaryAccent,
-        secondaryAccent = TuneMindColors.AfternoonSecondaryAccent,
-        highlight = TuneMindColors.AfternoonHighlight,
-        border = TuneMindColors.AfternoonBorder
+        name = "Deep Obsidian Amber (Noon)",
+        description = "Deep concentrated reddish-amber foundation with copper and gold accents.",
+        primaryBackground = DeepObsidianAmber.AppBackground,
+        secondaryBackground = DeepObsidianAmber.SecondaryBackground,
+        cardSurface = DeepObsidianAmber.CardBackground,
+        elevatedSurface = DeepObsidianAmber.CardElevated,
+        primaryText = DeepObsidianAmber.TextPrimary,
+        secondaryText = DeepObsidianAmber.TextSecondary,
+        primaryAccent = DeepObsidianAmber.PrimaryAccent,
+        secondaryAccent = DeepObsidianAmber.SecondaryAccent,
+        highlight = DeepObsidianAmber.SurfaceHighlight,
+        border = DeepObsidianAmber.SurfaceBorder
     )
 
     val Evening = PaletteColors(
         id = "evening",
-        name = "Transition",
-        description = "Warmth, depth, transition, and intimate atmosphere.",
-        primaryBackground = TuneMindColors.EveningPrimaryBackground,
-        secondaryBackground = TuneMindColors.EveningSecondaryBackground,
-        cardSurface = TuneMindColors.EveningCardSurface,
-        elevatedSurface = TuneMindColors.EveningElevatedSurface,
-        primaryText = TuneMindColors.EveningPrimaryText,
-        secondaryText = TuneMindColors.EveningSecondaryText,
-        primaryAccent = TuneMindColors.EveningPrimaryAccent,
-        secondaryAccent = TuneMindColors.EveningSecondaryAccent,
-        highlight = TuneMindColors.EveningHighlight,
-        border = TuneMindColors.EveningBorder
+        name = "Deep Obsidian Amber (Dusk)",
+        description = "Deep concentrated reddish-amber foundation with copper and gold accents.",
+        primaryBackground = DeepObsidianAmber.AppBackground,
+        secondaryBackground = DeepObsidianAmber.SecondaryBackground,
+        cardSurface = DeepObsidianAmber.CardBackground,
+        elevatedSurface = DeepObsidianAmber.CardElevated,
+        primaryText = DeepObsidianAmber.TextPrimary,
+        secondaryText = DeepObsidianAmber.TextSecondary,
+        primaryAccent = DeepObsidianAmber.PrimaryAccent,
+        secondaryAccent = DeepObsidianAmber.SecondaryAccent,
+        highlight = DeepObsidianAmber.SurfaceHighlight,
+        border = DeepObsidianAmber.SurfaceBorder
     )
 
     val Night = PaletteColors(
         id = "night",
-        name = "Deep Focus",
-        description = "Privacy, calmness, immersion, and reduced visual intensity.",
-        primaryBackground = TuneMindColors.NightPrimaryBackground,
-        secondaryBackground = TuneMindColors.NightSecondaryBackground,
-        cardSurface = TuneMindColors.NightCardSurface,
-        elevatedSurface = TuneMindColors.NightElevatedSurface,
-        primaryText = TuneMindColors.NightPrimaryText,
-        secondaryText = TuneMindColors.NightSecondaryText,
-        primaryAccent = TuneMindColors.NightPrimaryAccent,
-        secondaryAccent = TuneMindColors.NightSecondaryAccent,
-        highlight = TuneMindColors.NightHighlight,
-        border = TuneMindColors.NightBorder
+        name = "Deep Obsidian Amber",
+        description = "Deep concentrated reddish-amber foundation with copper and gold accents.",
+        primaryBackground = DeepObsidianAmber.AppBackground,
+        secondaryBackground = DeepObsidianAmber.SecondaryBackground,
+        cardSurface = DeepObsidianAmber.CardBackground,
+        elevatedSurface = DeepObsidianAmber.CardElevated,
+        primaryText = DeepObsidianAmber.TextPrimary,
+        secondaryText = DeepObsidianAmber.TextSecondary,
+        primaryAccent = DeepObsidianAmber.PrimaryAccent,
+        secondaryAccent = DeepObsidianAmber.SecondaryAccent,
+        highlight = DeepObsidianAmber.SurfaceHighlight,
+        border = DeepObsidianAmber.SurfaceBorder
     )
 
-    val AllPalettes = listOf(Morning, Afternoon, Evening, Night)
+    val AllPalettes = listOf(Night, Morning, Afternoon, Evening)
 
-    fun forId(id: String): PaletteColors = when (id.lowercase()) {
-        "morning" -> Morning
-        "afternoon" -> Afternoon
-        "evening" -> Evening
-        "night" -> Night
-        else -> Night
-    }
+    fun forId(id: String): PaletteColors = Night
 
     val MoodProfiles: Map<MusicalMood, MoodProfile> = mapOf(
         MusicalMood.CALM to MoodProfile(
@@ -124,40 +120,40 @@ object TuneMindPalettes {
             moodAccent = TuneMindColors.MoodCalmAccent,
             secondaryAccent = TuneMindColors.MoodCalmSecondaryAccent,
             visualMovement = "Slow and fluid",
-            gradientIntensity = 0.35f,
-            animationSpeedFactor = 0.8f
+            gradientIntensity = 0.25f,
+            animationSpeedFactor = 0.85f
         ),
         MusicalMood.ENERGETIC to MoodProfile(
             mood = MusicalMood.ENERGETIC,
             moodAccent = TuneMindColors.MoodEnergeticAccent,
             secondaryAccent = TuneMindColors.MoodEnergeticSecondaryAccent,
-            visualMovement = "More dynamic",
-            gradientIntensity = 0.65f,
-            animationSpeedFactor = 1.3f
+            visualMovement = "Dynamic warmth",
+            gradientIntensity = 0.35f,
+            animationSpeedFactor = 1.15f
         ),
         MusicalMood.REFLECTIVE to MoodProfile(
             mood = MusicalMood.REFLECTIVE,
             moodAccent = TuneMindColors.MoodReflectiveAccent,
             secondaryAccent = TuneMindColors.MoodReflectiveSecondaryAccent,
-            visualMovement = "Subtle",
-            gradientIntensity = 0.35f,
-            animationSpeedFactor = 0.85f
+            visualMovement = "Subtle deep focus",
+            gradientIntensity = 0.25f,
+            animationSpeedFactor = 0.9f
         ),
         MusicalMood.UPLIFTING to MoodProfile(
             mood = MusicalMood.UPLIFTING,
             moodAccent = TuneMindColors.MoodUpliftingAccent,
             secondaryAccent = TuneMindColors.MoodUpliftingSecondaryAccent,
-            visualMovement = "Light and fluid",
-            gradientIntensity = 0.55f,
-            animationSpeedFactor = 1.1f
+            visualMovement = "Warm and fluid",
+            gradientIntensity = 0.30f,
+            animationSpeedFactor = 1.05f
         ),
         MusicalMood.INTENSE to MoodProfile(
             mood = MusicalMood.INTENSE,
             moodAccent = TuneMindColors.MoodIntenseAccent,
             secondaryAccent = TuneMindColors.MoodIntenseSecondaryAccent,
-            visualMovement = "More pronounced but controlled",
-            gradientIntensity = 0.70f,
-            animationSpeedFactor = 1.25f
+            visualMovement = "Rich controlled presence",
+            gradientIntensity = 0.35f,
+            animationSpeedFactor = 1.15f
         )
     )
 }

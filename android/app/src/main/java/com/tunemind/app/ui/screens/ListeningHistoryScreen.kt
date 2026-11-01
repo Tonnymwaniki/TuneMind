@@ -79,7 +79,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(DeepObsidianAmber.AppBackground)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -87,26 +87,26 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search songs, artists, or albums…", fontSize = 13.sp, color = Color(0xFF64748B)) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp)) },
+            placeholder = { Text("Search songs, artists, or albums…", fontSize = 13.sp, color = DeepObsidianAmber.TextSecondary) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp)) },
             trailingIcon = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = DeepObsidianAmber.TextSecondary, modifier = Modifier.size(16.dp))
                         }
                     }
                     if (searchQuery.isNotBlank()) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = Color(0x3306B6D4),
+                            color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f),
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
                             Text(
                                 text = "${displayedTracks.size}",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = AccentCyanBright,
+                                color = DeepObsidianAmber.PrimaryAccent,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -117,12 +117,12 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F172A),
-                unfocusedContainerColor = Color(0xFF0F172A),
-                focusedBorderColor = AccentCyan,
-                unfocusedBorderColor = Color(0xFF1E293B),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
+                focusedContainerColor = DeepObsidianAmber.CardBackground,
+                unfocusedContainerColor = DeepObsidianAmber.CardBackground,
+                focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
+                unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
+                focusedTextColor = DeepObsidianAmber.TextPrimary,
+                unfocusedTextColor = DeepObsidianAmber.TextPrimary
             ),
             modifier = Modifier.fillMaxWidth()
         )
@@ -141,10 +141,10 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                 val isSelected = filterChip == mode
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color(0xFF0F172A),
+                    color = if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.25f) else DeepObsidianAmber.CardBackground,
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isSelected) AccentCyan else Color(0xFF1E293B)
+                        if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder
                     ),
                     modifier = Modifier.clickable { filterChip = mode }
                 ) {
@@ -152,7 +152,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         text = label,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) AccentCyanBright else Color(0xFF94A3B8),
+                        color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
@@ -162,8 +162,8 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
         // 3. Compact Ambient Telemetry Bar (Single capsule, NOT a massive nested card deck)
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = Color(0xFF0F172A),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -185,7 +185,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = DeepObsidianAmber.TextPrimary
                     )
                 }
 
@@ -193,7 +193,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                     text = "$distinctArtists Artists",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF94A3B8)
+                    color = DeepObsidianAmber.TextSecondary
                 )
 
                 Text(
@@ -201,7 +201,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = if (avgSatiety >= 60) AccentAmber else AccentCyanBright
+                    color = if (avgSatiety >= 60) DeepObsidianAmber.Warning else DeepObsidianAmber.AccentSoft
                 )
             }
         }
@@ -210,8 +210,8 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
         snackbarMessage?.let { msg ->
             Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF064E3B),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)),
+                color = DeepObsidianAmber.CardElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -219,9 +219,9 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(msg, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    Text(msg, color = DeepObsidianAmber.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     IconButton(onClick = { snackbarMessage = null }, modifier = Modifier.size(20.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Close, contentDescription = null, tint = DeepObsidianAmber.TextPrimary, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -230,13 +230,13 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
         // 4. Sleek Spotify-Style Timeline List (Clean rows with dividers)
         if (state.isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentCyan)
+                CircularProgressIndicator(color = DeepObsidianAmber.PrimaryAccent)
             }
         } else if (displayedTracks.isEmpty()) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                color = DeepObsidianAmber.CardBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -249,18 +249,18 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                     Icon(
                         Icons.Outlined.GraphicEq,
                         contentDescription = null,
-                        tint = AccentCyan,
+                        tint = DeepObsidianAmber.PrimaryAccent,
                         modifier = Modifier.size(36.dp)
                     )
                     Text(
                         text = if (searchQuery.isNotEmpty()) "No tracks matched '$searchQuery'" else "Listening Timeline Standby",
-                        color = Color.White,
+                        color = DeepObsidianAmber.TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "Play songs on Spotify or YouTube Music to view your live acoustic trajectory.",
-                        color = Color(0xFF94A3B8),
+                        color = DeepObsidianAmber.TextSecondary,
                         fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -271,8 +271,8 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF0F172A))
-                    .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+                    .background(DeepObsidianAmber.CardBackground)
+                    .border(1.dp, DeepObsidianAmber.SurfaceBorder, RoundedCornerShape(16.dp))
             ) {
                 items(displayedTracks, key = { it.entryId }) { track ->
                     val appName = track.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
@@ -280,7 +280,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         track.sourcePackage?.contains("spotify") == true -> Color(0xFF1DB954)
                         track.sourcePackage?.contains("youtube") == true -> Color(0xFFEF4444)
                         track.sourcePackage?.contains("apple") == true -> Color(0xFFFA243C)
-                        else -> AccentCyan
+                        else -> DeepObsidianAmber.PrimaryAccent
                     }
                     val isHighFatigue = track.distinctAppearanceCount >= 3
                     val satietyScore = minOf(95, maxOf(15, track.distinctAppearanceCount * 22))
@@ -311,16 +311,16 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
                                     Brush.radialGradient(
-                                        if (isTrackInVault) listOf(Color(0xFFB45309), Color(0xFF451A03))
-                                        else if (isHighFatigue) listOf(Color(0xFFDC2626), Color(0xFF7F1D1D))
-                                        else listOf(Color(0xFF0284C7), Color(0xFF0F172A))
+                                        if (isTrackInVault) listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CardElevated)
+                                        else if (isHighFatigue) listOf(DeepObsidianAmber.Error, DeepObsidianAmber.CardElevated)
+                                        else listOf(DeepObsidianAmber.CopperAccent, DeepObsidianAmber.CardBackground)
                                     )
                                 )
                                 .border(
                                     1.dp,
-                                    if (isTrackInVault) Color(0xFFF59E0B)
-                                    else if (isHighFatigue) Color(0xFFEF4444)
-                                    else Color(0xFF38BDF8).copy(alpha = 0.4f),
+                                    if (isTrackInVault) DeepObsidianAmber.PrimaryAccent
+                                    else if (isHighFatigue) DeepObsidianAmber.Error
+                                    else DeepObsidianAmber.SurfaceBorder,
                                     RoundedCornerShape(10.dp)
                                 ),
                             contentAlignment = Alignment.Center
@@ -334,14 +334,14 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                 text = track.title ?: "Unknown Title",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = DeepObsidianAmber.TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = track.artist ?: "Unknown Artist",
                                 fontSize = 11.sp,
-                                color = Color(0xFF94A3B8),
+                                color = DeepObsidianAmber.TextSecondary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -368,13 +368,13 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                         text = timeOnlyFmt.format(Date(lastMs)),
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        color = Color(0xFF64748B)
+                                        color = DeepObsidianAmber.TextSecondary
                                     )
                                 }
                                 Text(
                                     text = "• ${track.distinctAppearanceCount}x plays",
                                     fontSize = 9.sp,
-                                    color = Color(0xFF64748B)
+                                    color = DeepObsidianAmber.TextMuted
                                 )
                             }
                         }
@@ -383,14 +383,14 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = if (isTrackInVault) Color(0xFF78350F).copy(alpha = 0.4f)
-                                else if (isHighFatigue) Color(0xFFEF4444).copy(alpha = 0.15f)
-                                else Color(0xFF06B6D4).copy(alpha = 0.15f),
+                                color = if (isTrackInVault) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.25f)
+                                else if (isHighFatigue) DeepObsidianAmber.Error.copy(alpha = 0.2f)
+                                else DeepObsidianAmber.CardElevated,
                                 border = androidx.compose.foundation.BorderStroke(
                                     1.dp,
-                                    if (isTrackInVault) AccentAmber
-                                    else if (isHighFatigue) Color(0xFFEF4444).copy(alpha = 0.4f)
-                                    else AccentCyan.copy(alpha = 0.4f)
+                                    if (isTrackInVault) DeepObsidianAmber.PrimaryAccent
+                                    else if (isHighFatigue) DeepObsidianAmber.Error
+                                    else DeepObsidianAmber.SurfaceBorder
                                 )
                             ) {
                                 Text(
@@ -398,7 +398,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                     fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isTrackInVault) AccentAmber else if (isHighFatigue) Color(0xFFF87171) else AccentCyanBright,
+                                    color = if (isTrackInVault) DeepObsidianAmber.PrimaryAccent else if (isHighFatigue) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -406,7 +406,8 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                             if (!isTrackInVault && isHighFatigue) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = Color(0xFF78350F).copy(alpha = 0.6f),
+                                    color = DeepObsidianAmber.CardElevated,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent),
                                     modifier = Modifier.clickable {
                                         vm.quarantineTrack(track.title ?: "Unknown", track.artist ?: "Unknown", 5f)
                                         snackbarMessage = "Quarantined '${track.title}' to Cooldown Vault."
@@ -416,14 +417,14 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                         text = "Cooldown",
                                         fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = AccentAmber,
+                                        color = DeepObsidianAmber.PrimaryAccent,
                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                     )
                                 }
                             }
                         }
                     }
-                    HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.6.dp)
+                    HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f), thickness = 0.6.dp)
                 }
             }
         }

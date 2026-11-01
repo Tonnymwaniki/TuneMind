@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
- * Composition local providing the active Adaptive Personal Atmosphere state.
+ * Composition local providing the active Deep Obsidian Amber state.
  */
 val LocalAdaptiveTheme = staticCompositionLocalOf {
     AdaptiveThemeState.defaultForNight()
@@ -39,8 +39,8 @@ object TuneMindTheme {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Legacy token bridges to maintain backwards compatibility while
-// delegating to the dynamic adaptive theme colors.
+// Token bridges to maintain backwards compatibility while
+// delegating to Deep Obsidian Amber foundational colors.
 // ─────────────────────────────────────────────────────────────
 val Surface: Color
     @Composable
@@ -50,7 +50,7 @@ val Surface: Color
 val SurfaceContainerLowest: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalAdaptiveTheme.current.primaryBackground
+    get() = LocalAdaptiveTheme.current.recessedBackground
 
 val SurfaceContainerLow: Color
     @Composable
@@ -70,23 +70,23 @@ val SurfaceContainerHigh: Color
 val SurfaceContainerHighest: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalAdaptiveTheme.current.border
+    get() = LocalAdaptiveTheme.current.surfaceHighlight
 
 val SurfaceBright: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalAdaptiveTheme.current.highlight
+    get() = LocalAdaptiveTheme.current.accentSoft
 
 // Accents
-val PrimaryViolet = Color(0xFF8B5CF6)
-val PrimaryVioletDark = Color(0xFF7C3AED)
-val PrimaryVioletBright = Color(0xFFA78BFA)
-val AccentCyan = Color(0xFF06B6D4)
-val AccentCyanBright = Color(0xFF38BDF8)
-val AccentTeal = Color(0xFF14B8A6)
-val AccentAmber = Color(0xFFF59E0B)
-val AccentCrimson = Color(0xFFEF4444)
-val AccentGreen = Color(0xFF10B981)
+val PrimaryViolet = DeepObsidianAmber.PrimaryAccent
+val PrimaryVioletDark = DeepObsidianAmber.CopperAccent
+val PrimaryVioletBright = DeepObsidianAmber.AccentLight
+val AccentCyan = DeepObsidianAmber.SecondaryAccent
+val AccentCyanBright = DeepObsidianAmber.AccentSoft
+val AccentTeal = DeepObsidianAmber.CopperAccent
+val AccentAmber = DeepObsidianAmber.PrimaryAccent
+val AccentCrimson = DeepObsidianAmber.Error
+val AccentGreen = DeepObsidianAmber.Success
 
 // Text & Monochromes
 val TextPrimary: Color
@@ -102,7 +102,7 @@ val TextSecondary: Color
 val TextMuted: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalAdaptiveTheme.current.secondaryText.copy(alpha = 0.7f)
+    get() = LocalAdaptiveTheme.current.textMuted
 
 val BorderSubtle: Color
     @Composable
@@ -112,17 +112,17 @@ val BorderSubtle: Color
 val BorderHighlight: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalAdaptiveTheme.current.highlight
+    get() = LocalAdaptiveTheme.current.surfaceHighlight
 
 // Gradients
 val PrimaryGradient = Brush.horizontalGradient(
-    colors = listOf(PrimaryViolet, AccentCyan)
+    colors = listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CopperAccent)
 )
 val CardGlowGradient = Brush.verticalGradient(
-    colors = listOf(Color(0xFF5A6170), Color(0xFF434852))
+    colors = listOf(DeepObsidianAmber.CardElevated, DeepObsidianAmber.CardBackground)
 )
 val BurnoutShieldGradient = Brush.linearGradient(
-    colors = listOf(Color(0xFF585F6E), Color(0xFF373C45))
+    colors = listOf(DeepObsidianAmber.SurfaceHighlight, DeepObsidianAmber.AppBackground)
 )
 
 @Composable
@@ -130,7 +130,6 @@ fun TuneMindTheme(
     adaptiveState: AdaptiveThemeState = AdaptiveThemeState.defaultForNight(),
     content: @Composable () -> Unit
 ) {
-    // 500-900ms smooth gradual transition between palettes without flashing
     val animDuration = adaptiveState.animationDurationMs
     val animSpec = tween<Color>(durationMillis = animDuration)
 
@@ -158,24 +157,25 @@ fun TuneMindTheme(
         border = animatedBorder
     )
 
-    val colorScheme = androidx.compose.material3.darkColorScheme(
-        primary = animatedAccentPrimary,
-        onPrimary = Color(0xFF1E2128),
-        primaryContainer = animatedElevated,
-        onPrimaryContainer = animatedTextPrimary,
-        secondary = animatedAccentSecondary,
-        onSecondary = Color(0xFF1E2128),
-        secondaryContainer = animatedCard,
-        onSecondaryContainer = animatedTextPrimary,
-        tertiary = animatedHighlight,
-        background = animatedBg,
-        onBackground = animatedTextPrimary,
-        surface = animatedCard,
-        onSurface = animatedTextPrimary,
-        surfaceVariant = animatedElevated,
-        onSurfaceVariant = animatedTextSecondary,
-        outline = animatedBorder,
-        error = AccentCrimson
+    val colorScheme = darkColorScheme(
+        primary = DeepObsidianAmber.PrimaryAccent,
+        onPrimary = DeepObsidianAmber.AppBackground,
+        primaryContainer = DeepObsidianAmber.CardElevated,
+        onPrimaryContainer = DeepObsidianAmber.TextPrimary,
+        secondary = DeepObsidianAmber.SecondaryAccent,
+        onSecondary = DeepObsidianAmber.AppBackground,
+        secondaryContainer = DeepObsidianAmber.CardBackground,
+        onSecondaryContainer = DeepObsidianAmber.TextPrimary,
+        tertiary = DeepObsidianAmber.CopperAccent,
+        background = DeepObsidianAmber.AppBackground,
+        onBackground = DeepObsidianAmber.TextPrimary,
+        surface = DeepObsidianAmber.CardBackground,
+        onSurface = DeepObsidianAmber.TextPrimary,
+        surfaceVariant = DeepObsidianAmber.CardElevated,
+        onSurfaceVariant = DeepObsidianAmber.TextSecondary,
+        outline = DeepObsidianAmber.SurfaceBorder,
+        outlineVariant = DeepObsidianAmber.SurfaceHighlight,
+        error = DeepObsidianAmber.Error
     )
 
     CompositionLocalProvider(LocalAdaptiveTheme provides animatedState) {

@@ -57,7 +57,7 @@ fun AdaptiveAtmosphereSection(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF10B981))
+                            .background(DeepObsidianAmber.Success)
                     )
                     Text(
                         text = "HARDWARE BUS // CONSOLE CONFIG",
@@ -73,7 +73,7 @@ fun AdaptiveAtmosphereSection(
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF83B9BD)
+                    color = DeepObsidianAmber.SecondaryAccent
                 )
             }
         }

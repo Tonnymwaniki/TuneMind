@@ -378,8 +378,8 @@ fun SongProfile(
         ) {
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
+                color = DeepObsidianAmber.CardElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.6f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -390,14 +390,14 @@ fun SongProfile(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (profile.isInVault) AccentAmber else if (isFatigued) Color(0xFFEF4444) else AccentGreen)
+                            .background(if (profile.isInVault) DeepObsidianAmber.PrimaryAccent else if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.Success)
                     )
                     Text(
                         text = if (profile.isInVault) "COOLDOWN VAULT" else "NEURO-ACOUSTIC PROFILE",
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (profile.isInVault) AccentAmber else AccentCyan,
+                        color = if (profile.isInVault) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SecondaryAccent,
                         letterSpacing = 1.sp
                     )
                 }
@@ -422,10 +422,10 @@ fun SongProfile(
         // Hero Song Identity Card with Vinyl Disc & Profile Emoji Photo
         Card(
             shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                if (isFatigued) Color(0xFFEF4444).copy(alpha = 0.45f) else Color(0xFF1E293B)
+                if (isFatigued) DeepObsidianAmber.Error.copy(alpha = 0.45f) else DeepObsidianAmber.SurfaceBorder
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -444,16 +444,16 @@ fun SongProfile(
                         .background(
                             Brush.radialGradient(
                                 colors = when {
-                                    profile.isInVault -> listOf(Color(0xFFB45309), Color(0xFF451A03))
-                                    isFatigued -> listOf(Color(0xFFDC2626), Color(0xFF7F1D1D))
-                                    isModerate -> listOf(Color(0xFF0284C7), Color(0xFF0F172A))
-                                    else -> listOf(Color(0xFF059669), Color(0xFF064E3B))
+                                    profile.isInVault -> listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CardElevated)
+                                    isFatigued -> listOf(DeepObsidianAmber.Error, DeepObsidianAmber.CardElevated)
+                                    isModerate -> listOf(DeepObsidianAmber.CopperAccent, DeepObsidianAmber.CardBackground)
+                                    else -> listOf(DeepObsidianAmber.Success, DeepObsidianAmber.CardElevated)
                                 }
                             )
                         )
                         .border(
                             2.dp,
-                            Brush.linearGradient(listOf(Color(0xFF38BDF8).copy(alpha = 0.6f), Color(0xFF8B5CF6).copy(alpha = 0.4f))),
+                            Brush.linearGradient(listOf(DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f), DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))),
                             RoundedCornerShape(20.dp)
                         ),
                     contentAlignment = Alignment.Center
@@ -473,26 +473,26 @@ fun SongProfile(
                         text = profile.title,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
+                        color = DeepObsidianAmber.TextPrimary,
                         lineHeight = 24.sp
                     )
                     Text(
                         text = profile.artist,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF94A3B8)
+                        color = DeepObsidianAmber.TextSecondary
                     )
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
                     ) {
                         Text(
                             text = profile.vibeTag,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Medium,
-                            color = AccentCyanBright,
+                            color = DeepObsidianAmber.AccentSoft,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -503,8 +503,8 @@ fun SongProfile(
         // Satiety & Receptivity Radar Deck
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF090D16)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -539,10 +539,10 @@ fun SongProfile(
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (isFatigued) Color(0xFFEF4444).copy(alpha = 0.2f) else AccentCyan.copy(alpha = 0.15f),
+                        color = if (isFatigued) DeepObsidianAmber.Error.copy(alpha = 0.2f) else DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f),
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            if (isFatigued) Color(0xFFEF4444) else AccentCyan
+                            if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.PrimaryAccent
                         )
                     ) {
                         Text(
@@ -550,7 +550,7 @@ fun SongProfile(
                             fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = if (isFatigued) Color(0xFFF87171) else AccentCyanBright,
+                            color = if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -563,12 +563,12 @@ fun SongProfile(
                         .height(8.dp)
                         .clip(CircleShape),
                     color = when {
-                        profile.isInVault -> AccentAmber
-                        isFatigued -> Color(0xFFEF4444)
-                        isModerate -> AccentCyan
-                        else -> AccentGreen
+                        profile.isInVault -> DeepObsidianAmber.PrimaryAccent
+                        isFatigued -> DeepObsidianAmber.Error
+                        isModerate -> DeepObsidianAmber.CopperAccent
+                        else -> DeepObsidianAmber.Success
                     },
-                    trackColor = Color(0xFF1E293B)
+                    trackColor = DeepObsidianAmber.RecessedBackground
                 )
 
                 Text(
@@ -579,7 +579,7 @@ fun SongProfile(
                         else -> "Pristine novelty state with near 100% auditory receptor potency. Full dynamic impact."
                     },
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 16.sp
                 )
             }
@@ -589,8 +589,8 @@ fun SongProfile(
         if (isGeminiConfigured) {
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.4f)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -600,13 +600,13 @@ fun SongProfile(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
                             Text(
                                 text = "GEMINI ACOUSTIC DOSSIER",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyanBright,
+                                color = DeepObsidianAmber.PrimaryAccent,
                                 letterSpacing = 1.sp
                             )
                         }
@@ -629,7 +629,7 @@ fun SongProfile(
                                 },
                                 modifier = Modifier.size(24.dp)
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Regenerate", tint = Color(0xFF94A3B8), modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.Refresh, contentDescription = "Regenerate", tint = DeepObsidianAmber.TextSecondary, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -640,14 +640,14 @@ fun SongProfile(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.padding(vertical = 8.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentCyan, strokeWidth = 2.dp)
-                            Text("Gemini is analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = DeepObsidianAmber.PrimaryAccent, strokeWidth = 2.dp)
+                            Text("Gemini is analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                         }
                     } else if (geminiDossierText != null) {
                         Text(
                             text = geminiDossierText ?: "",
                             fontSize = 12.sp,
-                            color = Color(0xFFCBD5E1),
+                            color = DeepObsidianAmber.TextPrimary,
                             lineHeight = 18.sp
                         )
                     } else {
@@ -667,7 +667,7 @@ fun SongProfile(
                                 }
                             },
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                            colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -682,8 +682,8 @@ fun SongProfile(
         // Auditory Anchor Weights Breakdown
         Card(
             shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -696,19 +696,19 @@ fun SongProfile(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Outlined.Psychology, contentDescription = null, tint = PrimaryVioletBright, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Outlined.Psychology, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
                         Text(
                             text = "AUDITORY ANCHOR WEIGHTS",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = PrimaryVioletBright
+                            color = DeepObsidianAmber.PrimaryAccent
                         )
                     }
                     Text(
                         text = "Perceptual Decomposition",
                         fontSize = 10.sp,
-                        color = Color(0xFF64748B)
+                        color = DeepObsidianAmber.TextSecondary
                     )
                 }
 
@@ -723,14 +723,14 @@ fun SongProfile(
                                 text = anchor.name,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                color = DeepObsidianAmber.TextPrimary
                             )
                             Text(
                                 text = "${anchor.weightPercent}%",
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = anchor.color
+                                color = DeepObsidianAmber.AccentLight
                             )
                         }
 
@@ -740,14 +740,14 @@ fun SongProfile(
                                 .fillMaxWidth()
                                 .height(5.dp)
                                 .clip(CircleShape),
-                            color = anchor.color,
-                            trackColor = Color(0xFF1E293B)
+                            color = DeepObsidianAmber.PrimaryAccent,
+                            trackColor = DeepObsidianAmber.RecessedBackground
                         )
 
                         Text(
                             text = anchor.description,
                             fontSize = 10.sp,
-                            color = Color(0xFF64748B)
+                            color = DeepObsidianAmber.TextSecondary
                         )
                     }
                 }
@@ -758,8 +758,8 @@ fun SongProfile(
         if (profile.satietyTrends.isNotEmpty()) {
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -772,19 +772,19 @@ fun SongProfile(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(18.dp))
                             Text(
                                 text = "SATIETY TREND TRAJECTORY",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyan
+                                color = DeepObsidianAmber.SecondaryAccent
                             )
                         }
                         Text(
                             text = "Historical & Projected",
                             fontSize = 10.sp,
-                            color = Color(0xFF64748B)
+                            color = DeepObsidianAmber.TextSecondary
                         )
                     }
 
@@ -793,7 +793,7 @@ fun SongProfile(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(110.dp)
-                            .background(Color(0xFF020617), RoundedCornerShape(12.dp))
+                            .background(DeepObsidianAmber.RecessedBackground, RoundedCornerShape(12.dp))
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.Bottom
@@ -809,7 +809,7 @@ fun SongProfile(
                                     fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (pt.isProjected) Color(0xFF94A3B8) else if (pt.score >= 70) Color(0xFFF87171) else AccentCyanBright
+                                    color = if (pt.isProjected) DeepObsidianAmber.TextMuted else if (pt.score >= 70) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft
                                 )
 
                                 Box(
@@ -819,11 +819,11 @@ fun SongProfile(
                                         .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                         .background(
                                             if (pt.isProjected) {
-                                                Brush.verticalGradient(listOf(Color(0xFF334155), Color(0xFF1E293B)))
+                                                Brush.verticalGradient(listOf(DeepObsidianAmber.SurfaceBorder, DeepObsidianAmber.RecessedBackground))
                                             } else if (pt.score >= 70) {
-                                                Brush.verticalGradient(listOf(Color(0xFFDC2626), Color(0xFF991B1B)))
+                                                Brush.verticalGradient(listOf(DeepObsidianAmber.Error, DeepObsidianAmber.CardElevated))
                                             } else {
-                                                Brush.verticalGradient(listOf(AccentCyan, Color(0xFF0284C7)))
+                                                Brush.verticalGradient(listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CopperAccent))
                                             }
                                         )
                                 )
@@ -832,7 +832,7 @@ fun SongProfile(
                                     text = pt.label,
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    color = if (pt.isProjected) Color(0xFF64748B) else Color(0xFFCBD5E1),
+                                    color = if (pt.isProjected) DeepObsidianAmber.TextMuted else DeepObsidianAmber.TextPrimary,
                                     maxLines = 1
                                 )
                             }
@@ -846,8 +846,8 @@ fun SongProfile(
         if (profile.fatigueHistory.isNotEmpty()) {
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -860,29 +860,29 @@ fun SongProfile(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Outlined.History, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Outlined.History, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
                             Text(
                                 text = "FATIGUE EXPOSURE LOG",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentAmber
+                                color = DeepObsidianAmber.PrimaryAccent
                             )
                         }
                         Text(
                             text = "${profile.fatigueHistory.size} Episodes Captured",
                             fontSize = 10.sp,
-                            color = Color(0xFF64748B)
+                            color = DeepObsidianAmber.TextSecondary
                         )
                     }
 
                     profile.fatigueHistory.forEach { entry ->
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF020617),
+                            color = DeepObsidianAmber.RecessedBackground,
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
-                                if (entry.isLoopTrigger) Color(0xFFEF4444).copy(alpha = 0.35f) else Color(0xFF1E293B)
+                                if (entry.isLoopTrigger) DeepObsidianAmber.Error.copy(alpha = 0.45f) else DeepObsidianAmber.SurfaceBorder
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -898,13 +898,13 @@ fun SongProfile(
                                         text = entry.sessionLabel,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = DeepObsidianAmber.TextPrimary
                                     )
                                     Text(
                                         text = fmt.format(Date(entry.timestampMs)),
                                         fontSize = 10.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        color = Color(0xFF64748B)
+                                        color = DeepObsidianAmber.TextSecondary
                                     )
                                 }
 
@@ -913,14 +913,14 @@ fun SongProfile(
                                         text = "${entry.playDurationSec}s Playback",
                                         fontSize = 11.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        color = AccentCyan
+                                        color = DeepObsidianAmber.SecondaryAccent
                                     )
                                     Text(
                                         text = entry.satietyContribution,
                                         fontSize = 10.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (entry.isLoopTrigger) Color(0xFFF87171) else AccentGreen
+                                        color = if (entry.isLoopTrigger) DeepObsidianAmber.Error else DeepObsidianAmber.Success
                                     )
                                 }
                             }
@@ -937,27 +937,27 @@ fun SongProfile(
         ) {
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("TOTAL OBSERVED PLAYS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                    Text("${profile.appearanceCount} Times", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(if (profile.appearanceCount >= 3) "Loop Density High" else "Cadence Balanced", fontSize = 10.sp, color = if (profile.appearanceCount >= 3) AccentAmber else AccentGreen)
+                    Text("TOTAL OBSERVED PLAYS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
+                    Text("${profile.appearanceCount} Times", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                    Text(if (profile.appearanceCount >= 3) "Loop Density High" else "Cadence Balanced", fontSize = 10.sp, color = if (profile.appearanceCount >= 3) DeepObsidianAmber.Warning else DeepObsidianAmber.Success)
                 }
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("TOTAL AUDITORY EXPOSURE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                    Text("${playMinutes}m ${playSeconds}s", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyanBright)
-                    Text("Aggregated Time", fontSize = 10.sp, color = Color(0xFF64748B))
+                    Text("TOTAL AUDITORY EXPOSURE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
+                    Text("${playMinutes}m ${playSeconds}s", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.AccentLight)
+                    Text("Aggregated Time", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
         }
@@ -966,8 +966,8 @@ fun SongProfile(
         if (profile.isInVault) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF451A03).copy(alpha = 0.5f)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -981,14 +981,14 @@ fun SongProfile(
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentAmber
+                            color = DeepObsidianAmber.PrimaryAccent
                         )
                         Text(
                             "${profile.cooldownDaysRemaining}d remaining",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentAmber
+                            color = DeepObsidianAmber.PrimaryAccent
                         )
                     }
 
@@ -998,7 +998,7 @@ fun SongProfile(
                             onDismiss?.invoke()
                             onQuarantineSuccess("Released '${profile.title}' from Cooldown Vault.")
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF78350F)),
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1011,8 +1011,8 @@ fun SongProfile(
         } else {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1021,12 +1021,12 @@ fun SongProfile(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = AccentAmber
+                        color = DeepObsidianAmber.PrimaryAccent
                     )
                     Text(
                         text = "Quarantine this track in your Cooldown Vault to reset neurological receptivity and avoid permanent listener burnout.",
                         fontSize = 11.sp,
-                        color = Color(0xFF94A3B8),
+                        color = DeepObsidianAmber.TextSecondary,
                         lineHeight = 16.sp
                     )
 
@@ -1039,10 +1039,10 @@ fun SongProfile(
                             val isSelected = selectedQuarantineDays == days
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) AccentAmber.copy(alpha = 0.2f) else Color(0xFF020617),
+                                color = if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.25f) else DeepObsidianAmber.RecessedBackground,
                                 border = androidx.compose.foundation.BorderStroke(
                                     1.dp,
-                                    if (isSelected) AccentAmber else Color(0xFF1E293B)
+                                    if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
@@ -1053,7 +1053,7 @@ fun SongProfile(
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) AccentAmber else Color(0xFF94A3B8),
+                                    color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                     modifier = Modifier.padding(vertical = 8.dp)
                                 )
@@ -1067,13 +1067,14 @@ fun SongProfile(
                             onDismiss?.invoke()
                             onQuarantineSuccess("Quarantined '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF78350F).copy(alpha = 0.9f)),
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.CardBackground),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Quarantine to Cooldown Vault", color = AccentAmber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Quarantine to Cooldown Vault", color = DeepObsidianAmber.PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             }
@@ -1094,13 +1095,13 @@ fun SongProfile(
                 vm.playRecommendation(context, fakeRec)
                 onDismiss?.invoke()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+            colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF020617), modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DeepObsidianAmber.AppBackground, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Open & Play in $appName", color = Color(0xFF020617), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("Open & Play in $appName", color = DeepObsidianAmber.AppBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
 
         Spacer(Modifier.height(18.dp))

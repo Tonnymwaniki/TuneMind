@@ -32,72 +32,72 @@ export interface MoodProfile {
 }
 
 export const PALETTES: Record<'morning' | 'afternoon' | 'evening' | 'night', PaletteColors> = {
-  // A. MORNING — FIRST LIGHT (05:00 - 11:59)
+  // A. MORNING (05:00 - 11:59)
   morning: {
     id: 'morning',
-    name: 'First Light',
-    description: 'Mid-tone neutral morning steel with elevated aluminum and tactile Amber OLED.',
-    primaryBackground: '#474D58',
-    secondaryBackground: '#3B404A',
-    cardSurface: '#555C6A',
-    elevatedSurface: '#616979',
-    primaryText: '#F8FAFC',
-    secondaryText: '#AFB8C7',
-    primaryAccent: '#F59E0B', // Tactile Warm Amber OLED
-    secondaryAccent: '#10B981', // Precision emerald level indicator
-    highlight: '#FEF3C7',
-    border: '#666E7F',
+    name: 'Deep Obsidian Amber (Dawn)',
+    description: 'Deep concentrated reddish-amber foundation with copper and gold accents.',
+    primaryBackground: '#652814',
+    secondaryBackground: '#713019',
+    cardSurface: '#78351E',
+    elevatedSurface: '#854126',
+    primaryText: '#F5E5D0',
+    secondaryText: '#CFAE91',
+    primaryAccent: '#C68A46', // Warm Gold Accent
+    secondaryAccent: '#D9A054', // Soft Gold Accent
+    highlight: '#914725',
+    border: '#985B3C',
   },
 
-  // B. AFTERNOON — CLARITY (12:00 - 16:59)
+  // B. AFTERNOON (12:00 - 16:59)
   afternoon: {
     id: 'afternoon',
-    name: 'Clarity',
-    description: 'Balanced anodized studio steel with laser-etched lettering and amber OLED dial.',
-    primaryBackground: '#434852',
-    secondaryBackground: '#373C45',
-    cardSurface: '#515764',
-    elevatedSurface: '#5D6473',
-    primaryText: '#F3F4F6',
-    secondaryText: '#A9B2C0',
-    primaryAccent: '#F59E0B', // Warm Amber OLED dial
-    secondaryAccent: '#10B981', // Precision emerald level indicator
-    highlight: '#FDE68A',
-    border: '#626A7A',
+    name: 'Deep Obsidian Amber (Noon)',
+    description: 'Deep concentrated reddish-amber foundation with copper and gold accents.',
+    primaryBackground: '#652814',
+    secondaryBackground: '#713019',
+    cardSurface: '#78351E',
+    elevatedSurface: '#854126',
+    primaryText: '#F5E5D0',
+    secondaryText: '#CFAE91',
+    primaryAccent: '#C68A46',
+    secondaryAccent: '#D9A054',
+    highlight: '#914725',
+    border: '#985B3C',
   },
 
-  // C. EVENING — TRANSITION (17:00 - 20:59)
+  // C. EVENING (17:00 - 20:59)
   evening: {
     id: 'evening',
-    name: 'Transition',
-    description: 'Twilight-tinted studio steel with warm sunset amber OLED and emerald meter.',
-    primaryBackground: '#454752',
-    secondaryBackground: '#393B44',
-    cardSurface: '#535564',
-    elevatedSurface: '#5F6172',
-    primaryText: '#F3F4F6',
-    secondaryText: '#AAAEC0',
-    primaryAccent: '#EA580C', // Sunset Amber-Orange OLED
-    secondaryAccent: '#10B981', // Emerald indicator
-    highlight: '#FFEDD5',
-    border: '#656778',
+    name: 'Deep Obsidian Amber (Dusk)',
+    description: 'Deep concentrated reddish-amber foundation with copper and gold accents.',
+    primaryBackground: '#652814',
+    secondaryBackground: '#713019',
+    cardSurface: '#78351E',
+    elevatedSurface: '#854126',
+    primaryText: '#F5E5D0',
+    secondaryText: '#CFAE91',
+    primaryAccent: '#C68A46',
+    secondaryAccent: '#D9A054',
+    highlight: '#914725',
+    border: '#985B3C',
   },
 
-  // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
+  // D. NIGHT (21:00 - 04:59)
   night: {
     id: 'night',
-    name: 'Deep Focus',
-    description: 'Mellow fatigue-free mid-slate aluminum console with glowing amber OLED.',
-    primaryBackground: '#3E434D',
-    secondaryBackground: '#333740',
-    cardSurface: '#4C525E',
-    elevatedSurface: '#575E6C',
-    primaryText: '#F1F5F9',
-    secondaryText: '#A3ACBA',
-    primaryAccent: '#F59E0B', // Tactile Warm Amber OLED
-    secondaryAccent: '#10B981', // Emerald indicator
-    highlight: '#FDE68A',
-    border: '#5D6473',
+    name: 'Deep Obsidian Amber',
+    description: 'Deep concentrated reddish-amber foundation with copper and gold accents.',
+    primaryBackground: '#652814',
+    secondaryBackground: '#713019',
+    cardSurface: '#78351E',
+    elevatedSurface: '#854126',
+    primaryText: '#F5E5D0',
+    secondaryText: '#CFAE91',
+    primaryAccent: '#C68A46',
+    secondaryAccent: '#D9A054',
+    highlight: '#914725',
+    border: '#985B3C',
   },
 };
 

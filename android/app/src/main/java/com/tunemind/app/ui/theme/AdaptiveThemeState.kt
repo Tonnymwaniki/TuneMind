@@ -24,55 +24,45 @@ enum class VisualIntensity(val label: String, val factor: Float) {
 
 /**
  * Immutable cohesive Adaptive Theme state representing the active atmosphere.
+ * Defaults directly to the approved Deep Obsidian Amber visual system.
  */
 @Immutable
 data class AdaptiveThemeState(
-    val timePeriod: TimePeriod,
-    val activePalette: PaletteColors,
-    val musicMood: MusicalMood,
-    val musicEnergy: Float, // 0.0f - 1.0f
-    val primaryBackground: Color,
-    val secondaryBackground: Color,
-    val cardSurface: Color,
-    val elevatedSurface: Color,
-    val primaryText: Color,
-    val secondaryText: Color,
-    val primaryAccent: Color,
-    val secondaryAccent: Color,
-    val highlight: Color,
-    val border: Color,
-    val visualMovement: String,
-    val gradientIntensity: Float,
-    val animationDurationMs: Int,
-    val adaptationEnabled: Boolean,
-    val confidence: Float,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val timePeriod: TimePeriod = TimePeriod.NIGHT,
+    val activePalette: PaletteColors = TuneMindPalettes.Night,
+    val musicMood: MusicalMood = MusicalMood.UNKNOWN,
+    val musicEnergy: Float = 0.5f,
+    val primaryBackground: Color = DeepObsidianAmber.AppBackground,
+    val secondaryBackground: Color = DeepObsidianAmber.SecondaryBackground,
+    val cardSurface: Color = DeepObsidianAmber.CardBackground,
+    val elevatedSurface: Color = DeepObsidianAmber.CardElevated,
+    val primaryText: Color = DeepObsidianAmber.TextPrimary,
+    val secondaryText: Color = DeepObsidianAmber.TextSecondary,
+    val primaryAccent: Color = DeepObsidianAmber.PrimaryAccent,
+    val secondaryAccent: Color = DeepObsidianAmber.SecondaryAccent,
+    val highlight: Color = DeepObsidianAmber.SurfaceHighlight,
+    val border: Color = DeepObsidianAmber.SurfaceBorder,
+    val visualMovement: String = "Calm and focused",
+    val gradientIntensity: Float = 0.25f,
+    val animationDurationMs: Int = 600,
+    val adaptationEnabled: Boolean = false,
+    val confidence: Float = 1.0f,
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val recessedBackground: Color = DeepObsidianAmber.RecessedBackground,
+    val surfaceHighlight: Color = DeepObsidianAmber.SurfaceHighlight,
+    val copperAccent: Color = DeepObsidianAmber.CopperAccent,
+    val accentLight: Color = DeepObsidianAmber.AccentLight,
+    val accentSoft: Color = DeepObsidianAmber.AccentSoft,
+    val textMuted: Color = DeepObsidianAmber.TextMuted,
+    val textDisabled: Color = DeepObsidianAmber.TextDisabled,
+    val success: Color = DeepObsidianAmber.Success,
+    val warning: Color = DeepObsidianAmber.Warning,
+    val error: Color = DeepObsidianAmber.Error,
+    val info: Color = DeepObsidianAmber.Info
 ) {
     companion object {
         fun defaultForNight(): AdaptiveThemeState {
-            val p = TuneMindPalettes.Night
-            return AdaptiveThemeState(
-                timePeriod = TimePeriod.NIGHT,
-                activePalette = p,
-                musicMood = MusicalMood.UNKNOWN,
-                musicEnergy = 0.5f,
-                primaryBackground = p.primaryBackground,
-                secondaryBackground = p.secondaryBackground,
-                cardSurface = p.cardSurface,
-                elevatedSurface = p.elevatedSurface,
-                primaryText = p.primaryText,
-                secondaryText = p.secondaryText,
-                primaryAccent = p.primaryAccent,
-                secondaryAccent = p.secondaryAccent,
-                highlight = p.highlight,
-                border = p.border,
-                visualMovement = "Calm and focused",
-                gradientIntensity = 0.3f,
-                animationDurationMs = 700,
-                adaptationEnabled = true,
-                confidence = 1.0f,
-                lastUpdated = System.currentTimeMillis()
-            )
+            return AdaptiveThemeState()
         }
     }
 }

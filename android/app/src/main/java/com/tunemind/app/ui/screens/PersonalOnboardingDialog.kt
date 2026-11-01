@@ -68,7 +68,7 @@ fun PersonalOnboardingDialog(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF10B981))
+                            .background(DeepObsidianAmber.Success)
                     )
                     Text(
                         text = "TUNEMIND // CALIBRATION PROTOCOL 1.0",
@@ -89,7 +89,7 @@ fun PersonalOnboardingDialog(
                         fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF83B9BD),
+                        color = DeepObsidianAmber.AccentSoft,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -161,7 +161,7 @@ fun PersonalOnboardingDialog(
                         text = "RES: 99.4% OPTIMAL",
                         fontSize = 8.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF83B9BD)
+                        color = DeepObsidianAmber.SecondaryAccent
                     )
                 }
             }

@@ -238,7 +238,7 @@ fun SettingsScreen(
                             testStatusText = "API Key saved successfully ✓"
                         },
                         shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = Color(0xFF020617)),
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
@@ -264,26 +264,26 @@ fun SettingsScreen(
                             }
                         },
                         shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        Text(if (isTestingConnection) "Testing..." else "Test Connection", fontSize = 11.sp, color = Color.White)
+                        Text(if (isTestingConnection) "Testing..." else "Test Connection", fontSize = 11.sp, color = DeepObsidianAmber.TextPrimary)
                     }
                 }
 
                 testStatusText?.let { status ->
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF020617),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = status,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = if (status.startsWith("✓")) AccentGreen else if (status.startsWith("✗")) Color(0xFFEF4444) else AccentCyanBright,
+                            color = if (status.startsWith("✓")) DeepObsidianAmber.Success else if (status.startsWith("✗")) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         )
                     }
@@ -292,7 +292,7 @@ fun SettingsScreen(
                 Text(
                     text = "Tip: You can also set GEMINI_API_KEY in local.properties or your system environment variables to bake it into the Gradle build.",
                     fontSize = 10.sp,
-                    color = Color(0xFF64748B)
+                    color = DeepObsidianAmber.TextSecondary
                 )
             }
         }
@@ -355,8 +355,8 @@ fun SettingsScreen(
                     val isSelected = provider.providerId == selectedProviderId
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) Color(0xFF1E293B) else SurfaceContainerLow,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AccentCyan else BorderSubtle),
+                        color = if (isSelected) DeepObsidianAmber.CardElevated else DeepObsidianAmber.CardBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder),
                         modifier = Modifier.fillMaxWidth().clickable {
                             selectedProviderId = provider.providerId
                             vm?.setPreferredProviderId(context, provider.providerId)
@@ -375,7 +375,7 @@ fun SettingsScreen(
                                     vm?.setPreferredProviderId(context, provider.providerId)
                                         ?: registry.setPreferredProviderId(provider.providerId)
                                 },
-                                colors = RadioButtonDefaults.colors(selectedColor = AccentCyan)
+                                colors = RadioButtonDefaults.colors(selectedColor = DeepObsidianAmber.PrimaryAccent)
                             )
 
                             Column(modifier = Modifier.weight(1f)) {
@@ -384,19 +384,19 @@ fun SettingsScreen(
                                         text = provider.displayName,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color.White else TextPrimary
+                                        color = if (isSelected) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.TextSecondary
                                     )
                                     val isInstalled = provider.isInstalled(context)
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = if (isInstalled) AccentGreen.copy(alpha = 0.15f) else Color(0xFF334155),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isInstalled) AccentGreen.copy(alpha = 0.4f) else Color(0xFF475569))
+                                        color = if (isInstalled) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.RecessedBackground,
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isInstalled) DeepObsidianAmber.Success.copy(alpha = 0.4f) else DeepObsidianAmber.SurfaceBorder)
                                     ) {
                                         Text(
                                             text = if (isInstalled) "Installed" else "Web Handoff",
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isInstalled) AccentGreen else Color(0xFF94A3B8),
+                                            color = if (isInstalled) DeepObsidianAmber.Success else DeepObsidianAmber.TextMuted,
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                         )
                                     }
@@ -407,7 +407,7 @@ fun SettingsScreen(
                                 } else {
                                     "Supports search intent handoff"
                                 }
-                                Text(text = capDesc, fontSize = 10.sp, color = TextMuted)
+                                Text(text = capDesc, fontSize = 10.sp, color = DeepObsidianAmber.TextMuted)
                             }
                         }
                     }
@@ -513,9 +513,9 @@ fun SettingsScreen(
             onClick = {},
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder)
         ) {
-            Text("Export Listening Ledger (.JSON / .CSV)", fontSize = 12.sp, color = TextSecondary)
+            Text("Export Listening Ledger (.JSON / .CSV)", fontSize = 12.sp, color = DeepObsidianAmber.TextSecondary)
         }
 
         // Profile Reset
@@ -524,10 +524,10 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF451A03),
-                contentColor = AccentAmber
+                containerColor = DeepObsidianAmber.RecessedBackground,
+                contentColor = DeepObsidianAmber.Error
             ),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f))
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Error.copy(alpha = 0.5f))
         ) {
             Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
@@ -537,12 +537,12 @@ fun SettingsScreen(
         if (showResetDialog) {
             AlertDialog(
                 onDismissRequest = { showResetDialog = false },
-                title = { Text("Reset Listening Profile?", color = Color.White, fontWeight = FontWeight.Bold) },
+                title = { Text("Reset Listening Profile?", color = DeepObsidianAmber.TextPrimary, fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
                         "This will permanently erase all local Room database playback history, observed listening patterns, satiety models, and quarantined cooldowns. TuneMind will begin a fresh observation cycle.",
                         fontSize = 12.sp,
-                        color = Color(0xFFCBD5E1)
+                        color = DeepObsidianAmber.TextSecondary
                     )
                 },
                 confirmButton = {
@@ -551,17 +551,17 @@ fun SettingsScreen(
                             showResetDialog = false
                             vm?.resetListeningProfile()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White)
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.Error, contentColor = DeepObsidianAmber.TextPrimary)
                     ) {
                         Text("Erase Profile")
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showResetDialog = false }) {
-                        Text("Cancel", color = Color(0xFF94A3B8))
+                        Text("Cancel", color = DeepObsidianAmber.TextMuted)
                     }
                 },
-                containerColor = Color(0xFF0F172A),
+                containerColor = DeepObsidianAmber.CardBackground,
                 shape = RoundedCornerShape(16.dp)
             )
         }

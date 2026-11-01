@@ -173,7 +173,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(if (isListenerBound) Color(0xFF10B981) else Color(0xFFF59E0B))
+                                .background(if (isListenerBound) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
                         )
                         Text(
                             text = if (isListenerBound) "DAEMON // LIVE" else "DAEMON // OFFLINE",
@@ -413,7 +413,7 @@ fun HomeScreen(
                             !isActive -> colors.cardSurface.copy(alpha = 0.4f)
                             i < 8 -> colors.secondaryAccent
                             i < 16 -> colors.primaryAccent
-                            else -> Color(0xFF83B9BD)
+                            else -> DeepObsidianAmber.AccentLight
                         }
                         Box(
                             modifier = Modifier
@@ -506,7 +506,7 @@ fun HomeScreen(
                         Icon(
                             if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
-                            tint = Color.White,
+                            tint = DeepObsidianAmber.AppBackground,
                             modifier = Modifier.size(28.dp)
                         )
                     }
@@ -649,7 +649,7 @@ fun HomeScreen(
                                     text = "Δ -12dB FATIGUE",
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    color = Color(0xFF83B9BD)
+                                    color = DeepObsidianAmber.CopperAccent
                                 )
                             }
                         }
