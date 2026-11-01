@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.ui.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SongProfileData
 import com.tunemind.app.ui.components.SongProfileSheet
@@ -33,7 +34,6 @@ data class CooldownCandidate(
     val satietyScore: Int
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManualCooldownSelectionScreen(
     vm: TuneMindViewModel,
@@ -41,28 +41,40 @@ fun ManualCooldownSelectionScreen(
 ) {
     val historyState by vm.historyState.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-    var selectedDays by remember { mutableStateOf(5f) }
+    var selectedDays by remember { mutableFloatStateOf(7f) }
     var selectedTrack by remember { mutableStateOf<CooldownCandidate?>(null) }
     var isSubmitted by remember { mutableStateOf(false) }
     var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
 
-    // Derive candidates strictly from real captured songs
-    val realCandidates = remember(historyState.tracks) {
-        historyState.tracks
-            .filter { !it.title.isNullOrBlank() }
-            .map {
-                CooldownCandidate(
-                    title = it.title ?: "Unknown",
-                    artist = it.artist ?: "Unknown",
-                    playCount = it.distinctAppearanceCount,
-                    satietyScore = minOf(95, it.distinctAppearanceCount * 22)
-                )
-            }
+    // Aggregate real tracks from Room database
+    val realCandidates = historyState.tracks
+        .filter { !it.title.isNullOrBlank() }
+        .map {
+            CooldownCandidate(
+                title = it.title ?: "Unknown Title",
+                artist = it.artist ?: "Unknown Artist",
+                playCount = it.distinctAppearanceCount,
+                satietyScore = minOf(95, it.distinctAppearanceCount * 22)
+            )
+        }
+
+    val candidates = if (realCandidates.isNotEmpty()) {
+        realCandidates
+    } else {
+        TuneMindDemoData.recentlyIdentifiedTracks.map {
+            CooldownCandidate(
+                title = it.title,
+                artist = it.artist,
+                playCount = it.playCount,
+                satietyScore = it.satietyScore
+            )
+        }
     }
 
-    val filteredTracks = remember(searchQuery, realCandidates) {
-        if (searchQuery.isBlank()) realCandidates
-        else realCandidates.filter {
+    val filteredTracks = if (searchQuery.isBlank()) {
+        candidates
+    } else {
+        candidates.filter {
             it.title.contains(searchQuery, ignoreCase = true) ||
             it.artist.contains(searchQuery, ignoreCase = true)
         }
@@ -75,7 +87,7 @@ fun ManualCooldownSelectionScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(DeepObsidianAmber.AppBackground)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -91,7 +103,7 @@ fun ManualCooldownSelectionScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = DeepObsidianAmber.TextPrimary)
                 }
                 Column {
                     Text(
@@ -99,14 +111,14 @@ fun ManualCooldownSelectionScreen(
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = AccentCyan,
+                        color = DeepObsidianAmber.PrimaryAccent,
                         letterSpacing = 1.sp
                     )
                     Text(
                         text = "Add Track to Vault",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = DeepObsidianAmber.TextPrimary
                     )
                 }
             }
@@ -115,8 +127,8 @@ fun ManualCooldownSelectionScreen(
         // Info Banner
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -125,12 +137,12 @@ fun ManualCooldownSelectionScreen(
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = AccentCyan
+                    color = DeepObsidianAmber.SecondaryAccent
                 )
                 Text(
                     text = "Quarantining a song temporarily pauses its exposure, allowing dopamine receptor sensitivity to recover via exponential decay (e^-0.18t).",
                     fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 18.sp
                 )
             }
@@ -139,8 +151,8 @@ fun ManualCooldownSelectionScreen(
         if (isSubmitted) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B).copy(alpha = 0.3f)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -148,24 +160,27 @@ fun ManualCooldownSelectionScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DeepObsidianAmber.Success, modifier = Modifier.size(36.dp))
                     Text(
                         text = "Quarantine Activated",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = DeepObsidianAmber.TextPrimary
                     )
                     Text(
                         text = "${selectedTrack?.title} is now in cooldown for ${selectedDays.toInt()} days.",
                         fontSize = 12.sp,
-                        color = Color(0xFF94A3B8)
+                        color = DeepObsidianAmber.TextSecondary
                     )
                     Button(
                         onClick = onBack,
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepObsidianAmber.PrimaryAccent,
+                            contentColor = DeepObsidianAmber.AppBackground
+                        ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("Return to Satiety Lab", color = Color(0xFF020617), fontWeight = FontWeight.Bold)
+                        Text("Return to Satiety Lab", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -175,22 +190,22 @@ fun ManualCooldownSelectionScreen(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search captured songs or type any track...", color = Color(0xFF64748B)) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF64748B)) },
+                placeholder = { Text("Search captured songs or type any track...", color = DeepObsidianAmber.TextMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = DeepObsidianAmber.TextMuted) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B))
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = DeepObsidianAmber.TextMuted)
                         }
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF0F172A),
-                    unfocusedContainerColor = Color(0xFF0F172A),
-                    focusedBorderColor = AccentCyan,
-                    unfocusedBorderColor = Color(0xFF1E293B),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    focusedContainerColor = DeepObsidianAmber.RecessedBackground,
+                    unfocusedContainerColor = DeepObsidianAmber.RecessedBackground,
+                    focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
+                    unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
+                    focusedTextColor = DeepObsidianAmber.TextPrimary,
+                    unfocusedTextColor = DeepObsidianAmber.TextPrimary
                 ),
                 shape = RoundedCornerShape(12.dp),
                 singleLine = true
@@ -199,8 +214,8 @@ fun ManualCooldownSelectionScreen(
             // Duration Slider Card
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -208,13 +223,13 @@ fun ManualCooldownSelectionScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Cooldown Duration", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Cooldown Duration", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
                         Text(
                             "${selectedDays.toInt()} Days",
                             fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentCyan
+                            color = DeepObsidianAmber.SecondaryAccent
                         )
                     }
                     Slider(
@@ -223,17 +238,17 @@ fun ManualCooldownSelectionScreen(
                         valueRange = 1f..14f,
                         steps = 12,
                         colors = SliderDefaults.colors(
-                            thumbColor = AccentCyan,
-                            activeTrackColor = AccentCyan,
-                            inactiveTrackColor = Color(0xFF1E293B)
+                            thumbColor = DeepObsidianAmber.PrimaryAccent,
+                            activeTrackColor = DeepObsidianAmber.PrimaryAccent,
+                            inactiveTrackColor = DeepObsidianAmber.RecessedBackground
                         )
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("1 day (Micro-reset)", fontSize = 10.sp, color = Color(0xFF64748B))
-                        Text("14 days (Deep clean)", fontSize = 10.sp, color = Color(0xFF64748B))
+                        Text("1 day (Micro-reset)", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted)
+                        Text("14 days (Deep clean)", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted)
                     }
                 }
             }
@@ -242,8 +257,8 @@ fun ManualCooldownSelectionScreen(
             if (isCustomSearchMatch) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0891B2).copy(alpha = 0.15f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentCyan.copy(alpha = 0.4f)),
+                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -260,10 +275,10 @@ fun ManualCooldownSelectionScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(24.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Quarantine \"${searchQuery.trim()}\"", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("Custom song name • Will be added to Vault", fontSize = 11.sp, color = AccentCyanBright)
+                            Text("Quarantine \"${searchQuery.trim()}\"", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                            Text("Custom song name • Will be added to Vault", fontSize = 11.sp, color = DeepObsidianAmber.AccentSoft)
                         }
                         RadioButton(
                             selected = selectedTrack?.title == searchQuery.trim(),
@@ -275,7 +290,7 @@ fun ManualCooldownSelectionScreen(
                                     satietyScore = 75
                                 )
                             },
-                            colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = Color(0xFF64748B))
+                            colors = RadioButtonDefaults.colors(selectedColor = DeepObsidianAmber.PrimaryAccent, unselectedColor = DeepObsidianAmber.TextMuted)
                         )
                     }
                 }
@@ -286,14 +301,14 @@ fun ManualCooldownSelectionScreen(
                 text = "Captured Songs Available for Vault",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = DeepObsidianAmber.TextPrimary
             )
 
             if (filteredTracks.isEmpty() && !isCustomSearchMatch) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -301,12 +316,12 @@ fun ManualCooldownSelectionScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(32.dp))
+                        Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = DeepObsidianAmber.TextMuted, modifier = Modifier.size(32.dp))
                         Text(
                             text = if (searchQuery.isBlank()) "No songs captured yet" else "No matching captured songs",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = DeepObsidianAmber.TextPrimary
                         )
                         Text(
                             text = if (searchQuery.isBlank())
@@ -314,7 +329,7 @@ fun ManualCooldownSelectionScreen(
                             else
                                 "You can type any track name above to quarantine it directly.",
                             fontSize = 12.sp,
-                            color = Color(0xFF94A3B8),
+                            color = DeepObsidianAmber.TextSecondary,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
@@ -326,11 +341,11 @@ fun ManualCooldownSelectionScreen(
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) Color(0xFF0891B2).copy(alpha = 0.2f) else Color(0xFF0F172A)
+                            containerColor = if (isSelected) DeepObsidianAmber.CardElevated else DeepObsidianAmber.CardBackground
                         ),
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            if (isSelected) AccentCyan else Color(0xFF1E293B)
+                            if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -347,15 +362,15 @@ fun ManualCooldownSelectionScreen(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF1E293B)),
+                                    .background(DeepObsidianAmber.RecessedBackground),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.MusicNote, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(20.dp))
                             }
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text(text = "${track.artist} • ${track.playCount} plays • ${track.satietyScore}% Satiety", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                                Text(text = track.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                                Text(text = "${track.artist} • ${track.playCount} plays • ${track.satietyScore}% Satiety", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                             }
 
                             IconButton(
@@ -369,13 +384,13 @@ fun ManualCooldownSelectionScreen(
                                 },
                                 modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Default.Info, contentDescription = "View Profile", tint = AccentCyanBright, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Info, contentDescription = "View Profile", tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(18.dp))
                             }
 
                             RadioButton(
                                 selected = isSelected,
                                 onClick = { selectedTrack = track },
-                                colors = RadioButtonDefaults.colors(selectedColor = AccentCyan, unselectedColor = Color(0xFF64748B))
+                                colors = RadioButtonDefaults.colors(selectedColor = DeepObsidianAmber.PrimaryAccent, unselectedColor = DeepObsidianAmber.TextMuted)
                             )
                         }
                     }
@@ -393,8 +408,10 @@ fun ManualCooldownSelectionScreen(
                 },
                 enabled = selectedTrack != null,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentCyan,
-                    disabledContainerColor = Color(0xFF1E293B)
+                    containerColor = DeepObsidianAmber.PrimaryAccent,
+                    contentColor = DeepObsidianAmber.AppBackground,
+                    disabledContainerColor = DeepObsidianAmber.RecessedBackground,
+                    disabledContentColor = DeepObsidianAmber.TextDisabled
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
@@ -403,7 +420,6 @@ fun ManualCooldownSelectionScreen(
             ) {
                 Text(
                     text = if (selectedTrack != null) "Quarantine ${selectedTrack?.title} for ${selectedDays.toInt()} Days" else "Select a Track Above",
-                    color = if (selectedTrack != null) Color(0xFF020617) else Color(0xFF64748B),
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )

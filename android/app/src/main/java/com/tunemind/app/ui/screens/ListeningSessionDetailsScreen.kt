@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,7 +47,7 @@ fun ListeningSessionDetailsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(DeepObsidianAmber.AppBackground)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -56,8 +55,8 @@ fun ListeningSessionDetailsScreen(
         // Hero Header Card
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -71,19 +70,19 @@ fun ListeningSessionDetailsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = DeepObsidianAmber.TextPrimary)
                         }
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.15f)),
+                                .background(DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.GraphicEq,
                                 contentDescription = null,
-                                tint = AccentCyan,
+                                tint = DeepObsidianAmber.PrimaryAccent,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -93,29 +92,29 @@ fun ListeningSessionDetailsScreen(
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyan,
+                                color = DeepObsidianAmber.PrimaryAccent,
                                 letterSpacing = 1.sp
                             )
                             Text(
                                 text = "Reconstructed Episode",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = DeepObsidianAmber.TextPrimary
                             )
                         }
                     }
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF10B981).copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f))
+                        color = DeepObsidianAmber.Success.copy(alpha = 0.15f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.3f))
                     ) {
                         Text(
                             text = "CLOSED",
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentGreen,
+                            color = DeepObsidianAmber.Success,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
@@ -124,7 +123,7 @@ fun ListeningSessionDetailsScreen(
                 Text(
                     text = "Session observed via Spotify background daemon. Reconstructed from continuous Android playback callbacks and notification state machine.",
                     fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 18.sp
                 )
             }
@@ -137,40 +136,40 @@ fun ListeningSessionDetailsScreen(
         ) {
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Duration", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text(durationLabel, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
-                    Text("$trackCount tracks total", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Duration", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text(durationLabel, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                    Text("$trackCount tracks total", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Satiety Shift", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("+14%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
-                    Text("Velocity: 0.42/h", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Satiety Shift", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text("+14%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CopperAccent)
+                    Text("Velocity: 0.42/h", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Confidence", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("96%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
-                    Text("Zero jitter", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Confidence", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text("96%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Success)
+                    Text("Zero jitter", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
         }
@@ -185,13 +184,13 @@ fun ListeningSessionDetailsScreen(
                 text = "Reconstructed Track Timeline",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = DeepObsidianAmber.TextPrimary
             )
             Text(
                 text = "Tap for Profile",
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
-                color = AccentCyan
+                color = DeepObsidianAmber.SecondaryAccent
             )
         }
 
@@ -200,8 +199,8 @@ fun ListeningSessionDetailsScreen(
                 val satietyScore = minOf(95, track.distinctAppearanceCount * 22)
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -219,7 +218,7 @@ fun ListeningSessionDetailsScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1E293B)),
+                                .background(DeepObsidianAmber.RecessedBackground),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -227,25 +226,25 @@ fun ListeningSessionDetailsScreen(
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyan
+                                color = DeepObsidianAmber.PrimaryAccent
                             )
                         }
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = track.title ?: "Unknown Track", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text(text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Text(text = track.title ?: "Unknown Track", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                            Text(text = "${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                         }
 
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF0284C7).copy(alpha = 0.15f)
+                            color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f)
                         ) {
                             Text(
                                 text = "$satietyScore% Satiety",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyanBright,
+                                color = DeepObsidianAmber.AccentSoft,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -266,8 +265,8 @@ fun ListeningSessionDetailsScreen(
                 val cleanArtist = meta.substringBefore(" •")
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -290,31 +289,31 @@ fun ListeningSessionDetailsScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF1E293B)),
+                                .background(DeepObsidianAmber.RecessedBackground),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
                         }
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text(text = meta, fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                            Text(text = meta, fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                         }
 
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = if (tag.contains("High")) Color(0xFFEF4444).copy(alpha = 0.15f)
-                            else if (tag.contains("Palate")) Color(0xFF10B981).copy(alpha = 0.15f)
-                            else Color(0xFF0284C7).copy(alpha = 0.15f)
+                            color = if (tag.contains("High")) DeepObsidianAmber.Error.copy(alpha = 0.2f)
+                            else if (tag.contains("Palate")) DeepObsidianAmber.Success.copy(alpha = 0.2f)
+                            else DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f)
                         ) {
                             Text(
                                 text = tag,
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (tag.contains("High")) Color(0xFFF87171)
-                                else if (tag.contains("Palate")) Color(0xFF34D399)
-                                else AccentCyanBright,
+                                color = if (tag.contains("High")) DeepObsidianAmber.Error
+                                else if (tag.contains("Palate")) DeepObsidianAmber.Success
+                                else DeepObsidianAmber.AccentSoft,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }

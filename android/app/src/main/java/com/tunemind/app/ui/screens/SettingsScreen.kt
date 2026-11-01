@@ -129,8 +129,8 @@ fun SettingsScreen(
         // GOOGLE GEMINI REASONING INTELLIGENCE ENGINE
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (isGeminiConfigured) AccentCyan.copy(alpha = 0.5f) else Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isGeminiConfigured) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f) else DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -186,7 +186,7 @@ fun SettingsScreen(
                 Text(
                     text = "Runs real-time cognitive reasoning over your playback logs to prevent song burnout, synthesize satiety dynamics, and curate AI-guided recommendations.",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 16.sp
                 )
 
@@ -198,25 +198,25 @@ fun SettingsScreen(
                         testStatusText = null
                     },
                     label = { Text("Gemini API Key", fontSize = 12.sp) },
-                    placeholder = { Text("AIzaSy...", fontSize = 11.sp, color = Color(0xFF64748B)) },
+                    placeholder = { Text("AIzaSy...", fontSize = 11.sp, color = DeepObsidianAmber.TextMuted) },
                     visualTransformation = if (isKeyObscured) PasswordVisualTransformation() else VisualTransformation.None,
                     trailingIcon = {
                         IconButton(onClick = { isKeyObscured = !isKeyObscured }) {
                             Icon(
                                 if (isKeyObscured) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                 contentDescription = "Toggle Visibility",
-                                tint = Color(0xFF94A3B8),
+                                tint = DeepObsidianAmber.TextMuted,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF020617),
-                        unfocusedContainerColor = Color(0xFF020617),
-                        focusedBorderColor = AccentCyan,
-                        unfocusedBorderColor = Color(0xFF334155),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedContainerColor = DeepObsidianAmber.RecessedBackground,
+                        unfocusedContainerColor = DeepObsidianAmber.RecessedBackground,
+                        focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
+                        unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
+                        focusedTextColor = DeepObsidianAmber.TextPrimary,
+                        unfocusedTextColor = DeepObsidianAmber.TextPrimary
                     ),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),

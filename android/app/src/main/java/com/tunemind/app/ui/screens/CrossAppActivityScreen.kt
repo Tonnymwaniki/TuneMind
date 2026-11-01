@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,12 +23,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.BuildConfig
-import com.tunemind.app.data.local.EventBufferRepository
 import com.tunemind.app.data.local.EventQueueEntity
 import com.tunemind.app.data.local.TuneMindDatabase
-import com.tunemind.app.domain.event.ObservationEventType
+import com.tunemind.app.data.sync.SyncScheduler
 import com.tunemind.app.service.NotificationAccess
-import com.tunemind.app.sync.SyncScheduler
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -37,16 +34,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CrossAppActivityScreen(
     vm: TuneMindViewModel,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by vm.crossAppState.collectAsState()
-    var isNotificationAccessGranted by remember { mutableStateOf<Boolean>(NotificationAccess.isEnabled(context)) }
+    val crossAppState by vm.crossAppState.collectAsState()
+    var isNotificationAccessGranted by remember { mutableStateOf(false) }
     var testBroadcastingStatus by remember { mutableStateOf<String?>(null) }
     var localBufferedCount by remember { mutableStateOf(0) }
 
@@ -62,7 +58,7 @@ fun CrossAppActivityScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(DeepObsidianAmber.AppBackground)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -70,8 +66,8 @@ fun CrossAppActivityScreen(
         // Hero Header Card
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -88,13 +84,13 @@ fun CrossAppActivityScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+                                .background(DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.Sensors,
                                 contentDescription = null,
-                                tint = AccentGreen,
+                                tint = DeepObsidianAmber.PrimaryAccent,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -104,14 +100,14 @@ fun CrossAppActivityScreen(
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentGreen,
+                                color = DeepObsidianAmber.PrimaryAccent,
                                 letterSpacing = 1.sp
                             )
                             Text(
                                 text = "Connected Observers",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = DeepObsidianAmber.TextPrimary
                             )
                         }
                     }
@@ -120,14 +116,14 @@ fun CrossAppActivityScreen(
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(if (isNotificationAccessGranted) AccentGreen else AccentAmber)
+                            .background(if (isNotificationAccessGranted) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
                     )
                 }
 
                 Text(
                     text = "TuneMind passively captures media playback from background services across Spotify, YouTube Music, Apple Music, and local audio players without needing an open foreground app.",
                     fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 18.sp
                 )
             }
@@ -137,11 +133,11 @@ fun CrossAppActivityScreen(
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (isNotificationAccessGranted) Color(0xFF064E3B).copy(alpha = 0.3f) else Color(0xFF78350F).copy(alpha = 0.3f)
+                containerColor = if (isNotificationAccessGranted) DeepObsidianAmber.CardElevated else DeepObsidianAmber.CardBackground
             ),
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                if (isNotificationAccessGranted) Color(0xFF10B981).copy(alpha = 0.4f) else Color(0xFFF59E0B).copy(alpha = 0.4f)
+                if (isNotificationAccessGranted) DeepObsidianAmber.Success.copy(alpha = 0.5f) else DeepObsidianAmber.Warning.copy(alpha = 0.5f)
             ),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -158,14 +154,14 @@ fun CrossAppActivityScreen(
                         Icon(
                             if (isNotificationAccessGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
                             contentDescription = null,
-                            tint = if (isNotificationAccessGranted) AccentGreen else AccentAmber,
+                            tint = if (isNotificationAccessGranted) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
                             text = if (isNotificationAccessGranted) "Notification Listener: Active" else "Notification Access: Action Required",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = DeepObsidianAmber.TextPrimary
                         )
                     }
 
@@ -175,7 +171,8 @@ fun CrossAppActivityScreen(
                             context.startActivity(intent)
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isNotificationAccessGranted) Color(0xFF1E293B) else AccentAmber
+                            containerColor = if (isNotificationAccessGranted) DeepObsidianAmber.RecessedBackground else DeepObsidianAmber.PrimaryAccent,
+                            contentColor = if (isNotificationAccessGranted) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.AppBackground
                         ),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
@@ -183,7 +180,6 @@ fun CrossAppActivityScreen(
                         Text(
                             text = if (isNotificationAccessGranted) "Check Settings" else "Grant Permission",
                             fontSize = 11.sp,
-                            color = if (isNotificationAccessGranted) Color(0xFF94A3B8) else Color(0xFF020617),
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -195,7 +191,7 @@ fun CrossAppActivityScreen(
                     else
                         "Android requires Notification Access so TuneMind can read track title, artist, and playback states from Spotify, YouTube Music, and other media players.",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 16.sp
                 )
             }
@@ -204,8 +200,8 @@ fun CrossAppActivityScreen(
         // Live Cloud Ingestion Pipeline
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -214,13 +210,13 @@ fun CrossAppActivityScreen(
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = AccentCyan
+                    color = DeepObsidianAmber.SecondaryAccent
                 )
                 Text(
                     text = BuildConfig.TUNEMIND_BASE_URL,
                     fontSize = 12.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = Color.White
+                    color = DeepObsidianAmber.TextPrimary
                 )
 
                 Row(
@@ -231,7 +227,7 @@ fun CrossAppActivityScreen(
                     Text(
                         text = "Phone Queue: $localBufferedCount events buffered in Room",
                         fontSize = 11.sp,
-                        color = Color(0xFF94A3B8)
+                        color = DeepObsidianAmber.TextSecondary
                     )
 
                     Button(
@@ -239,18 +235,21 @@ fun CrossAppActivityScreen(
                             SyncScheduler.schedule(context)
                             testBroadcastingStatus = "Immediate sync scheduled"
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryViolet),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepObsidianAmber.PrimaryAccent,
+                            contentColor = DeepObsidianAmber.AppBackground
+                        ),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Sync, contentDescription = null, tint = DeepObsidianAmber.AppBackground, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Sync to Cloud", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Sync to Cloud", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 testBroadcastingStatus?.let { msg ->
-                    Text(msg, fontSize = 11.sp, color = AccentGreen, fontFamily = FontFamily.Monospace)
+                    Text(msg, fontSize = 11.sp, color = DeepObsidianAmber.Success, fontFamily = FontFamily.Monospace)
                 }
             }
         }
@@ -258,19 +257,19 @@ fun CrossAppActivityScreen(
         // Test Song Broadcaster
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF090D16)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.PlayCircle, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                    Text("Instant Test Broadcaster", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Icon(Icons.Default.PlayCircle, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
+                    Text("Instant Test Broadcaster", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
                 }
                 Text(
                     "Simulate an active track playback on this phone to test local Room storage and cloud sync instantly.",
                     fontSize = 11.sp,
-                    color = Color(0xFF94A3B8)
+                    color = DeepObsidianAmber.TextSecondary
                 )
 
                 Button(
@@ -298,13 +297,16 @@ fun CrossAppActivityScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DeepObsidianAmber.PrimaryAccent,
+                        contentColor = DeepObsidianAmber.AppBackground
+                    ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = null, tint = Color(0xFF020617), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Send, contentDescription = null, tint = DeepObsidianAmber.AppBackground, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Broadcast 'Espresso' Playback Event", color = Color(0xFF020617), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Broadcast 'Espresso' Playback Event", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }
@@ -314,23 +316,23 @@ fun CrossAppActivityScreen(
             text = "Supported Android Media Daemons",
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = DeepObsidianAmber.TextPrimary
         )
 
         val daemons = listOf(
             Triple("Spotify", "com.spotify.music", Color(0xFF1DB954)),
             Triple("YouTube Music", "com.google.android.apps.youtube.music", Color(0xFFEF4444)),
             Triple("Apple Music", "com.apple.android.music", Color(0xFFFA243C)),
-            Triple("Tidal", "com.aspiro.tidal", Color(0xFF06B6D4)),
-            Triple("SoundCloud", "com.soundcloud.android", Color(0xFFF97316)),
-            Triple("Generic Android Players", "com.android.music", Color(0xFF8B5CF6))
+            Triple("Tidal", "com.aspiro.tidal", DeepObsidianAmber.SecondaryAccent),
+            Triple("SoundCloud", "com.soundcloud.android", DeepObsidianAmber.CopperAccent),
+            Triple("Generic Android Players", "com.android.music", DeepObsidianAmber.PrimaryAccent)
         )
 
         daemons.forEach { (name, pkg, color) ->
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -356,20 +358,20 @@ fun CrossAppActivityScreen(
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        Text(pkg, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
+                        Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                        Text(pkg, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextMuted)
                     }
 
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1E293B)
+                        color = DeepObsidianAmber.RecessedBackground
                     ) {
                         Text(
                             text = "Observer Armed",
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8),
+                            color = DeepObsidianAmber.TextSecondary,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }

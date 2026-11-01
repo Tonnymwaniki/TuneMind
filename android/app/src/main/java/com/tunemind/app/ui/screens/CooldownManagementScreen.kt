@@ -40,7 +40,7 @@ fun CooldownManagementScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF020617)) // Deep slate-950
+            .background(DeepObsidianAmber.AppBackground)
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -48,8 +48,8 @@ fun CooldownManagementScreen(
         // Hero Header
         Card(
             shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0891B2).copy(alpha = 0.4f)),
+            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -63,7 +63,7 @@ fun CooldownManagementScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = DeepObsidianAmber.TextPrimary)
                         }
                         Column {
                             Text(
@@ -71,34 +71,37 @@ fun CooldownManagementScreen(
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentCyan,
+                                color = DeepObsidianAmber.PrimaryAccent,
                                 letterSpacing = 1.sp
                             )
                             Text(
                                 text = "Cooldown Management",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = DeepObsidianAmber.TextPrimary
                             )
                         }
                     }
 
                     Button(
                         onClick = onAddTrack,
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepObsidianAmber.PrimaryAccent,
+                            contentColor = DeepObsidianAmber.AppBackground
+                        ),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF020617), modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Add, contentDescription = null, tint = DeepObsidianAmber.AppBackground, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Add Track", color = Color(0xFF020617), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Add Track", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 Text(
                     text = "Songs in cooldown are suppressed from high-rotation recommendation loops to prevent listener burnout. TuneMind uses an exponential decay curve to return tracks to full acoustic freshness.",
                     fontSize = 12.sp,
-                    color = Color(0xFF94A3B8),
+                    color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 18.sp
                 )
             }
@@ -115,40 +118,40 @@ fun CooldownManagementScreen(
         ) {
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Total Resting", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("${vaultTracks.size} Tracks", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentCyan)
-                    Text("100% Persisted", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Total Resting", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text("${vaultTracks.size} Tracks", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.SecondaryAccent)
+                    Text("100% Persisted", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Avg Reset", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text(avgResetDays, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = PrimaryVioletBright)
-                    Text("Decay: 0.18/d", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Avg Reset", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text(avgResetDays, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                    Text("Decay: 0.18/d", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
 
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Shield", fontSize = 10.sp, color = Color(0xFF64748B), fontFamily = FontFamily.Monospace)
-                    Text("Active", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
-                    Text("Dopamine guard", fontSize = 10.sp, color = Color(0xFF94A3B8))
+                    Text("Shield", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
+                    Text("Active", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Success)
+                    Text("Dopamine guard", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
         }
@@ -157,8 +160,8 @@ fun CooldownManagementScreen(
         notificationText?.let { msg ->
             Card(
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -166,9 +169,9 @@ fun CooldownManagementScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(msg, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text(msg, color = DeepObsidianAmber.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     IconButton(onClick = { notificationText = null }, modifier = Modifier.size(20.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Close, contentDescription = null, tint = DeepObsidianAmber.TextPrimary, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -184,12 +187,12 @@ fun CooldownManagementScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Outlined.HourglassEmpty, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                Icon(Icons.Outlined.HourglassEmpty, contentDescription = null, tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(18.dp))
                 Text(
                     text = "Tracks in Active Cooldown",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = DeepObsidianAmber.TextPrimary
                 )
             }
 
@@ -197,15 +200,15 @@ fun CooldownManagementScreen(
                 text = "${vaultTracks.size} Resting",
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
-                color = AccentCyan
+                color = DeepObsidianAmber.SecondaryAccent
             )
         }
 
         if (vaultTracks.isEmpty()) {
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -213,17 +216,17 @@ fun CooldownManagementScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(36.dp))
-                    Text("Vault is Empty", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Tap \"Add Track\" above to quarantine any song into the cooldown vault.", fontSize = 12.sp, color = Color(0xFF94A3B8), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(36.dp))
+                    Text("Vault is Empty", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                    Text("Tap \"Add Track\" above to quarantine any song into the cooldown vault.", fontSize = 12.sp, color = DeepObsidianAmber.TextSecondary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
         } else {
             vaultTracks.forEach { track ->
                 Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B)),
+                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
@@ -240,28 +243,28 @@ fun CooldownManagementScreen(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF064E3B).copy(alpha = 0.4f)),
+                                    .background(DeepObsidianAmber.RecessedBackground),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Restore, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.Restore, contentDescription = null, tint = DeepObsidianAmber.Success, modifier = Modifier.size(22.dp))
                             }
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Text(track.artist, fontSize = 12.sp, color = Color(0xFF94A3B8))
+                                Text(track.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
+                                Text(track.artist, fontSize = 12.sp, color = DeepObsidianAmber.TextSecondary)
                             }
 
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF064E3B).copy(alpha = 0.4f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                                color = DeepObsidianAmber.Success.copy(alpha = 0.2f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.4f))
                             ) {
                                 Text(
                                     "${track.cooldownDaysRemaining} days left",
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = AccentGreen,
+                                    color = DeepObsidianAmber.Success,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
@@ -270,14 +273,14 @@ fun CooldownManagementScreen(
                         // Receptor Recovery Progress Bar
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Receptor Recovery (e^-0.18t)", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF64748B))
-                                Text("${(track.recoveryProgress * 100).toInt()}% restored", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = AccentGreen)
+                                Text("Receptor Recovery (e^-0.18t)", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextMuted)
+                                Text("${(track.recoveryProgress * 100).toInt()}% restored", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.Success)
                             }
                             LinearProgressIndicator(
                                 progress = { track.recoveryProgress.coerceIn(0.05f, 1f) },
                                 modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
-                                color = AccentGreen,
-                                trackColor = Color(0xFF1E293B)
+                                color = DeepObsidianAmber.Success,
+                                trackColor = DeepObsidianAmber.RecessedBackground
                             )
                         }
 
@@ -291,7 +294,7 @@ fun CooldownManagementScreen(
                                     notificationText = "Restored '${track.title}' from Vault early."
                                 }
                             ) {
-                                Text("Restore Early", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                                Text("Restore Early", fontSize = 11.sp, color = DeepObsidianAmber.TextMuted)
                             }
                         }
                     }
