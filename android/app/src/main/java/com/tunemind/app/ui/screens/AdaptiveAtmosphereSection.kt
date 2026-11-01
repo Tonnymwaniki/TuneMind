@@ -166,10 +166,10 @@ fun AdaptiveAtmosphereSection(
             }
 
             val channels = listOf(
-                Triple("CH 01 // DAWN", "Solar Amber", "#F59E0B"),
-                Triple("CH 02 // NOON", "Studio Amber", "#E5A857"),
-                Triple("CH 03 // DUSK", "Copper Amber", "#F97316"),
-                Triple("CH 04 // NIGHT", "Tube Amber", "#F59E0B")
+                Triple("CH 01 // DAWN", "Nixie Gold", "#FFA800"),
+                Triple("CH 02 // NOON", "Acid Lime", "#D4F01A"),
+                Triple("CH 03 // DUSK", "Sunset Amber", "#FF9400"),
+                Triple("CH 04 // NIGHT", "Vacuum Tube", "#FFA800")
             )
 
             Row(

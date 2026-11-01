@@ -36,68 +36,68 @@ export const PALETTES: Record<'morning' | 'afternoon' | 'evening' | 'night', Pal
   morning: {
     id: 'morning',
     name: 'First Light',
-    description: 'Deep Midnight Indigo base with fresh solar amber glow.',
-    primaryBackground: '#090D18',
-    secondaryBackground: '#101526',
-    cardSurface: '#161E34',
-    elevatedSurface: '#202A46',
-    primaryText: '#F8FAFC',
-    secondaryText: '#A1AEC2',
-    primaryAccent: '#F59E0B', // Radiant Warm Amber
-    secondaryAccent: '#818CF8', // Midnight Indigo Sky
-    highlight: '#FDE68A',
-    border: '#283552',
+    description: 'Deep Charcoal base with glowing Nixie Amber & Acid Lime.',
+    primaryBackground: '#090A0D',
+    secondaryBackground: '#121419',
+    cardSurface: '#191B22',
+    elevatedSurface: '#22252E',
+    primaryText: '#F3F4F6',
+    secondaryText: '#9096A5',
+    primaryAccent: '#FFA800', // Nixie Amber-Gold
+    secondaryAccent: '#D4F01A', // Acid Lime
+    highlight: '#FFE277',
+    border: '#2B2E3A',
   },
 
   // B. AFTERNOON — CLARITY (12:00 - 16:59)
   afternoon: {
     id: 'afternoon',
     name: 'Clarity',
-    description: 'Deep Midnight Indigo base with high-clarity amber and precision cyan.',
-    primaryBackground: '#080C16',
-    secondaryBackground: '#0F1424',
-    cardSurface: '#151C30',
-    elevatedSurface: '#1E2842',
-    primaryText: '#F8FAFC',
-    secondaryText: '#A1AEC2',
-    primaryAccent: '#E5A857', // Warm Studio Amber
-    secondaryAccent: '#38BDF8', // Precision Cyan
-    highlight: '#FCD34D',
-    border: '#26324E',
+    description: 'Deep Charcoal base with high-contrast Nixie Amber & Acid Lime.',
+    primaryBackground: '#08090C',
+    secondaryBackground: '#111318',
+    cardSurface: '#181A21',
+    elevatedSurface: '#21242D',
+    primaryText: '#F3F4F6',
+    secondaryText: '#9096A5',
+    primaryAccent: '#FFA800', // Nixie Amber-Gold
+    secondaryAccent: '#D4F01A', // Acid Lime
+    highlight: '#FFE277',
+    border: '#292C37',
   },
 
   // C. EVENING — TRANSITION (17:00 - 20:59)
   evening: {
     id: 'evening',
     name: 'Transition',
-    description: 'Deep Midnight Indigo base with warm sunset copper and violet dusk.',
-    primaryBackground: '#090D1A',
-    secondaryBackground: '#111628',
-    cardSurface: '#171E36',
-    elevatedSurface: '#212B48',
-    primaryText: '#F8FAFC',
-    secondaryText: '#A6B3C8',
-    primaryAccent: '#F97316', // Sunset Copper Amber
-    secondaryAccent: '#8B5CF6', // Deep Indigo Violet
-    highlight: '#FED7AA',
-    border: '#2A3756',
+    description: 'Deep Charcoal base with Sunset Nixie Amber & Acid Lime.',
+    primaryBackground: '#09090C',
+    secondaryBackground: '#121318',
+    cardSurface: '#191A22',
+    elevatedSurface: '#22242F',
+    primaryText: '#F3F4F6',
+    secondaryText: '#9499A8',
+    primaryAccent: '#FF9400', // Deep Sunset Nixie Amber
+    secondaryAccent: '#D4F01A', // Acid Lime
+    highlight: '#FFD466',
+    border: '#2B2D3A',
   },
 
   // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
   night: {
     id: 'night',
     name: 'Deep Focus',
-    description: 'Ultimate Midnight Indigo with glowing analog tube amber & laser lavender.',
-    primaryBackground: '#070B14',
-    secondaryBackground: '#0E1322',
-    cardSurface: '#141A2D',
-    elevatedSurface: '#1D253E',
-    primaryText: '#F8FAFC',
-    secondaryText: '#94A3B8',
-    primaryAccent: '#F59E0B', // Glowing Tube Filament Amber
-    secondaryAccent: '#A997D8', // Laser Lavender Indigo
-    highlight: '#FDE68A',
-    border: '#242F4A',
+    description: 'Pure Obsidian Charcoal with glowing Nixie tube filament & razor Acid Lime.',
+    primaryBackground: '#07080A',
+    secondaryBackground: '#0F1014',
+    cardSurface: '#16171F',
+    elevatedSurface: '#1F202B',
+    primaryText: '#F3F4F6',
+    secondaryText: '#888E9E',
+    primaryAccent: '#FFA800', // Glowing Vacuum Nixie Amber
+    secondaryAccent: '#D4F01A', // Precision Acid Lime
+    highlight: '#FFE277',
+    border: '#262835',
   },
 };
 

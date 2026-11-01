@@ -9,64 +9,56 @@ import androidx.compose.ui.graphics.Color
 object TuneMindColors {
 
     // ─────────────────────────────────────────────────────────────
+    // COMBINATION 1: OBSIDIAN TUBE (Deep Charcoal + Nixie Amber + Acid Lime)
+    // ─────────────────────────────────────────────────────────────
+
     // A. MORNING — FIRST LIGHT (05:00 - 11:59)
-    // Deep Midnight Indigo base with fresh solar amber glow.
-    // ─────────────────────────────────────────────────────────────
-    val MorningPrimaryBackground   = Color(0xFF090D18)
-    val MorningSecondaryBackground = Color(0xFF101526)
-    val MorningCardSurface         = Color(0xFF161E34)
-    val MorningElevatedSurface     = Color(0xFF202A46)
-    val MorningPrimaryText         = Color(0xFFF8FAFC)
-    val MorningSecondaryText       = Color(0xFFA1AEC2)
-    val MorningPrimaryAccent       = Color(0xFFF59E0B) // Radiant Warm Amber
-    val MorningSecondaryAccent     = Color(0xFF818CF8) // Midnight Indigo Sky
-    val MorningHighlight           = Color(0xFFFDE68A) // Soft Golden Warmth
-    val MorningBorder              = Color(0xFF283552)
+    val MorningPrimaryBackground   = Color(0xFF090A0D)
+    val MorningSecondaryBackground = Color(0xFF121419)
+    val MorningCardSurface         = Color(0xFF191B22)
+    val MorningElevatedSurface     = Color(0xFF22252E)
+    val MorningPrimaryText         = Color(0xFFF3F4F6)
+    val MorningSecondaryText       = Color(0xFF9096A5)
+    val MorningPrimaryAccent       = Color(0xFFFFA800) // Nixie Amber-Gold
+    val MorningSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime / Electric Citron
+    val MorningHighlight           = Color(0xFFFFE277) // Radiant Warm Glow
+    val MorningBorder              = Color(0xFF2B2E3A)
 
-    // ─────────────────────────────────────────────────────────────
     // B. AFTERNOON — CLARITY (12:00 - 16:59)
-    // Deep Midnight Indigo base with high-clarity amber and precision cyan.
-    // ─────────────────────────────────────────────────────────────
-    val AfternoonPrimaryBackground   = Color(0xFF080C16)
-    val AfternoonSecondaryBackground = Color(0xFF0F1424)
-    val AfternoonCardSurface         = Color(0xFF151C30)
-    val AfternoonElevatedSurface     = Color(0xFF1E2842)
-    val AfternoonPrimaryText         = Color(0xFFF8FAFC)
-    val AfternoonSecondaryText       = Color(0xFFA1AEC2)
-    val AfternoonPrimaryAccent       = Color(0xFFE5A857) // Warm Studio Amber
-    val AfternoonSecondaryAccent     = Color(0xFF38BDF8) // Precision Cyan
-    val AfternoonHighlight           = Color(0xFFFCD34D)
-    val AfternoonBorder              = Color(0xFF26324E)
+    val AfternoonPrimaryBackground   = Color(0xFF08090C)
+    val AfternoonSecondaryBackground = Color(0xFF111318)
+    val AfternoonCardSurface         = Color(0xFF181A21)
+    val AfternoonElevatedSurface     = Color(0xFF21242D)
+    val AfternoonPrimaryText         = Color(0xFFF3F4F6)
+    val AfternoonSecondaryText       = Color(0xFF9096A5)
+    val AfternoonPrimaryAccent       = Color(0xFFFFA800) // Nixie Amber-Gold
+    val AfternoonSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime
+    val AfternoonHighlight           = Color(0xFFFFE277)
+    val AfternoonBorder              = Color(0xFF292C37)
 
-    // ─────────────────────────────────────────────────────────────
     // C. EVENING — TRANSITION (17:00 - 20:59)
-    // Deep Midnight Indigo base with warm sunset copper and violet dusk.
-    // ─────────────────────────────────────────────────────────────
-    val EveningPrimaryBackground   = Color(0xFF090D1A)
-    val EveningSecondaryBackground = Color(0xFF111628)
-    val EveningCardSurface         = Color(0xFF171E36)
-    val EveningElevatedSurface     = Color(0xFF212B48)
-    val EveningPrimaryText         = Color(0xFFF8FAFC)
-    val EveningSecondaryText       = Color(0xFFA6B3C8)
-    val EveningPrimaryAccent       = Color(0xFFF97316) // Sunset Copper Amber
-    val EveningSecondaryAccent     = Color(0xFF8B5CF6) // Deep Indigo Violet
-    val EveningHighlight           = Color(0xFFFED7AA)
-    val EveningBorder              = Color(0xFF2A3756)
+    val EveningPrimaryBackground   = Color(0xFF09090C)
+    val EveningSecondaryBackground = Color(0xFF121318)
+    val EveningCardSurface         = Color(0xFF191A22)
+    val EveningElevatedSurface     = Color(0xFF22242F)
+    val EveningPrimaryText         = Color(0xFFF3F4F6)
+    val EveningSecondaryText       = Color(0xFF9499A8)
+    val EveningPrimaryAccent       = Color(0xFFFF9400) // Deep Sunset Nixie Amber
+    val EveningSecondaryAccent     = Color(0xFFD4F01A) // Acid Lime
+    val EveningHighlight           = Color(0xFFFFD466)
+    val EveningBorder              = Color(0xFF2B2D3A)
 
-    // ─────────────────────────────────────────────────────────────
     // D. NIGHT — DEEP FOCUS (21:00 - 04:59)
-    // Ultimate Midnight Indigo with glowing analog tube amber & laser lavender.
-    // ─────────────────────────────────────────────────────────────
-    val NightPrimaryBackground   = Color(0xFF070B14)
-    val NightSecondaryBackground = Color(0xFF0E1322)
-    val NightCardSurface         = Color(0xFF141A2D)
-    val NightElevatedSurface     = Color(0xFF1D253E)
-    val NightPrimaryText         = Color(0xFFF8FAFC)
-    val NightSecondaryText       = Color(0xFF94A3B8)
-    val NightPrimaryAccent       = Color(0xFFF59E0B) // Glowing Tube Filament Amber
-    val NightSecondaryAccent     = Color(0xFFA997D8) // Laser Lavender Indigo
-    val NightHighlight           = Color(0xFFFDE68A)
-    val NightBorder              = Color(0xFF242F4A)
+    val NightPrimaryBackground   = Color(0xFF07080A)
+    val NightSecondaryBackground = Color(0xFF0F1014)
+    val NightCardSurface         = Color(0xFF16171F)
+    val NightElevatedSurface     = Color(0xFF1F202B)
+    val NightPrimaryText         = Color(0xFFF3F4F6)
+    val NightSecondaryText       = Color(0xFF888E9E)
+    val NightPrimaryAccent       = Color(0xFFFFA800) // Glowing Vacuum Nixie Amber
+    val NightSecondaryAccent     = Color(0xFFD4F01A) // Precision Acid Lime
+    val NightHighlight           = Color(0xFFFFE277)
+    val NightBorder              = Color(0xFF262835)
 
     // ─────────────────────────────────────────────────────────────
     // MUSICAL MOOD PROFILES
