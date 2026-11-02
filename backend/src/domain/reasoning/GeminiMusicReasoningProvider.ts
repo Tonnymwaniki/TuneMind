@@ -24,10 +24,10 @@ import {
 export class GeminiMusicReasoningProvider implements MusicReasoningProvider {
   readonly providerId = 'google-gemini';
   private ai: GoogleGenAI | null = null;
-  private readonly preferredModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+  private readonly preferredModels = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'];
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = 'gemini-3.1-flash-lite';
+  private activeModelUsed: string = 'gemini-3.8-flash';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
 
   constructor() {
@@ -424,6 +424,158 @@ Respond ONLY with a valid JSON object matching exactly this schema:
       })),
       isAiGenerated: false,
       modelUsed: 'deterministic-heuristic'
+    };
+  }
+
+  /**
+   * Direct live analysis endpoint called by Android client or web dashboard proxy.
+   * Leverages Gemini 3.8 Flash with the backend's API_KEY.
+   */
+  async analyzeLiveSession(payload: {
+    userId?: string;
+    recentTracks?: Array<{ title?: string; artist?: string; plays?: number; satiety?: number }>;
+    nowPlaying?: { title?: string; artist?: string; isPlaying?: boolean; sourcePackage?: string };
+    vaultTracks?: Array<{ title?: string; artist?: string; cooldownDaysRemaining?: number }>;
+    timeSlot?: string;
+    eventCount?: number;
+    topSourceApp?: string;
+  }): Promise<any> {
+    const available = await this.isAvailable();
+    if (!available || !this.ai) {
+      this.initClient();
+    }
+
+    const tracksSummary = (payload.recentTracks || [])
+      .map(t => `- "${t.title || 'Unknown'}" by ${t.artist || 'Unknown'} (${t.plays || 1} plays, ${t.satiety || 20}% satiety)`)
+      .join('\n');
+
+    const vaultSummary = (payload.vaultTracks || [])
+      .map(v => `- "${v.title}" by ${v.artist} (${v.cooldownDaysRemaining}d recovery remaining)`)
+      .join('\n');
+
+    const prompt = `
+Real-time User Music Telemetry Payload:
+- Time Slot: ${payload.timeSlot || 'Active Listening Session'}
+- Primary Source: ${payload.topSourceApp || 'Spotify'}
+- Total Observed Events: ${payload.eventCount || 24}
+- Now Playing: ${payload.nowPlaying ? `"${payload.nowPlaying.title}" by ${payload.nowPlaying.artist} [Playing: ${payload.nowPlaying.isPlaying}]` : 'Standby / Idle'}
+- Recent Active Tracks:
+${tracksSummary || '- No recent tracks recorded yet.'}
+- Quarantined High-Satiety Vault:
+${vaultSummary || '- No tracks currently quarantined.'}
+
+Act as TuneMind's Chief Neuro-Acoustic Reasoning AI.
+Generate a real-time cognitive reasoning synthesis:
+1. receptivityScore: 0 to 100 representing auditory receptor freshness.
+2. cognitiveState: OPTIMAL_FLOW, MILD_SATURATION, or ELEVATED_BURNOUT.
+3. statusLabel: A concise 2-4 word technical status headline.
+4. flowNarrative: 2-3 sentence cognitive analysis of the listener's focus trajectory and dopamine adaptation.
+5. recommendations: 2 actionable acoustic recommendations (tempo shift, frequency balance, rest interval).
+6. probabilisticInferences: 2 probabilistic deductions about listening fatigue or harmonic patterns.
+
+Respond ONLY with a valid JSON object matching:
+{
+  "receptivityScore": 88,
+  "cognitiveState": "OPTIMAL_FLOW",
+  "statusLabel": "Optimal Cognitive Flow",
+  "flowNarrative": "Acoustic receptors show balanced stimulation with minimal repetition fatigue.",
+  "recommendations": [
+    {
+      "type": "TEMPO_ADAPTATION",
+      "action": "Maintain 112-124 BPM frequency band",
+      "rationale": "Sustains focus without cognitive exhaustion"
+    }
+  ],
+  "probabilisticInferences": [
+    {
+      "inference": "High structural tolerance in current session",
+      "confidence": 0.91,
+      "basis": "Completion rates remain above 80%"
+    }
+  ]
+}
+`.trim();
+
+    if (this.ai && !this.hasInvalidKey) {
+      for (const model of this.preferredModels) {
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 8000)
+          );
+
+          const callPromise = this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              systemInstruction:
+                "You are TuneMind's Chief Neuro-Acoustic Reasoning AI protecting listeners from music satiety and burnout while maximizing cognitive flow.",
+              responseMimeType: 'application/json',
+              temperature: 0.35,
+            },
+          });
+
+          const res = await Promise.race([callPromise, timeoutPromise]);
+          const text = res?.text;
+          if (text) {
+            const parsed = JSON.parse(text);
+            return {
+              status: 'ok',
+              isAiGenerated: true,
+              modelUsed: model,
+              generatedAt: new Date().toISOString(),
+              ...parsed
+            };
+          }
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          console.info(`[GeminiMusicReasoningProvider] Model ${model} returned: ${msg.slice(0, 100)}`);
+          if (msg.includes('API_KEY_INVALID') || msg.includes('PERMISSION_DENIED')) {
+            this.hasInvalidKey = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Deterministic fallback if API key is not yet set or transiently offline
+    const trackCount = payload.recentTracks?.length || 0;
+    const avgSatiety = payload.recentTracks?.length
+      ? Math.round(payload.recentTracks.reduce((acc, t) => acc + (t.satiety || 20), 0) / payload.recentTracks.length)
+      : 45;
+
+    const state = avgSatiety >= 75 ? 'ELEVATED_BURNOUT' : avgSatiety >= 55 ? 'MILD_SATURATION' : 'OPTIMAL_FLOW';
+    const score = 100 - avgSatiety;
+
+    return {
+      status: 'ok',
+      isAiGenerated: false,
+      modelUsed: 'neuro-acoustic-baseline',
+      generatedAt: new Date().toISOString(),
+      receptivityScore: Math.max(15, Math.min(98, score)),
+      cognitiveState: state,
+      statusLabel: state === 'OPTIMAL_FLOW' ? 'Optimal Cognitive Flow' : state === 'MILD_SATURATION' ? 'Mild Acoustic Saturation' : 'Auditory Receptor Burnout',
+      flowNarrative: state === 'OPTIMAL_FLOW'
+        ? `Auditory stereocilia engagement remains pristine across ${trackCount} tracked tracks. Neural tolerance for harmonic variation is optimal.`
+        : `Sensory adaptation detected across frequent loops. Satiety index is at ${avgSatiety}%. A frequency timbre shift is recommended.`,
+      recommendations: [
+        {
+          type: 'TEMPO_ADAPTATION',
+          action: 'Shift to ambient or downtempo frequencies',
+          rationale: 'Allows dopamine receptors to reset without interrupting focus.'
+        },
+        {
+          type: 'TIMBRE_CLEANSING',
+          action: 'Introduce acoustic instruments or binaural soundscapes',
+          rationale: 'Breaks synthesized sub-bass monotony.'
+        }
+      ],
+      probabilisticInferences: [
+        {
+          inference: 'Auditory receptor equilibrium sustained',
+          confidence: 0.86,
+          basis: `Derived from ${payload.eventCount || 20} telemetry observations.`
+        }
+      ]
     };
   }
 }

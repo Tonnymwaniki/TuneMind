@@ -7,7 +7,40 @@ import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 import rawReasoningRouter from './backend/src/api/v1/reasoning';
 import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
 
+import fs from 'fs';
+
 process.env['NODE_ENV'] = process.env['NODE_ENV'] || 'development';
+
+// Automatically parse and populate .env if present in workspace root
+if (fs.existsSync('.env')) {
+  try {
+    const envFileContent = fs.readFileSync('.env', 'utf-8');
+    for (const rawLine of envFileContent.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx > 0) {
+        const k = line.slice(0, eqIdx).trim();
+        let v = line.slice(eqIdx + 1).trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+        }
+        if (!process.env[k]) {
+          process.env[k] = v;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[server.ts] Error reading .env file:', err);
+  }
+}
+
+// Normalize API_KEY and GEMINI_API_KEY
+if (process.env.API_KEY && !process.env.GEMINI_API_KEY) {
+  process.env.GEMINI_API_KEY = process.env.API_KEY;
+} else if (process.env.GEMINI_API_KEY && !process.env.API_KEY) {
+  process.env.API_KEY = process.env.GEMINI_API_KEY;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

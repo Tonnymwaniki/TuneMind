@@ -27,14 +27,15 @@ object GeminiReasoningEngine {
 
     private const val PREFS_NAME = "tunemind_gemini_prefs"
     private const val KEY_GEMINI_API = "gemini_api_key"
-    private const val DEFAULT_MODEL = "gemini-2.5-flash"
+    private const val DEFAULT_MODEL = "gemini-3.8-flash"
+    private val FALLBACK_MODELS = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite")
     private const val BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     /**
      * Resolves active Gemini API key from:
      * 1. In-app Settings (SharedPreferences)
      * 2. BuildConfig.GEMINI_API_KEY (from local.properties or gradle build env)
-     * 3. System environment variable GEMINI_API_KEY
+     * 3. System environment variable API_KEY or GEMINI_API_KEY
      */
     fun getApiKey(context: Context): String {
         val userSaved = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -44,6 +45,9 @@ object GeminiReasoningEngine {
 
         val buildConfigKey = runCatching { BuildConfig.GEMINI_API_KEY }.getOrNull()?.trim() ?: ""
         if (buildConfigKey.isNotBlank() && buildConfigKey != "\"\"") return buildConfigKey
+
+        val envApi = runCatching { System.getenv("API_KEY") }.getOrNull()?.trim() ?: ""
+        if (envApi.isNotBlank()) return envApi
 
         return runCatching { System.getenv("GEMINI_API_KEY") }.getOrNull()?.trim() ?: ""
     }
@@ -59,10 +63,10 @@ object GeminiReasoningEngine {
     }
 
     /**
-     * Checks if a valid Gemini API key is configured.
+     * Checks if a valid Gemini API key is configured locally OR backend proxy is available.
      */
     fun isConfigured(context: Context): Boolean {
-        return getApiKey(context).isNotBlank()
+        return getApiKey(context).isNotBlank() || BuildConfig.TUNEMIND_BASE_URL.isNotBlank()
     }
 
     /**
@@ -146,6 +150,43 @@ object GeminiReasoningEngine {
     }
 
     /**
+     * Proxies raw telemetry payload to the TuneMind backend running with the user's API_KEY.
+     * Allows Android devices to execute real-time Gemini cognitive intelligence via the backend.
+     */
+    suspend fun callBackendAnalyze(payload: JSONObject): Result<JSONObject> = withContext(Dispatchers.IO) {
+        try {
+            val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+            if (baseUrl.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("No backend URL configured in BuildConfig.TUNEMIND_BASE_URL"))
+            }
+            val url = URL("$baseUrl/api/v1/reasoning/analyze")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.connectTimeout = 12_000
+            conn.readTimeout = 22_000
+            conn.doOutput = true
+
+            OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
+                writer.write(payload.toString())
+                writer.flush()
+            }
+
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+                Result.success(JSONObject(text))
+            } else {
+                val err = conn.errorStream?.let { BufferedReader(InputStreamReader(it, "UTF-8")).use { r -> r.readText() } } ?: "HTTP $code"
+                Result.failure(IllegalStateException("Backend reasoning error ($code): $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Validates connection to Gemini API.
      */
     suspend fun testConnection(context: Context, candidateKey: String? = null): Result<String> {
@@ -164,6 +205,7 @@ object GeminiReasoningEngine {
 
     /**
      * Real-time cognitive analysis of user's active listening session and satiety dynamics.
+     * Resolves via backend proxy (using backend's API_KEY) first, falling back to local on-device Gemini.
      */
     suspend fun analyzeActiveSession(
         context: Context,
@@ -172,43 +214,87 @@ object GeminiReasoningEngine {
         vaultTracks: List<VaultTrack>,
         timeSlot: String
     ): Result<String> {
-        val key = getApiKey(context)
-        if (key.isBlank()) {
-            return Result.failure(IllegalStateException("Gemini key required"))
+        // Build JSON payload for backend analysis proxy
+        val payload = JSONObject().apply {
+            put("timeSlot", timeSlot)
+            put("eventCount", recentTracks.sumOf { it.distinctAppearanceCount })
+            put("topSourceApp", nowPlaying?.sourcePackage ?: "Spotify")
+            if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
+                put("nowPlaying", JSONObject().apply {
+                    put("title", nowPlaying.title)
+                    put("artist", nowPlaying.artist ?: "")
+                    put("isPlaying", nowPlaying.isPlaying)
+                    put("sourcePackage", nowPlaying.sourcePackage ?: "")
+                })
+            }
+            val tracksArray = JSONArray()
+            recentTracks.take(6).forEach { t ->
+                tracksArray.put(JSONObject().apply {
+                    put("title", t.title)
+                    put("artist", t.artist)
+                    put("plays", t.distinctAppearanceCount)
+                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                })
+            }
+            put("recentTracks", tracksArray)
+            val vaultArray = JSONArray()
+            vaultTracks.forEach { v ->
+                vaultArray.put(JSONObject().apply {
+                    put("title", v.title)
+                    put("artist", v.artist)
+                    put("cooldownDaysRemaining", v.cooldownDaysRemaining.toInt())
+                })
+            }
+            put("vaultTracks", vaultArray)
         }
 
-        val topTracksSummary = recentTracks.take(5).joinToString("\n") {
-            "- '${it.title}' by ${it.artist} (${it.distinctAppearanceCount} plays, satiety ~${minOf(95, it.distinctAppearanceCount * 22)}%)"
-        }.ifEmpty { "No prior tracks logged yet." }
+        // 1. Try Backend Proxy with backend's API_KEY
+        val backendResult = callBackendAnalyze(payload)
+        backendResult.getOrNull()?.let { res ->
+            val narrative = res.optString("flowNarrative", res.optString("flowStateDescription", ""))
+            if (narrative.isNotBlank()) {
+                return Result.success(narrative)
+            }
+        }
 
-        val nowPlayingSummary = if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
-            "'${nowPlaying.title}' by ${nowPlaying.artist} [${if (nowPlaying.isPlaying) "Playing" else "Paused"}]"
-        } else "None currently active"
+        // 2. Direct on-device call if local key exists
+        val key = getApiKey(context)
+        if (key.isNotBlank()) {
+            val topTracksSummary = recentTracks.take(5).joinToString("\n") {
+                "- '${it.title}' by ${it.artist} (${it.distinctAppearanceCount} plays, satiety ~${minOf(95, it.distinctAppearanceCount * 22)}%)"
+            }.ifEmpty { "No prior tracks logged yet." }
 
-        val vaultSummary = vaultTracks.joinToString(", ") { "${it.title} (${(it.recoveryProgress * 100).toInt()}% restored)" }
-            .ifEmpty { "Vault is clear." }
+            val nowPlayingSummary = if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
+                "'${nowPlaying.title}' by ${nowPlaying.artist} [${if (nowPlaying.isPlaying) "Playing" else "Paused"}]"
+            } else "None currently active"
 
-        val prompt = """
-            Analyze the user's real-time music listening state:
-            - Current Time Context: $timeSlot
-            - Currently Observed: $nowPlayingSummary
-            - Recent Listening History:
-            $topTracksSummary
-            - Resting in Cooldown Vault: $vaultSummary
+            val vaultSummary = vaultTracks.joinToString(", ") { "${it.title} (${(it.recoveryProgress * 100).toInt()}% restored)" }
+                .ifEmpty { "Vault is clear." }
 
-            Provide a 2-sentence sharp cognitive synthesis:
-            1. What neuro-acoustic pattern is currently driving the user (focus flow, dopamine loop, or early receptor fatigue)?
-            2. Concrete action recommendation (e.g., maintain flow, switch tempo, or insert palate-cleanser).
-            Do not use markdown headers or bullet points. Keep it punchy, conversational, and grounded in auditory neuroscience.
-        """.trimIndent()
+            val prompt = """
+                Analyze the user's real-time music listening state:
+                - Current Time Context: $timeSlot
+                - Currently Observed: $nowPlayingSummary
+                - Recent Listening History:
+                $topTracksSummary
+                - Resting in Cooldown Vault: $vaultSummary
 
-        return callGemini(
-            apiKey = key,
-            prompt = prompt,
-            systemInstruction = "You are TuneMind's Cognitive Audio AI, a real-time auditory neuroscience assistant protecting listeners from music satiety and burnout while maximizing cognitive flow.",
-            temperature = 0.6f,
-            maxTokens = 200
-        )
+                Provide a 2-sentence sharp cognitive synthesis:
+                1. What neuro-acoustic pattern is currently driving the user (focus flow, dopamine loop, or early receptor fatigue)?
+                2. Concrete action recommendation (e.g., maintain flow, switch tempo, or insert palate-cleanser).
+                Do not use markdown headers or bullet points. Keep it punchy, conversational, and grounded in auditory neuroscience.
+            """.trimIndent()
+
+            return callGemini(
+                apiKey = key,
+                prompt = prompt,
+                systemInstruction = "You are TuneMind's Cognitive Audio AI, a real-time auditory neuroscience assistant protecting listeners from music satiety and burnout while maximizing cognitive flow.",
+                temperature = 0.6f,
+                maxTokens = 200
+            )
+        }
+
+        return Result.failure(IllegalStateException("No active Gemini API key or backend proxy available."))
     }
 
     /**
@@ -363,6 +449,77 @@ object GeminiReasoningEngine {
         val currentTrackArtist = nowPlaying?.artist ?: recentTracks.firstOrNull()?.artist
         val currentTrackPlays = recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
         val estSatiety = minOf(95, maxOf(15, currentTrackPlays * 22))
+
+        // 1. Prepare Telemetry Payload for Backend Proxy
+        val payload = JSONObject().apply {
+            put("timeSlot", timeSlot)
+            put("eventCount", eventCount)
+            put("topSourceApp", topSourceApp)
+            if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
+                put("nowPlaying", JSONObject().apply {
+                    put("title", nowPlaying.title)
+                    put("artist", nowPlaying.artist ?: "")
+                    put("isPlaying", nowPlaying.isPlaying)
+                    put("sourcePackage", nowPlaying.sourcePackage ?: topSourceApp)
+                })
+            }
+            val tracksArray = JSONArray()
+            recentTracks.take(8).forEach { t ->
+                tracksArray.put(JSONObject().apply {
+                    put("title", t.title)
+                    put("artist", t.artist)
+                    put("plays", t.distinctAppearanceCount)
+                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                })
+            }
+            put("recentTracks", tracksArray)
+            val vaultArray = JSONArray()
+            vaultTracks.forEach { v ->
+                vaultArray.put(JSONObject().apply {
+                    put("title", v.title)
+                    put("artist", v.artist)
+                    put("cooldownDaysRemaining", v.cooldownDaysRemaining.toInt())
+                })
+            }
+            put("vaultTracks", vaultArray)
+        }
+
+        // Try backend proxy first (which uses server.ts / process.env.API_KEY)
+        val backendResult = callBackendAnalyze(payload)
+        backendResult.getOrNull()?.let { res ->
+            try {
+                val score = res.optInt("receptivityScore", res.optInt("receptorPotencyScore", 85))
+                val state = res.optString("cognitiveState", res.optString("state", "OPTIMAL_FLOW"))
+                val label = res.optString("statusLabel", "Optimal Cognitive Flow")
+                val narrative = res.optString("flowNarrative", res.optString("flowStateDescription", ""))
+                val recsArray = res.optJSONArray("recommendations") ?: res.optJSONArray("acousticShiftRecommendations")
+                val shiftRec = if (recsArray != null && recsArray.length() > 0) {
+                    val r = recsArray.getJSONObject(0)
+                    r.optString("action", r.optString("recommendation", "Maintain balanced frequency range."))
+                } else "Maintain balanced frequency dynamic range."
+                val steer = if (recsArray != null && recsArray.length() > 1) {
+                    val r = recsArray.getJSONObject(1)
+                    r.optString("action", r.optString("recommendation", "Continue current listening curve."))
+                } else "Continue current listening curve; receptor fatigue remains optimal."
+
+                val report = ReasoningReport(
+                    id = UUID.randomUUID().toString(),
+                    generatedAtMs = System.currentTimeMillis(),
+                    analyzedEventCount = maxOf(eventCount, 1),
+                    topSourceApp = topSourceApp,
+                    receptorPotencyScore = score.coerceIn(5, 100),
+                    fatigueRiskLevel = state,
+                    fatigueRiskLabel = label,
+                    flowStateDescription = narrative.ifBlank { "Auditory receptor recovery is balanced with dopamine engagement." },
+                    acousticShiftRecommendation = shiftRec,
+                    steerAction = steer,
+                    observedTrackContext = currentTrackName,
+                    isGeminiGenerated = res.optBoolean("isAiGenerated", true)
+                )
+                saveLatestReport(context, report)
+                return Result.success(report)
+            } catch (_: Exception) {}
+        }
 
         if (key.isBlank()) {
             val fallback = ReasoningReport.createHeuristicBaseline(

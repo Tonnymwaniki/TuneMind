@@ -77,6 +77,27 @@ router.post('/trigger', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/v1/reasoning/analyze
+ * Direct live endpoint for Android app and web client to request real-time Gemini reasoning.
+ * Uses the backend's API_KEY to analyze real mobile/web telemetry without needing key on device.
+ */
+router.post('/analyze', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body || {};
+    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
+    const provider = new GeminiMusicReasoningProvider();
+    const result = await provider.analyzeLiveSession(payload);
+    res.json(result);
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /analyze:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
  * GET /api/v1/reasoning/status
  * Returns the operational health and configuration state of the telemetry reasoning poller.
  */

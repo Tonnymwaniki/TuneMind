@@ -13,8 +13,11 @@ if (localPropsFile.exists()) {
         localProps.load(stream)
     }
 }
-val geminiKey: String = localProps.getProperty("GEMINI_API_KEY")
+val geminiKey: String = localProps.getProperty("API_KEY")
+    ?: localProps.getProperty("GEMINI_API_KEY")
+    ?: (project.findProperty("API_KEY") as? String)
     ?: (project.findProperty("GEMINI_API_KEY") as? String)
+    ?: System.getenv("API_KEY")
     ?: System.getenv("GEMINI_API_KEY")
     ?: ""
 

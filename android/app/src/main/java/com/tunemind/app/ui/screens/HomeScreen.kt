@@ -955,15 +955,22 @@ fun HomeScreen(
                             }
                         }
 
+                        val rec0 = recommendations.firstOrNull()
+                        val rec0Title = rec0?.title ?: latestRealTrack?.title ?: "Midnight City"
+                        val rec0Artist = rec0?.artist ?: latestRealTrack?.artist ?: "M83"
+                        val rec0Reason = rec0?.reason ?: "Warm vintage synth palette • 94% harmonic match"
+
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
-                                text = "Midnight City",
+                                text = rec0Title,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.TextPrimary
+                                color = DeepObsidianAmber.TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "M83 • Warm vintage synth palette • 94% harmonic match",
+                                text = "$rec0Artist • $rec0Reason",
                                 fontSize = 11.sp,
                                 color = DeepObsidianAmber.TextSecondary,
                                 maxLines = 1,
@@ -979,7 +986,7 @@ fun HomeScreen(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CryoCyan.copy(alpha = 0.5f))
                                 ) {
                                     Text(
-                                        text = "DOPAMINE RE-ENGAGE",
+                                        text = rec0?.category?.name ?: "DOPAMINE RE-ENGAGE",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
@@ -1087,15 +1094,22 @@ fun HomeScreen(
                             }
                         }
 
+                        val rec1 = recommendations.getOrNull(1)
+                        val rec1Title = rec1?.title ?: state.recentTracks.getOrNull(1)?.title ?: "Resonance"
+                        val rec1Artist = rec1?.artist ?: state.recentTracks.getOrNull(1)?.artist ?: "HOME"
+                        val rec1Reason = rec1?.reason ?: "Chilled spectral rest • 88% acoustic parity"
+
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
-                                text = "Resonance",
+                                text = rec1Title,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.TextPrimary
+                                color = DeepObsidianAmber.TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "HOME • Chilled spectral rest • 88% acoustic parity",
+                                text = "$rec1Artist • $rec1Reason",
                                 fontSize = 11.sp,
                                 color = DeepObsidianAmber.TextSecondary,
                                 maxLines = 1,
@@ -1111,7 +1125,7 @@ fun HomeScreen(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.5f))
                                 ) {
                                     Text(
-                                        text = "CALM RECOVERY",
+                                        text = rec1?.category?.name ?: "CALM RECOVERY",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
@@ -1152,10 +1166,14 @@ fun HomeScreen(
 
         // 4. GEMINI REASONING SYNAPSE & TELEMETRY
         if (isGeminiConfigured) {
+            val isLiveGemini = reasoningReport?.isGeminiGenerated == true
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = colors.secondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isLiveGemini) DeepObsidianAmber.Success.copy(alpha = 0.5f) else colors.border.copy(alpha = 0.4f)
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1175,8 +1193,27 @@ fun HomeScreen(
                                 letterSpacing = 1.sp
                             )
                         }
-                        if (isReasoningLoading || isGeneratingReport) {
-                            CircularProgressIndicator(color = colors.primaryAccent, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isLiveGemini) DeepObsidianAmber.Success.copy(alpha = 0.5f) else DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)
+                                )
+                            ) {
+                                Text(
+                                    text = if (isLiveGemini) "GEMINI 3.8 LIVE" else "NEURAL BASELINE",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isLiveGemini) DeepObsidianAmber.Success else DeepObsidianAmber.SecondaryAccent,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (isReasoningLoading || isGeneratingReport) {
+                                CircularProgressIndicator(color = colors.primaryAccent, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            }
                         }
                     }
 
