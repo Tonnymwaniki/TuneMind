@@ -1,7 +1,8 @@
 package com.tunemind.app.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -214,24 +215,47 @@ fun TuneMindTopAppBar(
                     )
                 }
             } else {
-                // Radiant Soundwave Brand Mark
+                // Section-specific dynamic accent and animated soundwave
+                val activeSectionColor = when (currentRoute) {
+                    Screen.Home.route -> DeepObsidianAmber.EQBassCyan
+                    Screen.Fatigue.route -> DeepObsidianAmber.SatietyEmber
+                    Screen.History.route -> DeepObsidianAmber.NeuralViolet
+                    Screen.SevenDayStudy.route -> DeepObsidianAmber.CircadianMorning
+                    Screen.CooldownManagement.route -> DeepObsidianAmber.CryoCyan
+                    Screen.HearingInsights.route -> DeepObsidianAmber.DecibelSafe
+                    else -> DeepObsidianAmber.PrimaryAccent
+                }
+
+                val waveAnim = rememberInfiniteTransition(label = "headerSoundwave")
+                val wavePulse by waveAnim.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 1.35f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 550, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "wavePulse"
+                )
+
+                // Radiant Soundwave Brand Mark with live pulsing motion
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.5.dp),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(DeepObsidianAmber.RecessedBackground)
-                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 6.dp, vertical = 6.dp)
+                        .border(1.dp, activeSectionColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 7.dp, vertical = 6.dp)
                 ) {
                     val barHeights = listOf(6, 12, 16, 10, 5)
-                    barHeights.forEach { h ->
+                    barHeights.forEachIndexed { idx, h ->
+                        val animatedH = (h * (0.55f + 0.5f * kotlin.math.abs(kotlin.math.sin(idx * 0.7f + wavePulse * 3.14f)))).coerceIn(3f, 18f)
                         Box(
                             modifier = Modifier
                                 .width(2.5.dp)
-                                .height(h.dp)
+                                .height(animatedH.dp)
                                 .clip(RoundedCornerShape(1.dp))
-                                .background(DeepObsidianAmber.AccentLight)
+                                .background(activeSectionColor)
                         )
                     }
                 }
@@ -355,90 +379,113 @@ fun TuneMindBottomNavigationBar(
         Screen.SevenDayStudy
     )
 
-    Surface(
-        color = DeepObsidianAmber.RecessedBackground,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            Brush.horizontalGradient(
-                listOf(
-                    DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f),
-                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
-                    DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
-                )
-            )
-        ),
-        modifier = Modifier.navigationBarsPadding()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(68.dp)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
+        Surface(
+            color = DeepObsidianAmber.CardElevated.copy(alpha = 0.95f),
+            shape = RoundedCornerShape(26.dp),
+            shadowElevation = 12.dp,
+            border = androidx.compose.foundation.BorderStroke(
+                1.2.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.65f),
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.6f)
+                    )
+                )
+            ),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            items.forEach { screen ->
-                val selected = when (screen) {
-                    Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route)
-                    Screen.Fatigue -> currentRoute in listOf(Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
-                    Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
-                    Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route)
-                    else -> currentRoute == screen.route
-                }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items.forEach { screen ->
+                    val selected = when (screen) {
+                        Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route)
+                        Screen.Fatigue -> currentRoute in listOf(Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
+                        Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
+                        Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route)
+                        else -> currentRoute == screen.route
+                    }
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            if (selected) {
-                                Brush.verticalGradient(
-                                    listOf(
-                                        DeepObsidianAmber.CardElevated,
-                                        DeepObsidianAmber.CardBackground
-                                    )
-                                )
-                            } else {
-                                Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
-                            }
-                        )
-                        .border(
-                            width = if (selected) 1.dp else 0.dp,
-                            color = if (selected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.7f) else Color.Transparent,
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .clickable { onTabSelected(screen.route) }
-                        .padding(vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = screen.icon,
-                            contentDescription = screen.title,
-                            tint = if (selected) DeepObsidianAmber.AccentLight else DeepObsidianAmber.TextSecondary.copy(alpha = 0.6f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = screen.title.uppercase(),
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.TextMuted,
-                            letterSpacing = 0.6.sp
-                        )
-                        if (selected) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(3.dp)
-                                    .clip(CircleShape)
-                                    .background(DeepObsidianAmber.AccentSoft)
+                    val sectionAccent = when (screen) {
+                        Screen.Home -> DeepObsidianAmber.EQBassCyan
+                        Screen.Fatigue -> DeepObsidianAmber.SatietyEmber
+                        Screen.History -> DeepObsidianAmber.NeuralViolet
+                        Screen.SevenDayStudy -> DeepObsidianAmber.CircadianMorning
+                        else -> DeepObsidianAmber.PrimaryAccent
+                    }
+
+                    val bounceScale by animateFloatAsState(
+                        targetValue = if (selected) 1.12f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "tabBounce"
+                    )
+
+                    val tabBgColor by animateColorAsState(
+                        targetValue = if (selected) sectionAccent.copy(alpha = 0.15f) else Color.Transparent,
+                        animationSpec = tween(300),
+                        label = "tabBg"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 3.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(tabBgColor)
+                            .border(
+                                width = if (selected) 1.dp else 0.dp,
+                                color = if (selected) sectionAccent.copy(alpha = 0.65f) else Color.Transparent,
+                                shape = RoundedCornerShape(20.dp)
                             )
+                            .clickable { onTabSelected(screen.route) }
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.scale(bounceScale)
+                        ) {
+                            Icon(
+                                imageVector = screen.icon,
+                                contentDescription = screen.title,
+                                tint = if (selected) sectionAccent else DeepObsidianAmber.TextSecondary.copy(alpha = 0.55f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = screen.title.uppercase(),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) sectionAccent else DeepObsidianAmber.TextMuted,
+                                letterSpacing = 0.6.sp
+                            )
+                            if (selected) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(3.5.dp)
+                                        .clip(CircleShape)
+                                        .background(sectionAccent)
+                                )
+                            }
                         }
                     }
                 }

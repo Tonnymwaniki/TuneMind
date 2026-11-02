@@ -707,13 +707,47 @@ export default function App() {
               </div>
               <span className="font-bold text-base text-slate-100">TuneMind</span>
             </div>
-            <div className="hidden md:block">
-              <span className="text-xs uppercase tracking-wider font-semibold text-slate-500">
-                Personal Music Intelligence
-              </span>
-              <h2 className="text-lg font-bold text-slate-100 capitalize">
-                {currentTab.replace('_', ' ')}
-              </h2>
+            <div className="hidden md:flex items-center gap-3">
+              <div
+                className="h-10 w-10 rounded-xl flex items-center justify-center border shadow-lg transition-all duration-500 shrink-0"
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  borderColor:
+                    currentTab === 'home' ? 'var(--tm-accent)' :
+                    currentTab === 'fatigue' ? 'var(--tm-error)' :
+                    currentTab === 'history' || currentTab === 'session_details' ? 'var(--tm-info)' :
+                    currentTab === 'cooldown' || currentTab === 'hearing' ? 'var(--tm-success)' :
+                    currentTab === 'study' || currentTab === 'weekly_report' ? 'var(--tm-accent-light)' :
+                    'var(--tm-border)',
+                  boxShadow: `0 0 16px ${
+                    currentTab === 'home' ? 'rgba(198, 138, 70, 0.35)' :
+                    currentTab === 'fatigue' ? 'rgba(215, 124, 105, 0.4)' :
+                    currentTab === 'history' ? 'rgba(182, 160, 201, 0.4)' :
+                    currentTab === 'cooldown' ? 'rgba(143, 175, 131, 0.4)' :
+                    'rgba(233, 168, 79, 0.35)'
+                  }`
+                }}
+              >
+                {currentTab === 'home' && <Activity className="h-5 w-5 text-[var(--tm-accent-light)] animate-pulse" />}
+                {currentTab === 'fatigue' && <Flame className="h-5 w-5 text-[var(--tm-error)] animate-bounce" />}
+                {(currentTab === 'history' || currentTab === 'session_details') && <Clock className="h-5 w-5 text-[var(--tm-info)] animate-spin [animation-duration:10s]" />}
+                {currentTab === 'cooldown' && <Snowflake className="h-5 w-5 text-[var(--tm-success)] animate-pulse" />}
+                {(currentTab === 'study' || currentTab === 'weekly_report') && <Sparkles className="h-5 w-5 text-[var(--tm-accent-light)] animate-spin [animation-duration:14s]" />}
+                {currentTab === 'profile' && <User className="h-5 w-5 text-[var(--tm-copper)]" />}
+                {currentTab === 'phone_hub' && <Smartphone className="h-5 w-5 text-[var(--tm-success)] animate-bounce" />}
+                {currentTab === 'moments' && <Sparkles className="h-5 w-5 text-[var(--tm-accent-soft)] animate-pulse" />}
+                {currentTab === 'hearing' && <Volume2 className="h-5 w-5 text-[var(--tm-success)] animate-pulse" />}
+                {currentTab === 'settings' && <Sliders className="h-5 w-5 text-[var(--tm-copper)]" />}
+                {currentTab === 'cross_app' && <Layers className="h-5 w-5 text-[var(--tm-accent-sec)] animate-pulse" />}
+              </div>
+              <div>
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400 font-mono">
+                  Personal Acoustic Intelligence
+                </span>
+                <h2 className="text-lg font-bold text-slate-100 capitalize leading-tight">
+                  {currentTab.replace('_', ' ')}
+                </h2>
+              </div>
             </div>
           </div>
 
@@ -793,53 +827,66 @@ export default function App() {
       </main>
 
       {/* Bottom Nav for Mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800 flex justify-around p-2">
-        <button
-          onClick={() => setCurrentTab('home')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'home' ? 'text-cyan-400' : 'text-slate-400'
-          }`}
-        >
-          <Home className="h-4 w-4" />
-          <span>Home</span>
-        </button>
-        <button
-          onClick={() => setCurrentTab('phone_hub')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'phone_hub' ? 'text-emerald-400 font-bold' : 'text-slate-400'
-          }`}
-        >
-          <Smartphone className="h-4 w-4" />
-          <span>Ingest</span>
-        </button>
-        <button
-          onClick={() => setCurrentTab('history')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'history' ? 'text-purple-400' : 'text-slate-400'
-          }`}
-        >
-          <History className="h-4 w-4" />
-          <span>Sessions</span>
-        </button>
-        <button
-          onClick={() => setCurrentTab('fatigue')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'fatigue' ? 'text-amber-400' : 'text-slate-400'
-          }`}
-        >
-          <Flame className="h-4 w-4" />
-          <span>Fatigue</span>
-        </button>
-        <button
-          onClick={() => setCurrentTab('study')}
-          className={`flex flex-col items-center gap-1 p-2 rounded-lg text-xs ${
-            currentTab === 'study' ? 'text-indigo-400' : 'text-slate-400'
-          }`}
-        >
-          <Calendar className="h-4 w-4" />
-          <span>Study</span>
-        </button>
-      </nav>
+      {/* Floating Island Bottom Navigation for Mobile */}
+      <div className="md:hidden fixed bottom-3 left-4 right-4 z-40 pointer-events-none flex justify-center">
+        <nav className="pointer-events-auto flex items-center justify-around gap-1 px-3 py-2 rounded-full bg-[#181C26]/95 backdrop-blur-2xl border border-[var(--tm-border)]/50 shadow-2xl shadow-black/80 w-full max-w-md">
+          <button
+            onClick={() => setCurrentTab('home')}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-full text-[10px] font-mono font-bold transition-all duration-300 ${
+              currentTab === 'home'
+                ? 'scale-110 text-[var(--tm-accent-light)] bg-[var(--tm-accent)]/20 shadow-lg shadow-[var(--tm-accent)]/25'
+                : 'text-slate-400 hover:text-slate-200 active:scale-95'
+            }`}
+          >
+            <Home className="h-4 w-4" />
+            <span>Pulse</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('phone_hub')}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-full text-[10px] font-mono font-bold transition-all duration-300 ${
+              currentTab === 'phone_hub'
+                ? 'scale-110 text-[var(--tm-success)] bg-[var(--tm-success)]/20 shadow-lg shadow-[var(--tm-success)]/25'
+                : 'text-slate-400 hover:text-slate-200 active:scale-95'
+            }`}
+          >
+            <Smartphone className="h-4 w-4" />
+            <span>Ingest</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('fatigue')}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-full text-[10px] font-mono font-bold transition-all duration-300 ${
+              currentTab === 'fatigue'
+                ? 'scale-110 text-[var(--tm-error)] bg-[var(--tm-error)]/20 shadow-lg shadow-[var(--tm-error)]/25'
+                : 'text-slate-400 hover:text-slate-200 active:scale-95'
+            }`}
+          >
+            <Flame className="h-4 w-4" />
+            <span>Lab</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('history')}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-full text-[10px] font-mono font-bold transition-all duration-300 ${
+              currentTab === 'history'
+                ? 'scale-110 text-[var(--tm-info)] bg-[var(--tm-info)]/20 shadow-lg shadow-[var(--tm-info)]/25'
+                : 'text-slate-400 hover:text-slate-200 active:scale-95'
+            }`}
+          >
+            <History className="h-4 w-4" />
+            <span>Timeline</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('study')}
+            className={`flex flex-col items-center gap-1 py-1.5 px-3 rounded-full text-[10px] font-mono font-bold transition-all duration-300 ${
+              currentTab === 'study'
+                ? 'scale-110 text-[var(--tm-accent-light)] bg-[var(--tm-accent-light)]/20 shadow-lg shadow-[var(--tm-accent-light)]/25'
+                : 'text-slate-400 hover:text-slate-200 active:scale-95'
+            }`}
+          >
+            <Calendar className="h-4 w-4" />
+            <span>Intel</span>
+          </button>
+        </nav>
+      </div>
 
       {/* Raw Event Inspector Modal */}
       {selectedRawEvent && (

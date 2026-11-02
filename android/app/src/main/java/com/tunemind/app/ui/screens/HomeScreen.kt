@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -135,6 +136,27 @@ fun HomeScreen(
         }
     }
 
+    // Dynamic Audiophile Micro-Animations (Vinyl 33 RPM Platter & Real-Time Dynamic DSP EQ)
+    val infiniteTransition = rememberInfiniteTransition(label = "audioAnimations")
+    val vinylRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 16000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "vinylSpin"
+    )
+    val eqPulse by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "eqPulse"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -241,10 +263,11 @@ fun HomeScreen(
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Concentric Vinyl Turntable Platter
+            // Concentric Vinyl Turntable Platter (Rotates smoothly during playback)
             Box(
                 modifier = Modifier
                     .size(200.dp)
+                    .rotate(if (isPlaying) vinylRotation else 0f)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
@@ -388,10 +411,16 @@ fun HomeScreen(
                         idx < 11 -> DeepObsidianAmber.EQMidAmber  // Warm Mids (250-4000Hz)
                         else -> DeepObsidianAmber.EQHighRose      // Crisp Highs (4k-16kHz)
                     }
+                    val phase = (idx * 0.45f)
+                    val dynamicMult = if (isPlaying) {
+                        (0.6f + 0.65f * kotlin.math.abs(kotlin.math.sin(phase + eqPulse * 3.1415f))).toFloat()
+                    } else 0.35f
+                    val animatedHeight = (h * dynamicMult).coerceIn(4f, 26f)
+
                     Box(
                         modifier = Modifier
                             .width(3.dp)
-                            .height(if (isPlaying) h.dp else (h * 0.4f).dp)
+                            .height(animatedHeight.dp)
                             .clip(RoundedCornerShape(1.dp))
                             .background(barColor)
                     )
