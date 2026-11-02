@@ -173,34 +173,68 @@ fun TuneMindTopAppBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .background(colors.secondaryBackground)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DeepObsidianAmber.SecondaryBackground,
+                        DeepObsidianAmber.AppBackground
+                    )
+                )
+            )
             .border(
                 width = 1.dp,
-                color = colors.border.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(bottomStart = 0.dp, bottomEnd = 0.dp)
+                brush = Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f),
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.2f)
+                    )
+                ),
+                shape = RoundedCornerShape(0.dp)
             )
             .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!isRootTab) {
                 IconButton(
                     onClick = onBack,
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(colors.cardSurface)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DeepObsidianAmber.CardElevated)
+                        .border(1.dp, DeepObsidianAmber.SurfaceBorder, RoundedCornerShape(10.dp))
                 ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = colors.primaryText, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = DeepObsidianAmber.TextPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             } else {
-                Box(
+                // Radiant Soundwave Brand Mark
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                     modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(colors.primaryAccent)
-                )
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DeepObsidianAmber.RecessedBackground)
+                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    val barHeights = listOf(6, 12, 16, 10, 5)
+                    barHeights.forEach { h ->
+                        Box(
+                            modifier = Modifier
+                                .width(2.5.dp)
+                                .height(h.dp)
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(DeepObsidianAmber.AccentLight)
+                        )
+                    }
+                }
             }
 
             Column {
@@ -320,18 +354,26 @@ fun TuneMindBottomNavigationBar(
         Screen.History,
         Screen.SevenDayStudy
     )
-    val colors = TuneMindTheme.colors
 
     Surface(
-        color = colors.secondaryBackground,
-        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.35f)),
+        color = DeepObsidianAmber.RecessedBackground,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            Brush.horizontalGradient(
+                listOf(
+                    DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f),
+                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
+                    DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                )
+            )
+        ),
         modifier = Modifier.navigationBarsPadding()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .padding(horizontal = 12.dp),
+                .height(68.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -348,15 +390,26 @@ fun TuneMindBottomNavigationBar(
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) colors.elevatedSurface else Color.Transparent)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (selected) {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        DeepObsidianAmber.CardElevated,
+                                        DeepObsidianAmber.CardBackground
+                                    )
+                                )
+                            } else {
+                                Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                            }
+                        )
                         .border(
                             width = if (selected) 1.dp else 0.dp,
-                            color = if (selected) colors.border else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            color = if (selected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.7f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onTabSelected(screen.route) }
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -366,7 +419,7 @@ fun TuneMindBottomNavigationBar(
                         Icon(
                             imageVector = screen.icon,
                             contentDescription = screen.title,
-                            tint = if (selected) colors.primaryAccent else colors.secondaryText,
+                            tint = if (selected) DeepObsidianAmber.AccentLight else DeepObsidianAmber.TextSecondary.copy(alpha = 0.6f),
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -375,9 +428,18 @@ fun TuneMindBottomNavigationBar(
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) colors.primaryText else colors.secondaryText,
+                            color = if (selected) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.TextMuted,
                             letterSpacing = 0.6.sp
                         )
+                        if (selected) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(3.dp)
+                                    .clip(CircleShape)
+                                    .background(DeepObsidianAmber.AccentSoft)
+                            )
+                        }
                     }
                 }
             }

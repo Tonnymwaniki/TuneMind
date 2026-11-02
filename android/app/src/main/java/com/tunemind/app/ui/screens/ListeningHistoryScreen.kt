@@ -79,11 +79,19 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepObsidianAmber.AppBackground)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DeepObsidianAmber.SecondaryBackground,
+                        DeepObsidianAmber.AppBackground,
+                        DeepObsidianAmber.RecessedBackground
+                    )
+                )
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1. TOP: Clean Search Bar
+        // 1. TOP: Recessed Analog Search Bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -117,10 +125,10 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
             singleLine = true,
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = DeepObsidianAmber.CardBackground,
-                unfocusedContainerColor = DeepObsidianAmber.CardBackground,
+                focusedContainerColor = DeepObsidianAmber.RecessedBackground,
+                unfocusedContainerColor = DeepObsidianAmber.RecessedBackground,
                 focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
-                unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
+                unfocusedBorderColor = DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f),
                 focusedTextColor = DeepObsidianAmber.TextPrimary,
                 unfocusedTextColor = DeepObsidianAmber.TextPrimary
             ),
@@ -141,10 +149,10 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                 val isSelected = filterChip == mode
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.25f) else DeepObsidianAmber.CardBackground,
+                    color = if (isSelected) DeepObsidianAmber.CardElevated else DeepObsidianAmber.RecessedBackground,
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder
+                        if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.6f)
                     ),
                     modifier = Modifier.clickable { filterChip = mode }
                 ) {
@@ -152,56 +160,60 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         text = label,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        color = if (isSelected) DeepObsidianAmber.AccentSoft else DeepObsidianAmber.TextSecondary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
                     )
                 }
             }
         }
 
-        // 3. Compact Ambient Telemetry Bar (Single capsule, NOT a massive nested card deck)
+        // 3. Audiophile Telemetry Bar (Recessed Obsidian Well with Brushed Copper Accent)
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = DeepObsidianAmber.CardElevated,
+            color = DeepObsidianAmber.RecessedBackground,
             border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (totalCaptured > 0) AccentGreen else AccentAmber)
+                            .background(if (totalCaptured > 0) DeepObsidianAmber.Success else DeepObsidianAmber.SecondaryAccent)
                     )
                     Text(
-                        text = "$totalCaptured Captured",
-                        fontSize = 11.sp,
+                        text = "$totalCaptured CAPTURED",
+                        fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.TextPrimary
+                        color = DeepObsidianAmber.AccentSoft,
+                        letterSpacing = 0.5.sp
                     )
                 }
 
                 Text(
-                    text = "$distinctArtists Artists",
-                    fontSize = 11.sp,
+                    text = "$distinctArtists ARTISTS",
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
-                    color = DeepObsidianAmber.TextSecondary
+                    fontWeight = FontWeight.Medium,
+                    color = DeepObsidianAmber.TextSecondary,
+                    letterSpacing = 0.5.sp
                 )
 
                 Text(
-                    text = "Avg Satiety: $avgSatiety%",
-                    fontSize = 11.sp,
+                    text = "SATIETY: $avgSatiety%",
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = if (avgSatiety >= 60) DeepObsidianAmber.Warning else DeepObsidianAmber.AccentSoft
+                    color = if (avgSatiety >= 60) DeepObsidianAmber.Warning else DeepObsidianAmber.PrimaryAccent,
+                    letterSpacing = 0.5.sp
                 )
             }
         }

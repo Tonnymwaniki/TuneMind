@@ -138,7 +138,15 @@ fun HomeScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.primaryBackground)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DeepObsidianAmber.SecondaryBackground,
+                        DeepObsidianAmber.AppBackground,
+                        DeepObsidianAmber.RecessedBackground
+                    )
+                )
+            )
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -154,15 +162,15 @@ fun HomeScreen(
                     text = "TUNEMIND",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = colors.primaryText,
+                    color = DeepObsidianAmber.TextPrimary,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 1.sp
                 )
                 // Live Daemon Pill
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = colors.cardSurface,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.5f))
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -180,7 +188,7 @@ fun HomeScreen(
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = colors.secondaryText,
+                            color = DeepObsidianAmber.TextSecondary,
                             letterSpacing = 0.8.sp
                         )
                     }
@@ -194,10 +202,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(colors.cardSurface)
-                        .border(1.dp, colors.border.copy(alpha = 0.5f), CircleShape)
+                        .background(DeepObsidianAmber.CardElevated)
+                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f), CircleShape)
                 ) {
-                    Icon(Icons.Outlined.GraphicEq, contentDescription = "Moments", tint = colors.primaryAccent, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Outlined.GraphicEq, contentDescription = "Moments", tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
                 }
 
                 IconButton(
@@ -205,90 +213,120 @@ fun HomeScreen(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(colors.cardSurface)
-                        .border(1.dp, colors.border.copy(alpha = 0.5f), CircleShape)
+                        .background(DeepObsidianAmber.CardElevated)
+                        .border(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.4f), CircleShape)
                 ) {
-                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = colors.secondaryAccent, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(16.dp))
                 }
             }
         }
 
-        // 2. HERO NOW PLAYING DECK (Outer Machined Rim Vinyl Deck)
+        // 2. HERO NOW PLAYING DECK (Machined Vinyl Deck with Concentric Grooves & Equalizer)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(colors.secondaryBackground)
-                .border(1.dp, colors.border.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(22.dp))
+                .background(DeepObsidianAmber.CardElevated)
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f),
+                            DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f),
+                            DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(22.dp)
+                )
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Machined Vinyl Bezel Ring with Radial Sheen
+            // Concentric Vinyl Turntable Platter
             Box(
                 modifier = Modifier
-                    .size(190.dp)
+                    .size(200.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
                             listOf(
-                                colors.elevatedSurface,
-                                colors.cardSurface,
-                                colors.primaryBackground
+                                DeepObsidianAmber.CardBackground,
+                                DeepObsidianAmber.RecessedBackground,
+                                DeepObsidianAmber.AppBackground
                             )
                         )
                     )
-                    .border(2.dp, colors.border, CircleShape)
-                    .padding(8.dp),
+                    .border(2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), CircleShape)
+                    .padding(10.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Vinyl Groove Inner Disc
+                // Microgroove Ring 1
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.cardSurface)
-                        .border(1.dp, colors.border.copy(alpha = 0.6f), RoundedCornerShape(16.dp)),
+                        .size(170.dp)
+                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.25f), CircleShape)
+                )
+                // Microgroove Ring 2
+                Box(
+                    modifier = Modifier
+                        .size(136.dp)
+                        .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f), CircleShape)
+                )
+                // Microgroove Ring 3
+                Box(
+                    modifier = Modifier
+                        .size(104.dp)
+                        .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f), CircleShape)
+                )
+
+                // Golden Center Vinyl Label
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    DeepObsidianAmber.PrimaryAccent,
+                                    DeepObsidianAmber.SecondaryAccent
+                                )
+                            )
+                        )
+                        .border(1.5.dp, DeepObsidianAmber.AccentSoft, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Center Disc Art / Graphic
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.AppBackground,
+                            modifier = Modifier.size(26.dp)
+                        )
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(6.dp)
                                 .clip(CircleShape)
-                                .background(colors.primaryAccent.copy(alpha = 0.2f))
-                                .border(1.dp, colors.primaryAccent.copy(alpha = 0.5f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = colors.primaryAccent,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-                    }
-
-                    // Micro Monospace Hardware ID Badge
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = colors.primaryBackground.copy(alpha = 0.85f),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(6.dp)
-                    ) {
-                        Text(
-                            text = "VINYL-EMU // 48K",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.secondaryText,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                .background(DeepObsidianAmber.AppBackground)
                         )
                     }
+                }
+
+                // Micro Monospace Hardware ID Badge
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = DeepObsidianAmber.RecessedBackground.copy(alpha = 0.9f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                ) {
+                    Text(
+                        text = "VINYL // 48kHz",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.SecondaryAccent,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
                 }
             }
 
@@ -299,11 +337,11 @@ fun HomeScreen(
                 text = nowPlayingTitle,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = colors.primaryText,
+                color = DeepObsidianAmber.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(3.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -311,7 +349,7 @@ fun HomeScreen(
                 Text(
                     text = nowPlayingArtist,
                     fontSize = 13.sp,
-                    color = colors.secondaryText,
+                    color = DeepObsidianAmber.TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -319,22 +357,53 @@ fun HomeScreen(
                     modifier = Modifier
                         .size(3.dp)
                         .clip(CircleShape)
-                        .background(colors.border)
+                        .background(DeepObsidianAmber.CopperAccent)
                 )
                 Text(
                     text = "$nowPlayingSource Stream",
                     fontSize = 12.sp,
-                    color = colors.secondaryText
+                    color = DeepObsidianAmber.PrimaryAccent
                 )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // Dynamic 16-Band Live Equalizer Spectrum Visualizer
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(DeepObsidianAmber.RecessedBackground)
+                    .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                val eqHeights = listOf(14, 22, 10, 26, 18, 24, 16, 28, 20, 15, 25, 12, 22, 18, 26, 14)
+                eqHeights.forEachIndexed { idx, h ->
+                    val barColor = when (idx % 3) {
+                        0 -> DeepObsidianAmber.AccentLight
+                        1 -> DeepObsidianAmber.PrimaryAccent
+                        else -> DeepObsidianAmber.CopperAccent
+                    }
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(if (isPlaying) h.dp else (h * 0.4f).dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(barColor)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // Vibe & Harmonic Frequency Chip
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = colors.elevatedSurface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.6f))
+                shape = RoundedCornerShape(10.dp),
+                color = DeepObsidianAmber.RecessedBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -345,20 +414,20 @@ fun HomeScreen(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(colors.primaryAccent)
+                            .background(DeepObsidianAmber.PrimaryAccent)
                     )
                     Text(
                         text = "REFLECTIVE // 118 BPM",
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = colors.primaryAccent,
+                        color = DeepObsidianAmber.PrimaryAccent,
                         letterSpacing = 0.8.sp
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Satiety Meter: 30-Microcell Segmented LED Bar
             Column(
@@ -666,9 +735,17 @@ fun HomeScreen(
 
             // Modular Sound Cartridge 1: Dopamine Re-engage
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = colors.secondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(16.dp),
+                color = DeepObsidianAmber.CardElevated,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f),
+                            DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
+                        )
+                    )
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
@@ -678,7 +755,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -687,34 +764,34 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Cassette Pin Visual
+                        // Cassette Tape Spool Well
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.primaryBackground)
-                                .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DeepObsidianAmber.RecessedBackground)
+                                .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Outlined.GraphicEq,
                                 contentDescription = null,
-                                tint = colors.primaryAccent,
-                                modifier = Modifier.size(20.dp)
+                                tint = DeepObsidianAmber.AccentLight,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 text = "Midnight City",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.primaryText
+                                color = DeepObsidianAmber.TextPrimary
                             )
                             Text(
                                 text = "M83 • Warm vintage synth palette • 94% harmonic match",
                                 fontSize = 11.sp,
-                                color = colors.secondaryText,
+                                color = DeepObsidianAmber.TextSecondary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -724,22 +801,24 @@ fun HomeScreen(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = colors.primaryAccent.copy(alpha = 0.15f)
+                                    color = DeepObsidianAmber.RecessedBackground,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f))
                                 ) {
                                     Text(
                                         text = "DOPAMINE RE-ENGAGE",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
-                                        color = colors.primaryAccent,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        color = DeepObsidianAmber.PrimaryAccent,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
                                 Text(
                                     text = "Δ -12dB FATIGUE",
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    color = DeepObsidianAmber.CopperAccent
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.Success
                                 )
                             }
                         }
@@ -750,14 +829,15 @@ fun HomeScreen(
                             recommendations.firstOrNull()?.let { vm.playRecommendation(context, it) }
                         },
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.cardSurface)
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DeepObsidianAmber.RecessedBackground)
+                            .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                     ) {
                         Icon(
                             Icons.Outlined.QueueMusic,
                             contentDescription = "Queue",
-                            tint = colors.primaryAccent,
+                            tint = DeepObsidianAmber.PrimaryAccent,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -766,9 +846,17 @@ fun HomeScreen(
 
             // Modular Sound Cartridge 2: Calm Spectral Recovery
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = colors.secondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(16.dp),
+                color = DeepObsidianAmber.CardElevated,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.6f),
+                            DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
+                        )
+                    )
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
@@ -778,7 +866,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -789,31 +877,31 @@ fun HomeScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.primaryBackground)
-                                .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DeepObsidianAmber.RecessedBackground)
+                                .border(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Outlined.Bedtime,
                                 contentDescription = null,
-                                tint = colors.secondaryAccent,
-                                modifier = Modifier.size(20.dp)
+                                tint = DeepObsidianAmber.AccentSoft,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(
                                 text = "Resonance",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.primaryText
+                                color = DeepObsidianAmber.TextPrimary
                             )
                             Text(
                                 text = "HOME • Chilled spectral rest • 88% acoustic parity",
                                 fontSize = 11.sp,
-                                color = colors.secondaryText,
+                                color = DeepObsidianAmber.TextSecondary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -823,22 +911,23 @@ fun HomeScreen(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = colors.secondaryAccent.copy(alpha = 0.15f)
+                                    color = DeepObsidianAmber.RecessedBackground,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.4f))
                                 ) {
                                     Text(
                                         text = "CALM RECOVERY",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
-                                        color = colors.secondaryAccent,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        color = DeepObsidianAmber.SecondaryAccent,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
                                 Text(
                                     text = "NEURO-DRIFT: 0.12",
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    color = colors.secondaryText
+                                    color = DeepObsidianAmber.TextSecondary
                                 )
                             }
                         }
@@ -849,14 +938,15 @@ fun HomeScreen(
                             recommendations.getOrNull(1)?.let { vm.playRecommendation(context, it) }
                         },
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.cardSurface)
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DeepObsidianAmber.RecessedBackground)
+                            .border(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                     ) {
                         Icon(
                             Icons.Outlined.QueueMusic,
                             contentDescription = "Queue",
-                            tint = colors.secondaryAccent,
+                            tint = DeepObsidianAmber.SecondaryAccent,
                             modifier = Modifier.size(18.dp)
                         )
                     }
