@@ -305,21 +305,65 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                         SongProfileData.pickVibeTag(track.title ?: "", track.artist ?: "", satietyScore)
                     }
 
-                    // Sleek Modern List Item (Spotify-Style)
+                    // Sleek Modern List Item (Continuous Magnetic Tape Ribbon + Histogram Barcode)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 selectedProfileData = SongProfileData.fromTrackMemory(track, isInVault = isTrackInVault)
                             }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Magnetic Tape Ribbon Node
+                        Box(
+                            modifier = Modifier
+                                .width(14.dp)
+                                .height(52.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Vertical Continuous Tape Line
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(2.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f),
+                                                DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.7f),
+                                                DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)
+                                            )
+                                        )
+                                    )
+                            )
+                            // Guide Pinch Roller Jewel
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(DeepObsidianAmber.CardElevated)
+                                    .border(
+                                        1.5.dp,
+                                        if (isHighFatigue) DeepObsidianAmber.SatietyEmber else DeepObsidianAmber.PrimaryAccent,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(3.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isHighFatigue) DeepObsidianAmber.Error else DeepObsidianAmber.SecondaryAccent)
+                                )
+                            }
+                        }
+
                         // Artwork Tile
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(42.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
                                     Brush.radialGradient(
@@ -337,10 +381,10 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = trackEmoji, fontSize = 20.sp)
+                            Text(text = trackEmoji, fontSize = 18.sp)
                         }
 
-                        // Middle: Title, Artist, Source badge & Time
+                        // Middle: Title, Artist, 8-Bar Acoustic Histogram, Source & Time
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title ?: "Unknown Title",
@@ -357,7 +401,32 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(2.dp))
+
+                            // 8-Bar Dynamic Acoustic Energy Density Histogram Barcode
+                            Row(
+                                modifier = Modifier
+                                    .padding(vertical = 3.dp)
+                                    .height(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                val seed = (track.title?.hashCode() ?: 0) + (track.artist?.hashCode() ?: 0)
+                                for (barIdx in 0..7) {
+                                    val barH = (3 + kotlin.math.abs((seed + barIdx * 7) % 8)).coerceIn(2, 10)
+                                    val barColor = when {
+                                        isHighFatigue -> DeepObsidianAmber.SatietyEmber.copy(alpha = 0.8f)
+                                        satietyScore < 40 -> DeepObsidianAmber.DecibelSafe.copy(alpha = 0.75f)
+                                        else -> DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.75f)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(barH.dp)
+                                            .clip(RoundedCornerShape(1.dp))
+                                            .background(barColor)
+                                    )
+                                }
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)

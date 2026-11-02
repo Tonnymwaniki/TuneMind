@@ -1,8 +1,10 @@
 package com.tunemind.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,13 +21,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
@@ -41,6 +49,18 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
     var selectedDayIndex by remember { mutableIntStateOf(2) } // Wednesday default
     var isRecalibrating by remember { mutableStateOf(false) }
     var recalibrationSuccessMessage by remember { mutableStateOf<String?>(null) }
+
+    // Pulsing Incandescent Cathode Filament Glow for Selected Vacuum Tube
+    val filamentTransition = rememberInfiniteTransition(label = "filamentGlowTransition")
+    val filamentGlow by filamentTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "filamentGlow"
+    )
 
     val days = listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
     val listeningHours = listOf("2.4h", "4.1h", "3.2h", "5.0h", "4.8h", "6.2h", "3.5h")
@@ -325,35 +345,57 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                             )
                             Spacer(modifier = Modifier.height(4.dp))
 
-                            // Vacuum Tube Glass Capsule
+                            // Vacuum Tube Glass Capsule with Glowing Cathode Filament
                             Box(
                                 modifier = Modifier
-                                    .width(24.dp)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .width(26.dp)
+                                    .height(116.dp)
+                                    .clip(RoundedCornerShape(13.dp))
                                     .background(DeepObsidianAmber.SecondaryBackground)
                                     .border(
-                                        1.dp,
-                                        if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f),
-                                        RoundedCornerShape(12.dp)
+                                        1.2.dp,
+                                        if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = filamentGlow)
+                                        else DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f),
+                                        RoundedCornerShape(13.dp)
                                     )
                                     .padding(2.dp),
                                 contentAlignment = Alignment.BottomCenter
                             ) {
+                                // Vertical Incandescent Cathode Filament Wire
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .width(1.5.dp)
+                                        .align(Alignment.Center)
+                                        .background(
+                                            if (isSelected) DeepObsidianAmber.AccentLight.copy(alpha = filamentGlow)
+                                            else DeepObsidianAmber.CopperAccent.copy(alpha = 0.35f)
+                                        )
+                                )
+
                                 // Illuminated Liquid Amber Column with gradient
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .fillMaxHeight(fill)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(RoundedCornerShape(11.dp))
                                         .background(
                                             Brush.verticalGradient(
                                                 listOf(
-                                                    if (isSelected) DeepObsidianAmber.AccentSoft else DeepObsidianAmber.PrimaryAccent,
+                                                    if (isSelected) DeepObsidianAmber.AccentSoft.copy(alpha = 0.9f) else DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.75f),
                                                     if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.CopperAccent
                                                 )
                                             )
                                         )
+                                )
+
+                                // Base Cathode Heater Coil (Machined Copper Ring)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .align(Alignment.BottomCenter)
+                                        .background(DeepObsidianAmber.CopperAccent)
                                 )
                             }
 
@@ -420,6 +462,194 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 16.sp
                 )
+            }
+        }
+
+        // 4B. 5-AXIS ACOUSTIC RADAR SPIDER CHART
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = DeepObsidianAmber.SecondaryBackground,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            Icons.Outlined.Radar,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.SecondaryAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "ACOUSTIC RADAR FOOTPRINT // 5-AXIS",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                    Text(
+                        text = "${days[selectedDayIndex]} RESONANCE",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DeepObsidianAmber.PrimaryAccent
+                    )
+                }
+
+                // 5-Axis Spider Chart Canvas
+                val radarValues = when (selectedDayIndex) {
+                    0 -> listOf(0.72f, 0.65f, 0.58f, 0.80f, 0.74f)
+                    1 -> listOf(0.85f, 0.78f, 0.68f, 0.75f, 0.82f)
+                    2 -> listOf(0.92f, 0.84f, 0.76f, 0.88f, 0.90f)
+                    3 -> listOf(0.88f, 0.82f, 0.80f, 0.70f, 0.86f)
+                    4 -> listOf(0.94f, 0.90f, 0.85f, 0.65f, 0.92f)
+                    5 -> listOf(0.96f, 0.95f, 0.90f, 0.60f, 0.95f)
+                    else -> listOf(0.65f, 0.60f, 0.50f, 0.95f, 0.85f)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(190.dp)) {
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val radius = size.minDimension / 2f - 18.dp.toPx()
+                        val numAxes = 5
+                        val angleStep = (2 * PI / numAxes).toFloat()
+
+                        // 3 Concentric Reference Pentagon Rings
+                        val rings = listOf(0.33f, 0.66f, 1.0f)
+                        rings.forEach { fraction ->
+                            val ringPath = Path()
+                            for (i in 0 until numAxes) {
+                                val angle = i * angleStep - (PI / 2).toFloat()
+                                val x = center.x + radius * fraction * cos(angle)
+                                val y = center.y + radius * fraction * sin(angle)
+                                if (i == 0) ringPath.moveTo(x, y) else ringPath.lineTo(x, y)
+                            }
+                            ringPath.close()
+                            drawPath(
+                                path = ringPath,
+                                color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f),
+                                style = Stroke(width = 1.dp.toPx())
+                            )
+                        }
+
+                        // 5 Radial Axis Spokes
+                        for (i in 0 until numAxes) {
+                            val angle = i * angleStep - (PI / 2).toFloat()
+                            val endX = center.x + radius * cos(angle)
+                            val endY = center.y + radius * sin(angle)
+                            drawLine(
+                                color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f),
+                                start = center,
+                                end = Offset(endX, endY),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
+
+                        // Active Acoustic Footprint Polygon
+                        val footprintPath = Path()
+                        val vertices = mutableListOf<Offset>()
+                        for (i in 0 until numAxes) {
+                            val angle = i * angleStep - (PI / 2).toFloat()
+                            val value = radarValues[i]
+                            val x = center.x + radius * value * cos(angle)
+                            val y = center.y + radius * value * sin(angle)
+                            val pt = Offset(x, y)
+                            vertices.add(pt)
+                            if (i == 0) footprintPath.moveTo(x, y) else footprintPath.lineTo(x, y)
+                        }
+                        footprintPath.close()
+
+                        // Fill Footprint with Amber Translucency
+                        drawPath(
+                            path = footprintPath,
+                            color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.28f)
+                        )
+                        // Stroke Footprint Perimeter
+                        drawPath(
+                            path = footprintPath,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+
+                        // Draw Glowing Vertices
+                        vertices.forEach { vertex ->
+                            drawCircle(
+                                color = DeepObsidianAmber.AccentLight,
+                                radius = 4.dp.toPx(),
+                                center = vertex
+                            )
+                            drawCircle(
+                                color = DeepObsidianAmber.AppBackground,
+                                radius = 2.dp.toPx(),
+                                center = vertex
+                            )
+                        }
+                    }
+                }
+
+                // Radar Metric Chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "HARMONIC: ${(radarValues[0] * 100).toInt()}%",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent
+                        )
+                        Text(
+                            text = "HEADROOM: ${(radarValues[1] * 100).toInt()}%",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "BASS SAT: ${(radarValues[2] * 100).toInt()}%",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.EQBassCyan
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "VOCAL REC: ${(radarValues[3] * 100).toInt()}%",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.DecibelSafe
+                        )
+                        Text(
+                            text = "CIRCADIAN: ${(radarValues[4] * 100).toInt()}%",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.CircadianMorning
+                        )
+                    }
+                }
             }
         }
 

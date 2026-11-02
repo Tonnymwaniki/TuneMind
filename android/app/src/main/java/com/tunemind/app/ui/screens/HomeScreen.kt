@@ -22,6 +22,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -156,6 +160,24 @@ fun HomeScreen(
         ),
         label = "eqPulse"
     )
+    val tonearmAngle by animateFloatAsState(
+        targetValue = if (isPlaying) 22f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "tonearmAngle"
+    )
+    val cassetteRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "cassetteSpin"
+    )
+    val haptic = LocalHapticFeedback.current
 
     Column(
         modifier = Modifier
@@ -263,93 +285,193 @@ fun HomeScreen(
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Concentric Vinyl Turntable Platter (Rotates smoothly during playback)
+            // Concentric Vinyl Turntable Platter & Machined Pivoting Tonearm
             Box(
                 modifier = Modifier
-                    .size(200.dp)
-                    .rotate(if (isPlaying) vinylRotation else 0f)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                DeepObsidianAmber.CardBackground,
-                                DeepObsidianAmber.RecessedBackground,
-                                DeepObsidianAmber.AppBackground
-                            )
-                        )
-                    )
-                    .border(2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), CircleShape)
-                    .padding(10.dp),
+                    .fillMaxWidth()
+                    .height(210.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Microgroove Ring 1
+                // Platter & Vinyl Record
                 Box(
                     modifier = Modifier
-                        .size(170.dp)
-                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.25f), CircleShape)
-                )
-                // Microgroove Ring 2
-                Box(
-                    modifier = Modifier
-                        .size(136.dp)
-                        .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f), CircleShape)
-                )
-                // Microgroove Ring 3
-                Box(
-                    modifier = Modifier
-                        .size(104.dp)
-                        .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f), CircleShape)
-                )
-
-                // Golden Center Vinyl Label (Branded Deep Obsidian Amber Soul)
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
+                        .size(196.dp)
+                        .offset(x = (-16).dp)
+                        .rotate(if (isPlaying) vinylRotation else 0f)
                         .clip(CircleShape)
                         .background(
-                            Brush.linearGradient(
+                            Brush.radialGradient(
                                 listOf(
-                                    DeepObsidianAmber.BrandSoulAmber,
-                                    DeepObsidianAmber.PrimaryAccent
+                                    DeepObsidianAmber.CardBackground,
+                                    DeepObsidianAmber.RecessedBackground,
+                                    DeepObsidianAmber.AppBackground
                                 )
                             )
                         )
-                        .border(1.5.dp, DeepObsidianAmber.SecondaryAccent, CircleShape),
+                        .border(2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), CircleShape)
+                        .padding(8.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = DeepObsidianAmber.AccentSoft,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(DeepObsidianAmber.AppBackground)
+                    // Microgroove Ring 1
+                    Box(
+                        modifier = Modifier
+                            .size(166.dp)
+                            .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.25f), CircleShape)
+                    )
+                    // Microgroove Ring 2
+                    Box(
+                        modifier = Modifier
+                            .size(134.dp)
+                            .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f), CircleShape)
+                    )
+                    // Microgroove Ring 3
+                    Box(
+                        modifier = Modifier
+                            .size(102.dp)
+                            .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f), CircleShape)
+                    )
+
+                    // Golden Center Vinyl Label (Branded Deep Obsidian Amber Soul)
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        DeepObsidianAmber.BrandSoulAmber,
+                                        DeepObsidianAmber.PrimaryAccent
+                                    )
+                                )
+                            )
+                            .border(1.5.dp, DeepObsidianAmber.SecondaryAccent, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = DeepObsidianAmber.AccentSoft,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(DeepObsidianAmber.AppBackground)
+                            )
+                        }
+                    }
+
+                    // Micro Monospace Hardware ID Badge
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = DeepObsidianAmber.RecessedBackground.copy(alpha = 0.9f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp)
+                    ) {
+                        Text(
+                            text = "VINYL // 33⅓ RPM",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                         )
                     }
                 }
 
-                // Micro Monospace Hardware ID Badge
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = DeepObsidianAmber.RecessedBackground.copy(alpha = 0.9f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)),
+                // Machined Audiophile Tonearm with Gimbal Bearing & Stylus
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 12.dp)
+                        .width(76.dp)
+                        .height(180.dp)
+                        .graphicsLayer {
+                            rotationZ = tonearmAngle
+                            transformOrigin = TransformOrigin(0.75f, 0.12f)
+                        }
                 ) {
-                    Text(
-                        text = "VINYL // 48kHz",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.SecondaryAccent,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    // Gimbal Bearing Base (Top Pivot)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(
+                                        DeepObsidianAmber.PrimaryAccent,
+                                        DeepObsidianAmber.CardElevated,
+                                        DeepObsidianAmber.AppBackground
+                                    )
+                                )
+                            )
+                            .border(1.5.dp, DeepObsidianAmber.CopperAccent, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Counterweight inner disc
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(DeepObsidianAmber.BrandSoulAmber)
+                                .border(1.dp, DeepObsidianAmber.SecondaryAccent, CircleShape)
+                        )
+                    }
+
+                    // Tonearm Shaft (Machined brushed brass/copper alloy)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 26.dp, end = 15.dp)
+                            .width(4.dp)
+                            .height(115.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        DeepObsidianAmber.SecondaryAccent,
+                                        DeepObsidianAmber.CopperAccent,
+                                        DeepObsidianAmber.BrandSoulAmber
+                                    )
+                                )
+                            )
                     )
+
+                    // Cartridge Headshell & Stylus Needle Tip
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 12.dp, bottom = 12.dp)
+                            .size(width = 24.dp, height = 14.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(DeepObsidianAmber.RecessedBackground)
+                            .border(1.dp, DeepObsidianAmber.PrimaryAccent, RoundedCornerShape(3.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(4.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isPlaying) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning)
+                            )
+                            Text(
+                                text = "MC",
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.SecondaryAccent
+                            )
+                        }
+                    }
                 }
             }
 
@@ -598,6 +720,7 @@ fun HomeScreen(
                             .clip(CircleShape)
                             .background(colors.primaryAccent)
                             .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 vm.togglePlayback()
                             },
                         contentAlignment = Alignment.Center
@@ -779,6 +902,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         recommendations.firstOrNull()?.let { vm.playRecommendation(context, it) }
                     }
             ) {
@@ -794,7 +918,7 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Cassette Tape Spool Well
+                        // Animated Cassette Spool Well
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
@@ -803,12 +927,32 @@ fun HomeScreen(
                                 .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Outlined.GraphicEq,
-                                contentDescription = null,
-                                tint = DeepObsidianAmber.AccentLight,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .rotate(if (isPlaying) cassetteRotation else 0f)
+                                    .clip(CircleShape)
+                                    .background(DeepObsidianAmber.CardElevated)
+                                    .border(1.2.dp, DeepObsidianAmber.CopperAccent, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                for (spoke in 0..2) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(26.dp)
+                                            .rotate(spoke * 60f)
+                                            .background(DeepObsidianAmber.SecondaryAccent)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(DeepObsidianAmber.RecessedBackground)
+                                        .border(1.dp, DeepObsidianAmber.AccentLight, CircleShape)
+                                )
+                            }
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -890,6 +1034,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         recommendations.getOrNull(1)?.let { vm.playRecommendation(context, it) }
                     }
             ) {
@@ -905,6 +1050,7 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        // Animated Cassette Spool Well (Reverse Spin)
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
@@ -913,12 +1059,32 @@ fun HomeScreen(
                                 .border(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Outlined.Bedtime,
-                                contentDescription = null,
-                                tint = DeepObsidianAmber.NeuralViolet,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .rotate(if (isPlaying) -cassetteRotation else 0f)
+                                    .clip(CircleShape)
+                                    .background(DeepObsidianAmber.CardElevated)
+                                    .border(1.2.dp, DeepObsidianAmber.NeuralViolet, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                for (spoke in 0..2) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(26.dp)
+                                            .rotate(spoke * 60f)
+                                            .background(DeepObsidianAmber.NeuralViolet)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(DeepObsidianAmber.RecessedBackground)
+                                        .border(1.dp, DeepObsidianAmber.TextSecondary, CircleShape)
+                                )
+                            }
                         }
 
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {

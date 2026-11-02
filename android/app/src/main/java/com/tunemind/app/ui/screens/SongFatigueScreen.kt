@@ -1,5 +1,6 @@
 package com.tunemind.app.ui.screens
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,8 +19,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +52,28 @@ fun SongFatigueScreen(
     val avgSatiety = if (realCapturedTracks.isNotEmpty()) {
         (realCapturedTracks.map { minOf(95, it.distinctAppearanceCount * 22) }.average()).toInt()
     } else 64
+
+    // Ballistic Galvanometer Needle Physics with Spring Overshoot & Settling
+    val needleAngle by animateFloatAsState(
+        targetValue = -60f + (avgSatiety.toFloat() / 100f) * 120f,
+        animationSpec = spring(
+            dampingRatio = 0.52f,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "ballisticNeedle"
+    )
+
+    // Thermal Ember Pulsing Border for Saturated Tracks (>75% Fatigue)
+    val emberTransition = rememberInfiniteTransition(label = "emberTransition")
+    val emberPulse by emberTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "emberPulse"
+    )
 
     Column(
         modifier = Modifier
@@ -134,40 +160,95 @@ fun SongFatigueScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Simulated Precision Tachometer Gauge Arc
+            // Analog Ballistic Tachometer Gauge Arc
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp),
+                    .height(145.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Outer Track Ring Arc Simulation
+                // Outer Track Ring Arc
                 Box(
                     modifier = Modifier
-                        .size(200.dp, 100.dp)
-                        .clip(RoundedCornerShape(topStart = 100.dp, topEnd = 100.dp))
+                        .size(220.dp, 110.dp)
+                        .clip(RoundedCornerShape(topStart = 110.dp, topEnd = 110.dp))
                         .background(
                             Brush.sweepGradient(
                                 listOf(
-                                    DeepObsidianAmber.Success,
+                                    DeepObsidianAmber.DecibelSafe,
                                     DeepObsidianAmber.PrimaryAccent,
                                     DeepObsidianAmber.Warning,
-                                    DeepObsidianAmber.Error,
-                                    DeepObsidianAmber.Success
+                                    DeepObsidianAmber.SatietyEmber,
+                                    DeepObsidianAmber.DecibelSafe
                                 )
                             )
                         )
-                        .padding(8.dp)
+                        .padding(6.dp)
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(topStart = 92.dp, topEnd = 92.dp))
+                            .clip(RoundedCornerShape(topStart = 104.dp, topEnd = 104.dp))
                             .background(colors.cardSurface)
-                    )
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        // Graduated Calibration Dial Labels
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "0% FRESH",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.DecibelSafe
+                            )
+                            Text(
+                                text = "50% BALANCED",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.PrimaryAccent
+                            )
+                            Text(
+                                text = "100% SATIATED",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.SatietyEmber
+                            )
+                        }
+                    }
                 }
 
-                // Needle & Center Hub Anchor
+                // Machined Ballistic Needle (Pivots from Bottom Center with Spring Overshoot)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 24.dp)
+                        .width(3.dp)
+                        .height(72.dp)
+                        .graphicsLayer {
+                            rotationZ = needleAngle
+                            transformOrigin = TransformOrigin(0.5f, 1f)
+                        }
+                        .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    DeepObsidianAmber.SatietyEmber,
+                                    DeepObsidianAmber.PrimaryAccent,
+                                    DeepObsidianAmber.CopperAccent
+                                )
+                            )
+                        )
+                )
+
+                // Galvanometer Center Hub Pivot Casing
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -175,22 +256,32 @@ fun SongFatigueScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(20.dp)
                             .clip(CircleShape)
                             .background(DeepObsidianAmber.CopperAccent)
-                            .border(2.dp, colors.primaryBackground, CircleShape)
-                    )
+                            .border(2.dp, DeepObsidianAmber.AppBackground, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(DeepObsidianAmber.SecondaryAccent)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "BURNOUT VELOCITY: LOW",
+                        text = if (avgSatiety < 45) "BURNOUT VELOCITY: OPTIMAL"
+                               else if (avgSatiety < 75) "BURNOUT VELOCITY: MODERATE"
+                               else "BURNOUT VELOCITY: SATURATED",
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = colors.primaryText,
+                        color = if (avgSatiety < 75) colors.primaryText else DeepObsidianAmber.SatietyEmber,
                         letterSpacing = 0.8.sp
                     )
                     Text(
-                        text = "STABLE EQUILIBRIUM",
+                        text = "ANALOG BALLISTIC DAMPING // 0.52ζ",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         color = DeepObsidianAmber.SecondaryAccent
@@ -336,10 +427,15 @@ fun SongFatigueScreen(
                 }
             } else {
                 vaultTracks.forEach { track ->
+                    val isExhausted = track.cooldownDaysRemaining >= 4
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = colors.secondaryBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.2.dp,
+                            if (isExhausted) DeepObsidianAmber.SatietyEmber.copy(alpha = emberPulse)
+                            else colors.border.copy(alpha = 0.4f)
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(

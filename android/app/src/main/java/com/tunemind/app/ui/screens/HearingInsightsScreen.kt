@@ -1,5 +1,7 @@
 package com.tunemind.app.ui.screens
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,8 +18,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +45,26 @@ fun HearingInsightsScreen(
 
     val isSafe = avgDb < 85f
     val headroomDb = (85f - avgDb).coerceAtLeast(0f)
+
+    // Ballistic Dual Channel VU Meters (Spring Damping 0.52ζ)
+    val needleAngleL by animateFloatAsState(
+        targetValue = -50f + (((avgDb - 1.6f) - 40f) / 80f).coerceIn(0f, 1f) * 100f,
+        animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
+        label = "vuLeft"
+    )
+    val needleAngleR by animateFloatAsState(
+        targetValue = -50f + (((avgDb + 1.4f) - 40f) / 80f).coerceIn(0f, 1f) * 100f,
+        animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
+        label = "vuRight"
+    )
+
+    // Circadian Sound Dose Percentage (0.0 to 1.0)
+    val soundDoseFraction = ((avgDb / 85f) * 0.44f).coerceIn(0.12f, 1.0f)
+    val soundDoseColor = when {
+        soundDoseFraction < 0.60f -> DeepObsidianAmber.DecibelSafe
+        soundDoseFraction < 0.82f -> DeepObsidianAmber.PrimaryAccent
+        else -> DeepObsidianAmber.Error
+    }
 
     Column(
         modifier = Modifier
@@ -140,107 +168,349 @@ fun HearingInsightsScreen(
             }
         }
 
-        // 2. MAIN CENTERPIECE: PRECISION ARC VU FACEPLATE (Machined Screws Detailing)
+        // 2. MAIN CENTERPIECE: DUAL ANALOG LEFT/RIGHT VU METERS (Warm Amber Backlight)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(colors.secondaryBackground)
                 .border(1.dp, colors.border.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header within faceplate
+            // Header within rack
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(DeepObsidianAmber.PrimaryAccent))
+                    Text(
+                        text = "ANALOG VU RACK // DUAL STEREO BUS",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.SecondaryAccent,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+                Text(
+                    text = "BALLISTIC 0.52ζ",
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DeepObsidianAmber.PrimaryAccent
+                )
+            }
+
+            // Dual Meters Row (Left & Right Channels)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // LEFT CHANNEL VU METER
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.16f),
+                                    DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.08f),
+                                    DeepObsidianAmber.CardElevated
+                                )
+                            )
+                        )
+                        .border(1.2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "CH-L",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent
+                        )
+                        Text(
+                            text = "${(avgDb - 1.6f).toInt()} dB",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
+                        )
+                    }
+
+                    // Meter Arc & Needle Box
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(82.dp),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        // Curved Scale Markings
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter)
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("-20", fontSize = 7.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextMuted)
+                            Text("-7", fontSize = 7.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
+                            Text("0", fontSize = 7.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                            Text("+3", fontSize = 7.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Error)
+                        }
+
+                        // Ballistic Pointer Needle
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .width(2.dp)
+                                .height(58.dp)
+                                .graphicsLayer {
+                                    rotationZ = needleAngleL
+                                    transformOrigin = TransformOrigin(0.5f, 1f)
+                                }
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            DeepObsidianAmber.PrimaryAccent,
+                                            DeepObsidianAmber.CopperAccent,
+                                            DeepObsidianAmber.AppBackground
+                                        )
+                                    )
+                                )
+                        )
+
+                        // Pivot Bearing
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(DeepObsidianAmber.CopperAccent)
+                                .border(1.5.dp, DeepObsidianAmber.AppBackground, CircleShape)
+                        )
+                    }
+                }
+
+                // RIGHT CHANNEL VU METER
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.16f),
+                                    DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.08f),
+                                    DeepObsidianAmber.CardElevated
+                                )
+                            )
+                        )
+                        .border(1.2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "CH-R",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent
+                        )
+                        Text(
+                            text = "${(avgDb + 1.4f).toInt()} dB",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
+                        )
+                    }
+
+                    // Meter Arc & Needle Box
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(82.dp),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        // Curved Scale Markings
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter)
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("-20", fontSize = 7.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextMuted)
+                            Text("-7", fontSize = 7.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
+                            Text("0", fontSize = 7.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                            Text("+3", fontSize = 7.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Error)
+                        }
+
+                        // Ballistic Pointer Needle
+                        Box(
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .width(2.dp)
+                                .height(58.dp)
+                                .graphicsLayer {
+                                    rotationZ = needleAngleR
+                                    transformOrigin = TransformOrigin(0.5f, 1f)
+                                }
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            DeepObsidianAmber.PrimaryAccent,
+                                            DeepObsidianAmber.CopperAccent,
+                                            DeepObsidianAmber.AppBackground
+                                        )
+                                    )
+                                )
+                        )
+
+                        // Pivot Bearing
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(DeepObsidianAmber.CopperAccent)
+                                .border(1.5.dp, DeepObsidianAmber.AppBackground, CircleShape)
+                        )
+                    }
+                }
+            }
+
+            // Digital Exposure Readout
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "RANGE: 40-120 dBA",
-                    fontSize = 8.sp,
+                    text = "PEAK INTEGRATION: ${avgDb.toInt()} dBA",
+                    fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = colors.secondaryText
+                    color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
                 )
                 Text(
-                    text = "MONITOR: CONTINUOUS",
-                    fontSize = 8.sp,
+                    text = if (isSafe) "[SAFE HEADROOM]" else "[CAUTION EXPOSURE]",
+                    fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.SecondaryAccent
+                    color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
                 )
             }
+        }
 
-            // Visual Dial Plate
-            Box(
+        // 2B. CIRCADIAN SOUND DOSE PROGRESS RING (Emerald -> Amber -> Crimson)
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.secondaryBackground,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp),
-                contentAlignment = Alignment.Center
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Outer Track
+                // Circular Gauge Ring
                 Box(
-                    modifier = Modifier
-                        .size(220.dp, 110.dp)
-                        .clip(RoundedCornerShape(topStart = 110.dp, topEnd = 110.dp))
-                        .background(
-                            Brush.sweepGradient(
-                                listOf(
-                                    DeepObsidianAmber.Success,
-                                    DeepObsidianAmber.PrimaryAccent,
-                                    DeepObsidianAmber.Warning,
-                                    DeepObsidianAmber.Error,
-                                    DeepObsidianAmber.Success
-                                )
-                            )
+                    modifier = Modifier.size(80.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(76.dp)) {
+                        val strokeW = 8.dp.toPx()
+                        val arcSize = size.minDimension - strokeW
+                        val topLeftOffset = Offset(strokeW / 2f, strokeW / 2f)
+
+                        // Background track
+                        drawArc(
+                            color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = topLeftOffset,
+                            size = Size(arcSize, arcSize),
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
                         )
-                        .padding(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(topStart = 102.dp, topEnd = 102.dp))
-                            .background(colors.cardSurface)
-                    )
+
+                        // Dynamic Dose Arc
+                        drawArc(
+                            color = soundDoseColor,
+                            startAngle = -90f,
+                            sweepAngle = 360f * soundDoseFraction,
+                            useCenter = false,
+                            topLeft = topLeftOffset,
+                            size = Size(arcSize, arcSize),
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "${(soundDoseFraction * 100).toInt()}%",
+                            fontSize = 16.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = soundDoseColor
+                        )
+                        Text(
+                            text = "DOSE",
+                            fontSize = 7.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = colors.secondaryText
+                        )
+                    }
                 }
 
-                // Center Decibel Digital Readout & Needle Pivot
+                // Dose Context Telemetry
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "${avgDb.toInt()} dBA",
-                        fontSize = 28.sp,
+                        text = "CIRCADIAN SOUND DOSE",
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
-                        color = if (isSafe) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
-                        letterSpacing = 0.5.sp
+                        color = colors.primaryText
                     )
                     Text(
-                        text = if (isSafe) "SAFE ACOUSTIC HEADROOM" else "ATTENTION: NEAR CRITICAL THRESHOLD",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSafe) DeepObsidianAmber.Success else DeepObsidianAmber.Warning
+                        text = if (soundDoseFraction < 0.6f) "Auditory stereocilia fatigue is within pristine recovery bounds. +%.1f dB margin.".format(headroomDb)
+                               else "Auditory dose elevated. Consider acoustic recovery interval before bedtime.",
+                        fontSize = 11.sp,
+                        color = colors.secondaryText,
+                        lineHeight = 15.sp
                     )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(soundDoseColor))
+                        Text(
+                            text = if (soundDoseFraction < 0.6f) "DOSE: SAFE [EMERALD]" else "DOSE: ELEVATED",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = soundDoseColor
+                        )
+                    }
                 }
-            }
-
-            // Scale Markings Legend Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("40", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = colors.secondaryText)
-                Text("60", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.Success)
-                Text("80", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = colors.secondaryText)
-                Text("85 CRIT", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Warning)
-                Text("100", fontSize = 8.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.Warning)
-                Text("120 dB", fontSize = 8.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.Error)
             }
         }
 
