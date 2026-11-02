@@ -1,7 +1,6 @@
 package com.tunemind.app.navigation
 
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -86,7 +85,19 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            enterTransition = {
+                fadeIn(animationSpec = tween(320)) + scaleIn(initialScale = 0.94f, animationSpec = tween(320, easing = FastOutSlowInEasing))
+            },
+            exitTransition = {
+                fadeOut(animationSpec = tween(220)) + scaleOut(targetScale = 1.03f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+            },
+            popEnterTransition = {
+                fadeIn(animationSpec = tween(320)) + scaleIn(initialScale = 1.03f, animationSpec = tween(320, easing = FastOutSlowInEasing))
+            },
+            popExitTransition = {
+                fadeOut(animationSpec = tween(220)) + scaleOut(targetScale = 0.94f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+            }
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
@@ -384,20 +395,20 @@ fun TuneMindBottomNavigationBar(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            color = DeepObsidianAmber.CardElevated.copy(alpha = 0.95f),
-            shape = RoundedCornerShape(26.dp),
-            shadowElevation = 12.dp,
+            color = Color(0xF511141D),
+            shape = RoundedCornerShape(32.dp),
+            shadowElevation = 18.dp,
             border = androidx.compose.foundation.BorderStroke(
                 1.2.dp,
                 Brush.horizontalGradient(
                     listOf(
-                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.65f),
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.55f),
                         DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f),
-                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.6f)
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
                     )
                 )
             ),
@@ -406,8 +417,8 @@ fun TuneMindBottomNavigationBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .height(60.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -428,63 +439,77 @@ fun TuneMindBottomNavigationBar(
                         else -> DeepObsidianAmber.PrimaryAccent
                     }
 
-                    val bounceScale by animateFloatAsState(
-                        targetValue = if (selected) 1.12f else 1.0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
-                        ),
-                        label = "tabBounce"
-                    )
-
-                    val tabBgColor by animateColorAsState(
-                        targetValue = if (selected) sectionAccent.copy(alpha = 0.15f) else Color.Transparent,
-                        animationSpec = tween(300),
-                        label = "tabBg"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 3.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(tabBgColor)
-                            .border(
-                                width = if (selected) 1.dp else 0.dp,
-                                color = if (selected) sectionAccent.copy(alpha = 0.65f) else Color.Transparent,
-                                shape = RoundedCornerShape(20.dp)
-                            )
-                            .clickable { onTabSelected(screen.route) }
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.scale(bounceScale)
-                        ) {
-                            Icon(
-                                imageVector = screen.icon,
-                                contentDescription = screen.title,
-                                tint = if (selected) sectionAccent else DeepObsidianAmber.TextSecondary.copy(alpha = 0.55f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = screen.title.uppercase(),
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) sectionAccent else DeepObsidianAmber.TextMuted,
-                                letterSpacing = 0.6.sp
-                            )
-                            if (selected) {
-                                Spacer(modifier = Modifier.height(2.dp))
+                    AnimatedContent(
+                        targetState = selected,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(240)) + scaleIn(initialScale = 0.88f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)))
+                                .togetherWith(fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.88f))
+                        },
+                        label = "tabMorph"
+                    ) { isTargetSelected ->
+                        if (isTargetSelected) {
+                            // UNIQUE CLICKED STATE: Glowing illuminated capsule pill
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(
+                                                sectionAccent.copy(alpha = 0.22f),
+                                                sectionAccent.copy(alpha = 0.08f)
+                                            )
+                                        )
+                                    )
+                                    .border(
+                                        width = 1.2.dp,
+                                        brush = Brush.horizontalGradient(
+                                            listOf(
+                                                sectionAccent.copy(alpha = 0.8f),
+                                                sectionAccent.copy(alpha = 0.4f)
+                                            )
+                                        ),
+                                        shape = RoundedCornerShape(22.dp)
+                                    )
+                                    .clickable { onTabSelected(screen.route) }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.title,
+                                    tint = sectionAccent,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = screen.title.uppercase(),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = sectionAccent,
+                                    letterSpacing = 0.8.sp
+                                )
                                 Box(
                                     modifier = Modifier
-                                        .size(3.5.dp)
+                                        .size(4.dp)
                                         .clip(CircleShape)
                                         .background(sectionAccent)
+                                )
+                            }
+                        } else {
+                            // CASUAL RESTING STATE: Clean, effortless floating icon
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .clickable { onTabSelected(screen.route) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.title,
+                                    tint = DeepObsidianAmber.TextSecondary.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
