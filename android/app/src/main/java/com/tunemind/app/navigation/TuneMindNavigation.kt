@@ -207,7 +207,7 @@ fun TuneMindTopAppBar(
                         .border(1.dp, DeepObsidianAmber.SurfaceBorder, RoundedCornerShape(10.dp))
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.Outlined.ArrowBack,
                         contentDescription = "Back",
                         tint = DeepObsidianAmber.TextPrimary,
                         modifier = Modifier.size(18.dp)
@@ -337,7 +337,7 @@ fun TuneMindTopAppBar(
                     .clip(RoundedCornerShape(8.dp))
                     .background(colors.cardSurface)
             ) {
-                Icon(Icons.Default.Tune, contentDescription = "Switchboard", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
+                Icon(Icons.Outlined.Tune, contentDescription = "Switchboard", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
             }
         }
     }
