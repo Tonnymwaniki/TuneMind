@@ -466,6 +466,23 @@ export default function App() {
     }
   };
 
+  // Subtle, distinct background gradient mapped per active section using CSS variables
+  const sectionGradientClass = {
+    home: 'tm-section-gradient-home',
+    fatigue: 'tm-section-gradient-fatigue',
+    history: 'tm-section-gradient-history',
+    session_details: 'tm-section-gradient-history',
+    cooldown: 'tm-section-gradient-cooldown',
+    study: 'tm-section-gradient-study',
+    weekly_report: 'tm-section-gradient-study',
+    profile: 'tm-section-gradient-profile',
+    phone_hub: 'tm-section-gradient-home',
+    cross_app: 'tm-section-gradient-study',
+    settings: 'tm-section-gradient-home',
+    moments: 'tm-section-gradient-home',
+    hearing: 'tm-section-gradient-cooldown',
+  }[currentTab] || 'tm-section-gradient-home';
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Sidebar for Desktop Navigation */}
@@ -677,10 +694,10 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto pb-20 md:pb-6">
+      {/* Main Content Area with subtle section-specific background gradient */}
+      <main className={`flex-1 flex flex-col min-w-0 overflow-y-auto pb-20 md:pb-6 transition-all duration-700 ${sectionGradientClass}`}>
         {/* Top Header Bar */}
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-800/70 bg-slate-950/80 backdrop-blur-xl px-4 md:px-8 py-3.5">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--tm-border)]/30 bg-black/40 backdrop-blur-xl px-4 md:px-8 py-3.5">
           <div className="flex items-center gap-3">
             <div className="md:hidden flex items-center gap-2">
               <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 p-[1px]">

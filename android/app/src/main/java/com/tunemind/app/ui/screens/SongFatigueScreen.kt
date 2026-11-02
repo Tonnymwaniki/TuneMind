@@ -52,7 +52,15 @@ fun SongFatigueScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.primaryBackground)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DeepObsidianAmber.SatietyEmber.copy(alpha = 0.07f),
+                        DeepObsidianAmber.AppBackground,
+                        DeepObsidianAmber.RecessedBackground
+                    )
+                )
+            )
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)

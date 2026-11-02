@@ -82,7 +82,7 @@ fun ListeningHistoryScreen(vm: TuneMindViewModel) {
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        DeepObsidianAmber.SecondaryBackground,
+                        DeepObsidianAmber.NeuralViolet.copy(alpha = 0.08f),
                         DeepObsidianAmber.AppBackground,
                         DeepObsidianAmber.RecessedBackground
                     )

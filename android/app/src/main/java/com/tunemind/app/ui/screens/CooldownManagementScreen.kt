@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,7 +41,15 @@ fun CooldownManagementScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepObsidianAmber.AppBackground)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        DeepObsidianAmber.CryoCyan.copy(alpha = 0.07f),
+                        DeepObsidianAmber.AppBackground,
+                        DeepObsidianAmber.RecessedBackground
+                    )
+                )
+            )
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)

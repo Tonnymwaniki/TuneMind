@@ -22,7 +22,26 @@
     --tm-warning: #E2B46B;
     --tm-error: #D77C69;
     --tm-info: #B6A0C9;
-    --tm-transition: background-color 700ms ease, border-color 700ms ease, color 700ms ease;
+    --tm-transition: background 700ms cubic-bezier(0.4, 0, 0.2, 1), background-color 700ms ease, border-color 700ms ease, color 700ms ease;
+
+    /* Subtle, distinct section background gradients defined with palette variables */
+    --tm-gradient-home: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--tm-accent) 22%, transparent) 0%, color-mix(in srgb, var(--tm-copper) 12%, transparent) 45%, transparent 75%),
+      linear-gradient(180deg, var(--tm-sec-bg) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
+
+    --tm-gradient-fatigue: radial-gradient(120% 70% at 85% -10%, color-mix(in srgb, var(--tm-error) 24%, transparent) 0%, color-mix(in srgb, var(--tm-warning) 12%, transparent) 40%, transparent 75%),
+      linear-gradient(180deg, color-mix(in srgb, var(--tm-error) 10%, var(--tm-sec-bg)) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
+
+    --tm-gradient-history: radial-gradient(120% 70% at 15% -10%, color-mix(in srgb, var(--tm-info) 24%, transparent) 0%, color-mix(in srgb, var(--tm-accent-light) 12%, transparent) 45%, transparent 75%),
+      linear-gradient(180deg, color-mix(in srgb, var(--tm-info) 10%, var(--tm-sec-bg)) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
+
+    --tm-gradient-cooldown: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--tm-success) 22%, transparent) 0%, color-mix(in srgb, var(--tm-accent) 10%, transparent) 45%, transparent 75%),
+      linear-gradient(180deg, color-mix(in srgb, var(--tm-success) 10%, var(--tm-sec-bg)) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
+
+    --tm-gradient-study: radial-gradient(120% 75% at 50% -10%, color-mix(in srgb, var(--tm-accent-light) 22%, transparent) 0%, color-mix(in srgb, var(--tm-info) 14%, transparent) 50%, transparent 80%),
+      linear-gradient(180deg, color-mix(in srgb, var(--tm-accent-light) 10%, var(--tm-sec-bg)) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
+
+    --tm-gradient-profile: radial-gradient(120% 70% at 30% -10%, color-mix(in srgb, var(--tm-accent-sec) 22%, transparent) 0%, color-mix(in srgb, var(--tm-copper) 12%, transparent) 45%, transparent 75%),
+      linear-gradient(180deg, color-mix(in srgb, var(--tm-accent-sec) 8%, var(--tm-sec-bg)) 0%, var(--tm-bg) 35%, var(--tm-recessed) 100%);
   }
 
   body {
@@ -35,6 +54,31 @@
   code, pre {
     font-family: 'JetBrains Mono', monospace;
   }
+}
+
+/* Section-specific subtle ambient background gradients to break monochromatic feel */
+.tm-section-gradient-home {
+  background: var(--tm-gradient-home);
+}
+
+.tm-section-gradient-fatigue {
+  background: var(--tm-gradient-fatigue);
+}
+
+.tm-section-gradient-history {
+  background: var(--tm-gradient-history);
+}
+
+.tm-section-gradient-cooldown {
+  background: var(--tm-gradient-cooldown);
+}
+
+.tm-section-gradient-study {
+  background: var(--tm-gradient-study);
+}
+
+.tm-section-gradient-profile {
+  background: var(--tm-gradient-profile);
 }
 
 /* Custom scrollbars */
