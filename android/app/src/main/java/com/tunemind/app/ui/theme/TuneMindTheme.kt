@@ -77,16 +77,16 @@ val SurfaceBright: Color
     @ReadOnlyComposable
     get() = LocalAdaptiveTheme.current.accentSoft
 
-// Accents
-val PrimaryViolet = DeepObsidianAmber.PrimaryAccent
-val PrimaryVioletDark = DeepObsidianAmber.CopperAccent
-val PrimaryVioletBright = DeepObsidianAmber.AccentLight
-val AccentCyan = DeepObsidianAmber.SecondaryAccent
-val AccentCyanBright = DeepObsidianAmber.AccentSoft
-val AccentTeal = DeepObsidianAmber.CopperAccent
+// Feature Domain Accents
+val PrimaryViolet = DeepObsidianAmber.NeuralViolet
+val PrimaryVioletDark = DeepObsidianAmber.ElectricViolet
+val PrimaryVioletBright = DeepObsidianAmber.NeuralViolet
+val AccentCyan = DeepObsidianAmber.CryoCyan
+val AccentCyanBright = DeepObsidianAmber.EQBassCyan
+val AccentTeal = Color(0xFF26A69A)
 val AccentAmber = DeepObsidianAmber.PrimaryAccent
-val AccentCrimson = DeepObsidianAmber.Error
-val AccentGreen = DeepObsidianAmber.Success
+val AccentCrimson = DeepObsidianAmber.SatietyEmber
+val AccentGreen = DeepObsidianAmber.DecibelSafe
 
 // Text & Monochromes
 val TextPrimary: Color
@@ -116,13 +116,13 @@ val BorderHighlight: Color
 
 // Gradients
 val PrimaryGradient = Brush.horizontalGradient(
-    colors = listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CopperAccent)
+    colors = listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.SecondaryAccent)
 )
 val CardGlowGradient = Brush.verticalGradient(
     colors = listOf(DeepObsidianAmber.CardElevated, DeepObsidianAmber.CardBackground)
 )
 val BurnoutShieldGradient = Brush.linearGradient(
-    colors = listOf(DeepObsidianAmber.SurfaceHighlight, DeepObsidianAmber.AppBackground)
+    colors = listOf(DeepObsidianAmber.SatietyEmber.copy(alpha = 0.3f), DeepObsidianAmber.CardBackground)
 )
 
 @Composable

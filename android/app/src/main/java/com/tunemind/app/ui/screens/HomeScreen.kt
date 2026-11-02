@@ -214,9 +214,9 @@ fun HomeScreen(
                         .size(34.dp)
                         .clip(CircleShape)
                         .background(DeepObsidianAmber.CardElevated)
-                        .border(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.4f), CircleShape)
+                        .border(1.dp, DeepObsidianAmber.DecibelSafe.copy(alpha = 0.4f), CircleShape)
                 ) {
-                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = DeepObsidianAmber.DecibelSafe, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -278,7 +278,7 @@ fun HomeScreen(
                         .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f), CircleShape)
                 )
 
-                // Golden Center Vinyl Label
+                // Golden Center Vinyl Label (Branded Deep Obsidian Amber Soul)
                 Box(
                     modifier = Modifier
                         .size(68.dp)
@@ -286,24 +286,24 @@ fun HomeScreen(
                         .background(
                             Brush.linearGradient(
                                 listOf(
-                                    DeepObsidianAmber.PrimaryAccent,
-                                    DeepObsidianAmber.SecondaryAccent
+                                    DeepObsidianAmber.BrandSoulAmber,
+                                    DeepObsidianAmber.PrimaryAccent
                                 )
                             )
                         )
-                        .border(1.5.dp, DeepObsidianAmber.AccentSoft, CircleShape),
+                        .border(1.5.dp, DeepObsidianAmber.SecondaryAccent, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.MusicNote,
                             contentDescription = null,
-                            tint = DeepObsidianAmber.AppBackground,
-                            modifier = Modifier.size(26.dp)
+                            tint = DeepObsidianAmber.AccentSoft,
+                            modifier = Modifier.size(24.dp)
                         )
                         Box(
                             modifier = Modifier
-                                .size(6.dp)
+                                .size(5.dp)
                                 .clip(CircleShape)
                                 .background(DeepObsidianAmber.AppBackground)
                         )
@@ -382,10 +382,11 @@ fun HomeScreen(
             ) {
                 val eqHeights = listOf(14, 22, 10, 26, 18, 24, 16, 28, 20, 15, 25, 12, 22, 18, 26, 14)
                 eqHeights.forEachIndexed { idx, h ->
-                    val barColor = when (idx % 3) {
-                        0 -> DeepObsidianAmber.AccentLight
-                        1 -> DeepObsidianAmber.PrimaryAccent
-                        else -> DeepObsidianAmber.CopperAccent
+                    // Tri-Spectrum Audiophile DSP Visualization
+                    val barColor = when {
+                        idx < 5 -> DeepObsidianAmber.EQBassCyan   // Sub-bass & Bass (20-250Hz)
+                        idx < 11 -> DeepObsidianAmber.EQMidAmber  // Warm Mids (250-4000Hz)
+                        else -> DeepObsidianAmber.EQHighRose      // Crisp Highs (4k-16kHz)
                     }
                     Box(
                         modifier = Modifier
@@ -802,14 +803,14 @@ fun HomeScreen(
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
                                     color = DeepObsidianAmber.RecessedBackground,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f))
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CryoCyan.copy(alpha = 0.5f))
                                 ) {
                                     Text(
                                         text = "DOPAMINE RE-ENGAGE",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
-                                        color = DeepObsidianAmber.PrimaryAccent,
+                                        color = DeepObsidianAmber.CryoCyan,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -818,7 +819,7 @@ fun HomeScreen(
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = DeepObsidianAmber.Success
+                                    color = DeepObsidianAmber.DecibelSafe
                                 )
                             }
                         }
@@ -832,12 +833,12 @@ fun HomeScreen(
                             .size(36.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(DeepObsidianAmber.RecessedBackground)
-                            .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .border(1.dp, DeepObsidianAmber.CryoCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
                     ) {
                         Icon(
                             Icons.Outlined.QueueMusic,
                             contentDescription = "Queue",
-                            tint = DeepObsidianAmber.PrimaryAccent,
+                            tint = DeepObsidianAmber.CryoCyan,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -852,7 +853,7 @@ fun HomeScreen(
                     1.dp,
                     Brush.horizontalGradient(
                         listOf(
-                            DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.6f),
+                            DeepObsidianAmber.NeuralViolet.copy(alpha = 0.6f),
                             DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
                         )
                     )
@@ -880,13 +881,13 @@ fun HomeScreen(
                                 .size(48.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(DeepObsidianAmber.RecessedBackground)
-                                .border(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                                .border(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Outlined.Bedtime,
                                 contentDescription = null,
-                                tint = DeepObsidianAmber.AccentSoft,
+                                tint = DeepObsidianAmber.NeuralViolet,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -912,14 +913,14 @@ fun HomeScreen(
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
                                     color = DeepObsidianAmber.RecessedBackground,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.4f))
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.5f))
                                 ) {
                                     Text(
                                         text = "CALM RECOVERY",
                                         fontSize = 8.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
-                                        color = DeepObsidianAmber.SecondaryAccent,
+                                        color = DeepObsidianAmber.NeuralViolet,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }

@@ -67,11 +67,11 @@ fun CooldownManagementScreen(
                         }
                         Column {
                             Text(
-                                text = "RECOVERY VAULT",
+                                text = "CRYO VAULT",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent,
+                                color = DeepObsidianAmber.CryoCyan,
                                 letterSpacing = 1.sp
                             )
                             Text(
@@ -86,7 +86,7 @@ fun CooldownManagementScreen(
                     Button(
                         onClick = onAddTrack,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = DeepObsidianAmber.PrimaryAccent,
+                            containerColor = DeepObsidianAmber.CryoCyan,
                             contentColor = DeepObsidianAmber.AppBackground
                         ),
                         shape = RoundedCornerShape(10.dp),
@@ -119,13 +119,13 @@ fun CooldownManagementScreen(
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CryoCyan.copy(alpha = 0.4f)),
                 modifier = Modifier.weight(1f)
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Total Resting", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
-                    Text("${vaultTracks.size} Tracks", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.SecondaryAccent)
-                    Text("100% Persisted", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
+                    Text("${vaultTracks.size} Tracks", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CryoCyan)
+                    Text("Cryo Protected", fontSize = 10.sp, color = DeepObsidianAmber.GlacialBlue)
                 }
             }
 

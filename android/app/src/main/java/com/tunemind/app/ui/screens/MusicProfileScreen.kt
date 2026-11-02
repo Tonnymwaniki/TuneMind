@@ -67,7 +67,7 @@ fun MusicProfileScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(
                                 Brush.linearGradient(
-                                    listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CopperAccent)
+                                    listOf(DeepObsidianAmber.NeuralViolet, DeepObsidianAmber.ElectricViolet)
                                 )
                             ),
                         contentAlignment = Alignment.Center
@@ -76,7 +76,7 @@ fun MusicProfileScreen(
                             text = "T",
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.AppBackground
+                            color = DeepObsidianAmber.TextPrimary
                         )
                     }
 
@@ -95,14 +95,14 @@ fun MusicProfileScreen(
                         )
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f))
+                            color = DeepObsidianAmber.NeuralViolet.copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.4f))
                         ) {
                             Text(
                                 text = "Acoustic Intelligence Tier 1 • Active",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.AccentSoft,
+                                color = DeepObsidianAmber.NeuralViolet,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }

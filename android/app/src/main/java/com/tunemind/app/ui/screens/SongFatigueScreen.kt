@@ -311,7 +311,7 @@ fun SongFatigueScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.CopperAccent, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.CryoCyan, modifier = Modifier.size(24.dp))
                         Text(
                             text = "CRYO-CHAMBER EMPTY",
                             fontSize = 11.sp,
@@ -357,7 +357,7 @@ fun SongFatigueScreen(
                                     Icon(
                                         Icons.Outlined.AcUnit,
                                         contentDescription = null,
-                                        tint = DeepObsidianAmber.CopperAccent,
+                                        tint = DeepObsidianAmber.CryoCyan,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
