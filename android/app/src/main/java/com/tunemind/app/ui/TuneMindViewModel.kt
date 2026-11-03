@@ -183,6 +183,15 @@ class TuneMindViewModel : ViewModel() {
     private val _isDiscovering = MutableStateFlow<Boolean>(false)
     val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
 
+    private val _playedRecCount = MutableStateFlow(0)
+    val playedRecCount: StateFlow<Int> = _playedRecCount.asStateFlow()
+
+    private val _savedRecCount = MutableStateFlow(0)
+    val savedRecCount: StateFlow<Int> = _savedRecCount.asStateFlow()
+
+    private val _dismissedRecCount = MutableStateFlow(0)
+    val dismissedRecCount: StateFlow<Int> = _dismissedRecCount.asStateFlow()
+
     // Personal Taste Genome & Explicit Anchors (e.g. Afrobeats, Hip-Hop, Burna Boy, Drake)
     private val _userTasteAnchors = MutableStateFlow<List<String>>(loadTasteAnchorsFromPrefs())
     val userTasteAnchors: StateFlow<List<String>> = _userTasteAnchors.asStateFlow()
@@ -394,6 +403,30 @@ class TuneMindViewModel : ViewModel() {
             } catch (t: Throwable) {
                 android.util.Log.w("TuneMindVM", "observeSaved notice: ${t.message}")
             }
+        }
+
+        viewModelScope.launch {
+            try {
+                aiRecDao?.observePlayedCount()?.collect { count ->
+                    _playedRecCount.value = count
+                }
+            } catch (_: Throwable) {}
+        }
+
+        viewModelScope.launch {
+            try {
+                aiRecDao?.observeSavedCount()?.collect { count ->
+                    _savedRecCount.value = count
+                }
+            } catch (_: Throwable) {}
+        }
+
+        viewModelScope.launch {
+            try {
+                aiRecDao?.observeDismissedCount()?.collect { count ->
+                    _dismissedRecCount.value = count
+                }
+            } catch (_: Throwable) {}
         }
 
         // Initialize Telemetry Reasoning Report & schedule periodic Worker
@@ -949,7 +982,7 @@ class TuneMindViewModel : ViewModel() {
             try {
                 if (_isDiscovering.value) return@launch
 
-                val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name }
+                val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name && !it.isDismissed }
                 if (!forceRefresh && existingForSlot.isNotEmpty()) {
                     return@launch
                 }
@@ -958,6 +991,14 @@ class TuneMindViewModel : ViewModel() {
                 val prefProvider = getPreferredProviderId(ctx)
                 val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
                 val satiety = minOf(95, maxOf(18, currentPlays * 22))
+
+                val (allKnownTitles, playedSignals, dismissedSignals) = withContext(Dispatchers.IO) {
+                    Triple(
+                        aiRecDao?.getAllKnownTitles() ?: emptyList(),
+                        aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
+                        aiRecDao?.getDismissedSignals() ?: emptyList()
+                    )
+                }
 
                 val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
                     context = ctx,
@@ -968,7 +1009,10 @@ class TuneMindViewModel : ViewModel() {
                     satietyPercent = satiety,
                     preferredProviderId = prefProvider,
                     userTasteAnchors = _userTasteAnchors.value,
-                    nowPlayingArtist = _homeState.value.nowPlaying?.artist
+                    nowPlayingArtist = _homeState.value.nowPlaying?.artist,
+                    excludeTitles = allKnownTitles,
+                    playedSignals = playedSignals,
+                    dismissedSignals = dismissedSignals
                 )
 
                 if (newRecs.isNotEmpty()) {
@@ -1004,6 +1048,26 @@ class TuneMindViewModel : ViewModel() {
                 aiRecDao?.markPlayed(id)
             } catch (t: Throwable) {
                 android.util.Log.e("TuneMindVM", "markRecommendationPlayed error: ${t.message}", t)
+            }
+        }
+    }
+
+    fun dismissAiRecommendation(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                aiRecDao?.dismiss(id)
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "dismiss error: ${t.message}", t)
+            }
+        }
+    }
+
+    fun restoreDismissedRecommendation(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                aiRecDao?.restoreDismissed(id)
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "restoreDismissed error: ${t.message}", t)
             }
         }
     }

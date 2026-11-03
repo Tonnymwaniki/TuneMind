@@ -30,6 +30,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   5 — Musical moments, audio device sessions, volume observations, and music providers.
  *   6 — Persistent AI Recommendation Crate (chrono-receptive auto-evolving music discovery).
  *   7 — Index and column constraint alignment for AI Recommendation Crate.
+ *   8 — Unique title-artist index, subTier, and reinforcement learning telemetry tracking fields.
  */
 @Database(
     entities = [
@@ -43,7 +44,7 @@ import com.tunemind.app.domain.study.StudyEntity
         MusicProviderEntity::class,
         com.tunemind.app.domain.recommendation.AiRecommendationEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -69,7 +70,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         context.applicationContext,
                         TuneMindDatabase::class.java,
                         DATABASE_NAME,
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_5_7)
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_5_7, MIGRATION_7_8)
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
                 } catch (e: Throwable) {
@@ -238,6 +239,40 @@ abstract class TuneMindDatabase : RoomDatabase() {
         val MIGRATION_5_7 = object : Migration(5, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 MIGRATION_5_6.migrate(db)
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS ai_recommendation_crate")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ai_recommendation_crate (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        album TEXT,
+                        category TEXT NOT NULL,
+                        subTier TEXT NOT NULL DEFAULT 'CORE_DOPAMINE',
+                        reason TEXT NOT NULL,
+                        confidence REAL NOT NULL,
+                        timeSlotKey TEXT NOT NULL,
+                        timeSlotLabel TEXT NOT NULL,
+                        recommendedAtMs INTEGER NOT NULL,
+                        suggestedProviderId TEXT NOT NULL,
+                        isSaved INTEGER NOT NULL,
+                        wasPlayed INTEGER NOT NULL,
+                        isDismissed INTEGER NOT NULL DEFAULT 0,
+                        playCount INTEGER NOT NULL DEFAULT 0,
+                        completedListenCount INTEGER NOT NULL DEFAULT 0,
+                        lastInteractedAtMs INTEGER,
+                        telemetryBasisSummary TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_ai_rec_crate_title_artist ON ai_recommendation_crate(title, artist)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_timeSlotKey ON ai_recommendation_crate(timeSlotKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_recommendedAtMs ON ai_recommendation_crate(recommendedAtMs)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isSaved ON ai_recommendation_crate(isSaved)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isDismissed ON ai_recommendation_crate(isDismissed)")
             }
         }
     }

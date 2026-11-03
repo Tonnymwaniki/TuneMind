@@ -423,7 +423,10 @@ object GeminiReasoningEngine {
         satietyPercent: Int,
         preferredProviderId: String,
         userTasteAnchors: List<String> = emptyList(),
-        nowPlayingArtist: String? = null
+        nowPlayingArtist: String? = null,
+        excludeTitles: List<String> = emptyList(),
+        playedSignals: List<String> = emptyList(),
+        dismissedSignals: List<String> = emptyList()
     ): List<com.tunemind.app.domain.recommendation.AiRecommendationEntity> = withContext(Dispatchers.IO) {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
             .filter { it.isNotBlank() }
@@ -445,6 +448,18 @@ object GeminiReasoningEngine {
             val anchorsArray = JSONArray()
             userTasteAnchors.forEach { anchorsArray.put(it) }
             put("userTasteAnchors", anchorsArray)
+
+            val excludeArray = JSONArray()
+            excludeTitles.take(60).forEach { excludeArray.put(it) }
+            put("excludeTitles", excludeArray)
+
+            val playedArray = JSONArray()
+            playedSignals.take(12).forEach { playedArray.put(it) }
+            put("playedFeedback", playedArray)
+
+            val dismissedArray = JSONArray()
+            dismissedSignals.take(12).forEach { dismissedArray.put(it) }
+            put("dismissedFeedback", dismissedArray)
 
             val tracksArray = JSONArray()
             recentTracks.take(8).forEach { t ->
@@ -477,7 +492,7 @@ object GeminiReasoningEngine {
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 conn.setRequestProperty("Accept", "application/json")
                 conn.connectTimeout = 12_000
-                conn.readTimeout = 22_000
+                conn.readTimeout = 24_000
                 conn.doOutput = true
 
                 OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
@@ -491,15 +506,23 @@ object GeminiReasoningEngine {
                     val recsArray = root.optJSONArray("recommendations")
                     if (recsArray != null && recsArray.length() > 0) {
                         val list = mutableListOf<com.tunemind.app.domain.recommendation.AiRecommendationEntity>()
+                        val seenKeys = mutableSetOf<String>()
                         for (i in 0 until recsArray.length()) {
                             val item = recsArray.getJSONObject(i)
+                            val title = item.optString("title", "Discovery Track").trim()
+                            val artist = item.optString("artist", "Featured Artist").trim()
+                            val key = "${title.lowercase()}_${artist.lowercase()}"
+                            if (title.isBlank() || seenKeys.contains(key)) continue
+                            seenKeys.add(key)
+
                             list.add(
                                 com.tunemind.app.domain.recommendation.AiRecommendationEntity(
-                                    id = "ai-crate-${UUID.randomUUID()}",
-                                    title = item.optString("title", "Discovery Track"),
-                                    artist = item.optString("artist", "Featured Artist"),
+                                    id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(title, artist),
+                                    title = title,
+                                    artist = artist,
                                     album = item.optString("album", null),
                                     category = item.optString("category", "DOPAMINE_FLOW"),
+                                    subTier = item.optString("subTier", if (i < 4) "CORE_DOPAMINE" else if (i < 7) "DEEP_CUT" else if (i < 9) "PALATE_CLEANSER" else "SONIC_FRONTIER"),
                                     reason = item.optString("reason", "Curated for your $timeSlotLabel dopamine state based on your listening pattern."),
                                     confidence = item.optDouble("confidence", 0.94).toFloat(),
                                     timeSlotKey = timeSlotKey,
@@ -510,7 +533,7 @@ object GeminiReasoningEngine {
                                 )
                             )
                         }
-                        return@withContext list
+                        if (list.isNotEmpty()) return@withContext list
                     }
                 }
             } catch (_: Exception) {}
@@ -519,6 +542,19 @@ object GeminiReasoningEngine {
         // 2. Direct On-Device Gemini call if local key exists
         val key = getApiKey(context)
         if (key.isNotBlank()) {
+            val exclusionStr = if (excludeTitles.isNotEmpty()) {
+                "STRICT EXCLUSIONS (DO NOT RECOMMEND): " + excludeTitles.take(40).joinToString(", ")
+            } else ""
+
+            val feedbackStr = buildString {
+                if (playedSignals.isNotEmpty()) {
+                    append("USER PLAYED & ENJOYED: ${playedSignals.take(8).joinToString("; ")}. Emphasize kindred melodies. ")
+                }
+                if (dismissedSignals.isNotEmpty()) {
+                    append("USER DISMISSED/SKIPPED: ${dismissedSignals.take(8).joinToString("; ")}. Steer away from this sound.")
+                }
+            }
+
             val prompt = """
                 CRITICAL DIRECTIVE:
                 The listener actively listens to: $artistsSummary.
@@ -528,20 +564,23 @@ object GeminiReasoningEngine {
                 - If the listener listens to Afrobeats/Amapiano: recommend Burna Boy, Asake, Tems, Rema, Wizkid, Ayra Starr, etc.
                 - If the listener listens to Hip-Hop/Rap: recommend Kendrick Lamar, J. Cole, Drake, Travis Scott, etc.
                 Time of Day: $timeSlotLabel | Satiety Level: $satietyPercent%.
+                $feedbackStr
+                $exclusionStr
 
-                Recommend 4 real, acclaimed, hit-tier or cult-favorite songs:
-                1. "DOPAMINE_FLOW": Instant groove / banger matching their top artists' energy.
-                2. "PALATE_CLEANSER": Stripped-back, acoustic, or vocal track by a kindred artist in their genre.
-                3. "CHRONO_RESTORE": Calibrated for $timeSlotLabel within their genre world.
-                4. "NOVEL_EXPLORATION": Fresh discovery by an adjacent artist that fans of $artistsSummary love.
+                Recommend EXACTLY 10 real, acclaimed songs across 4 tiers:
+                - 4 tracks: "CORE_DOPAMINE" (category: "DOPAMINE_FLOW") - Instant groove / banger matching their top artists' energy.
+                - 3 tracks: "DEEP_CUT" (category: "NOVEL_EXPLORATION" or "DOPAMINE_FLOW") - Rising artist or high-quality b-side in their genre.
+                - 2 tracks: "PALATE_CLEANSER" (category: "PALATE_CLEANSER") - Stripped-back acoustic or tender vocal track to reset ear fatigue.
+                - 1 track: "SONIC_FRONTIER" (category: "NOVEL_EXPLORATION") - Controlled adjacent crossover (e.g. Afro-Amapiano blend).
 
-                Output ONLY a JSON array of 4 objects matching:
+                Output ONLY a JSON array of 10 objects matching:
                 [
                   {
                     "title": "Song Title",
                     "artist": "Artist Name",
                     "album": "Album Name",
                     "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
+                    "subTier": "CORE_DOPAMINE" | "DEEP_CUT" | "PALATE_CLEANSER" | "SONIC_FRONTIER",
                     "reason": "1 sentence on why fans of ${artistsSummary.split(',')[0]} love this track for $timeSlotLabel.",
                     "confidence": 0.95
                   }
@@ -551,9 +590,9 @@ object GeminiReasoningEngine {
             val geminiResult = callGemini(
                 apiKey = key,
                 prompt = prompt,
-                systemInstruction = "Output valid JSON only. Recommend real, popular, genre-congruent songs matching user taste.",
-                temperature = 0.4f,
-                maxTokens = 600
+                systemInstruction = "Output valid JSON only. Recommend real, popular, genre-congruent songs matching user taste. No duplicates.",
+                temperature = 0.35f,
+                maxTokens = 2000
             )
 
             geminiResult.getOrNull()?.let { raw ->
@@ -561,15 +600,25 @@ object GeminiReasoningEngine {
                     val clean = raw.replace("```json", "").replace("```", "").trim()
                     val array = JSONArray(clean)
                     val list = mutableListOf<com.tunemind.app.domain.recommendation.AiRecommendationEntity>()
+                    val seenKeys = mutableSetOf<String>()
+                    val excludedLower = excludeTitles.map { it.lowercase().trim() }.toSet()
+
                     for (i in 0 until array.length()) {
                         val item = array.getJSONObject(i)
+                        val title = item.optString("title", "Discovery Track").trim()
+                        val artist = item.optString("artist", "Featured Artist").trim()
+                        val keyLower = "${title.lowercase()}_${artist.lowercase()}"
+                        if (title.isBlank() || seenKeys.contains(keyLower) || excludedLower.contains(title.lowercase())) continue
+                        seenKeys.add(keyLower)
+
                         list.add(
                             com.tunemind.app.domain.recommendation.AiRecommendationEntity(
-                                id = "ai-crate-${UUID.randomUUID()}",
-                                title = item.optString("title", "Discovery Track"),
-                                artist = item.optString("artist", "Featured Artist"),
+                                id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(title, artist),
+                                title = title,
+                                artist = artist,
                                 album = item.optString("album", null),
                                 category = item.optString("category", "DOPAMINE_FLOW"),
+                                subTier = item.optString("subTier", if (i < 4) "CORE_DOPAMINE" else if (i < 7) "DEEP_CUT" else if (i < 9) "PALATE_CLEANSER" else "SONIC_FRONTIER"),
                                 reason = item.optString("reason", "Curated for your $timeSlotLabel state based on your listening pattern."),
                                 confidence = item.optDouble("confidence", 0.94).toFloat(),
                                 timeSlotKey = timeSlotKey,
@@ -580,69 +629,86 @@ object GeminiReasoningEngine {
                             )
                         )
                     }
-                    if (list.isNotEmpty()) return@withContext list
+                    if (list.size >= 4) return@withContext list
                 } catch (_: Exception) {}
             }
         }
 
-        // 3. Genre-Aware Adaptive Baseline Fallback (replaces generic ambient with genre-matched music)
+        // 3. Genre-Aware Adaptive Baseline Fallback (10 verified tracks per palette, filtering exclusions)
         val lower = artistsSummary.lowercase()
         val isBongo = lower.contains("bongo") || lower.contains("mbosso") || lower.contains("diamond") || lower.contains("platnumz") || lower.contains("harmonize") || lower.contains("rayvanny") || lower.contains("zuchu") || lower.contains("marioo") || lower.contains("kiba") || lower.contains("kusah") || lower.contains("jux") || lower.contains("otile") || lower.contains("nandy") || lower.contains("swahili") || lower.contains("east africa")
         val isAfro = lower.contains("afro") || lower.contains("amapiano") || lower.contains("burna") || lower.contains("wizkid") || lower.contains("rema") || lower.contains("asake") || lower.contains("tems")
         val isHipHop = lower.contains("hip") || lower.contains("rap") || lower.contains("drake") || lower.contains("kendrick") || lower.contains("cole") || lower.contains("travis")
-        val isRnB = lower.contains("r&b") || lower.contains("soul") || lower.contains("sza") || lower.contains("ocean") || lower.contains("faiyaz")
 
-        val fallbackItems = if (isBongo) {
+        data class FallbackTrack(val title: String, val artist: String, val reason: String, val category: String, val subTier: String)
+
+        val fullLibrary = if (isBongo) {
             listOf(
-                Triple("Huwezi Jua", "Mbosso", "Soulful Bongo Flava melody and acoustic guitar chords deliver immediate emotional entrainment."),
-                Triple("Mi Amor", "Marioo & Jovial", "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue."),
-                Triple("Komasava", "Diamond Platnumz", "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness."),
-                Triple("Sukari", "Zuchu", "Playful taarab-infused acoustic cadence and bright melodic hooks expand listening horizons.")
+                FallbackTrack("Huwezi Jua", "Mbosso", "Soulful Bongo Flava acoustic chords deliver immediate emotional entrainment.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Mi Amor", "Marioo & Jovial", "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Komasava", "Diamond Platnumz", "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Sukari", "Zuchu", "Playful taarab-infused acoustic cadence and bright melodic hooks provide sustained joy.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Amepotea", "Mbosso", "Introspective acoustic ballad highlighting rich Swahili lyricism and melancholy strings.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Enjoy", "Jux & Diamond Platnumz", "Effortless Afro-Bongo bounce with smooth vocal trade-offs maintaining flow state.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Single Again", "Harmonize", "Melodic guitar progression and relatable emotional phrasing tailored for chrono-recovery.", "CHRONO_RESTORE", "DEEP_CUT"),
+                FallbackTrack("Dah!", "Nandy", "Airy, gentle vocal production resets acoustic receptor saturation effortlessly.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Inatosha", "Marioo", "Warm mid-tempo guitar arpeggios soothe high-frequency auditory fatigue.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Kelebe", "Rayvanny & Innoss'B", "Exciting Congolese Rumba meets Bongo Flava fusion expands your listening horizon.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
             )
         } else if (isAfro) {
             listOf(
-                Triple("Last Last", "Burna Boy", "Toni Braxton sample cadence and infectious syncopated groove triggers instantaneous dopamine entrainment."),
-                Triple("Free Mind", "Tems", "Intimate acoustic guitar chords and raw vocal dynamics clear auditory receptor habituation."),
-                Triple("Calm Down", "Rema", "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus."),
-                Triple("Lonely At The Top", "Asake", "Acoustic log drum undertones and introspective lyricism expand your current rotation.")
+                FallbackTrack("Last Last", "Burna Boy", "Toni Braxton sample cadence and syncopated groove triggers instantaneous dopamine entrainment.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Calm Down", "Rema", "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Lonely At The Top", "Asake", "Acoustic log drum undertones deliver supreme cognitive comfort.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Rush", "Ayra Starr", "Punchy percussion and magnetic hook provide sustained listening pleasure.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Soweto", "Victony & Tempoe", "Subtle flute hooks and delicate rhythmic pacing keep listening receptors active.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Ku Lo Sa", "Oxlade", "Intricate falsetto and warm percussion create an expansive, resonant acoustic space.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Essence", "Wizkid & Tems", "Sun-drenched saxophone cadence and smooth duet harmonies induce tranquility.", "CHRONO_RESTORE", "DEEP_CUT"),
+                FallbackTrack("Free Mind", "Tems", "Intimate acoustic guitar chords and raw vocal dynamics clear auditory habituation.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Understand", "Omah Lay", "Gentle mid-tempo bounce allows ear rest between high-energy sessions.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Mnike", "Tyler ICU & Tumelo.za", "Deep, hypnotic Amapiano shaker patterns introduce sonic novelty.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
             )
         } else if (isHipHop) {
             listOf(
-                Triple("Middle Child", "J. Cole", "Crisp horn fanfare and punchy 808 cadence stimulate dopamine release and sustained flow."),
-                Triple("PRIDE.", "Kendrick Lamar", "Warbled guitars and relaxed vocal pacing provide complete ear fatigue relief."),
-                Triple("Snooze", "SZA", "Velvety chord progressions and laid-back tempo harmonize with your circadian rhythm."),
-                Triple("family ties", "Baby Keem & Kendrick Lamar", "Dynamic brass modulation and beat shifts expand your listening horizon.")
-            )
-        } else if (isRnB) {
-            listOf(
-                Triple("Kill Bill", "SZA", "Bouncy bassline and crisp vocal hooks trigger sustained auditory pleasure."),
-                Triple("Pink + White", "Frank Ocean", "Stripped piano and acoustic guitar reset sensory saturation effortlessly."),
-                Triple("Dead Man Walking", "Brent Faiyaz", "Lush orchestral strings and slow cadence deliver perfect temporal balance."),
-                Triple("Bad Habit", "Steve Lacy", "Lo-fi guitar hooks and funky harmonies push taste boundaries with zero friction.")
+                FallbackTrack("Middle Child", "J. Cole", "Crisp horn fanfare and punchy 808 cadence stimulate dopamine release.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("First Person Shooter", "Drake & J. Cole", "Dynamic two-part beat switch maintains intense cognitive engagement.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("HUMBLE.", "Kendrick Lamar", "Aggressive piano riff and bass-heavy structure provide immediate alertness.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("SICKO MODE", "Travis Scott", "Triple-act tempo shift and lush low-end frequencies create rich immersion.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("family ties", "Baby Keem & Kendrick Lamar", "Dynamic brass modulation and beat shifts expand your listening horizon.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Surround Sound", "JID & 21 Savage", "Aretha Franklin sample flips into high-precision technical cadence.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("a lot", "21 Savage & J. Cole", "Soulful backing vocal loop and laid-back cadence balance temporal energy.", "CHRONO_RESTORE", "DEEP_CUT"),
+                FallbackTrack("PRIDE.", "Kendrick Lamar", "Warbled guitars and relaxed vocal pacing provide complete ear fatigue relief.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("LOVE.", "Kendrick Lamar & Zacari", "Soothing falsetto vocal lines and minimalist production reset auditory saturation.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Redrum", "21 Savage", "Vintage vocal sample fused with contemporary trap beats expands aesthetic boundaries.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
             )
         } else {
             listOf(
-                Triple("Blinding Lights", "The Weeknd", "Driving 80s synth progression and relentless groove deliver peak engagement."),
-                Triple("Redbone", "Childish Gambino", "Warm 70s soul bassline and falsetto reset compressed ear fatigue."),
-                Triple("Levitating", "Dua Lipa", "Nu-disco funk rhythm and energetic tempo expand current listening patterns."),
-                Triple("Stay", "The Kid LAROI & Justin Bieber", "Upbeat tempo and bright harmonic cadence boost cognitive alertness.")
+                FallbackTrack("Blinding Lights", "The Weeknd", "Driving 80s synth progression and relentless groove deliver peak engagement.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Kill Bill", "SZA", "Bouncy bassline and crisp vocal hooks trigger sustained auditory pleasure.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Levitating", "Dua Lipa", "Nu-disco funk rhythm and energetic tempo expand current listening patterns.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("As It Was", "Harry Styles", "Bright bell chimes and driving indie-pop drum beat elevate daily focus.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
+                FallbackTrack("Snooze", "SZA", "Velvety chord progressions harmonize with your circadian rhythm.", "CHRONO_RESTORE", "DEEP_CUT"),
+                FallbackTrack("Bad Habit", "Steve Lacy", "Lo-fi guitar hooks and funky harmonies push taste boundaries with zero friction.", "NOVEL_EXPLORATION", "DEEP_CUT"),
+                FallbackTrack("Stay", "The Kid LAROI & Justin Bieber", "Upbeat tempo and bright harmonic cadence boost cognitive alertness.", "CHRONO_RESTORE", "DEEP_CUT"),
+                FallbackTrack("Redbone", "Childish Gambino", "Warm 70s soul bassline and falsetto reset compressed ear fatigue.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Pink + White", "Frank Ocean", "Stripped piano and acoustic guitar reset sensory saturation effortlessly.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
+                FallbackTrack("Dead Man Walking", "Brent Faiyaz", "Lush orchestral strings and slow cadence deliver perfect temporal balance.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
             )
         }
 
-        fallbackItems.mapIndexed { idx, (t, a, r) ->
-            val cat = when (idx) {
-                0 -> "DOPAMINE_FLOW"
-                1 -> "PALATE_CLEANSER"
-                2 -> "CHRONO_RESTORE"
-                else -> "NOVEL_EXPLORATION"
-            }
+        val excludedSet = excludeTitles.map { it.lowercase().trim() }.toSet()
+        val nonExcluded = fullLibrary.filter { !excludedSet.contains(it.title.lowercase()) }
+        val finalTracks = (if (nonExcluded.size >= 4) nonExcluded else fullLibrary).take(10)
+
+        finalTracks.map { item ->
             com.tunemind.app.domain.recommendation.AiRecommendationEntity(
-                id = "ai-crate-${UUID.randomUUID()}",
-                title = t,
-                artist = a,
+                id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(item.title, item.artist),
+                title = item.title,
+                artist = item.artist,
                 album = null,
-                category = cat,
-                reason = r,
+                category = item.category,
+                subTier = item.subTier,
+                reason = item.reason,
                 confidence = 0.95f,
                 timeSlotKey = timeSlotKey,
                 timeSlotLabel = timeSlotLabel,

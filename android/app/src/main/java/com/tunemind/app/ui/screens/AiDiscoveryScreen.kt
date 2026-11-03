@@ -58,6 +58,9 @@ fun AiDiscoveryScreen(
     val crate by vm.aiDiscoveryCrate.collectAsState()
     val savedRecs by vm.savedAiRecommendations.collectAsState()
     val isDiscovering by vm.isDiscovering.collectAsState()
+    val playedCount by vm.playedRecCount.collectAsState()
+    val savedCount by vm.savedRecCount.collectAsState()
+    val dismissedCount by vm.dismissedRecCount.collectAsState()
     val currentSlot = vm.currentTimeSlot
     val reasoningReport by vm.reasoningReport.collectAsState()
     val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
@@ -75,6 +78,9 @@ fun AiDiscoveryScreen(
 
     var selectedFilterTab by remember { mutableIntStateOf(0) } // 0 = Active Daypart, 1 = Stored Archive, 2 = Saved Gems
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     // Rotating Spool Animation
     val infiniteTransition = rememberInfiniteTransition(label = "crateAnimations")
     val spoolRotation by infiniteTransition.animateFloat(
@@ -88,77 +94,145 @@ fun AiDiscoveryScreen(
     )
 
     val activeDaypartCrate = remember(crate, currentSlot) {
-        crate.filter { it.timeSlotKey == currentSlot.name }
+        crate.filter { it.timeSlotKey == currentSlot.name && !it.isDismissed }
     }
 
     val displayList = when (selectedFilterTab) {
         0 -> activeDaypartCrate
-        1 -> crate
-        else -> savedRecs
+        1 -> crate.filter { !it.isDismissed }
+        else -> savedRecs.filter { !it.isDismissed }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        DeepObsidianAmber.CircadianMorning.copy(alpha = 0.08f),
-                        DeepObsidianAmber.AppBackground,
-                        DeepObsidianAmber.RecessedBackground
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            DeepObsidianAmber.CircadianMorning.copy(alpha = 0.08f),
+                            DeepObsidianAmber.AppBackground,
+                            DeepObsidianAmber.RecessedBackground
+                        )
                     )
                 )
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // 1. TOP HARDWARE TELEMETRY HEADER
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = DeepObsidianAmber.SecondaryBackground,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
-            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // 1. TOP HARDWARE & TELEMETRY HUD HEADER
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = DeepObsidianAmber.SecondaryBackground,
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(DeepObsidianAmber.Success)
-                    )
-                    Text(
-                        text = "CHRONO-RECEPTIVE DISCOVERY // GEMINI 3.8",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.TextSecondary,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = DeepObsidianAmber.RecessedBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "AUTO-CHANGING",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.PrimaryAccent,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDiscovering) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.Success)
+                            )
+                            Text(
+                                text = if (isDiscovering) "AI REASONING ACTIVE // 10 TRACKS" else "TASTE CALIBRATION ONLINE // GEMINI 3.8",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.TextSecondary,
+                                letterSpacing = 1.sp
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = DeepObsidianAmber.RecessedBackground,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "10-TRACK CRATE",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    // Telemetry Interaction Feedback Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = DeepObsidianAmber.RecessedBackground,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = "PLAYED: $playedCount",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.Success,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = DeepObsidianAmber.RecessedBackground,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = "SAVED: $savedCount",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = DeepObsidianAmber.RecessedBackground,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.TextMuted.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "MUTED: $dismissedCount",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.TextMuted,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        val totalSignals = playedCount + savedCount + dismissedCount
+                        val calibrationLevel = minOf(98, 70 + (totalSignals * 2))
+                        Text(
+                            text = "$calibrationLevel% Calibrated",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
-        }
 
         // Section Title & Mission
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -531,14 +605,33 @@ fun AiDiscoveryScreen(
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             vm.toggleSaveRecommendation(item.id, !item.isSaved)
                         },
-                        onDelete = {
-                            vm.deleteRecommendation(item.id)
+                        onDismiss = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            vm.dismissAiRecommendation(item.id)
+                            scope.launch {
+                                val res = snackbarHostState.showSnackbar(
+                                    message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                    actionLabel = "UNDO",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (res == SnackbarResult.ActionPerformed) {
+                                    vm.restoreDismissedRecommendation(item.id)
+                                }
+                            }
                         }
                     )
                 }
             }
         }
     }
+
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 16.dp)
+    )
+}
 
     if (showCalibrateTasteDialog) {
         CalibrateTasteDialog(
@@ -553,7 +646,7 @@ fun AiDiscoveryScreen(
 
 /**
  * Individual Chrono AI Recommendation Card with Category Badging,
- * Cognitive Dopamine Rationale, and 1-Tap Provider Playback.
+ * Cognitive Dopamine Rationale, Sub-Tier Classification, and Telemetry Interactions.
  */
 @Composable
 private fun AiRecommendationCard(
@@ -561,7 +654,7 @@ private fun AiRecommendationCard(
     spoolRotation: Float,
     onPlay: () -> Unit,
     onToggleSave: () -> Unit,
-    onDelete: () -> Unit
+    onDismiss: () -> Unit
 ) {
     val categoryColor = when (item.category.uppercase()) {
         "DOPAMINE_FLOW" -> DeepObsidianAmber.PrimaryAccent
@@ -570,11 +663,12 @@ private fun AiRecommendationCard(
         else -> DeepObsidianAmber.NeuralViolet
     }
 
-    val categoryLabel = when (item.category.uppercase()) {
-        "DOPAMINE_FLOW" -> "DOPAMINE FLOW"
-        "PALATE_CLEANSER" -> "PALATE CLEANSER"
-        "CHRONO_RESTORE" -> "CHRONO RESTORE"
-        else -> "SONIC NOVELTY"
+    val (subTierLabel, subTierColor) = when (item.subTier.uppercase()) {
+        "CORE_DOPAMINE" -> Pair("CORE DOPAMINE", DeepObsidianAmber.PrimaryAccent)
+        "DEEP_CUT" -> Pair("DEEP CUT", DeepObsidianAmber.NeuralViolet)
+        "PALATE_CLEANSER" -> Pair("PALATE CLEANSER", DeepObsidianAmber.CryoCyan)
+        "SONIC_FRONTIER" -> Pair("SONIC FRONTIER", DeepObsidianAmber.Success)
+        else -> Pair("DISCOVERY", DeepObsidianAmber.SecondaryAccent)
     }
 
     val formattedDate = remember(item.recommendedAtMs) {
@@ -589,7 +683,7 @@ private fun AiRecommendationCard(
             1.dp,
             Brush.horizontalGradient(
                 listOf(
-                    categoryColor.copy(alpha = 0.5f),
+                    subTierColor.copy(alpha = 0.5f),
                     DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
                 )
             )
@@ -616,7 +710,7 @@ private fun AiRecommendationCard(
                             .size(42.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(DeepObsidianAmber.RecessedBackground)
-                            .border(1.dp, categoryColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                            .border(1.dp, subTierColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -625,7 +719,7 @@ private fun AiRecommendationCard(
                                 .rotate(if (item.wasPlayed) spoolRotation else 0f)
                                 .clip(CircleShape)
                                 .background(DeepObsidianAmber.SecondaryBackground)
-                                .border(1.dp, categoryColor, CircleShape),
+                                .border(1.dp, subTierColor, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Box(
@@ -656,17 +750,32 @@ private fun AiRecommendationCard(
                     }
                 }
 
-                // Save Gem Icon
-                IconButton(
-                    onClick = onToggleSave,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = if (item.isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = "Save Gem",
-                        tint = if (item.isSaved) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // Save Gem Bookmark
+                    IconButton(
+                        onClick = onToggleSave,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (item.isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = "Save Gem",
+                            tint = if (item.isSaved) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Dismiss / Negative Reinforcement
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Dismiss vibe",
+                            tint = DeepObsidianAmber.TextMuted,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
 
@@ -686,7 +795,7 @@ private fun AiRecommendationCard(
                 )
             }
 
-            // Bottom Strip: Category Badge, Daypart Context, and Play Button
+            // Bottom Strip: Sub-Tier Badge, Audit Tag, and Play Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -696,31 +805,48 @@ private fun AiRecommendationCard(
                     Surface(
                         shape = RoundedCornerShape(4.dp),
                         color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, categoryColor.copy(alpha = 0.5f))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, subTierColor.copy(alpha = 0.5f))
                     ) {
                         Text(
-                            text = categoryLabel,
+                            text = subTierLabel,
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = categoryColor,
+                            color = subTierColor,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
 
-                    Text(
-                        text = item.timeSlotLabel,
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = DeepObsidianAmber.TextSecondary
-                    )
+                    if (item.wasPlayed) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = DeepObsidianAmber.Success.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = "AUDIT ACTIVE",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.Success,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = item.timeSlotLabel,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                    }
                 }
 
                 Button(
                     onClick = onPlay,
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = categoryColor,
+                        containerColor = subTierColor,
                         contentColor = DeepObsidianAmber.AppBackground
                     ),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),

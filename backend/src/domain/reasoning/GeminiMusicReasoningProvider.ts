@@ -591,6 +591,9 @@ Respond ONLY with a valid JSON object matching:
     topArtists?: string[];
     userTasteAnchors?: string[];
     preferredProvider?: string;
+    excludeTitles?: string[];
+    playedFeedback?: string[];
+    dismissedFeedback?: string[];
   }): Promise<{ status: string; isAiGenerated: boolean; modelUsed: string; recommendations: any[] }> {
     const available = await this.isAvailable();
     if (!available || !this.ai) {
@@ -601,6 +604,10 @@ Respond ONLY with a valid JSON object matching:
     const satiety = payload.satietyLevel ?? 45;
     const observedArtists = (payload.topArtists || []).filter(Boolean);
     const userAnchors = (payload.userTasteAnchors || []).filter(Boolean);
+    const excludeTitles: string[] = (payload.excludeTitles || []).map((t: string) => String(t).trim()).filter(Boolean);
+    const positiveFeedback: string[] = (payload.playedFeedback || []).map((t: string) => String(t).trim()).filter(Boolean);
+    const negativeFeedback: string[] = (payload.dismissedFeedback || []).map((t: string) => String(t).trim()).filter(Boolean);
+
     // User taste anchors take highest precedence over raw observed tracks
     const allArtists = Array.from(new Set([...userAnchors, ...observedArtists]));
     const artistsSummary = allArtists.slice(0, 8).join(', ') || 'Bongo Flava, Afrobeats, Hip-Hop, R&B, Pop';
@@ -611,9 +618,21 @@ Respond ONLY with a valid JSON object matching:
       .join('\n') || '- Emerging listening baseline.';
 
     const vaultSummary = (payload.vaultTracks || [])
-      .slice(0, 4)
+      .slice(0, 6)
       .map(v => `- "${v.title}" by ${v.artist}`)
       .join(', ') || 'None';
+
+    const exclusionListStr = excludeTitles.length > 0
+      ? excludeTitles.slice(0, 60).map(t => `"${t}"`).join(', ')
+      : 'None';
+
+    const positiveStr = positiveFeedback.length > 0
+      ? positiveFeedback.slice(0, 10).join('; ')
+      : 'User actively enjoys their primary taste anchors.';
+
+    const negativeStr = negativeFeedback.length > 0
+      ? negativeFeedback.slice(0, 10).join('; ')
+      : 'None recorded yet.';
 
     const prompt = `
 CRITICAL USER TASTE DIRECTIVE:
@@ -626,30 +645,38 @@ ${recentTracksSummary}
 - AUDITORY SATIETY: ${satiety}% (0% = fresh, 100% = saturated)
 - COOLDOWN RESTING TRACKS (do NOT recommend): ${vaultSummary}
 
+REINFORCEMENT LEARNING SIGNALS (AUTONOMOUS TASTE CALIBRATION):
+- POSITIVE SIGNALS (User played or saved these gems with high dopamine affinity): ${positiveStr}
+  -> DIRECTIVE: Strongly reinforce and expand upon the acoustic signatures, melodies, and kindred artists of these tracks.
+- NEGATIVE SIGNALS (User dismissed or skipped these — avoid these vibes): ${negativeStr}
+  -> DIRECTIVE: Steer away from rhythms, arrangements, or moods matching these dismissed tracks.
+- STRICT EXCLUSION LIST (DO NOT RECOMMEND ANY OF THESE TITLES — THEY ARE ALREADY IN CRATE OR ROTATION):
+  [${exclusionListStr}]
+
 ABSOLUTE REQUIREMENTS:
-1. DO NOT GUESS OR GENERATE RANDOM GENERIC AMBIENT/INSTRUMENTAL/INDIE TRACKS (e.g. Brian Eno, Marconi Union, Tycho) UNLESS THE USER'S HISTORY EXPLICITLY LISTS THEM!
-2. All 4 recommended tracks MUST belong to the EXACT SAME or CLOSELY ADJACENT musical universe, style, and genre as their demonstrated artists above (${artistsSummary}).
+1. NEVER GUESS OR GENERATE RANDOM GENERIC AMBIENT/INSTRUMENTAL/INDIE TRACKS (e.g. Brian Eno, Marconi Union, Tycho) UNLESS THE USER'S HISTORY EXPLICITLY LISTS THEM!
+2. All 10 recommended tracks MUST belong to the EXACT SAME or CLOSELY ADJACENT musical universe, style, and genre as their demonstrated artists above (${artistsSummary}).
    - If the user listens to Bongo Flava / East African Afro-Pop (e.g. Mbosso, Diamond Platnumz, Harmonize, Rayvanny, Zuchu, Marioo, Ali Kiba, Jux, Otile Brown, Nandy, Kusah, Lava Lava): recommend genuine, beloved Bongo Flava hits from Mbosso, Diamond Platnumz, Marioo, Rayvanny, Harmonize, Zuchu, Alikiba, Otile Brown, etc.! NEVER substitute Western ambient music for Bongo Flava!
    - If the user listens to Afrobeats/Amapiano: recommend celebrated songs from Burna Boy, Asake, Tems, Rema, Wizkid, Ayra Starr, Omah Lay, Fireboy DML, Kabza De Small, etc.
    - If the user listens to Hip-Hop/Rap: recommend Kendrick Lamar, J. Cole, Drake, Travis Scott, 21 Savage, Future, Gunna, Metro Boomin, Baby Keem, etc.
    - If the user listens to R&B/Soul: recommend SZA, Frank Ocean, Brent Faiyaz, Daniel Caesar, Giveon, Summer Walker, Steve Lacy, etc.
-   - If the user listens to Pop, Rock, Gospel, or Dance: stay strictly in that genre.
-3. Every song must be a REAL, HIGH-QUALITY track by real artists that a fan of ${artistsSummary} will genuinely love.
+3. Every song must be a REAL, HIGH-QUALITY track by real artists. No hallucinations. Do not repeat any artist more than twice across the 10 recommendations.
 
-GENERATE 4 SONGS:
-1. "DOPAMINE_FLOW": An undeniable track with infectious groove matching their top artists' energy that triggers instant dopamine response.
-2. "PALATE_CLEANSER": A smoother, acoustic, or stripped-back vocal/instrumental track by a kindred artist in their genre that relieves auditory ear fatigue without feeling alien.
-3. "CHRONO_RESTORE": A song tailored for ${timeSlot} within their genre palette.
-4. "NOVEL_EXPLORATION": A fresh, exciting song from an adjacent or rising artist that fans of ${artistsSummary} love.
+GENERATE EXACTLY 10 DIVERSE TRACKS STRUCTURED ACROSS 4 SUB-TIERS:
+- 4 tracks: "CORE_DOPAMINE" (category: "DOPAMINE_FLOW") -> Direct bullseye hits matching their favorite artists.
+- 3 tracks: "DEEP_CUT" (category: "NOVEL_EXPLORATION" or "DOPAMINE_FLOW") -> High-quality b-sides or rising artists in the genre.
+- 2 tracks: "PALATE_CLEANSER" (category: "PALATE_CLEANSER") -> Stripped-back acoustic, tender ballad, or fatigue-reset track within the genre.
+- 1 track: "SONIC_FRONTIER" (category: "NOVEL_EXPLORATION" or "CHRONO_RESTORE") -> Controlled adjacent crossover (e.g., Afro-Bongo Amapiano fusion).
 
-Output strictly a valid JSON array of 4 objects matching this schema:
+Output strictly a valid JSON array of 10 objects matching this schema:
 [
   {
     "title": "Song Title",
     "artist": "Artist Name",
     "album": "Album Name",
     "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
-    "reason": "1 concise sentence on why fans of ${artistsSummary.split(',')[0] || 'this genre'} love this track for ${timeSlot}.",
+    "subTier": "CORE_DOPAMINE" | "DEEP_CUT" | "PALATE_CLEANSER" | "SONIC_FRONTIER",
+    "reason": "1 concise sentence explaining the acoustic match and dopamine fit for ${timeSlot}.",
     "confidence": 0.95
   }
 ]
@@ -659,7 +686,7 @@ Output strictly a valid JSON array of 4 objects matching this schema:
       for (const model of this.preferredModels) {
         try {
           const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 10000)
+            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 14000)
           );
 
           const callPromise = this.ai.models.generateContent({
@@ -667,9 +694,9 @@ Output strictly a valid JSON array of 4 objects matching this schema:
             contents: prompt,
             config: {
               systemInstruction:
-                "You are TuneMind's Chief Cognitive Music Discovery AI. Output strictly valid JSON arrays only. Recommend real, popular, genre-congruent songs matching user taste.",
+                "You are TuneMind's Chief Cognitive Music Discovery AI. Output strictly valid JSON arrays only. Recommend real, popular, genre-congruent songs matching user taste. Never repeat excluded songs.",
               responseMimeType: 'application/json',
-              temperature: 0.4,
+              temperature: 0.35,
             },
           });
 
@@ -679,19 +706,30 @@ Output strictly a valid JSON array of 4 objects matching this schema:
             const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(clean);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              return {
-                status: 'ok',
-                isAiGenerated: true,
-                modelUsed: model,
-                recommendations: parsed.map(item => ({
+              const excludedSet = new Set(excludeTitles.map(t => t.toLowerCase()));
+              const validRecs = parsed
+                .filter(item => {
+                  const titleLower = String(item.title || '').trim().toLowerCase();
+                  return titleLower.length > 0 && !excludedSet.has(titleLower);
+                })
+                .map(item => ({
                   title: String(item.title || 'Discovery Track'),
                   artist: String(item.artist || 'Featured Artist'),
                   album: item.album ? String(item.album) : null,
                   category: String(item.category || 'DOPAMINE_FLOW'),
+                  subTier: String(item.subTier || 'CORE_DOPAMINE'),
                   reason: String(item.reason || `Curated for your ${timeSlot} cognitive state based on your listening pattern.`),
                   confidence: Math.min(1.0, Math.max(0.7, Number(item.confidence) || 0.92))
-                }))
-              };
+                }));
+
+              if (validRecs.length >= 4) {
+                return {
+                  status: 'ok',
+                  isAiGenerated: true,
+                  modelUsed: model,
+                  recommendations: validRecs.slice(0, 10)
+                };
+              }
             }
           }
         } catch (err: any) {
@@ -705,128 +743,374 @@ Output strictly a valid JSON array of 4 objects matching this schema:
       }
     }
 
-    // Genre-Aware Adaptive Fallback (replaces generic ambient with genre-matched music)
+    // Genre-Aware Adaptive Baseline Fallback (10 genre-congruent tracks per taste palette)
     const lowerArtists = artistsSummary.toLowerCase();
     const isBongo = lowerArtists.includes('bongo') || lowerArtists.includes('mbosso') || lowerArtists.includes('diamond') || lowerArtists.includes('platnumz') || lowerArtists.includes('harmonize') || lowerArtists.includes('rayvanny') || lowerArtists.includes('zuchu') || lowerArtists.includes('marioo') || lowerArtists.includes('kiba') || lowerArtists.includes('kusah') || lowerArtists.includes('jux') || lowerArtists.includes('otile') || lowerArtists.includes('nandy') || lowerArtists.includes('swahili') || lowerArtists.includes('east africa');
     const isAfro = lowerArtists.includes('afro') || lowerArtists.includes('amapiano') || lowerArtists.includes('burna') || lowerArtists.includes('wizkid') || lowerArtists.includes('rema') || lowerArtists.includes('asake') || lowerArtists.includes('tems');
     const isHipHop = lowerArtists.includes('hip') || lowerArtists.includes('rap') || lowerArtists.includes('drake') || lowerArtists.includes('kendrick') || lowerArtists.includes('cole') || lowerArtists.includes('travis');
     const isRnB = lowerArtists.includes('r&b') || lowerArtists.includes('soul') || lowerArtists.includes('sza') || lowerArtists.includes('ocean') || lowerArtists.includes('faiyaz');
 
-    let heuristicRecs: any[];
+    let fullLibrary: Array<{
+      title: string;
+      artist: string;
+      album: string;
+      category: string;
+      subTier: string;
+      reason: string;
+      confidence: number;
+    }>;
 
     if (isBongo) {
-      heuristicRecs = [
+      fullLibrary = [
         {
           title: "Huwezi Jua",
           artist: "Mbosso",
           album: "Khan",
           category: "DOPAMINE_FLOW",
-          reason: "Soulful Bongo Flava melody and acoustic guitar chords deliver immediate emotional entrainment.",
+          subTier: "CORE_DOPAMINE",
+          reason: "Soulful acoustic guitar chords and signature Mbosso romantic cadence deliver immediate emotional entrainment.",
           confidence: 0.98
         },
         {
           title: "Mi Amor",
           artist: "Marioo & Jovial",
           album: "The Kid You Know",
-          category: "PALATE_CLEANSER",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
           reason: "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue.",
-          confidence: 0.95
+          confidence: 0.96
         },
         {
           title: "Komasava",
           artist: "Diamond Platnumz",
           album: "Komasava",
-          category: "CHRONO_RESTORE",
-          reason: "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness.",
-          confidence: 0.96
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "High-energy Afro-Bongo rhythm and infectious hook elevate daytime dopamine alertness.",
+          confidence: 0.97
         },
         {
           title: "Sukari",
           artist: "Zuchu",
           album: "I Am Zuchu",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Playful taarab-infused acoustic cadence and bright melodic hooks provide sustained listening joy.",
+          confidence: 0.95
+        },
+        {
+          title: "Amepotea",
+          artist: "Mbosso",
+          album: "Khan",
           category: "NOVEL_EXPLORATION",
-          reason: "Playful taarab-infused acoustic cadence and bright melodic hooks expand listening horizons.",
+          subTier: "DEEP_CUT",
+          reason: "Introspective acoustic ballad highlighting rich Swahili lyricism and melancholy string arrangements.",
           confidence: 0.94
+        },
+        {
+          title: "Enjoy",
+          artist: "Jux & Diamond Platnumz",
+          album: "Enjoy",
+          category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
+          reason: "Effortless Afro-Bongo bounce with smooth vocal trade-offs that maintain active flow state.",
+          confidence: 0.93
+        },
+        {
+          title: "Single Again",
+          artist: "Harmonize",
+          album: "Made For Us",
+          category: "CHRONO_RESTORE",
+          subTier: "DEEP_CUT",
+          reason: "Melodic guitar progression and relatable emotional phrasing tailored for chrono-recovery.",
+          confidence: 0.94
+        },
+        {
+          title: "Dah!",
+          artist: "Nandy",
+          album: "Dah!",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Airy, gentle vocal production resets acoustic receptor saturation without breaking genre continuity.",
+          confidence: 0.95
+        },
+        {
+          title: "Inatosha",
+          artist: "Marioo",
+          album: "The Kid You Know",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Warm mid-tempo guitar arpeggios soothe high-frequency auditory fatigue.",
+          confidence: 0.92
+        },
+        {
+          title: "Kelebe",
+          artist: "Rayvanny & Innoss'B",
+          album: "Sound from Africa",
+          category: "NOVEL_EXPLORATION",
+          subTier: "SONIC_FRONTIER",
+          reason: "Exciting cross-border Congolese Rumba meets Bongo Flava fusion expands your listening horizon.",
+          confidence: 0.91
         }
       ];
     } else if (isAfro) {
-      heuristicRecs = [
+      fullLibrary = [
         {
           title: "Last Last",
           artist: "Burna Boy",
           album: "Love, Damini",
           category: "DOPAMINE_FLOW",
-          reason: "Toni Braxton sample cadence and infectious syncopated groove triggers instantaneous dopamine entrainment.",
+          subTier: "CORE_DOPAMINE",
+          reason: "Toni Braxton sample cadence and syncopated groove triggers instantaneous dopamine entrainment.",
+          confidence: 0.97
+        },
+        {
+          title: "Calm Down",
+          artist: "Rema",
+          album: "Rave & Climax",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.",
           confidence: 0.96
+        },
+        {
+          title: "Lonely At The Top",
+          artist: "Asake",
+          album: "Work of Art",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Acoustic log drum undertones and introspective vocal harmonies deliver supreme cognitive comfort.",
+          confidence: 0.95
+        },
+        {
+          title: "Rush",
+          artist: "Ayra Starr",
+          album: "19 & Dangerous",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Punchy percussion and magnetic hook provide sustained listening pleasure.",
+          confidence: 0.94
+        },
+        {
+          title: "Soweto",
+          artist: "Victony & Tempoe",
+          album: "Outlaw",
+          category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
+          reason: "Subtle flute hooks and delicate rhythmic pacing keep listening receptors active.",
+          confidence: 0.93
+        },
+        {
+          title: "Ku Lo Sa",
+          artist: "Oxlade",
+          album: "Ku Lo Sa",
+          category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
+          reason: "Intricate falsetto and warm percussion create an expansive, resonant acoustic space.",
+          confidence: 0.92
+        },
+        {
+          title: "Essence",
+          artist: "Wizkid & Tems",
+          album: "Made in Lagos",
+          category: "CHRONO_RESTORE",
+          subTier: "DEEP_CUT",
+          reason: "Sun-drenched saxophone cadence and smooth duet harmonies induce circadian tranquility.",
+          confidence: 0.95
         },
         {
           title: "Free Mind",
           artist: "Tems",
           album: "For Broken Ears",
           category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
           reason: "Intimate acoustic guitar chords and raw vocal dynamics clear auditory receptor habituation.",
-          confidence: 0.94
+          confidence: 0.96
         },
         {
-          title: "Calm Down",
-          artist: "Rema",
-          album: "Rave & Climax",
-          category: "CHRONO_RESTORE",
-          reason: "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.",
-          confidence: 0.95
-        },
-        {
-          title: "Lonely At The Top",
-          artist: "Asake",
-          album: "Work of Art",
-          category: "NOVEL_EXPLORATION",
-          reason: "Acoustic log drum undertones and introspective lyricism expand your current rotation.",
+          title: "Understand",
+          artist: "Omah Lay",
+          album: "Boy Alone",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Gentle mid-tempo bounce and reflective cadence allow ear rest between high-energy sessions.",
           confidence: 0.93
+        },
+        {
+          title: "Mnike",
+          artist: "Tyler ICU & Tumelo.za",
+          album: "Mnike",
+          category: "NOVEL_EXPLORATION",
+          subTier: "SONIC_FRONTIER",
+          reason: "Deep, hypnotic Amapiano shaker patterns introduce sonic novelty while respecting your groove palate.",
+          confidence: 0.91
         }
       ];
     } else if (isHipHop) {
-      heuristicRecs = [
+      fullLibrary = [
         {
           title: "Middle Child",
           artist: "J. Cole",
           album: "Middle Child",
           category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
           reason: "Crisp horn fanfare and punchy 808 cadence stimulate dopamine release and sustained flow.",
+          confidence: 0.96
+        },
+        {
+          title: "First Person Shooter",
+          artist: "Drake & J. Cole",
+          album: "For All The Dogs",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Dynamic two-part beat switch and rapid flow maintain intense cognitive engagement.",
           confidence: 0.95
         },
         {
-          title: "PRIDE.",
+          title: "HUMBLE.",
           artist: "Kendrick Lamar",
           album: "DAMN.",
-          category: "PALATE_CLEANSER",
-          reason: "Warbled guitars and relaxed vocal pacing provide complete ear fatigue relief.",
-          confidence: 0.94
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Aggressive piano riff and bass-heavy structure provide immediate alertness boost.",
+          confidence: 0.97
         },
         {
-          title: "Snooze",
-          artist: "SZA",
-          album: "SOS",
-          category: "CHRONO_RESTORE",
-          reason: "Velvety chord progressions and laid-back tempo harmonize with your circadian rhythm.",
-          confidence: 0.96
+          title: "SICKO MODE",
+          artist: "Travis Scott",
+          album: "ASTROWORLD",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Triple-act tempo shift and lush low-end frequencies create rich auditory immersion.",
+          confidence: 0.94
         },
         {
           title: "family ties",
           artist: "Baby Keem & Kendrick Lamar",
           album: "The Melodic Blue",
           category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
           reason: "Dynamic brass modulation and beat shifts expand your listening horizon.",
+          confidence: 0.93
+        },
+        {
+          title: "Surround Sound",
+          artist: "JID, 21 Savage & Baby Tate",
+          album: "The Forever Story",
+          category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
+          reason: "Aretha Franklin sample flips into high-precision technical cadence.",
           confidence: 0.92
+        },
+        {
+          title: "a lot",
+          artist: "21 Savage & J. Cole",
+          album: "i am > i was",
+          category: "CHRONO_RESTORE",
+          subTier: "DEEP_CUT",
+          reason: "Soulful backing vocal loop and laid-back cadence balance temporal energy.",
+          confidence: 0.94
+        },
+        {
+          title: "PRIDE.",
+          artist: "Kendrick Lamar",
+          album: "DAMN.",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Warbled guitars and relaxed vocal pacing provide complete ear fatigue relief.",
+          confidence: 0.95
+        },
+        {
+          title: "LOVE.",
+          artist: "Kendrick Lamar & Zacari",
+          album: "DAMN.",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Soothing falsetto vocal lines and minimalist production reset auditory saturation.",
+          confidence: 0.93
+        },
+        {
+          title: "Redrum",
+          artist: "21 Savage",
+          album: "american dream",
+          category: "NOVEL_EXPLORATION",
+          subTier: "SONIC_FRONTIER",
+          reason: "Haunting vintage vocal sample fused with contemporary trap beats expands aesthetic boundaries.",
+          confidence: 0.91
         }
       ];
-    } else if (isRnB) {
-      heuristicRecs = [
+    } else {
+      fullLibrary = [
+        {
+          title: "Blinding Lights",
+          artist: "The Weeknd",
+          album: "After Hours",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Driving 80s synth progression and relentless groove deliver peak engagement.",
+          confidence: 0.96
+        },
         {
           title: "Kill Bill",
           artist: "SZA",
           album: "SOS",
           category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
           reason: "Bouncy bassline and crisp vocal hooks trigger sustained auditory pleasure.",
+          confidence: 0.96
+        },
+        {
+          title: "Levitating",
+          artist: "Dua Lipa",
+          album: "Future Nostalgia",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Nu-disco funk rhythm and energetic tempo expand current listening patterns.",
+          confidence: 0.94
+        },
+        {
+          title: "As It Was",
+          artist: "Harry Styles",
+          album: "Harry's House",
+          category: "DOPAMINE_FLOW",
+          subTier: "CORE_DOPAMINE",
+          reason: "Bright bell chimes and driving indie-pop drum beat elevate daily focus.",
+          confidence: 0.93
+        },
+        {
+          title: "Snooze",
+          artist: "SZA",
+          album: "SOS",
+          category: "CHRONO_RESTORE",
+          subTier: "DEEP_CUT",
+          reason: "Velvety chord progressions and laid-back tempo harmonize with your circadian rhythm.",
+          confidence: 0.95
+        },
+        {
+          title: "Bad Habit",
+          artist: "Steve Lacy",
+          album: "Gemini Rights",
+          category: "NOVEL_EXPLORATION",
+          subTier: "DEEP_CUT",
+          reason: "Lo-fi guitar hooks and funky harmonies push taste boundaries with zero friction.",
+          confidence: 0.93
+        },
+        {
+          title: "Stay",
+          artist: "The Kid LAROI & Justin Bieber",
+          album: "F*CK LOVE 3",
+          category: "CHRONO_RESTORE",
+          subTier: "DEEP_CUT",
+          reason: "Upbeat tempo and bright harmonic cadence boost cognitive alertness.",
+          confidence: 0.92
+        },
+        {
+          title: "Redbone",
+          artist: "Childish Gambino",
+          album: "Awaken, My Love!",
+          category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
+          reason: "Warm 70s soul bassline and falsetto reset compressed ear fatigue.",
           confidence: 0.96
         },
         {
@@ -834,6 +1118,7 @@ Output strictly a valid JSON array of 4 objects matching this schema:
           artist: "Frank Ocean",
           album: "Blonde",
           category: "PALATE_CLEANSER",
+          subTier: "PALATE_CLEANSER",
           reason: "Stripped piano and acoustic guitar reset sensory saturation effortlessly.",
           confidence: 0.97
         },
@@ -841,63 +1126,27 @@ Output strictly a valid JSON array of 4 objects matching this schema:
           title: "Dead Man Walking",
           artist: "Brent Faiyaz",
           album: "Wasteland",
-          category: "CHRONO_RESTORE",
+          category: "NOVEL_EXPLORATION",
+          subTier: "SONIC_FRONTIER",
           reason: "Lush orchestral strings and slow cadence deliver perfect temporal balance.",
-          confidence: 0.93
-        },
-        {
-          title: "Bad Habit",
-          artist: "Steve Lacy",
-          album: "Gemini Rights",
-          category: "NOVEL_EXPLORATION",
-          reason: "Lo-fi guitar hooks and funky harmonies push taste boundaries with zero friction.",
-          confidence: 0.94
-        }
-      ];
-    } else {
-      heuristicRecs = [
-        {
-          title: "Blinding Lights",
-          artist: "The Weeknd",
-          album: "After Hours",
-          category: "DOPAMINE_FLOW",
-          reason: "Driving 80s synth progression and relentless groove deliver peak engagement.",
-          confidence: 0.95
-        },
-        {
-          title: "Levitating",
-          artist: "Dua Lipa",
-          album: "Future Nostalgia",
-          category: "NOVEL_EXPLORATION",
-          reason: "Nu-disco funk rhythm and energetic tempo expand current listening patterns.",
-          confidence: 0.93
-        },
-        {
-          title: "Redbone",
-          artist: "Childish Gambino",
-          album: "\"Awaken, My Love!\"",
-          category: "PALATE_CLEANSER",
-          reason: "Warm 70s soul bassline and falsetto reset compressed ear fatigue.",
-          confidence: 0.96
-        },
-        {
-          title: "Stay",
-          artist: "The Kid LAROI & Justin Bieber",
-          album: "F*CK LOVE 3: OVER YOU",
-          category: "CHRONO_RESTORE",
-          reason: "Upbeat tempo and bright harmonic cadence boost cognitive alertness.",
           confidence: 0.92
         }
       ];
     }
 
+    // Filter out any songs already in crate/history
+    const excludedSet = new Set(excludeTitles.map(t => t.toLowerCase()));
+    const filteredFallback = fullLibrary.filter(t => !excludedSet.has(t.title.toLowerCase()));
+    const finalRecs = (filteredFallback.length >= 4 ? filteredFallback : fullLibrary).slice(0, 10);
+
     return {
       status: 'ok',
       isAiGenerated: false,
-      modelUsed: 'heuristic-taste-aligned',
-      recommendations: heuristicRecs
+      modelUsed: 'heuristic-taste-aligned-10x',
+      recommendations: finalRecs
     };
   }
 }
+
 
 
