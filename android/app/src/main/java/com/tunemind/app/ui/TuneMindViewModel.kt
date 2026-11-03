@@ -952,6 +952,12 @@ class TuneMindViewModel : ViewModel() {
         item: com.tunemind.app.domain.recommendation.AiRecommendationEntity
     ): com.tunemind.app.provider.PlaybackLaunchResult {
         markRecommendationPlayed(item.id)
+        val recCategory = when (item.category) {
+            "PALATE_CLEANSER" -> com.tunemind.app.domain.recommendation.RecommendationCategory.PALATE_CLEANSER
+            "CHRONO_RESTORE" -> com.tunemind.app.domain.recommendation.RecommendationCategory.COOLDOWN_RESTORED
+            "SONIC_NOVELTY" -> com.tunemind.app.domain.recommendation.RecommendationCategory.EXPLORATION_DISCOVERY
+            else -> com.tunemind.app.domain.recommendation.RecommendationCategory.FAMILIAR_RECEPTIVE
+        }
         val track = com.tunemind.app.domain.recommendation.RecommendedTrack(
             id = item.id,
             title = item.title,
@@ -959,6 +965,7 @@ class TuneMindViewModel : ViewModel() {
             album = item.album,
             reason = item.reason,
             confidence = item.confidence,
+            category = recCategory,
             suggestedProviderId = item.suggestedProviderId
         )
         return playRecommendation(context, track)

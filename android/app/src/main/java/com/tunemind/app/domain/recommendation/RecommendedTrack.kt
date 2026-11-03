@@ -26,7 +26,7 @@ data class RecommendedTrack(
     val genre: String? = null,
     val reason: String,
     val confidence: Float, // 0.0 to 1.0
-    val category: RecommendationCategory,
+    val category: RecommendationCategory = RecommendationCategory.EXPLORATION_DISCOVERY,
     val suggestedProviderId: String? = "spotify",
     val providerTrackId: String? = null,
     val observationCountBasis: Int = 1
