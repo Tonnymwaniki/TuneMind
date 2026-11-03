@@ -33,8 +33,9 @@ import com.tunemind.app.ui.screens.*
 import com.tunemind.app.ui.theme.*
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    // 4 Core Streamlined Bottom Navigation Destinations (Hardware Switchboard Style)
+    // 5 Core Streamlined Bottom Navigation Destinations (Hardware Switchboard Style)
     object Home : Screen("home", "Pulse", Icons.Outlined.GraphicEq)
+    object AiDiscovery : Screen("ai_discovery", "Crate", Icons.Outlined.AutoAwesome)
     object Fatigue : Screen("fatigue", "Lab", Icons.Outlined.LocalFireDepartment)
     object History : Screen("history", "Timeline", Icons.Outlined.Reorder)
     object SevenDayStudy : Screen("seven_day_study", "Intel", Icons.Outlined.QueryStats)
@@ -49,7 +50,6 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object ManualCooldown : Screen("manual_cooldown", "Add to Cooldown", Icons.Outlined.AddCircleOutline)
     object MusicalMoments : Screen("musical_moments", "Moments", Icons.Outlined.BookmarkBorder)
     object HearingInsights : Screen("hearing_insights", "Hearing", Icons.Outlined.Headphones)
-    object AiDiscovery : Screen("ai_discovery", "AI Crate", Icons.Outlined.AutoAwesome)
 }
 
 @Composable
@@ -403,6 +403,7 @@ fun TuneMindBottomNavigationBar(
 ) {
     val items = listOf(
         Screen.Home,
+        Screen.AiDiscovery,
         Screen.Fatigue,
         Screen.History,
         Screen.SevenDayStudy
@@ -412,7 +413,7 @@ fun TuneMindBottomNavigationBar(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
@@ -435,13 +436,14 @@ fun TuneMindBottomNavigationBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 items.forEach { screen ->
                     val selected = when (screen) {
                         Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route)
+                        Screen.AiDiscovery -> currentRoute == Screen.AiDiscovery.route
                         Screen.Fatigue -> currentRoute in listOf(Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
                         Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
                         Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route)
@@ -450,6 +452,7 @@ fun TuneMindBottomNavigationBar(
 
                     val sectionAccent = when (screen) {
                         Screen.Home -> DeepObsidianAmber.EQBassCyan
+                        Screen.AiDiscovery -> DeepObsidianAmber.PrimaryAccent
                         Screen.Fatigue -> DeepObsidianAmber.SatietyEmber
                         Screen.History -> DeepObsidianAmber.NeuralViolet
                         Screen.SevenDayStudy -> DeepObsidianAmber.CircadianMorning

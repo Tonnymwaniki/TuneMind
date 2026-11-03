@@ -243,6 +243,17 @@ fun HomeScreen(
             // Tactile Rotary Utility Keys
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
+                    onClick = onOpenAiDiscovery,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(DeepObsidianAmber.CardElevated)
+                        .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI Crate", tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
+                }
+
+                IconButton(
                     onClick = onOpenMoments,
                     modifier = Modifier
                         .size(34.dp)
@@ -263,6 +274,97 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = DeepObsidianAmber.DecibelSafe, modifier = Modifier.size(16.dp))
                 }
+            }
+        }
+
+        // 1.5. PROMINENT CHRONO AI CRATE HERO ACTION BANNER
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(
+                1.2.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.85f),
+                        DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.6f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
+                    )
+                )
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenAiDiscovery() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        DeepObsidianAmber.PrimaryAccent,
+                                        DeepObsidianAmber.BrandSoulAmber
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = "AI Crate",
+                            tint = DeepObsidianAmber.AppBackground,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "CHRONO AI CRATE",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                letterSpacing = 1.sp
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = "DAYPART SYNCED",
+                                    fontSize = 7.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.Success,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Auto-evolving songs for ${vm.currentTimeSlot.label} - Tap to Open Crate",
+                            fontSize = 11.sp,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                    }
+                }
+                Icon(
+                    Icons.Default.ArrowForward,
+                    contentDescription = null,
+                    tint = DeepObsidianAmber.PrimaryAccent,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
 
