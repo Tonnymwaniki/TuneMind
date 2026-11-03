@@ -183,6 +183,42 @@ class TuneMindViewModel : ViewModel() {
     private val _isDiscovering = MutableStateFlow<Boolean>(false)
     val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
 
+    // Personal Taste Genome & Explicit Anchors (e.g. Afrobeats, Hip-Hop, Burna Boy, Drake)
+    private val _userTasteAnchors = MutableStateFlow<List<String>>(loadTasteAnchorsFromPrefs())
+    val userTasteAnchors: StateFlow<List<String>> = _userTasteAnchors.asStateFlow()
+
+    private fun loadTasteAnchorsFromPrefs(): List<String> {
+        val ctx = AppHolder.context ?: return emptyList()
+        val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("taste_anchors", null) ?: return emptyList()
+        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    fun saveTasteAnchors(anchors: List<String>) {
+        _userTasteAnchors.value = anchors.distinct()
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("taste_anchors", anchors.joinToString(",")).apply()
+        triggerChronoDiscovery(forceRefresh = true)
+    }
+
+    fun addTasteAnchor(anchor: String) {
+        val clean = anchor.trim()
+        if (clean.isBlank()) return
+        val current = _userTasteAnchors.value.toMutableList()
+        if (!current.contains(clean)) {
+            current.add(clean)
+            saveTasteAnchors(current)
+        }
+    }
+
+    fun removeTasteAnchor(anchor: String) {
+        val current = _userTasteAnchors.value.toMutableList()
+        if (current.remove(anchor)) {
+            saveTasteAnchors(current)
+        }
+    }
+
     // Cooldown Vault Persistence
     private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
     val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
@@ -490,6 +526,18 @@ class TuneMindViewModel : ViewModel() {
                 )
 
                 refreshRecommendations()
+
+                // If real tracks are observed and the crate was uncalibrated or empty, auto-calibrate
+                val observedArtists = memory.tracks.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct()
+                if (observedArtists.isNotEmpty()) {
+                    val currentCrate = _aiDiscoveryCrate.value
+                    val needsCalibration = currentCrate.isEmpty() || currentCrate.any {
+                        it.telemetryBasisSummary.contains("Emerging") || it.telemetryBasisSummary.contains("Daypart:")
+                    }
+                    if (needsCalibration && !_isDiscovering.value) {
+                        triggerChronoDiscovery(forceRefresh = true)
+                    }
+                }
             }
         } catch (t: Throwable) {
             android.util.Log.w("TuneMindVM", "observeRecent error: ${t.message}")
@@ -918,7 +966,9 @@ class TuneMindViewModel : ViewModel() {
                     timeSlotKey = currentTimeSlot.name,
                     timeSlotLabel = currentTimeSlot.label,
                     satietyPercent = satiety,
-                    preferredProviderId = prefProvider
+                    preferredProviderId = prefProvider,
+                    userTasteAnchors = _userTasteAnchors.value,
+                    nowPlayingArtist = _homeState.value.nowPlaying?.artist
                 )
 
                 if (newRecs.isNotEmpty()) {

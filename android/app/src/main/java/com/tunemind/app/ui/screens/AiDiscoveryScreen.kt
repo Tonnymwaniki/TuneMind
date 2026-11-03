@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,6 +61,17 @@ fun AiDiscoveryScreen(
     val currentSlot = vm.currentTimeSlot
     val reasoningReport by vm.reasoningReport.collectAsState()
     val playbackFeedback by vm.playbackLaunchFeedback.collectAsState()
+
+    val tasteAnchors by vm.userTasteAnchors.collectAsState()
+    val historyState by vm.historyState.collectAsState()
+    val homeState by vm.homeState.collectAsState()
+    val topDetectedArtists = remember(historyState.tracks, homeState.nowPlaying) {
+        val observed = (historyState.tracks.mapNotNull { it.artist } + listOfNotNull(homeState.nowPlaying?.artist))
+            .filter { it.isNotBlank() }
+            .distinct()
+        observed.take(6)
+    }
+    var showCalibrateTasteDialog by remember { mutableStateOf(false) }
 
     var selectedFilterTab by remember { mutableIntStateOf(0) } // 0 = Active Daypart, 1 = Stored Archive, 2 = Saved Gems
 
@@ -295,6 +307,138 @@ fun AiDiscoveryScreen(
             }
         }
 
+        // 2.5. SONIC TASTE BLUEPRINT & CALIBRATION CARD
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.7f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
+                    )
+                )
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            Icons.Outlined.Fingerprint,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "SONIC TASTE BLUEPRINT",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+
+                    TextButton(
+                        onClick = { showCalibrateTasteDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Tune,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.SecondaryAccent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "CALIBRATE TASTE",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent
+                        )
+                    }
+                }
+
+                // Detected Real Artists
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "DEMONSTRATED:",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DeepObsidianAmber.TextSecondary
+                    )
+                    Text(
+                        text = topDetectedArtists.joinToString(", ").ifEmpty { "Listening for active songs on Spotify/Players..." },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Taste Anchors Chips (if any added)
+                if (tasteAnchors.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ANCHORS:",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                        androidx.compose.foundation.lazy.LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(tasteAnchors) { anchor ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = DeepObsidianAmber.RecessedBackground,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = anchor,
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = DeepObsidianAmber.PrimaryAccent,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = DeepObsidianAmber.TextSecondary,
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clickable { vm.removeTasteAnchor(anchor) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 3. FILTER TABS (Active Daypart | Stored Crate | Saved Gems)
         Row(
             modifier = Modifier
@@ -394,6 +538,16 @@ fun AiDiscoveryScreen(
                 }
             }
         }
+    }
+
+    if (showCalibrateTasteDialog) {
+        CalibrateTasteDialog(
+            currentAnchors = tasteAnchors,
+            detectedArtists = topDetectedArtists,
+            onDismiss = { showCalibrateTasteDialog = false },
+            onAddAnchor = { anchor -> vm.addTasteAnchor(anchor) },
+            onRemoveAnchor = { anchor -> vm.removeTasteAnchor(anchor) }
+        )
     }
 }
 
@@ -589,3 +743,282 @@ private fun AiRecommendationCard(
         }
     }
 }
+
+/**
+ * Interactive Taste Calibration Dialog.
+ * Allows the user to anchor specific genres, artists, or styles so Gemini
+ * grounds recommendations precisely in what their ears and dopamine want,
+ * completely eliminating blind guesswork or random ambient fallbacks.
+ */
+@Composable
+private fun CalibrateTasteDialog(
+    currentAnchors: List<String>,
+    detectedArtists: List<String>,
+    onDismiss: () -> Unit,
+    onAddAnchor: (String) -> Unit,
+    onRemoveAnchor: (String) -> Unit
+) {
+    var newAnchorInput by remember { mutableStateOf("") }
+    val suggestedGenres = remember {
+        listOf(
+            "Afrobeats",
+            "Hip-Hop",
+            "R&B / Soul",
+            "Amapiano",
+            "Pop / Synthwave",
+            "Dancehall",
+            "Neo-Soul / Jazz",
+            "Indie / Alt"
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Outlined.Tune,
+                    contentDescription = null,
+                    tint = DeepObsidianAmber.PrimaryAccent,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = "CALIBRATE TASTE BLUEPRINT",
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = DeepObsidianAmber.TextPrimary
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "Lock in your musical DNA so Gemini never defaults to generic ambient guesswork. Enter the artists and genres you actually love.",
+                    fontSize = 12.sp,
+                    color = DeepObsidianAmber.TextSecondary,
+                    lineHeight = 17.sp
+                )
+
+                // Input field to add custom artist or genre
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newAnchorInput,
+                        onValueChange = { newAnchorInput = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                "e.g. Burna Boy, Drake, Afrobeats...",
+                                fontSize = 11.sp,
+                                color = DeepObsidianAmber.TextSecondary.copy(alpha = 0.6f)
+                            )
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
+                            unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
+                            focusedTextColor = DeepObsidianAmber.TextPrimary,
+                            unfocusedTextColor = DeepObsidianAmber.TextPrimary,
+                            cursorColor = DeepObsidianAmber.PrimaryAccent
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            if (newAnchorInput.isNotBlank()) {
+                                onAddAnchor(newAnchorInput.trim())
+                                newAnchorInput = ""
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepObsidianAmber.PrimaryAccent,
+                            contentColor = DeepObsidianAmber.AppBackground
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        enabled = newAnchorInput.isNotBlank()
+                    ) {
+                        Text(
+                            text = "ADD",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Currently active anchors
+                if (currentAnchors.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "ACTIVE TASTE ANCHORS (BOUND TO GEMINI):",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(currentAnchors) { anchor ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = DeepObsidianAmber.RecessedBackground,
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f)
+                                    )
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = anchor,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DeepObsidianAmber.PrimaryAccent
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove $anchor",
+                                            tint = DeepObsidianAmber.TextSecondary,
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .clickable { onRemoveAnchor(anchor) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 1-Tap add from detected playback artists
+                if (detectedArtists.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "DETECTED FROM PLAYBACK (TAP TO ANCHOR):",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(detectedArtists) { artist ->
+                                val isAlreadyAnchored = currentAnchors.any { it.equals(artist, ignoreCase = true) }
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isAlreadyAnchored) DeepObsidianAmber.RecessedBackground else DeepObsidianAmber.CardElevated,
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f) else DeepObsidianAmber.SurfaceBorder
+                                    ),
+                                    modifier = Modifier.clickable(enabled = !isAlreadyAnchored) {
+                                        onAddAnchor(artist)
+                                    }
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            if (isAlreadyAnchored) Icons.Default.Check else Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SecondaryAccent,
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = artist,
+                                            fontSize = 10.sp,
+                                            color = if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Suggested genres quick tap
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "POPULAR TASTE STYLES (TAP TO ADD):",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.TextSecondary
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(suggestedGenres) { genre ->
+                            val isAlreadyAnchored = currentAnchors.any { it.equals(genre, ignoreCase = true) }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isAlreadyAnchored) DeepObsidianAmber.RecessedBackground else DeepObsidianAmber.CardElevated,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f) else DeepObsidianAmber.SurfaceBorder
+                                ),
+                                modifier = Modifier.clickable(enabled = !isAlreadyAnchored) {
+                                    onAddAnchor(genre)
+                                }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        if (isAlreadyAnchored) Icons.Default.Check else Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = genre,
+                                        fontSize = 10.sp,
+                                        color = if (isAlreadyAnchored) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DeepObsidianAmber.PrimaryAccent,
+                    contentColor = DeepObsidianAmber.AppBackground
+                )
+            ) {
+                Text(
+                    text = "APPLY & CLOSE",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        containerColor = DeepObsidianAmber.CardElevated,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+

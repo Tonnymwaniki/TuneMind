@@ -24,7 +24,7 @@ import {
 export class GeminiMusicReasoningProvider implements MusicReasoningProvider {
   readonly providerId = 'google-gemini';
   private ai: GoogleGenAI | null = null;
-  private readonly preferredModels = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'];
+  private readonly preferredModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
   private activeModelUsed: string = 'gemini-3.8-flash';
@@ -589,6 +589,7 @@ Respond ONLY with a valid JSON object matching:
     satietyLevel?: number;
     vaultTracks?: Array<{ title?: string; artist?: string }>;
     topArtists?: string[];
+    userTasteAnchors?: string[];
     preferredProvider?: string;
   }): Promise<{ status: string; isAiGenerated: boolean; modelUsed: string; recommendations: any[] }> {
     const available = await this.isAvailable();
@@ -598,9 +599,13 @@ Respond ONLY with a valid JSON object matching:
 
     const timeSlot = payload.timeSlot || 'Morning Focus';
     const satiety = payload.satietyLevel ?? 45;
-    const artistsSummary = (payload.topArtists || []).filter(Boolean).slice(0, 5).join(', ') || 'Electronic, Indie, R&B, Lo-Fi';
+    const observedArtists = (payload.topArtists || []).filter(Boolean);
+    const userAnchors = (payload.userTasteAnchors || []).filter(Boolean);
+    const allArtists = Array.from(new Set([...observedArtists, ...userAnchors]));
+    const artistsSummary = allArtists.slice(0, 8).join(', ') || 'Afrobeats, Hip-Hop, R&B, Pop, Contemporary';
+
     const recentTracksSummary = (payload.recentTracks || [])
-      .slice(0, 6)
+      .slice(0, 8)
       .map(t => `- "${t.title}" by ${t.artist} (${t.plays || 1} plays, satiety ~${t.satiety || 30}%)`)
       .join('\n') || '- Emerging listening baseline.';
 
@@ -610,31 +615,40 @@ Respond ONLY with a valid JSON object matching:
       .join(', ') || 'None';
 
     const prompt = `
-Context:
-- Current Daypart / Time Context: ${timeSlot}
-- Auditory Satiety Level: ${satiety}% (0% = totally rested, 100% = severe auditory receptor habituation)
-- Observed Familiar Artists: ${artistsSummary}
-- Resting in Cooldown Vault (satiated, do not recommend): ${vaultSummary}
-- Recent Listening History:
+CRITICAL USER TASTE DIRECTIVE:
+You are TuneMind's Cognitive Audio Discovery AI.
+The user is an active music listener with this demonstrated rotation and taste:
+- TOP DEMONSTRATED ARTISTS & TASTE ANCHORS: ${artistsSummary}
+- RECENT OBSERVED TRACKS IN ROTATION:
 ${recentTracksSummary}
+- CURRENT TIME OF DAY: ${timeSlot}
+- AUDITORY SATIETY: ${satiety}% (0% = fresh, 100% = saturated)
+- COOLDOWN RESTING TRACKS (do NOT recommend): ${vaultSummary}
 
-Task:
-You are TuneMind's Cognitive Audio Discovery AI. Recommend exactly 4 real, distinct, high-quality songs that will satisfy the listener's auditory receptors and dopamine response for this exact time of day.
-Ensure each song addresses a distinct cognitive need:
-1. "DOPAMINE_FLOW": Sustained focus or groove entrainment without sensory fatigue.
-2. "PALATE_CLEANSER": Frequency or timbre contrast (e.g. acoustic, strings, or math rock) that resets auditory habituation.
-3. "CHRONO_RESTORE": Perfectly attuned to the circadian daypart (${timeSlot}).
-4. "NOVEL_EXPLORATION": Fresh sonic discovery adjacent to their taste footprint.
+ABSOLUTE REQUIREMENTS:
+1. DO NOT GUESS OR GENERATE RANDOM GENERIC AMBIENT/INSTRUMENTAL/INDIE TRACKS (e.g. Brian Eno, Marconi Union, Tycho) UNLESS THE USER'S HISTORY EXPLICITLY LISTS THEM!
+2. All 4 recommended tracks MUST belong to the EXACT SAME or CLOSELY ADJACENT musical universe, style, and genre as their demonstrated artists above (${artistsSummary}).
+   - If the user listens to Afrobeats/Amapiano: recommend celebrated songs from Burna Boy, Asake, Tems, Rema, Wizkid, Ayra Starr, Omah Lay, Fireboy DML, Kabza De Small, etc.
+   - If the user listens to Hip-Hop/Rap: recommend Kendrick Lamar, J. Cole, Drake, Travis Scott, 21 Savage, Future, Gunna, Metro Boomin, Baby Keem, etc.
+   - If the user listens to R&B/Soul: recommend SZA, Frank Ocean, Brent Faiyaz, Daniel Caesar, Giveon, Summer Walker, Steve Lacy, etc.
+   - If the user listens to Pop, Rock, Gospel, or Dance: stay strictly in that genre.
+3. Every song must be a REAL, HIGH-QUALITY track by real artists that a fan of ${artistsSummary} will genuinely love.
 
-Output strictly a valid JSON array of 4 objects matching this schema (no markdown, no backticks, no wrap):
+GENERATE 4 SONGS:
+1. "DOPAMINE_FLOW": An undeniable track with infectious groove matching their top artists' energy that triggers instant dopamine response.
+2. "PALATE_CLEANSER": A smoother, acoustic, or stripped-back vocal/instrumental track by a kindred artist in their genre that relieves auditory ear fatigue without feeling alien.
+3. "CHRONO_RESTORE": A song tailored for ${timeSlot} within their genre palette.
+4. "NOVEL_EXPLORATION": A fresh, exciting song from an adjacent or rising artist that fans of ${artistsSummary} love.
+
+Output strictly a valid JSON array of 4 objects matching this schema:
 [
   {
     "title": "Song Title",
     "artist": "Artist Name",
     "album": "Album Name",
     "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
-    "reason": "1-2 punchy sentences explaining why this track satisfies their auditory receptors and dopamine state right now.",
-    "confidence": 0.94
+    "reason": "1 concise sentence on why fans of ${artistsSummary.split(',')[0] || 'this genre'} love this track for ${timeSlot}.",
+    "confidence": 0.95
   }
 ]
 `.trim();
@@ -643,7 +657,7 @@ Output strictly a valid JSON array of 4 objects matching this schema (no markdow
       for (const model of this.preferredModels) {
         try {
           const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 8000)
+            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 10000)
           );
 
           const callPromise = this.ai.models.generateContent({
@@ -651,9 +665,9 @@ Output strictly a valid JSON array of 4 objects matching this schema (no markdow
             contents: prompt,
             config: {
               systemInstruction:
-                "You are TuneMind's Chief Cognitive Music Discovery AI. Output strictly valid JSON arrays only. Recommend real, existing songs.",
+                "You are TuneMind's Chief Cognitive Music Discovery AI. Output strictly valid JSON arrays only. Recommend real, popular, genre-congruent songs matching user taste.",
               responseMimeType: 'application/json',
-              temperature: 0.5,
+              temperature: 0.4,
             },
           });
 
@@ -668,12 +682,12 @@ Output strictly a valid JSON array of 4 objects matching this schema (no markdow
                 isAiGenerated: true,
                 modelUsed: model,
                 recommendations: parsed.map(item => ({
-                  title: String(item.title || 'Untitled Track'),
-                  artist: String(item.artist || 'Unknown Artist'),
+                  title: String(item.title || 'Discovery Track'),
+                  artist: String(item.artist || 'Featured Artist'),
                   album: item.album ? String(item.album) : null,
                   category: String(item.category || 'DOPAMINE_FLOW'),
-                  reason: String(item.reason || `Curated for your ${timeSlot} cognitive state.`),
-                  confidence: Math.min(1.0, Math.max(0.7, Number(item.confidence) || 0.88))
+                  reason: String(item.reason || `Curated for your ${timeSlot} cognitive state based on your listening pattern.`),
+                  confidence: Math.min(1.0, Math.max(0.7, Number(item.confidence) || 0.92))
                 }))
               };
             }
@@ -689,121 +703,163 @@ Output strictly a valid JSON array of 4 objects matching this schema (no markdow
       }
     }
 
-    // Heuristic fallbacks calibrated by time of day if Gemini key is offline
-    const isMorning = timeSlot.toLowerCase().includes('morning') || timeSlot.toLowerCase().includes('dawn');
-    const isNight = timeSlot.toLowerCase().includes('night') || timeSlot.toLowerCase().includes('evening');
+    // Genre-Aware Adaptive Fallback (replaces generic ambient with genre-matched music)
+    const lowerArtists = artistsSummary.toLowerCase();
+    const isAfro = lowerArtists.includes('afro') || lowerArtists.includes('amapiano') || lowerArtists.includes('burna') || lowerArtists.includes('wizkid') || lowerArtists.includes('rema') || lowerArtists.includes('asake') || lowerArtists.includes('tems');
+    const isHipHop = lowerArtists.includes('hip') || lowerArtists.includes('rap') || lowerArtists.includes('drake') || lowerArtists.includes('kendrick') || lowerArtists.includes('cole') || lowerArtists.includes('travis');
+    const isRnB = lowerArtists.includes('r&b') || lowerArtists.includes('soul') || lowerArtists.includes('sza') || lowerArtists.includes('ocean') || lowerArtists.includes('faiyaz');
 
-    const heuristicRecs = isMorning
-      ? [
-          {
-            title: "Weightless",
-            artist: "Marconi Union",
-            album: "Weightless",
-            category: "CHRONO_RESTORE",
-            reason: "Carefully paced 60 BPM tempo facilitates alpha brainwave entrainment during morning awakening.",
-            confidence: 0.95
-          },
-          {
-            title: "Daylight",
-            artist: "Matt Duncan",
-            album: "Soft Danger",
-            category: "DOPAMINE_FLOW",
-            reason: "Warm brass arrangement and mid-tempo groove stimulates dopamine release without acoustic overload.",
-            confidence: 0.91
-          },
-          {
-            title: "Breathe",
-            artist: "Télépopmusik",
-            album: "Genetic World",
-            category: "PALATE_CLEANSER",
-            reason: "Silky acoustic textures provide a frequency palate cleanse from compressed modern mixes.",
-            confidence: 0.89
-          },
-          {
-            title: "Awake",
-            artist: "Tycho",
-            album: "Awake",
-            category: "NOVEL_EXPLORATION",
-            reason: "Analog synth sweeps and organic percussion broaden your sonic genome for daily focus.",
-            confidence: 0.93
-          }
-        ]
-      : isNight
-      ? [
-          {
-            title: "An Ending (Ascent)",
-            artist: "Brian Eno",
-            album: "Apollo",
-            category: "CHRONO_RESTORE",
-            reason: "Slow attack synthesizer pads relieve acoustic hair-cell tension and support evening parasympathetic shift.",
-            confidence: 0.96
-          },
-          {
-            title: "Resonance",
-            artist: "HOME",
-            album: "Odyssey",
-            category: "DOPAMINE_FLOW",
-            reason: "Warm analog warmth and gentle synthwave pacing delivers calm dopamine reinforcement.",
-            confidence: 0.92
-          },
-          {
-            title: "Avril 14th",
-            artist: "Aphex Twin",
-            album: "Drukqs",
-            category: "PALATE_CLEANSER",
-            reason: "Acoustic prepared piano transients clear auditory habituation from heavy electronic percussion.",
-            confidence: 0.94
-          },
-          {
-            title: "Midnight City",
-            artist: "M83",
-            album: "Hurry Up, We're Dreaming",
-            category: "NOVEL_EXPLORATION",
-            reason: "Expansive dynamic headroom matches late-night auditory receptivity.",
-            confidence: 0.90
-          }
-        ]
-      : [
-          {
-            title: "Intro",
-            artist: "The xx",
-            album: "xx",
-            category: "DOPAMINE_FLOW",
-            reason: "Minimalist bass groove and crisp snare hits sustain midday motor entrainment and focus.",
-            confidence: 0.94
-          },
-          {
-            title: "Electric Feel",
-            artist: "MGMT",
-            album: "Oracular Spectacular",
-            category: "PALATE_CLEANSER",
-            reason: "Funk-infused rhythm breaks midday cognitive fatigue and resets repetitive habituation.",
-            confidence: 0.91
-          },
-          {
-            title: "Sunset Lover",
-            artist: "Petit Biscuit",
-            album: "Presence",
-            category: "CHRONO_RESTORE",
-            reason: "Sunlit vocal chops and gentle cadence align with afternoon focus recovery.",
-            confidence: 0.90
-          },
-          {
-            title: "Coffee",
-            artist: "Sylvan Esso",
-            album: "Sylvan Esso",
-            category: "NOVEL_EXPLORATION",
-            reason: "Syncopated claps and harmonic depth broaden dynamic listening bandwidth.",
-            confidence: 0.88
-          }
-        ];
+    let heuristicRecs: any[];
+
+    if (isAfro) {
+      heuristicRecs = [
+        {
+          title: "Last Last",
+          artist: "Burna Boy",
+          album: "Love, Damini",
+          category: "DOPAMINE_FLOW",
+          reason: "Toni Braxton sample cadence and infectious syncopated groove triggers instantaneous dopamine entrainment.",
+          confidence: 0.96
+        },
+        {
+          title: "Free Mind",
+          artist: "Tems",
+          album: "For Broken Ears",
+          category: "PALATE_CLEANSER",
+          reason: "Intimate acoustic guitar chords and raw vocal dynamics clear auditory receptor habituation.",
+          confidence: 0.94
+        },
+        {
+          title: "Calm Down",
+          artist: "Rema",
+          album: "Rave & Climax",
+          category: "CHRONO_RESTORE",
+          reason: "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.",
+          confidence: 0.95
+        },
+        {
+          title: "Lonely At The Top",
+          artist: "Asake",
+          album: "Work of Art",
+          category: "NOVEL_EXPLORATION",
+          reason: "Acoustic log drum undertones and introspective lyricism expand your current rotation.",
+          confidence: 0.93
+        }
+      ];
+    } else if (isHipHop) {
+      heuristicRecs = [
+        {
+          title: "Middle Child",
+          artist: "J. Cole",
+          album: "Middle Child",
+          category: "DOPAMINE_FLOW",
+          reason: "Crisp horn fanfare and punchy 808 cadence stimulate dopamine release and sustained flow.",
+          confidence: 0.95
+        },
+        {
+          title: "PRIDE.",
+          artist: "Kendrick Lamar",
+          album: "DAMN.",
+          category: "PALATE_CLEANSER",
+          reason: "Warbled guitars and relaxed vocal pacing provide complete ear fatigue relief.",
+          confidence: 0.94
+        },
+        {
+          title: "Snooze",
+          artist: "SZA",
+          album: "SOS",
+          category: "CHRONO_RESTORE",
+          reason: "Velvety chord progressions and laid-back tempo harmonize with your circadian rhythm.",
+          confidence: 0.96
+        },
+        {
+          title: "family ties",
+          artist: "Baby Keem & Kendrick Lamar",
+          album: "The Melodic Blue",
+          category: "NOVEL_EXPLORATION",
+          reason: "Dynamic brass modulation and beat shifts expand your listening horizon.",
+          confidence: 0.92
+        }
+      ];
+    } else if (isRnB) {
+      heuristicRecs = [
+        {
+          title: "Kill Bill",
+          artist: "SZA",
+          album: "SOS",
+          category: "DOPAMINE_FLOW",
+          reason: "Bouncy bassline and crisp vocal hooks trigger sustained auditory pleasure.",
+          confidence: 0.96
+        },
+        {
+          title: "Pink + White",
+          artist: "Frank Ocean",
+          album: "Blonde",
+          category: "PALATE_CLEANSER",
+          reason: "Stripped piano and acoustic guitar reset sensory saturation effortlessly.",
+          confidence: 0.97
+        },
+        {
+          title: "Dead Man Walking",
+          artist: "Brent Faiyaz",
+          album: "Wasteland",
+          category: "CHRONO_RESTORE",
+          reason: "Lush orchestral strings and slow cadence deliver perfect temporal balance.",
+          confidence: 0.93
+        },
+        {
+          title: "Bad Habit",
+          artist: "Steve Lacy",
+          album: "Gemini Rights",
+          category: "NOVEL_EXPLORATION",
+          reason: "Lo-fi guitar hooks and funky harmonies push taste boundaries with zero friction.",
+          confidence: 0.94
+        }
+      ];
+    } else {
+      heuristicRecs = [
+        {
+          title: "Blinding Lights",
+          artist: "The Weeknd",
+          album: "After Hours",
+          category: "DOPAMINE_FLOW",
+          reason: "Driving 80s synth progression and relentless groove deliver peak engagement.",
+          confidence: 0.95
+        },
+        {
+          title: "Levitating",
+          artist: "Dua Lipa",
+          album: "Future Nostalgia",
+          category: "NOVEL_EXPLORATION",
+          reason: "Nu-disco funk rhythm and energetic tempo expand current listening patterns.",
+          confidence: 0.93
+        },
+        {
+          title: "Redbone",
+          artist: "Childish Gambino",
+          album: "\"Awaken, My Love!\"",
+          category: "PALATE_CLEANSER",
+          reason: "Warm 70s soul bassline and falsetto reset compressed ear fatigue.",
+          confidence: 0.96
+        },
+        {
+          title: "Stay",
+          artist: "The Kid LAROI & Justin Bieber",
+          album: "F*CK LOVE 3: OVER YOU",
+          category: "CHRONO_RESTORE",
+          reason: "Upbeat tempo and bright harmonic cadence boost cognitive alertness.",
+          confidence: 0.92
+        }
+      ];
+    }
 
     return {
       status: 'ok',
       isAiGenerated: false,
-      modelUsed: 'chrono-acoustic-heuristic',
+      modelUsed: 'heuristic-taste-aligned',
       recommendations: heuristicRecs
     };
   }
 }
+
 
