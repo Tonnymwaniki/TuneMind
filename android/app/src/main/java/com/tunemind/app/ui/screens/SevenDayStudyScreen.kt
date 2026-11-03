@@ -90,8 +90,9 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
         for (i in 0..6) map[i] = mutableListOf()
         val tempCal = Calendar.getInstance()
         historyState.tracks.forEach { track ->
-            if (track.lastObservedAppearanceAtMs > 0) {
-                tempCal.timeInMillis = track.lastObservedAppearanceAtMs
+            val appearanceMs = track.lastObservedAppearanceAtMs
+            if (appearanceMs != null && appearanceMs > 0L) {
+                tempCal.timeInMillis = appearanceMs
                 val dow = (tempCal.get(Calendar.DAY_OF_WEEK) + 5) % 7
                 map[dow]?.add(track)
             }
@@ -164,10 +165,12 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
         vaultTracks.map { it.recoveryProgress }.average().toFloat().coerceIn(0.25f, 0.98f)
     } else 0.88f
     val circadianParity = when (vm.currentTimeSlot) {
-        TimeSlot.MORNING_AWAKENING -> 0.94f
-        TimeSlot.MIDDAY_FOCUS -> 0.86f
-        TimeSlot.EVENING_EXPLORATION -> 0.80f
-        TimeSlot.NIGHT_RESTORATION -> 0.92f
+        TimeSlot.EARLY_MORNING -> 0.94f
+        TimeSlot.MORNING -> 0.90f
+        TimeSlot.AFTERNOON -> 0.84f
+        TimeSlot.EVENING -> 0.80f
+        TimeSlot.NIGHT -> 0.88f
+        TimeSlot.LATE_NIGHT -> 0.95f
     }
 
     val radarValues = remember(selectedDayIndex, currentReceptorScore, dynamicHeadroom, bassSaturation, vocalRecovery, circadianParity) {
@@ -887,15 +890,19 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
         )
 
         val activeSlot = vm.currentTimeSlot
+        data class CircadianWindowItem(val slot: TimeSlot, val title: String, val subtitle: String)
+
         val circadianWindows = listOf(
-            Triple(TimeSlot.MORNING_AWAKENING, "Morning Awakening", "06:00 - 11:00 • Linguistic & Melody Absorption (92% Receptive)"),
-            Triple(TimeSlot.MIDDAY_FOCUS, "Midday Focus", "11:00 - 16:00 • Steady Rhythm & Motor Entrainment (84% Receptive)"),
-            Triple(TimeSlot.EVENING_EXPLORATION, "Evening Exploration", "16:00 - 21:00 • Harmonic Novelty & Sonic Discovery (78% Receptive)"),
-            Triple(TimeSlot.NIGHT_RESTORATION, "Night Restoration", "21:00 - 06:00 • Sensory Decompression & Ambient Timbres (95% Receptive)")
+            CircadianWindowItem(TimeSlot.EARLY_MORNING, "Dawn Awakening", "05:00 - 08:00 • Linguistic & Melody Absorption (94% Receptive)"),
+            CircadianWindowItem(TimeSlot.MORNING, "Morning Focus", "08:00 - 12:00 • Steady Harmonic Flow & Cognitive Entrainment (90% Receptive)"),
+            CircadianWindowItem(TimeSlot.AFTERNOON, "Afternoon Receptivity", "12:00 - 17:00 • Rhythm Stability & Motor Entrainment (84% Receptive)"),
+            CircadianWindowItem(TimeSlot.EVENING, "Evening Wind-Down", "17:00 - 21:00 • Timbre Diversity & Exploratory Rest (80% Receptive)"),
+            CircadianWindowItem(TimeSlot.NIGHT, "Night Listening", "21:00 - 24:00 • Deeper Soundscapes & Dynamic Headroom (88% Receptive)"),
+            CircadianWindowItem(TimeSlot.LATE_NIGHT, "Late Night Deep Dive", "00:00 - 05:00 • Ambient Textures & Hair-Cell Recovery (95% Receptive)")
         )
 
-        circadianWindows.forEach { (slot, title, subtitle) ->
-            val isCurrentSlot = slot == activeSlot
+        circadianWindows.forEach { item ->
+            val isCurrentSlot = item.slot == activeSlot
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = if (isCurrentSlot) DeepObsidianAmber.CardElevated else DeepObsidianAmber.CardBackground,
@@ -915,7 +922,7 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = title,
+                                text = item.title,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = DeepObsidianAmber.TextPrimary
@@ -938,7 +945,7 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                             }
                         }
                         Text(
-                            text = subtitle,
+                            text = item.subtitle,
                             fontSize = 10.sp,
                             color = DeepObsidianAmber.TextSecondary
                         )
