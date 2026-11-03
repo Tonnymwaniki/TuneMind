@@ -317,6 +317,17 @@ fun TuneMindTopAppBar(
 
         // Top Right Utility Controls (AI Crate, DSP Link, Graphic EQ, Switchboard)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Satiety Lab quick shortcut
+            IconButton(
+                onClick = { onNavigate(Screen.Fatigue.route) },
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.cardSurface)
+            ) {
+                Icon(Icons.Outlined.LocalFireDepartment, contentDescription = "Satiety Lab", tint = DeepObsidianAmber.SatietyEmber, modifier = Modifier.size(18.dp))
+            }
+
             // AI Discovery Crate quick shortcut
             IconButton(
                 onClick = { onNavigate(Screen.AiDiscovery.route) },
@@ -401,10 +412,10 @@ fun TuneMindBottomNavigationBar(
     currentRoute: String?,
     onTabSelected: (String) -> Unit
 ) {
+    // 4 Streamlined, Uncongested Core Tabs: Pulse, Crate, Timeline, Intel
     val items = listOf(
         Screen.Home,
         Screen.AiDiscovery,
-        Screen.Fatigue,
         Screen.History,
         Screen.SevenDayStudy
     )
@@ -436,7 +447,7 @@ fun TuneMindBottomNavigationBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -444,16 +455,14 @@ fun TuneMindBottomNavigationBar(
                     val selected = when (screen) {
                         Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route)
                         Screen.AiDiscovery -> currentRoute == Screen.AiDiscovery.route
-                        Screen.Fatigue -> currentRoute in listOf(Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
                         Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
-                        Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route)
+                        Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route, Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
                         else -> currentRoute == screen.route
                     }
 
                     val sectionAccent = when (screen) {
                         Screen.Home -> DeepObsidianAmber.EQBassCyan
                         Screen.AiDiscovery -> DeepObsidianAmber.PrimaryAccent
-                        Screen.Fatigue -> DeepObsidianAmber.SatietyEmber
                         Screen.History -> DeepObsidianAmber.NeuralViolet
                         Screen.SevenDayStudy -> DeepObsidianAmber.CircadianMorning
                         else -> DeepObsidianAmber.PrimaryAccent

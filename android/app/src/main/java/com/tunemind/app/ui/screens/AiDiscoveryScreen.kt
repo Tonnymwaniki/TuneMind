@@ -761,14 +761,17 @@ private fun CalibrateTasteDialog(
     var newAnchorInput by remember { mutableStateOf("") }
     val suggestedGenres = remember {
         listOf(
+            "Bongo Flava",
+            "Mbosso",
+            "Diamond Platnumz",
+            "Harmonize",
+            "Marioo",
             "Afrobeats",
+            "Amapiano",
             "Hip-Hop",
             "R&B / Soul",
-            "Amapiano",
-            "Pop / Synthwave",
             "Dancehall",
-            "Neo-Soul / Jazz",
-            "Indie / Alt"
+            "Pop / Synthwave"
         )
     }
 
@@ -820,7 +823,7 @@ private fun CalibrateTasteDialog(
                         modifier = Modifier.weight(1f),
                         placeholder = {
                             Text(
-                                "e.g. Burna Boy, Drake, Afrobeats...",
+                                "e.g. Mbosso, Bongo Flava, Diamond, Afrobeats...",
                                 fontSize = 11.sp,
                                 color = DeepObsidianAmber.TextSecondary.copy(alpha = 0.6f)
                             )

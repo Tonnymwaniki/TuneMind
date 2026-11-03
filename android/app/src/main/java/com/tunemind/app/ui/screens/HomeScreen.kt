@@ -254,6 +254,17 @@ fun HomeScreen(
                 }
 
                 IconButton(
+                    onClick = onOpenFatigue,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(DeepObsidianAmber.CardElevated)
+                        .border(1.dp, DeepObsidianAmber.SatietyEmber.copy(alpha = 0.4f), CircleShape)
+                ) {
+                    Icon(Icons.Outlined.LocalFireDepartment, contentDescription = "Satiety Lab", tint = DeepObsidianAmber.SatietyEmber, modifier = Modifier.size(16.dp))
+                }
+
+                IconButton(
                     onClick = onOpenMoments,
                     modifier = Modifier
                         .size(34.dp)
@@ -765,6 +776,46 @@ fun HomeScreen(
                         fontFamily = FontFamily.Monospace,
                         color = colors.secondaryText.copy(alpha = 0.7f)
                     )
+                }
+
+                // Dedicated Satiety Lab & Cooldown Entrypoint
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SatietyEmber.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenFatigue() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                Icons.Outlined.LocalFireDepartment,
+                                contentDescription = null,
+                                tint = DeepObsidianAmber.SatietyEmber,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "RECEPTOR SATIETY LAB // COOLDOWN",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.SatietyEmber,
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+                        Text(
+                            text = "DIAGNOSE >",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                    }
                 }
             }
 

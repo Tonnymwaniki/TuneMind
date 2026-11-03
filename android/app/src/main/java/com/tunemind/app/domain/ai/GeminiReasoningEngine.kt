@@ -428,8 +428,9 @@ object GeminiReasoningEngine {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
             .filter { it.isNotBlank() }
             .distinct()
-        val allArtists = (observedArtists + userTasteAnchors).distinct().filter { it.isNotBlank() }
-        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Afrobeats, Hip-Hop, R&B, Pop, Contemporary" }
+        // Explicit user taste anchors take top precedence
+        val allArtists = (userTasteAnchors + observedArtists).distinct().filter { it.isNotBlank() }
+        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Bongo Flava, Afrobeats, Hip-Hop, R&B, Pop" }
 
         // 1. Prepare JSON payload for Backend Discovery Proxy
         val payload = JSONObject().apply {
@@ -523,6 +524,9 @@ object GeminiReasoningEngine {
                 The listener actively listens to: $artistsSummary.
                 Do NOT guess or recommend generic ambient or indie songs unless their history shows it.
                 Every recommended song MUST belong to the EXACT SAME or kindred musical genre, style, and vibe as $artistsSummary.
+                - If the listener listens to Bongo Flava / East African Afro-Pop (e.g. Mbosso, Diamond Platnumz, Harmonize, Rayvanny, Zuchu, Marioo, Ali Kiba, Jux, Otile Brown, Nandy): recommend genuine, celebrated Bongo Flava hits from Mbosso, Diamond Platnumz, Marioo, Rayvanny, Harmonize, Zuchu, Alikiba, Otile Brown, etc.! NEVER substitute Western ambient music for Bongo Flava!
+                - If the listener listens to Afrobeats/Amapiano: recommend Burna Boy, Asake, Tems, Rema, Wizkid, Ayra Starr, etc.
+                - If the listener listens to Hip-Hop/Rap: recommend Kendrick Lamar, J. Cole, Drake, Travis Scott, etc.
                 Time of Day: $timeSlotLabel | Satiety Level: $satietyPercent%.
 
                 Recommend 4 real, acclaimed, hit-tier or cult-favorite songs:
@@ -583,11 +587,19 @@ object GeminiReasoningEngine {
 
         // 3. Genre-Aware Adaptive Baseline Fallback (replaces generic ambient with genre-matched music)
         val lower = artistsSummary.lowercase()
+        val isBongo = lower.contains("bongo") || lower.contains("mbosso") || lower.contains("diamond") || lower.contains("platnumz") || lower.contains("harmonize") || lower.contains("rayvanny") || lower.contains("zuchu") || lower.contains("marioo") || lower.contains("kiba") || lower.contains("kusah") || lower.contains("jux") || lower.contains("otile") || lower.contains("nandy") || lower.contains("swahili") || lower.contains("east africa")
         val isAfro = lower.contains("afro") || lower.contains("amapiano") || lower.contains("burna") || lower.contains("wizkid") || lower.contains("rema") || lower.contains("asake") || lower.contains("tems")
         val isHipHop = lower.contains("hip") || lower.contains("rap") || lower.contains("drake") || lower.contains("kendrick") || lower.contains("cole") || lower.contains("travis")
         val isRnB = lower.contains("r&b") || lower.contains("soul") || lower.contains("sza") || lower.contains("ocean") || lower.contains("faiyaz")
 
-        val fallbackItems = if (isAfro) {
+        val fallbackItems = if (isBongo) {
+            listOf(
+                Triple("Huwezi Jua", "Mbosso", "Soulful Bongo Flava melody and acoustic guitar chords deliver immediate emotional entrainment."),
+                Triple("Mi Amor", "Marioo & Jovial", "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue."),
+                Triple("Komasava", "Diamond Platnumz", "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness."),
+                Triple("Sukari", "Zuchu", "Playful taarab-infused acoustic cadence and bright melodic hooks expand listening horizons.")
+            )
+        } else if (isAfro) {
             listOf(
                 Triple("Last Last", "Burna Boy", "Toni Braxton sample cadence and infectious syncopated groove triggers instantaneous dopamine entrainment."),
                 Triple("Free Mind", "Tems", "Intimate acoustic guitar chords and raw vocal dynamics clear auditory receptor habituation."),

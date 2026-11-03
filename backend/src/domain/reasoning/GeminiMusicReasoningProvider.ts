@@ -601,8 +601,9 @@ Respond ONLY with a valid JSON object matching:
     const satiety = payload.satietyLevel ?? 45;
     const observedArtists = (payload.topArtists || []).filter(Boolean);
     const userAnchors = (payload.userTasteAnchors || []).filter(Boolean);
-    const allArtists = Array.from(new Set([...observedArtists, ...userAnchors]));
-    const artistsSummary = allArtists.slice(0, 8).join(', ') || 'Afrobeats, Hip-Hop, R&B, Pop, Contemporary';
+    // User taste anchors take highest precedence over raw observed tracks
+    const allArtists = Array.from(new Set([...userAnchors, ...observedArtists]));
+    const artistsSummary = allArtists.slice(0, 8).join(', ') || 'Bongo Flava, Afrobeats, Hip-Hop, R&B, Pop';
 
     const recentTracksSummary = (payload.recentTracks || [])
       .slice(0, 8)
@@ -628,6 +629,7 @@ ${recentTracksSummary}
 ABSOLUTE REQUIREMENTS:
 1. DO NOT GUESS OR GENERATE RANDOM GENERIC AMBIENT/INSTRUMENTAL/INDIE TRACKS (e.g. Brian Eno, Marconi Union, Tycho) UNLESS THE USER'S HISTORY EXPLICITLY LISTS THEM!
 2. All 4 recommended tracks MUST belong to the EXACT SAME or CLOSELY ADJACENT musical universe, style, and genre as their demonstrated artists above (${artistsSummary}).
+   - If the user listens to Bongo Flava / East African Afro-Pop (e.g. Mbosso, Diamond Platnumz, Harmonize, Rayvanny, Zuchu, Marioo, Ali Kiba, Jux, Otile Brown, Nandy, Kusah, Lava Lava): recommend genuine, beloved Bongo Flava hits from Mbosso, Diamond Platnumz, Marioo, Rayvanny, Harmonize, Zuchu, Alikiba, Otile Brown, etc.! NEVER substitute Western ambient music for Bongo Flava!
    - If the user listens to Afrobeats/Amapiano: recommend celebrated songs from Burna Boy, Asake, Tems, Rema, Wizkid, Ayra Starr, Omah Lay, Fireboy DML, Kabza De Small, etc.
    - If the user listens to Hip-Hop/Rap: recommend Kendrick Lamar, J. Cole, Drake, Travis Scott, 21 Savage, Future, Gunna, Metro Boomin, Baby Keem, etc.
    - If the user listens to R&B/Soul: recommend SZA, Frank Ocean, Brent Faiyaz, Daniel Caesar, Giveon, Summer Walker, Steve Lacy, etc.
@@ -705,13 +707,49 @@ Output strictly a valid JSON array of 4 objects matching this schema:
 
     // Genre-Aware Adaptive Fallback (replaces generic ambient with genre-matched music)
     const lowerArtists = artistsSummary.toLowerCase();
+    const isBongo = lowerArtists.includes('bongo') || lowerArtists.includes('mbosso') || lowerArtists.includes('diamond') || lowerArtists.includes('platnumz') || lowerArtists.includes('harmonize') || lowerArtists.includes('rayvanny') || lowerArtists.includes('zuchu') || lowerArtists.includes('marioo') || lowerArtists.includes('kiba') || lowerArtists.includes('kusah') || lowerArtists.includes('jux') || lowerArtists.includes('otile') || lowerArtists.includes('nandy') || lowerArtists.includes('swahili') || lowerArtists.includes('east africa');
     const isAfro = lowerArtists.includes('afro') || lowerArtists.includes('amapiano') || lowerArtists.includes('burna') || lowerArtists.includes('wizkid') || lowerArtists.includes('rema') || lowerArtists.includes('asake') || lowerArtists.includes('tems');
     const isHipHop = lowerArtists.includes('hip') || lowerArtists.includes('rap') || lowerArtists.includes('drake') || lowerArtists.includes('kendrick') || lowerArtists.includes('cole') || lowerArtists.includes('travis');
     const isRnB = lowerArtists.includes('r&b') || lowerArtists.includes('soul') || lowerArtists.includes('sza') || lowerArtists.includes('ocean') || lowerArtists.includes('faiyaz');
 
     let heuristicRecs: any[];
 
-    if (isAfro) {
+    if (isBongo) {
+      heuristicRecs = [
+        {
+          title: "Huwezi Jua",
+          artist: "Mbosso",
+          album: "Khan",
+          category: "DOPAMINE_FLOW",
+          reason: "Soulful Bongo Flava melody and acoustic guitar chords deliver immediate emotional entrainment.",
+          confidence: 0.98
+        },
+        {
+          title: "Mi Amor",
+          artist: "Marioo & Jovial",
+          album: "The Kid You Know",
+          category: "PALATE_CLEANSER",
+          reason: "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue.",
+          confidence: 0.95
+        },
+        {
+          title: "Komasava",
+          artist: "Diamond Platnumz",
+          album: "Komasava",
+          category: "CHRONO_RESTORE",
+          reason: "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness.",
+          confidence: 0.96
+        },
+        {
+          title: "Sukari",
+          artist: "Zuchu",
+          album: "I Am Zuchu",
+          category: "NOVEL_EXPLORATION",
+          reason: "Playful taarab-infused acoustic cadence and bright melodic hooks expand listening horizons.",
+          confidence: 0.94
+        }
+      ];
+    } else if (isAfro) {
       heuristicRecs = [
         {
           title: "Last Last",
