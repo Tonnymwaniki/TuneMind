@@ -165,12 +165,23 @@ class TuneMindViewModel : ViewModel() {
     }
     private val momentDao by lazy { db?.musicalMomentDao() }
     private val audioDao by lazy { db?.audioDeviceDao() }
+    private val aiRecDao by lazy { db?.aiRecommendationDao() }
 
     private val _musicalMomentsState = MutableStateFlow(MusicalMomentsState())
     val musicalMomentsState: StateFlow<MusicalMomentsState> = _musicalMomentsState.asStateFlow()
 
     private val _hearingInsightsState = MutableStateFlow(HearingInsightsState())
     val hearingInsightsState: StateFlow<HearingInsightsState> = _hearingInsightsState.asStateFlow()
+
+    // Persistent Chrono AI Recommendation Crate
+    private val _aiDiscoveryCrate = MutableStateFlow<List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>>(emptyList())
+    val aiDiscoveryCrate: StateFlow<List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>> = _aiDiscoveryCrate.asStateFlow()
+
+    private val _savedAiRecommendations = MutableStateFlow<List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>>(emptyList())
+    val savedAiRecommendations: StateFlow<List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>> = _savedAiRecommendations.asStateFlow()
+
+    private val _isDiscovering = MutableStateFlow<Boolean>(false)
+    val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
 
     // Cooldown Vault Persistence
     private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
@@ -328,6 +339,27 @@ class TuneMindViewModel : ViewModel() {
         refreshGeminiState()
         requestGeminiSessionReasoning()
 
+        // Observe AI Recommendation Crate from Room DB
+        viewModelScope.launch {
+            try {
+                aiRecDao?.observeAll()?.collect { crate ->
+                    _aiDiscoveryCrate.value = crate
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeCrate notice: ${t.message}")
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                aiRecDao?.observeSaved()?.collect { saved ->
+                    _savedAiRecommendations.value = saved
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeSaved notice: ${t.message}")
+            }
+        }
+
         // Initialize Telemetry Reasoning Report & schedule periodic Worker
         AppHolder.context?.let { ctx ->
             _reasoningReport.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.getLatestReport(ctx)
@@ -335,12 +367,21 @@ class TuneMindViewModel : ViewModel() {
         }
         refreshTelemetryReasoningReport()
         recomputeAdaptiveTheme()
+        triggerChronoDiscovery(forceRefresh = false)
 
-        // 60-second periodic time-period transition watcher
+        // 60-second periodic time-period transition watcher & auto-changing chrono discovery
         viewModelScope.launch {
+            var lastObservedSlot = currentTimeSlot
             while (true) {
                 kotlinx.coroutines.delay(60_000L)
-                recomputeAdaptiveTheme()
+                val currentSlot = currentTimeSlot
+                if (currentSlot != lastObservedSlot) {
+                    lastObservedSlot = currentSlot
+                    recomputeAdaptiveTheme()
+                    triggerChronoDiscovery(forceRefresh = true)
+                } else {
+                    recomputeAdaptiveTheme()
+                }
             }
         }
 
@@ -848,6 +889,79 @@ class TuneMindViewModel : ViewModel() {
             }
             refreshRecommendations()
         }
+    }
+
+    /**
+     * Triggers Chrono-Receptive AI Discovery for current daypart & telemetry growth.
+     * When [forceRefresh] is true, generates a fresh Neuro-Pulse even if crate has recommendations.
+     */
+    fun triggerChronoDiscovery(forceRefresh: Boolean = false) {
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch {
+            if (_isDiscovering.value) return@launch
+
+            val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name }
+            if (!forceRefresh && existingForSlot.isNotEmpty()) {
+                return@launch
+            }
+
+            _isDiscovering.value = true
+            val prefProvider = getPreferredProviderId(ctx)
+            val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
+            val satiety = minOf(95, maxOf(18, currentPlays * 22))
+
+            val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
+                context = ctx,
+                recentTracks = _historyState.value.tracks,
+                vaultTracks = _vaultState.value,
+                timeSlotKey = currentTimeSlot.name,
+                timeSlotLabel = currentTimeSlot.label,
+                satietyPercent = satiety,
+                preferredProviderId = prefProvider
+            )
+
+            if (newRecs.isNotEmpty()) {
+                withContext(Dispatchers.IO) {
+                    aiRecDao?.insertAll(newRecs)
+                }
+            }
+            _isDiscovering.value = false
+        }
+    }
+
+    fun toggleSaveRecommendation(id: String, isSaved: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            aiRecDao?.updateSaved(id, isSaved)
+        }
+    }
+
+    fun markRecommendationPlayed(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            aiRecDao?.markPlayed(id)
+        }
+    }
+
+    fun deleteRecommendation(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            aiRecDao?.deleteById(id)
+        }
+    }
+
+    fun playAiRecommendation(
+        context: android.content.Context,
+        item: com.tunemind.app.domain.recommendation.AiRecommendationEntity
+    ): com.tunemind.app.provider.PlaybackLaunchResult {
+        markRecommendationPlayed(item.id)
+        val track = com.tunemind.app.domain.recommendation.RecommendedTrack(
+            id = item.id,
+            title = item.title,
+            artist = item.artist,
+            album = item.album,
+            reason = item.reason,
+            confidence = item.confidence,
+            suggestedProviderId = item.suggestedProviderId
+        )
+        return playRecommendation(context, track)
     }
 }
 

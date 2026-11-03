@@ -48,7 +48,8 @@ fun HomeScreen(
     onOpenWeeklyReport: () -> Unit,
     onOpenStudy: () -> Unit = {},
     onOpenMoments: () -> Unit = {},
-    onOpenHearing: () -> Unit = {}
+    onOpenHearing: () -> Unit = {},
+    onOpenAiDiscovery: () -> Unit = {}
 ) {
     val state by vm.homeState.collectAsState()
     val scrollState = rememberScrollState()
@@ -842,6 +843,104 @@ fun HomeScreen(
                     ) {
                         Text(
                             text = "VIEW MATRIX",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                        Icon(
+                            Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // CHRONO-RECEPTIVE AI DISCOVERY CRATE TILE (Gemini 3.8 Auto-Evolving Discoveries)
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                    )
+                )
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenAiDiscovery() }
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "CHRONO AI CRATE // AUTO-EVOLVING",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "DAYPART SYNCED",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.Success,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "${vm.currentTimeSlot.label} Discoveries",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.TextPrimary
+                        )
+                        Text(
+                            text = "Songs your ears and dopamine crave based on your daily data growth.",
+                            fontSize = 11.sp,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "OPEN CRATE",
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

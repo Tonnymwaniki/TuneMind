@@ -578,4 +578,232 @@ Respond ONLY with a valid JSON object matching:
       ]
     };
   }
+
+  /**
+   * Generates chronobiological, auto-evolving music recommendations based on
+   * time of day, auditory receptor satiety, and observed listening growth.
+   */
+  async generateChronoDiscovery(payload: {
+    timeSlot?: string;
+    recentTracks?: Array<{ title?: string; artist?: string; plays?: number; satiety?: number }>;
+    satietyLevel?: number;
+    vaultTracks?: Array<{ title?: string; artist?: string }>;
+    topArtists?: string[];
+    preferredProvider?: string;
+  }): Promise<{ status: string; isAiGenerated: boolean; modelUsed: string; recommendations: any[] }> {
+    const available = await this.isAvailable();
+    if (!available || !this.ai) {
+      this.initClient();
+    }
+
+    const timeSlot = payload.timeSlot || 'Morning Focus';
+    const satiety = payload.satietyLevel ?? 45;
+    const artistsSummary = (payload.topArtists || []).filter(Boolean).slice(0, 5).join(', ') || 'Electronic, Indie, R&B, Lo-Fi';
+    const recentTracksSummary = (payload.recentTracks || [])
+      .slice(0, 6)
+      .map(t => `- "${t.title}" by ${t.artist} (${t.plays || 1} plays, satiety ~${t.satiety || 30}%)`)
+      .join('\n') || '- Emerging listening baseline.';
+
+    const vaultSummary = (payload.vaultTracks || [])
+      .slice(0, 4)
+      .map(v => `- "${v.title}" by ${v.artist}`)
+      .join(', ') || 'None';
+
+    const prompt = `
+Context:
+- Current Daypart / Time Context: ${timeSlot}
+- Auditory Satiety Level: ${satiety}% (0% = totally rested, 100% = severe auditory receptor habituation)
+- Observed Familiar Artists: ${artistsSummary}
+- Resting in Cooldown Vault (satiated, do not recommend): ${vaultSummary}
+- Recent Listening History:
+${recentTracksSummary}
+
+Task:
+You are TuneMind's Cognitive Audio Discovery AI. Recommend exactly 4 real, distinct, high-quality songs that will satisfy the listener's auditory receptors and dopamine response for this exact time of day.
+Ensure each song addresses a distinct cognitive need:
+1. "DOPAMINE_FLOW": Sustained focus or groove entrainment without sensory fatigue.
+2. "PALATE_CLEANSER": Frequency or timbre contrast (e.g. acoustic, strings, or math rock) that resets auditory habituation.
+3. "CHRONO_RESTORE": Perfectly attuned to the circadian daypart (${timeSlot}).
+4. "NOVEL_EXPLORATION": Fresh sonic discovery adjacent to their taste footprint.
+
+Output strictly a valid JSON array of 4 objects matching this schema (no markdown, no backticks, no wrap):
+[
+  {
+    "title": "Song Title",
+    "artist": "Artist Name",
+    "album": "Album Name",
+    "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
+    "reason": "1-2 punchy sentences explaining why this track satisfies their auditory receptors and dopamine state right now.",
+    "confidence": 0.94
+  }
+]
+`.trim();
+
+    if (this.ai && !this.hasInvalidKey) {
+      for (const model of this.preferredModels) {
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout calling ${model}`)), 8000)
+          );
+
+          const callPromise = this.ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              systemInstruction:
+                "You are TuneMind's Chief Cognitive Music Discovery AI. Output strictly valid JSON arrays only. Recommend real, existing songs.",
+              responseMimeType: 'application/json',
+              temperature: 0.5,
+            },
+          });
+
+          const res = await Promise.race([callPromise, timeoutPromise]);
+          const text = res?.text;
+          if (text) {
+            const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(clean);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return {
+                status: 'ok',
+                isAiGenerated: true,
+                modelUsed: model,
+                recommendations: parsed.map(item => ({
+                  title: String(item.title || 'Untitled Track'),
+                  artist: String(item.artist || 'Unknown Artist'),
+                  album: item.album ? String(item.album) : null,
+                  category: String(item.category || 'DOPAMINE_FLOW'),
+                  reason: String(item.reason || `Curated for your ${timeSlot} cognitive state.`),
+                  confidence: Math.min(1.0, Math.max(0.7, Number(item.confidence) || 0.88))
+                }))
+              };
+            }
+          }
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          console.info(`[GeminiMusicReasoningProvider] Discovery model ${model}: ${msg.slice(0, 100)}`);
+          if (msg.includes('API_KEY_INVALID') || msg.includes('PERMISSION_DENIED')) {
+            this.hasInvalidKey = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Heuristic fallbacks calibrated by time of day if Gemini key is offline
+    const isMorning = timeSlot.toLowerCase().includes('morning') || timeSlot.toLowerCase().includes('dawn');
+    const isNight = timeSlot.toLowerCase().includes('night') || timeSlot.toLowerCase().includes('evening');
+
+    const heuristicRecs = isMorning
+      ? [
+          {
+            title: "Weightless",
+            artist: "Marconi Union",
+            album: "Weightless",
+            category: "CHRONO_RESTORE",
+            reason: "Carefully paced 60 BPM tempo facilitates alpha brainwave entrainment during morning awakening.",
+            confidence: 0.95
+          },
+          {
+            title: "Daylight",
+            artist: "Matt Duncan",
+            album: "Soft Danger",
+            category: "DOPAMINE_FLOW",
+            reason: "Warm brass arrangement and mid-tempo groove stimulates dopamine release without acoustic overload.",
+            confidence: 0.91
+          },
+          {
+            title: "Breathe",
+            artist: "Télépopmusik",
+            album: "Genetic World",
+            category: "PALATE_CLEANSER",
+            reason: "Silky acoustic textures provide a frequency palate cleanse from compressed modern mixes.",
+            confidence: 0.89
+          },
+          {
+            title: "Awake",
+            artist: "Tycho",
+            album: "Awake",
+            category: "NOVEL_EXPLORATION",
+            reason: "Analog synth sweeps and organic percussion broaden your sonic genome for daily focus.",
+            confidence: 0.93
+          }
+        ]
+      : isNight
+      ? [
+          {
+            title: "An Ending (Ascent)",
+            artist: "Brian Eno",
+            album: "Apollo",
+            category: "CHRONO_RESTORE",
+            reason: "Slow attack synthesizer pads relieve acoustic hair-cell tension and support evening parasympathetic shift.",
+            confidence: 0.96
+          },
+          {
+            title: "Resonance",
+            artist: "HOME",
+            album: "Odyssey",
+            category: "DOPAMINE_FLOW",
+            reason: "Warm analog warmth and gentle synthwave pacing delivers calm dopamine reinforcement.",
+            confidence: 0.92
+          },
+          {
+            title: "Avril 14th",
+            artist: "Aphex Twin",
+            album: "Drukqs",
+            category: "PALATE_CLEANSER",
+            reason: "Acoustic prepared piano transients clear auditory habituation from heavy electronic percussion.",
+            confidence: 0.94
+          },
+          {
+            title: "Midnight City",
+            artist: "M83",
+            album: "Hurry Up, We're Dreaming",
+            category: "NOVEL_EXPLORATION",
+            reason: "Expansive dynamic headroom matches late-night auditory receptivity.",
+            confidence: 0.90
+          }
+        ]
+      : [
+          {
+            title: "Intro",
+            artist: "The xx",
+            album: "xx",
+            category: "DOPAMINE_FLOW",
+            reason: "Minimalist bass groove and crisp snare hits sustain midday motor entrainment and focus.",
+            confidence: 0.94
+          },
+          {
+            title: "Electric Feel",
+            artist: "MGMT",
+            album: "Oracular Spectacular",
+            category: "PALATE_CLEANSER",
+            reason: "Funk-infused rhythm breaks midday cognitive fatigue and resets repetitive habituation.",
+            confidence: 0.91
+          },
+          {
+            title: "Sunset Lover",
+            artist: "Petit Biscuit",
+            album: "Presence",
+            category: "CHRONO_RESTORE",
+            reason: "Sunlit vocal chops and gentle cadence align with afternoon focus recovery.",
+            confidence: 0.90
+          },
+          {
+            title: "Coffee",
+            artist: "Sylvan Esso",
+            album: "Sylvan Esso",
+            category: "NOVEL_EXPLORATION",
+            reason: "Syncopated claps and harmonic depth broaden dynamic listening bandwidth.",
+            confidence: 0.88
+          }
+        ];
+
+    return {
+      status: 'ok',
+      isAiGenerated: false,
+      modelUsed: 'chrono-acoustic-heuristic',
+      recommendations: heuristicRecs
+    };
+  }
 }
+

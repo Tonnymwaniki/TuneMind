@@ -410,6 +410,211 @@ object GeminiReasoningEngine {
         )
     }
 
+    /**
+     * Generates persistent Chrono-Receptive AI recommendations stored into user's crate.
+     * Evaluates time of day, auditory satiety, and longitudinal listening telemetry.
+     */
+    suspend fun generateChronoCrateRecommendations(
+        context: Context,
+        recentTracks: List<TrackMemoryEntry>,
+        vaultTracks: List<VaultTrack>,
+        timeSlotKey: String,
+        timeSlotLabel: String,
+        satietyPercent: Int,
+        preferredProviderId: String
+    ): List<com.tunemind.app.domain.recommendation.AiRecommendationEntity> = withContext(Dispatchers.IO) {
+        val topArtists = recentTracks.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct().take(5)
+
+        // 1. Prepare JSON payload for Backend Discovery Proxy
+        val payload = JSONObject().apply {
+            put("timeSlot", timeSlotLabel)
+            put("satietyLevel", satietyPercent)
+            put("preferredProvider", preferredProviderId)
+            val artistsArray = JSONArray()
+            topArtists.forEach { artistsArray.put(it) }
+            put("topArtists", artistsArray)
+
+            val tracksArray = JSONArray()
+            recentTracks.take(8).forEach { t ->
+                tracksArray.put(JSONObject().apply {
+                    put("title", t.title)
+                    put("artist", t.artist)
+                    put("plays", t.distinctAppearanceCount)
+                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                })
+            }
+            put("recentTracks", tracksArray)
+
+            val vaultArray = JSONArray()
+            vaultTracks.forEach { v ->
+                vaultArray.put(JSONObject().apply {
+                    put("title", v.title)
+                    put("artist", v.artist)
+                })
+            }
+            put("vaultTracks", vaultArray)
+        }
+
+        // Try Backend Proxy first
+        val backendUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+        if (backendUrl.isNotBlank()) {
+            try {
+                val url = URL("$backendUrl/api/v1/reasoning/discovery")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.setRequestProperty("Accept", "application/json")
+                conn.connectTimeout = 12_000
+                conn.readTimeout = 22_000
+                conn.doOutput = true
+
+                OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
+                    writer.write(payload.toString())
+                    writer.flush()
+                }
+
+                if (conn.responseCode in 200..299) {
+                    val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+                    val root = JSONObject(text)
+                    val recsArray = root.optJSONArray("recommendations")
+                    if (recsArray != null && recsArray.length() > 0) {
+                        val list = mutableListOf<com.tunemind.app.domain.recommendation.AiRecommendationEntity>()
+                        for (i in 0 until recsArray.length()) {
+                            val item = recsArray.getJSONObject(i)
+                            list.add(
+                                com.tunemind.app.domain.recommendation.AiRecommendationEntity(
+                                    id = "ai-crate-${UUID.randomUUID()}",
+                                    title = item.optString("title", "Discovery Track"),
+                                    artist = item.optString("artist", "Featured Artist"),
+                                    album = item.optString("album", null),
+                                    category = item.optString("category", "DOPAMINE_FLOW"),
+                                    reason = item.optString("reason", "Curated for your $timeSlotLabel dopamine state."),
+                                    confidence = item.optDouble("confidence", 0.92).toFloat(),
+                                    timeSlotKey = timeSlotKey,
+                                    timeSlotLabel = timeSlotLabel,
+                                    recommendedAtMs = System.currentTimeMillis(),
+                                    suggestedProviderId = preferredProviderId,
+                                    telemetryBasisSummary = "Daypart: $timeSlotLabel • Satiety: $satietyPercent%"
+                                )
+                            )
+                        }
+                        return@withContext list
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Direct On-Device Gemini call if local key exists
+        val key = getApiKey(context)
+        if (key.isNotBlank()) {
+            val prompt = """
+                Context:
+                - Current Time Context: $timeSlotLabel
+                - Listener Satiety: $satietyPercent%
+                - Familiar Artists: ${topArtists.joinToString(", ").ifEmpty { "Indie, Ambient, Electronic" }}
+                - Songs on Cooldown: ${vaultTracks.joinToString(", ") { it.title }.ifEmpty { "None" }}
+
+                Recommend 4 real songs to satisfy the listener's auditory receptors and dopamine balance right now.
+                Output ONLY a JSON array of 4 objects matching:
+                [
+                  {
+                    "title": "Song Title",
+                    "artist": "Artist Name",
+                    "album": "Album Name",
+                    "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
+                    "reason": "1-2 sentences on why this fits their $timeSlotLabel state.",
+                    "confidence": 0.94
+                  }
+                ]
+            """.trimIndent()
+
+            val geminiResult = callGemini(
+                apiKey = key,
+                prompt = prompt,
+                systemInstruction = "Output valid JSON only. No markdown formatting, no code blocks.",
+                temperature = 0.5f,
+                maxTokens = 600
+            )
+
+            geminiResult.getOrNull()?.let { raw ->
+                try {
+                    val clean = raw.replace("```json", "").replace("```", "").trim()
+                    val array = JSONArray(clean)
+                    val list = mutableListOf<com.tunemind.app.domain.recommendation.AiRecommendationEntity>()
+                    for (i in 0 until array.length()) {
+                        val item = array.getJSONObject(i)
+                        list.add(
+                            com.tunemind.app.domain.recommendation.AiRecommendationEntity(
+                                id = "ai-crate-${UUID.randomUUID()}",
+                                title = item.optString("title", "Discovery Track"),
+                                artist = item.optString("artist", "Featured Artist"),
+                                album = item.optString("album", null),
+                                category = item.optString("category", "DOPAMINE_FLOW"),
+                                reason = item.optString("reason", "Curated for your $timeSlotLabel dopamine state."),
+                                confidence = item.optDouble("confidence", 0.92).toFloat(),
+                                timeSlotKey = timeSlotKey,
+                                timeSlotLabel = timeSlotLabel,
+                                recommendedAtMs = System.currentTimeMillis(),
+                                suggestedProviderId = preferredProviderId,
+                                telemetryBasisSummary = "Daypart: $timeSlotLabel • Satiety: $satietyPercent%"
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) return@withContext list
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 3. Heuristic baseline fallback
+        val isMorning = timeSlotLabel.contains("Morning", ignoreCase = true) || timeSlotLabel.contains("Dawn", ignoreCase = true)
+        val isNight = timeSlotLabel.contains("Night", ignoreCase = true) || timeSlotLabel.contains("Evening", ignoreCase = true)
+
+        val fallbackItems = if (isMorning) {
+            listOf(
+                Triple("Weightless", "Marconi Union", "60 BPM pacing promotes alpha brainwave entrainment during morning awakening."),
+                Triple("Daylight", "Matt Duncan", "Warm brass groove provides natural dopamine stimulation without acoustic overload."),
+                Triple("Breathe", "Télépopmusik", "Silky acoustic textures offer a frequency palate cleanse from compressed modern mixes."),
+                Triple("Awake", "Tycho", "Organic percussion and ambient analog synths prime focus receptors for the day.")
+            )
+        } else if (isNight) {
+            listOf(
+                Triple("An Ending (Ascent)", "Brian Eno", "Slow attack synth pads relieve acoustic hair-cell tension for evening restoration."),
+                Triple("Resonance", "HOME", "Warm analog warmth and gentle pacing delivers calm dopamine reinforcement."),
+                Triple("Avril 14th", "Aphex Twin", "Prepared acoustic piano transients clear auditory habituation from heavy percussion."),
+                Triple("Midnight City", "M83", "Expansive dynamic headroom matches late-night auditory receptivity.")
+            )
+        } else {
+            listOf(
+                Triple("Intro", "The xx", "Minimalist bass groove and crisp transient snare hits sustain midday motor entrainment."),
+                Triple("Electric Feel", "MGMT", "Funk-infused rhythm breaks midday cognitive fatigue and resets repetitive habituation."),
+                Triple("Sunset Lover", "Petit Biscuit", "Sunlit vocal chops and gentle cadence align with afternoon focus recovery."),
+                Triple("Coffee", "Sylvan Esso", "Syncopated claps and harmonic depth broaden dynamic listening bandwidth.")
+            )
+        }
+
+        fallbackItems.mapIndexed { idx, (t, a, r) ->
+            val cat = when (idx) {
+                0 -> "CHRONO_RESTORE"
+                1 -> "DOPAMINE_FLOW"
+                2 -> "PALATE_CLEANSER"
+                else -> "NOVEL_EXPLORATION"
+            }
+            com.tunemind.app.domain.recommendation.AiRecommendationEntity(
+                id = "ai-crate-fallback-${UUID.randomUUID()}",
+                title = t,
+                artist = a,
+                category = cat,
+                reason = r,
+                confidence = 0.90f,
+                timeSlotKey = timeSlotKey,
+                timeSlotLabel = timeSlotLabel,
+                recommendedAtMs = System.currentTimeMillis(),
+                suggestedProviderId = preferredProviderId,
+                telemetryBasisSummary = "Daypart: $timeSlotLabel • Satiety: $satietyPercent%"
+            )
+        }
+    }
+
     private const val PREFS_REPORT = "tunemind_telemetry_reasoning_prefs"
     private const val KEY_LATEST_REPORT = "latest_reasoning_report_json"
 

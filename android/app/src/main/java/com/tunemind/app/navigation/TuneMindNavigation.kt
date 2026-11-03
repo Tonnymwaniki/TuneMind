@@ -49,6 +49,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object ManualCooldown : Screen("manual_cooldown", "Add to Cooldown", Icons.Outlined.AddCircleOutline)
     object MusicalMoments : Screen("musical_moments", "Moments", Icons.Outlined.BookmarkBorder)
     object HearingInsights : Screen("hearing_insights", "Hearing", Icons.Outlined.Headphones)
+    object AiDiscovery : Screen("ai_discovery", "AI Crate", Icons.Outlined.AutoAwesome)
 }
 
 @Composable
@@ -107,8 +108,12 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                     onOpenWeeklyReport = { navController.navigate(Screen.WeeklyReport.route) },
                     onOpenStudy = { navController.navigate(Screen.SevenDayStudy.route) },
                     onOpenMoments = { navController.navigate(Screen.MusicalMoments.route) },
-                    onOpenHearing = { navController.navigate(Screen.HearingInsights.route) }
+                    onOpenHearing = { navController.navigate(Screen.HearingInsights.route) },
+                    onOpenAiDiscovery = { navController.navigate(Screen.AiDiscovery.route) }
                 )
+            }
+            composable(Screen.AiDiscovery.route) {
+                AiDiscoveryScreen(vm = vm, onBack = { navController.popBackStack() })
             }
             composable(Screen.MusicalMoments.route) {
                 MusicalMomentsScreen(vm = vm, onBack = { navController.popBackStack() })
@@ -299,6 +304,7 @@ fun TuneMindTopAppBar(
                         Screen.ManualCooldown.route -> "Manual Cooldown"
                         Screen.MusicalMoments.route -> "Musical Moments"
                         Screen.HearingInsights.route -> "Decibel Headroom"
+                        Screen.AiDiscovery.route -> "Neuro AI Crate"
                         else -> "TuneMind"
                     },
                     fontSize = 16.sp,
@@ -309,8 +315,19 @@ fun TuneMindTopAppBar(
             }
         }
 
-        // Top Right Utility Controls (DSP Link, Graphic EQ, Switchboard)
+        // Top Right Utility Controls (AI Crate, DSP Link, Graphic EQ, Switchboard)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // AI Discovery Crate quick shortcut
+            IconButton(
+                onClick = { onNavigate(Screen.AiDiscovery.route) },
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.cardSurface)
+            ) {
+                Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI Discovery Crate", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
+            }
+
             // Musical Moments quick shortcut
             IconButton(
                 onClick = { onNavigate(Screen.MusicalMoments.route) },
@@ -319,7 +336,7 @@ fun TuneMindTopAppBar(
                     .clip(RoundedCornerShape(8.dp))
                     .background(colors.cardSurface)
             ) {
-                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
+                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = colors.secondaryText, modifier = Modifier.size(18.dp))
             }
 
             // Hearing Insights quick shortcut

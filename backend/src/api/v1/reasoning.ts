@@ -98,6 +98,27 @@ router.post('/analyze', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/v1/reasoning/discovery
+ * Chronobiological music discovery endpoint. Generates 4 new songs tailored to the user's
+ * current daypart and dopamine/satiety state using Gemini 3.8 Flash with the backend's API_KEY.
+ */
+router.post('/discovery', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body || {};
+    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
+    const provider = new GeminiMusicReasoningProvider();
+    const result = await provider.generateChronoDiscovery(payload);
+    res.json(result);
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /discovery:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
  * GET /api/v1/reasoning/status
  * Returns the operational health and configuration state of the telemetry reasoning poller.
  */

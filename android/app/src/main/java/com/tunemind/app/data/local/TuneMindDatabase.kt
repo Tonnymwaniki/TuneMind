@@ -28,6 +28,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   3 — Listening study table.
  *   4 — Experiment + experiment_event tables.
  *   5 — Musical moments, audio device sessions, volume observations, and music providers.
+ *   6 — Persistent AI Recommendation Crate (chrono-receptive auto-evolving music discovery).
  */
 @Database(
     entities = [
@@ -38,10 +39,11 @@ import com.tunemind.app.domain.study.StudyEntity
         MusicalMomentEntity::class,
         AudioDeviceSessionEntity::class,
         VolumeObservationEntity::class,
-        MusicProviderEntity::class
+        MusicProviderEntity::class,
+        com.tunemind.app.domain.recommendation.AiRecommendationEntity::class
     ],
-    version = 5,
-    exportSchema = true,
+    version = 6,
+    exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
 
@@ -51,6 +53,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun musicalMomentDao(): MusicalMomentDao
     abstract fun audioDeviceDao(): AudioDeviceDao
     abstract fun musicProviderDao(): MusicProviderDao
+    abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
 
     companion object {
         private const val DATABASE_NAME = "tunemind.db"
@@ -64,7 +67,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
                     context.applicationContext,
                     TuneMindDatabase::class.java,
                     DATABASE_NAME,
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }
@@ -175,6 +178,32 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         capabilitiesJson TEXT NOT NULL
                     )
                 """.trimIndent())
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS ai_recommendation_crate (
+                        id TEXT PRIMARY KEY NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        album TEXT,
+                        category TEXT NOT NULL DEFAULT 'DOPAMINE_FLOW',
+                        reason TEXT NOT NULL,
+                        confidence REAL NOT NULL DEFAULT 0.88,
+                        timeSlotKey TEXT NOT NULL DEFAULT 'MORNING',
+                        timeSlotLabel TEXT NOT NULL DEFAULT 'Morning Focus',
+                        recommendedAtMs INTEGER NOT NULL,
+                        suggestedProviderId TEXT NOT NULL DEFAULT 'spotify',
+                        isSaved INTEGER NOT NULL DEFAULT 0,
+                        wasPlayed INTEGER NOT NULL DEFAULT 0,
+                        telemetryBasisSummary TEXT NOT NULL DEFAULT 'Based on recent listening patterns'
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_timeSlotKey ON ai_recommendation_crate(timeSlotKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_recommendedAtMs ON ai_recommendation_crate(recommendedAtMs)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isSaved ON ai_recommendation_crate(isSaved)")
             }
         }
     }
