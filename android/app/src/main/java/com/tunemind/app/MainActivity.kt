@@ -30,35 +30,62 @@ import com.tunemind.app.ui.theme.TuneMindTheme
 
 open class MainActivity : ComponentActivity() {
 
+    private var startupError: Throwable? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppHolder.context = applicationContext
+
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e("MainActivity", "UNCAUGHT EXCEPTION on thread ${thread.name}: ${throwable.message}", throwable)
+            startupError = throwable
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
 
         // Safe rebind attempt without touching component enabled settings
         forceRebindListener(this)
 
         enableEdgeToEdge()
-        setContent {
-            val vm: com.tunemind.app.ui.TuneMindViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-                factory = com.tunemind.app.ui.TuneMindViewModelFactory()
-            )
-            val adaptiveState by vm.adaptiveThemeState.collectAsState()
-
-            TuneMindTheme(adaptiveState = adaptiveState) {
-                var interceptedError by remember { mutableStateOf<Throwable?>(null) }
+        try {
+            setContent {
+                var interceptedError by remember { mutableStateOf(startupError) }
 
                 if (interceptedError != null) {
                     CrashDiagnosticsScreen(
                         error = interceptedError!!,
                         onReset = {
                             interceptedError = null
+                            try {
+                                com.tunemind.app.data.local.TuneMindDatabase.resetDatabase(applicationContext)
+                            } catch (_: Exception) {}
                             recreate()
                         }
                     )
                 } else {
-                    val navController = rememberNavController()
-                    TuneMindAppNavigation(navController = navController)
+                    val vm: com.tunemind.app.ui.TuneMindViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                        factory = com.tunemind.app.ui.TuneMindViewModelFactory()
+                    )
+                    val adaptiveState by vm.adaptiveThemeState.collectAsState()
+
+                    TuneMindTheme(adaptiveState = adaptiveState) {
+                        val navController = rememberNavController()
+                        TuneMindAppNavigation(navController = navController)
+                    }
                 }
+            }
+        } catch (t: Throwable) {
+            Log.e("MainActivity", "Fatal content initialization error: ${t.message}", t)
+            setContent {
+                CrashDiagnosticsScreen(
+                    error = t,
+                    onReset = {
+                        try {
+                            com.tunemind.app.data.local.TuneMindDatabase.resetDatabase(applicationContext)
+                        } catch (_: Exception) {}
+                        recreate()
+                    }
+                )
             }
         }
     }

@@ -898,52 +898,73 @@ class TuneMindViewModel : ViewModel() {
     fun triggerChronoDiscovery(forceRefresh: Boolean = false) {
         val ctx = AppHolder.context ?: return
         viewModelScope.launch {
-            if (_isDiscovering.value) return@launch
+            try {
+                if (_isDiscovering.value) return@launch
 
-            val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name }
-            if (!forceRefresh && existingForSlot.isNotEmpty()) {
-                return@launch
-            }
-
-            _isDiscovering.value = true
-            val prefProvider = getPreferredProviderId(ctx)
-            val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
-            val satiety = minOf(95, maxOf(18, currentPlays * 22))
-
-            val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
-                context = ctx,
-                recentTracks = _historyState.value.tracks,
-                vaultTracks = _vaultState.value,
-                timeSlotKey = currentTimeSlot.name,
-                timeSlotLabel = currentTimeSlot.label,
-                satietyPercent = satiety,
-                preferredProviderId = prefProvider
-            )
-
-            if (newRecs.isNotEmpty()) {
-                withContext(Dispatchers.IO) {
-                    aiRecDao?.insertAll(newRecs)
+                val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name }
+                if (!forceRefresh && existingForSlot.isNotEmpty()) {
+                    return@launch
                 }
+
+                _isDiscovering.value = true
+                val prefProvider = getPreferredProviderId(ctx)
+                val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
+                val satiety = minOf(95, maxOf(18, currentPlays * 22))
+
+                val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
+                    context = ctx,
+                    recentTracks = _historyState.value.tracks,
+                    vaultTracks = _vaultState.value,
+                    timeSlotKey = currentTimeSlot.name,
+                    timeSlotLabel = currentTimeSlot.label,
+                    satietyPercent = satiety,
+                    preferredProviderId = prefProvider
+                )
+
+                if (newRecs.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            aiRecDao?.insertAll(newRecs)
+                        } catch (t: Throwable) {
+                            android.util.Log.e("TuneMindVM", "aiRecDao insertAll error: ${t.message}", t)
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e("TuneMindVM", "triggerChronoDiscovery error: ${e.message}", e)
+            } finally {
+                _isDiscovering.value = false
             }
-            _isDiscovering.value = false
         }
     }
 
     fun toggleSaveRecommendation(id: String, isSaved: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
-            aiRecDao?.updateSaved(id, isSaved)
+            try {
+                aiRecDao?.updateSaved(id, isSaved)
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "toggleSaveRecommendation error: ${t.message}", t)
+            }
         }
     }
 
     fun markRecommendationPlayed(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            aiRecDao?.markPlayed(id)
+            try {
+                aiRecDao?.markPlayed(id)
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "markRecommendationPlayed error: ${t.message}", t)
+            }
         }
     }
 
     fun deleteRecommendation(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            aiRecDao?.deleteById(id)
+            try {
+                aiRecDao?.deleteById(id)
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "deleteRecommendation error: ${t.message}", t)
+            }
         }
     }
 

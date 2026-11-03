@@ -29,6 +29,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   4 — Experiment + experiment_event tables.
  *   5 — Musical moments, audio device sessions, volume observations, and music providers.
  *   6 — Persistent AI Recommendation Crate (chrono-receptive auto-evolving music discovery).
+ *   7 — Index and column constraint alignment for AI Recommendation Crate.
  */
 @Database(
     entities = [
@@ -42,7 +43,7 @@ import com.tunemind.app.domain.study.StudyEntity
         MusicProviderEntity::class,
         com.tunemind.app.domain.recommendation.AiRecommendationEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -63,13 +64,33 @@ abstract class TuneMindDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): TuneMindDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    TuneMindDatabase::class.java,
-                    DATABASE_NAME,
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
-                    .fallbackToDestructiveMigration()
-                    .build().also { INSTANCE = it }
+                INSTANCE ?: try {
+                    Room.databaseBuilder(
+                        context.applicationContext,
+                        TuneMindDatabase::class.java,
+                        DATABASE_NAME,
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_5_7)
+                        .fallbackToDestructiveMigration()
+                        .build().also { INSTANCE = it }
+                } catch (e: Throwable) {
+                    android.util.Log.e("TuneMindDB", "Database initialization fallback triggered: ${e.message}")
+                    Room.databaseBuilder(
+                        context.applicationContext,
+                        TuneMindDatabase::class.java,
+                        DATABASE_NAME,
+                    ).fallbackToDestructiveMigration()
+                        .build().also { INSTANCE = it }
+                }
+            }
+        }
+
+        fun resetDatabase(context: Context) {
+            try {
+                INSTANCE?.close()
+                INSTANCE = null
+                context.deleteDatabase(DATABASE_NAME)
+            } catch (e: Exception) {
+                android.util.Log.e("TuneMindDB", "Error resetting database", e)
             }
         }
 
@@ -183,27 +204,40 @@ abstract class TuneMindDatabase : RoomDatabase() {
 
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS ai_recommendation_crate")
                 db.execSQL("""
                     CREATE TABLE IF NOT EXISTS ai_recommendation_crate (
                         id TEXT PRIMARY KEY NOT NULL,
                         title TEXT NOT NULL,
                         artist TEXT NOT NULL,
                         album TEXT,
-                        category TEXT NOT NULL DEFAULT 'DOPAMINE_FLOW',
+                        category TEXT NOT NULL,
                         reason TEXT NOT NULL,
-                        confidence REAL NOT NULL DEFAULT 0.88,
-                        timeSlotKey TEXT NOT NULL DEFAULT 'MORNING',
-                        timeSlotLabel TEXT NOT NULL DEFAULT 'Morning Focus',
+                        confidence REAL NOT NULL,
+                        timeSlotKey TEXT NOT NULL,
+                        timeSlotLabel TEXT NOT NULL,
                         recommendedAtMs INTEGER NOT NULL,
-                        suggestedProviderId TEXT NOT NULL DEFAULT 'spotify',
-                        isSaved INTEGER NOT NULL DEFAULT 0,
-                        wasPlayed INTEGER NOT NULL DEFAULT 0,
-                        telemetryBasisSummary TEXT NOT NULL DEFAULT 'Based on recent listening patterns'
+                        suggestedProviderId TEXT NOT NULL,
+                        isSaved INTEGER NOT NULL,
+                        wasPlayed INTEGER NOT NULL,
+                        telemetryBasisSummary TEXT NOT NULL
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_timeSlotKey ON ai_recommendation_crate(timeSlotKey)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_recommendedAtMs ON ai_recommendation_crate(recommendedAtMs)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isSaved ON ai_recommendation_crate(isSaved)")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_5_6.migrate(db)
+            }
+        }
+
+        val MIGRATION_5_7 = object : Migration(5, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_5_6.migrate(db)
             }
         }
     }
