@@ -49,7 +49,9 @@ fun HomeScreen(
     onOpenStudy: () -> Unit = {},
     onOpenMoments: () -> Unit = {},
     onOpenHearing: () -> Unit = {},
-    onOpenAiDiscovery: () -> Unit = {}
+    onOpenAiDiscovery: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val state by vm.homeState.collectAsState()
     val scrollState = rememberScrollState()

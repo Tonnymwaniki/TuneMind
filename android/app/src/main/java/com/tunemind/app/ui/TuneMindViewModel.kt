@@ -51,6 +51,19 @@ data class HearingInsightsState(
     val safetyGuidance: String = "Listening exposure within safe acoustic threshold (<80 dB)."
 )
 
+data class UserProfileState(
+    val name: String = "Tonny",
+    val email: String = "tonny@tunemind.neuro",
+    val tier: String = "Acoustic Intelligence Tier 1",
+    val archetype: String = "Late-Night Deep Explorer",
+    val archetypeDescription: String = "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals."
+)
+
+enum class AudioFocusBehavior {
+    DUCK,
+    PAUSE
+}
+
 data class NowPlayingObservation(
     val title: String? = null,
     val artist: String? = null,
@@ -201,10 +214,12 @@ class TuneMindViewModel : ViewModel() {
     val userTasteAnchors: StateFlow<List<String>> = _userTasteAnchors.asStateFlow()
 
     private fun loadTasteAnchorsFromPrefs(): List<String> {
-        val ctx = AppHolder.context ?: return emptyList()
+        val ctx = AppHolder.context ?: return listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop")
         val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
-        val raw = prefs.getString("taste_anchors", null) ?: return emptyList()
-        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val raw = prefs.getString("taste_anchors", null)
+            ?: return listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop")
+        val list = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        return if (list.isEmpty()) listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop") else list
     }
 
     fun saveTasteAnchors(anchors: List<String>) {
@@ -229,6 +244,100 @@ class TuneMindViewModel : ViewModel() {
         val current = _userTasteAnchors.value.toMutableList()
         if (current.remove(anchor)) {
             saveTasteAnchors(current)
+        }
+    }
+
+    // User Profile & Acoustic Archetype
+    private val _userProfile = MutableStateFlow(loadUserProfile())
+    val userProfile: StateFlow<UserProfileState> = _userProfile.asStateFlow()
+
+    private fun loadUserProfile(): UserProfileState {
+        val ctx = AppHolder.context ?: return UserProfileState()
+        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        return UserProfileState(
+            name = prefs.getString("user_name", "Tonny") ?: "Tonny",
+            email = prefs.getString("user_email", "tonny@tunemind.neuro") ?: "tonny@tunemind.neuro",
+            tier = prefs.getString("user_tier", "Acoustic Intelligence Tier 1") ?: "Acoustic Intelligence Tier 1",
+            archetype = prefs.getString("user_archetype", "Late-Night Deep Explorer") ?: "Late-Night Deep Explorer",
+            archetypeDescription = prefs.getString("user_archetype_desc", "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals.")
+                ?: "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals."
+        )
+    }
+
+    fun updateUserProfile(name: String, archetype: String) {
+        val current = _userProfile.value
+        val updated = current.copy(name = name, archetype = archetype)
+        _userProfile.value = updated
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("user_name", name)
+            .putString("user_archetype", archetype)
+            .apply()
+    }
+
+    // System Switchboard: Battery Optimization, Audio Focus, Decibel Safety Guard
+    private val _isBatteryOptimizationIgnored = MutableStateFlow<Boolean>(false)
+    val isBatteryOptimizationIgnored: StateFlow<Boolean> = _isBatteryOptimizationIgnored.asStateFlow()
+
+    private val _audioFocusBehavior = MutableStateFlow(loadAudioFocusBehavior())
+    val audioFocusBehavior: StateFlow<AudioFocusBehavior> = _audioFocusBehavior.asStateFlow()
+
+    private val _isDecibelSafetyAlertEnabled = MutableStateFlow(loadDecibelSafetyAlert())
+    val isDecibelSafetyAlertEnabled: StateFlow<Boolean> = _isDecibelSafetyAlertEnabled.asStateFlow()
+
+    private fun loadAudioFocusBehavior(): AudioFocusBehavior {
+        val ctx = AppHolder.context ?: return AudioFocusBehavior.DUCK
+        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("audio_focus_behavior", "DUCK")
+        return runCatching { AudioFocusBehavior.valueOf(raw ?: "DUCK") }.getOrDefault(AudioFocusBehavior.DUCK)
+    }
+
+    fun setAudioFocusBehavior(behavior: AudioFocusBehavior) {
+        _audioFocusBehavior.value = behavior
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("audio_focus_behavior", behavior.name).apply()
+    }
+
+    private fun loadDecibelSafetyAlert(): Boolean {
+        val ctx = AppHolder.context ?: return true
+        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        return prefs.getBoolean("decibel_safety_alert", true)
+    }
+
+    fun setDecibelSafetyAlertEnabled(enabled: Boolean) {
+        _isDecibelSafetyAlertEnabled.value = enabled
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("decibel_safety_alert", enabled).apply()
+    }
+
+    fun checkBatteryOptimization(context: android.content.Context) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+            _isBatteryOptimizationIgnored.value = pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+        } else {
+            _isBatteryOptimizationIgnored.value = true
+        }
+    }
+
+    fun requestIgnoreBatteryOptimization(context: android.content.Context) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            try {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                try {
+                    val fallbackIntent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(fallbackIntent)
+                } catch (_: Exception) {}
+            }
         }
     }
 

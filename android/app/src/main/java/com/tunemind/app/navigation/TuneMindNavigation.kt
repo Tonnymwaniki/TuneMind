@@ -126,7 +126,9 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                     onOpenStudy = { navController.navigate(Screen.SevenDayStudy.route) },
                     onOpenMoments = { navController.navigate(Screen.MusicalMoments.route) },
                     onOpenHearing = { navController.navigate(Screen.HearingInsights.route) },
-                    onOpenAiDiscovery = { navController.navigate(Screen.AiDiscovery.route) }
+                    onOpenAiDiscovery = { navController.navigate(Screen.AiDiscovery.route) },
+                    onOpenProfile = { navController.navigate(Screen.Profile.route) },
+                    onOpenSettings = { navController.navigate(Screen.Settings.route) }
                 )
             }
             composable(Screen.AiDiscovery.route) {
@@ -410,15 +412,45 @@ fun TuneMindTopAppBar(
                 }
             }
 
-            // Studio Switchboard Settings
+            // User Profile (Sonic Taste Genome & Archetype)
+            IconButton(
+                onClick = { onNavigate(Screen.Profile.route) },
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                DeepObsidianAmber.NeuralViolet.copy(alpha = 0.85f),
+                                DeepObsidianAmber.ElectricViolet.copy(alpha = 0.85f)
+                            )
+                        )
+                    )
+                    .border(1.dp, DeepObsidianAmber.NeuralViolet, CircleShape)
+            ) {
+                Text(
+                    text = "T",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+
+            // Studio Switchboard Settings (Gear Icon)
             IconButton(
                 onClick = { onNavigate(Screen.Settings.route) },
                 modifier = Modifier
                     .size(34.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(colors.cardSurface)
+                    .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
             ) {
-                Icon(Icons.Outlined.Tune, contentDescription = "Switchboard", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Outlined.Settings,
+                    contentDescription = "Studio Settings",
+                    tint = colors.primaryAccent,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
