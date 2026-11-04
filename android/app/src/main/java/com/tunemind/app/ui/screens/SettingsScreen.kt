@@ -30,7 +30,7 @@ import com.tunemind.app.ui.theme.*
 
 @Composable
 fun SettingsScreen(
-    vm: TuneMindViewModel? = null,
+    vm: TuneMindViewModel,
     onBack: () -> Unit,
     onOpenCrossApp: () -> Unit,
     onOpenWeeklyReport: () -> Unit
@@ -42,9 +42,9 @@ fun SettingsScreen(
     val providers = remember { registry.getInstalledProviders() }
     var showResetDialog by remember { mutableStateOf(false) }
 
-    val isBatteryIgnored by (vm?.isBatteryOptimizationIgnored ?: remember { mutableStateOf(true) }).collectAsState()
-    val audioFocusBehavior by (vm?.audioFocusBehavior ?: remember { mutableStateOf(com.tunemind.app.ui.AudioFocusBehavior.DUCK) }).collectAsState()
-    val isDecibelSafetyEnabled by (vm?.isDecibelSafetyAlertEnabled ?: remember { mutableStateOf(true) }).collectAsState()
+    val isBatteryIgnored by vm.isBatteryOptimizationIgnored.collectAsState()
+    val audioFocusBehavior by vm.audioFocusBehavior.collectAsState()
+    val isDecibelSafetyEnabled by vm.isDecibelSafetyAlertEnabled.collectAsState()
 
     var persistentListener by remember { mutableStateOf(true) }
     var fatigueSensitivity by remember { mutableStateOf(0.75f) }
@@ -56,7 +56,7 @@ fun SettingsScreen(
     val colors = TuneMindTheme.colors
 
     LaunchedEffect(Unit) {
-        vm?.checkBatteryOptimization(context)
+        vm.checkBatteryOptimization(context)
     }
 
     Column(
@@ -168,7 +168,7 @@ fun SettingsScreen(
 
                 if (!isBatteryIgnored) {
                     Button(
-                        onClick = { vm?.requestIgnoreBatteryOptimization(context) },
+                        onClick = { vm.requestIgnoreBatteryOptimization(context) },
                         colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.Warning),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -225,7 +225,7 @@ fun SettingsScreen(
 
                     Switch(
                         checked = isDecibelSafetyEnabled,
-                        onCheckedChange = { vm?.setDecibelSafetyAlertEnabled(it) }
+                        onCheckedChange = { vm.setDecibelSafetyAlertEnabled(it) }
                     )
                 }
 
@@ -272,7 +272,7 @@ fun SettingsScreen(
                     border = BorderStroke(1.dp, if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.DUCK) colors.primaryAccent else DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { vm?.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) }
+                        .clickable { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) }
                 ) {
                     Row(
                         modifier = Modifier.padding(10.dp),
@@ -281,7 +281,7 @@ fun SettingsScreen(
                     ) {
                         RadioButton(
                             selected = audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.DUCK,
-                            onClick = { vm?.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) },
+                            onClick = { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) },
                             colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
                         )
                         Column {
@@ -298,7 +298,7 @@ fun SettingsScreen(
                     border = BorderStroke(1.dp, if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.PAUSE) colors.primaryAccent else DeepObsidianAmber.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { vm?.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) }
+                        .clickable { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) }
                 ) {
                     Row(
                         modifier = Modifier.padding(10.dp),
@@ -307,7 +307,7 @@ fun SettingsScreen(
                     ) {
                         RadioButton(
                             selected = audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.PAUSE,
-                            onClick = { vm?.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) },
+                            onClick = { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) },
                             colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
                         )
                         Column {
@@ -377,8 +377,7 @@ fun SettingsScreen(
                             checked = alwaysAsk,
                             onCheckedChange = {
                                 alwaysAsk = it
-                                vm?.setAlwaysAskEnabled(context, it)
-                                    ?: registry.setAlwaysAskEnabled(it)
+                                vm.setAlwaysAskEnabled(context, it)
                             }
                         )
                     }
@@ -402,8 +401,7 @@ fun SettingsScreen(
                         border = BorderStroke(1.dp, if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder),
                         modifier = Modifier.fillMaxWidth().clickable {
                             selectedProviderId = provider.providerId
-                            vm?.setPreferredProviderId(context, provider.providerId)
-                                ?: registry.setPreferredProviderId(provider.providerId)
+                            vm.setPreferredProviderId(context, provider.providerId)
                         }
                     ) {
                         Row(
@@ -415,8 +413,7 @@ fun SettingsScreen(
                                 selected = isSelected,
                                 onClick = {
                                     selectedProviderId = provider.providerId
-                                    vm?.setPreferredProviderId(context, provider.providerId)
-                                        ?: registry.setPreferredProviderId(provider.providerId)
+                                    vm.setPreferredProviderId(context, provider.providerId)
                                 },
                                 colors = RadioButtonDefaults.colors(selectedColor = DeepObsidianAmber.PrimaryAccent)
                             )
@@ -582,7 +579,7 @@ fun SettingsScreen(
                     Button(
                         onClick = {
                             showResetDialog = false
-                            vm?.resetListeningProfile()
+                            vm.resetListeningProfile()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.Error, contentColor = DeepObsidianAmber.TextPrimary)
                     ) {
