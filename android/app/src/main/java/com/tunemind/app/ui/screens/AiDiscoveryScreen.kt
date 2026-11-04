@@ -81,6 +81,9 @@ fun AiDiscoveryScreen(
 
     var selectedFilterTab by remember { mutableIntStateOf(0) } // 0 = Active Daypart, 1 = Stored Archive, 2 = Saved Gems
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     var trackPendingPlayerChoice by remember { mutableStateOf<AiRecommendationEntity?>(null) }
     val installedProviders = remember(context) { vm.getInstalledProviders(context) }
     val activeSessionPackage = homeState.nowPlaying?.sourcePackage
@@ -98,9 +101,6 @@ fun AiDiscoveryScreen(
             }
         }
     }
-
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     // Rotating Spool Animation
     val infiniteTransition = rememberInfiniteTransition(label = "crateAnimations")
