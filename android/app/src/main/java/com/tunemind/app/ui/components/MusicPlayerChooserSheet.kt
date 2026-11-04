@@ -13,6 +13,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -130,22 +132,33 @@ fun MusicPlayerChooserSheet(
                     val isBackgroundActive = activeSessionPackage != null &&
                             activeSessionPackage.contains(provider.packageName, ignoreCase = true)
 
-                    val brandColor = when (provider.providerId) {
-                        "boomplay" -> Color(0xFFFF6B00)
-                        "youtube_music" -> Color(0xFFFF0033)
-                        "spotify" -> Color(0xFF1DB954)
-                        "apple_music" -> Color(0xFFFA243C)
-                        "audiomack" -> Color(0xFFFFA200)
+                    val brandColor = when {
+                        provider.providerId == "boomplay" -> Color(0xFFFF6B00)
+                        provider.providerId == "youtube_music" -> Color(0xFFFF0033)
+                        provider.providerId == "spotify" -> Color(0xFF1DB954)
+                        provider.providerId == "apple_music" -> Color(0xFFFA243C)
+                        provider.providerId == "audiomack" -> Color(0xFFFFA200)
+                        provider.providerId == "local_files" -> DeepObsidianAmber.PrimaryAccent
+                        provider.providerId.startsWith("pkg_") -> DeepObsidianAmber.NeuralViolet
                         else -> DeepObsidianAmber.SecondaryAccent
                     }
 
-                    val playerSubtitle = when (provider.providerId) {
-                        "boomplay" -> "Afrobeats, Bongo Flava & Amapiano"
-                        "youtube_music" -> "YouTube Music Ecosystem"
-                        "spotify" -> "Spotify Global Audio"
-                        "apple_music" -> "Apple Music Library"
-                        "audiomack" -> "Audiomack Stream"
+                    val playerSubtitle = when {
+                        provider.providerId == "boomplay" -> "Afrobeats, Bongo Flava & Amapiano"
+                        provider.providerId == "youtube_music" -> "YouTube Music Ecosystem"
+                        provider.providerId == "spotify" -> "Spotify Global Audio"
+                        provider.providerId == "apple_music" -> "Apple Music Library"
+                        provider.providerId == "audiomack" -> "Audiomack Stream"
+                        provider.providerId == "local_files" -> "Play from device audio storage & local offline tracks"
+                        provider.providerId.startsWith("pkg_") -> "Installed Device Audio Player (${provider.packageName})"
                         else -> "System Default Player"
+                    }
+
+                    val playerIcon = when {
+                        isBackgroundActive -> Icons.Filled.GraphicEq
+                        provider.providerId == "local_files" -> Icons.Filled.FolderOpen
+                        provider.providerId.startsWith("pkg_") -> Icons.Filled.MusicNote
+                        else -> Icons.Filled.Headphones
                     }
 
                     Surface(
@@ -179,7 +192,7 @@ fun MusicPlayerChooserSheet(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = if (isBackgroundActive) Icons.Filled.GraphicEq else Icons.Filled.Headphones,
+                                    imageVector = playerIcon,
                                     contentDescription = provider.displayName,
                                     tint = brandColor,
                                     modifier = Modifier.size(20.dp)
