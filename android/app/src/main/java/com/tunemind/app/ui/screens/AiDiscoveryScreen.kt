@@ -368,7 +368,7 @@ fun AiDiscoveryScreen(
                         )
                         Text(
                             text = if (selectedFilterTab == 2) "Tap bookmark on any card to save tracks permanently."
-                            else "Tap 'RE-ROLL' above to let Gemini synthesize 10 tailored discoveries.",
+                            else "Tap 'RE-ROLL' above to synthesize 10 tailored discoveries.",
                             fontSize = 11.sp,
                             color = DeepObsidianAmber.TextSecondary,
                             lineHeight = 15.sp
@@ -961,7 +961,7 @@ private fun CalibrateTasteDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    text = "Lock in your musical DNA so Gemini never defaults to generic ambient guesswork. Enter the artists and genres you actually love.",
+                    text = "Lock in your musical DNA so recommendations never default to generic ambient guesswork. Enter the artists and genres you actually love.",
                     fontSize = 12.sp,
                     color = DeepObsidianAmber.TextSecondary,
                     lineHeight = 17.sp
@@ -1023,7 +1023,7 @@ private fun CalibrateTasteDialog(
                 if (currentAnchors.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "ACTIVE TASTE ANCHORS (BOUND TO GEMINI):",
+                            text = "ACTIVE TASTE ANCHORS (BOUND TO TUNE-MIND):",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

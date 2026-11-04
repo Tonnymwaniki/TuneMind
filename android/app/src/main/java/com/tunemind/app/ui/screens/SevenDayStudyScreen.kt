@@ -782,7 +782,7 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "GEMINI 3.8 FLASH // COGNITIVE REASONING",
+                            text = "NEURO-COGNITIVE REASONING MATRIX",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -800,7 +800,7 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                         )
                     ) {
                         Text(
-                            text = if (report?.isGeminiGenerated == true) "GEMINI 3.8 LIVE" else "NEURO BASELINE",
+                            text = if (report?.isGeminiGenerated == true) "INTELLIGENCE ACTIVE" else "NEURO BASELINE",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -981,7 +981,7 @@ fun SevenDayStudyScreen(vm: TuneMindViewModel, onBack: () -> Unit) {
                     vm.requestGeminiSessionReasoning()
                     delay(1200)
                     isRecalibrating = false
-                    recalibrationSuccessMessage = "Intelligence matrix recalibrated with latest telemetry via Gemini 3.8 Flash!"
+                    recalibrationSuccessMessage = "Intelligence matrix recalibrated with latest telemetry!"
                     delay(3500)
                     recalibrationSuccessMessage = null
                 }

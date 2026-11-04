@@ -602,7 +602,7 @@ fun SongProfile(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
                             Text(
-                                text = "GEMINI ACOUSTIC DOSSIER",
+                                text = "NEURO-ACOUSTIC PROFILE DOSSIER",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -641,7 +641,7 @@ fun SongProfile(
                             modifier = Modifier.padding(vertical = 8.dp)
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = DeepObsidianAmber.PrimaryAccent, strokeWidth = 2.dp)
-                            Text("Gemini is analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
+                            Text("Analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                         }
                     } else if (geminiDossierText != null) {
                         Text(
@@ -672,7 +672,7 @@ fun SongProfile(
                         ) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Synthesize Acoustic Dossier with Gemini", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Synthesize Acoustic Profile Dossier", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }

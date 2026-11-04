@@ -1437,7 +1437,7 @@ fun HomeScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = colors.primaryAccent, modifier = Modifier.size(16.dp))
                             Text(
-                                text = "GEMINI REASONING CORE",
+                                text = "NEURO-REASONING CORE",
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
@@ -1455,7 +1455,7 @@ fun HomeScreen(
                                 )
                             ) {
                                 Text(
-                                    text = if (isLiveGemini) "GEMINI 3.8 LIVE" else "NEURAL BASELINE",
+                                    text = if (isLiveGemini) "INTELLIGENCE ACTIVE" else "NEURAL BASELINE",
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
