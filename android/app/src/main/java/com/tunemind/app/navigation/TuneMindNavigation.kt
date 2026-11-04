@@ -69,13 +69,30 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
         bottomBar = {
             TuneMindBottomNavigationBar(
                 currentRoute = currentRoute,
-                onTabSelected = { route ->
-                    navController.navigate(route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+                onTabSelected = { targetRoute ->
+                    if (currentRoute == targetRoute) return@TuneMindBottomNavigationBar
+                    try {
+                        if (targetRoute == Screen.Home.route) {
+                            val popped = navController.popBackStack(Screen.Home.route, inclusive = false)
+                            if (!popped) {
+                                navController.navigate(Screen.Home.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        inclusive = false
+                                    }
+                                    launchSingleTop = true
+                                }
+                            }
+                        } else {
+                            navController.navigate(targetRoute) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
-                        launchSingleTop = true
-                        restoreState = true
+                    } catch (_: Exception) {
+                        navController.navigate(targetRoute)
                     }
                 }
             )
@@ -452,13 +469,7 @@ fun TuneMindBottomNavigationBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 items.forEach { screen ->
-                    val selected = when (screen) {
-                        Screen.Home -> currentRoute in listOf(Screen.Home.route, Screen.CrossApp.route)
-                        Screen.AiDiscovery -> currentRoute == Screen.AiDiscovery.route
-                        Screen.History -> currentRoute in listOf(Screen.History.route, Screen.SessionDetails.route, Screen.Profile.route)
-                        Screen.SevenDayStudy -> currentRoute in listOf(Screen.SevenDayStudy.route, Screen.WeeklyReport.route, Screen.Fatigue.route, Screen.ManualCooldown.route, Screen.CooldownManagement.route)
-                        else -> currentRoute == screen.route
-                    }
+                    val selected = currentRoute == screen.route
 
                     val sectionAccent = when (screen) {
                         Screen.Home -> DeepObsidianAmber.EQBassCyan
@@ -468,78 +479,82 @@ fun TuneMindBottomNavigationBar(
                         else -> DeepObsidianAmber.PrimaryAccent
                     }
 
-                    AnimatedContent(
-                        targetState = selected,
-                        transitionSpec = {
-                            (fadeIn(animationSpec = tween(240)) + scaleIn(initialScale = 0.88f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)))
-                                .togetherWith(fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.88f))
-                        },
-                        label = "tabMorph"
-                    ) { isTargetSelected ->
-                        if (isTargetSelected) {
-                            // UNIQUE CLICKED STATE: Glowing illuminated capsule pill
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(22.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            listOf(
-                                                sectionAccent.copy(alpha = 0.22f),
-                                                sectionAccent.copy(alpha = 0.08f)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable { onTabSelected(screen.route) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AnimatedContent(
+                            targetState = selected,
+                            transitionSpec = {
+                                (fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.9f))
+                                    .togetherWith(fadeOut(animationSpec = tween(140)) + scaleOut(targetScale = 0.9f))
+                            },
+                            label = "tabMorph"
+                        ) { isTargetSelected ->
+                            if (isTargetSelected) {
+                                // UNIQUE CLICKED STATE: Glowing illuminated capsule pill
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(
+                                                    sectionAccent.copy(alpha = 0.22f),
+                                                    sectionAccent.copy(alpha = 0.08f)
+                                                )
                                             )
                                         )
+                                        .border(
+                                            width = 1.2.dp,
+                                            brush = Brush.horizontalGradient(
+                                                listOf(
+                                                    sectionAccent.copy(alpha = 0.8f),
+                                                    sectionAccent.copy(alpha = 0.4f)
+                                                )
+                                            ),
+                                            shape = RoundedCornerShape(22.dp)
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = screen.icon,
+                                        contentDescription = screen.title,
+                                        tint = sectionAccent,
+                                        modifier = Modifier.size(19.dp)
                                     )
-                                    .border(
-                                        width = 1.2.dp,
-                                        brush = Brush.horizontalGradient(
-                                            listOf(
-                                                sectionAccent.copy(alpha = 0.8f),
-                                                sectionAccent.copy(alpha = 0.4f)
-                                            )
-                                        ),
-                                        shape = RoundedCornerShape(22.dp)
+                                    Text(
+                                        text = screen.title.uppercase(),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = sectionAccent,
+                                        letterSpacing = 0.6.sp
                                     )
-                                    .clickable { onTabSelected(screen.route) }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = screen.icon,
-                                    contentDescription = screen.title,
-                                    tint = sectionAccent,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text(
-                                    text = screen.title.uppercase(),
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = sectionAccent,
-                                    letterSpacing = 0.8.sp
-                                )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(sectionAccent)
+                                    )
+                                }
+                            } else {
+                                // CASUAL RESTING STATE: Clean, effortless floating icon
                                 Box(
-                                    modifier = Modifier
-                                        .size(4.dp)
-                                        .clip(CircleShape)
-                                        .background(sectionAccent)
-                                )
-                            }
-                        } else {
-                            // CASUAL RESTING STATE: Clean, effortless floating icon
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .clickable { onTabSelected(screen.route) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = screen.icon,
-                                    contentDescription = screen.title,
-                                    tint = DeepObsidianAmber.TextSecondary.copy(alpha = 0.45f),
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                    modifier = Modifier.size(44.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = screen.icon,
+                                        contentDescription = screen.title,
+                                        tint = DeepObsidianAmber.TextSecondary.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }

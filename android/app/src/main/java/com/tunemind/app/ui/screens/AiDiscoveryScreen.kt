@@ -120,23 +120,33 @@ fun AiDiscoveryScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // 1. TOP HARDWARE & TELEMETRY HUD HEADER
+            // 1. COMPACT UNIFIED STUDIO CONTROL STRIP
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = DeepObsidianAmber.SecondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f),
+                            DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
+                            DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                        )
+                    )
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Top Row: Status LED, Section Title, Daypart Pill, and Re-Roll Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Box(
                                 modifier = Modifier
                                     .size(7.dp)
@@ -144,495 +154,486 @@ fun AiDiscoveryScreen(
                                     .background(if (isDiscovering) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.Success)
                             )
                             Text(
-                                text = if (isDiscovering) "AI REASONING ACTIVE // 10 TRACKS" else "TASTE CALIBRATION ONLINE // GEMINI 3.8",
-                                fontSize = 9.sp,
+                                text = "NEURO AI CRATE",
+                                fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.TextSecondary,
-                                letterSpacing = 1.sp
+                                color = DeepObsidianAmber.TextPrimary,
+                                letterSpacing = 0.8.sp
                             )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = currentSlot.label.uppercase(),
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.PrimaryAccent,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
 
+                        // Compact Re-roll Action
+                        Button(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                vm.triggerChronoDiscovery(forceRefresh = true)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DeepObsidianAmber.PrimaryAccent,
+                                contentColor = DeepObsidianAmber.AppBackground
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(28.dp),
+                            enabled = !isDiscovering
+                        ) {
+                            if (isDiscovering) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    color = DeepObsidianAmber.AppBackground,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = "ROLLING...",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = "RE-ROLL",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom Row: Telemetry counters & Taste Calibrate quick chip
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.35f))
+                            ) {
+                                Text(
+                                    text = "PLAYED: $playedCount",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.Success,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f))
+                            ) {
+                                Text(
+                                    text = "SAVED: $savedCount",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.PrimaryAccent,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.TextMuted.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "MUTED: $dismissedCount",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.TextMuted,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // Calibrate Taste Chip
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = DeepObsidianAmber.RecessedBackground,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.5f)),
+                            modifier = Modifier.clickable { showCalibrateTasteDialog = true }
                         ) {
-                            Text(
-                                text = "10-TRACK CRATE",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent,
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    // Telemetry Interaction Feedback Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = DeepObsidianAmber.RecessedBackground,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.35f))
-                        ) {
-                            Text(
-                                text = "PLAYED: $playedCount",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.Success,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = DeepObsidianAmber.RecessedBackground,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f))
-                        ) {
-                            Text(
-                                text = "SAVED: $savedCount",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = DeepObsidianAmber.RecessedBackground,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.TextMuted.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = "MUTED: $dismissedCount",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.TextMuted,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-
-                        Spacer(Modifier.weight(1f))
-
-                        val totalSignals = playedCount + savedCount + dismissedCount
-                        val calibrationLevel = minOf(98, 70 + (totalSignals * 2))
-                        Text(
-                            text = "$calibrationLevel% Calibrated",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = DeepObsidianAmber.SecondaryAccent,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-        // Section Title & Mission
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                text = "NEURO-ACOUSTIC DISCOVERY CRATE",
-                fontSize = 17.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                color = DeepObsidianAmber.TextPrimary,
-                letterSpacing = 0.5.sp
-            )
-            Text(
-                text = "New, unplayed tracks dynamically curated by Gemini. Matches your ears and dopamine receptors across the clock.",
-                fontSize = 12.sp,
-                color = DeepObsidianAmber.TextSecondary,
-                lineHeight = 17.sp
-            )
-        }
-
-        // 2. DAYPART & DOPAMINE HORIZON STATUS CARD
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = DeepObsidianAmber.CardElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(
-                            Icons.Outlined.AccessTime,
-                            contentDescription = null,
-                            tint = DeepObsidianAmber.SecondaryAccent,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "CURRENT CIRCADIAN DAYPART",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.SecondaryAccent,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = "ACTIVE WINDOW",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.Success,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = currentSlot.label,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = DeepObsidianAmber.TextPrimary,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "${currentSlot.startHour}:00 - ${currentSlot.endHour}:00 Window",
-                            fontSize = 11.sp,
-                            color = DeepObsidianAmber.TextSecondary
-                        )
-                    }
-
-                    Column(horizontalAlignment = Alignment.End) {
-                        val score = reasoningReport?.receptorPotencyScore ?: 88
-                        Text(
-                            text = "$score% Receptive",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Auditory Headroom",
-                            fontSize = 10.sp,
-                            color = DeepObsidianAmber.TextSecondary
-                        )
-                    }
-                }
-
-                // Neuro-Pulse Reroll Button
-                Button(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        vm.triggerChronoDiscovery(forceRefresh = true)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DeepObsidianAmber.PrimaryAccent,
-                        contentColor = DeepObsidianAmber.AppBackground
-                    ),
-                    enabled = !isDiscovering
-                ) {
-                    if (isDiscovering) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = DeepObsidianAmber.AppBackground,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "Synthesizing Neuro-Pulse via Gemini...",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "TRIGGER NEURO-PULSE // RE-ROLL CRATE",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2.5. SONIC TASTE BLUEPRINT & CALIBRATION CARD
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = DeepObsidianAmber.CardElevated,
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Brush.horizontalGradient(
-                    listOf(
-                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.7f),
-                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
-                    )
-                )
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(
-                            Icons.Outlined.Fingerprint,
-                            contentDescription = null,
-                            tint = DeepObsidianAmber.PrimaryAccent,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "SONIC TASTE BLUEPRINT",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-
-                    TextButton(
-                        onClick = { showCalibrateTasteDialog = true },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Tune,
-                            contentDescription = null,
-                            tint = DeepObsidianAmber.SecondaryAccent,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = "CALIBRATE TASTE",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.SecondaryAccent
-                        )
-                    }
-                }
-
-                // Detected Real Artists
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "DEMONSTRATED:",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = DeepObsidianAmber.TextSecondary
-                    )
-                    Text(
-                        text = topDetectedArtists.joinToString(", ").ifEmpty { "Listening for active songs on Spotify/Players..." },
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // Taste Anchors Chips (if any added)
-                if (tasteAnchors.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "ANCHORS:",
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = DeepObsidianAmber.TextSecondary
-                        )
-                        androidx.compose.foundation.lazy.LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            items(tasteAnchors) { anchor ->
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = DeepObsidianAmber.RecessedBackground,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f))
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = anchor,
-                                            fontSize = 9.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = DeepObsidianAmber.PrimaryAccent,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "Remove",
-                                            tint = DeepObsidianAmber.TextSecondary,
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .clickable { vm.removeTasteAnchor(anchor) }
-                                        )
-                                    }
-                                }
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Tune,
+                                    contentDescription = null,
+                                    tint = DeepObsidianAmber.SecondaryAccent,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = if (tasteAnchors.isNotEmpty()) "ANCHOR: ${tasteAnchors.first().uppercase()}" else "TASTE BLUEPRINT",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.SecondaryAccent
+                                )
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 3. FILTER TABS (Active Daypart | Stored Crate | Saved Gems)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(DeepObsidianAmber.RecessedBackground)
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            val tabs = listOf(
-                "Active Daypart (${activeDaypartCrate.size})",
-                "Stored Crate (${crate.size})",
-                "Saved Gems (${savedRecs.size})"
-            )
-
-            tabs.forEachIndexed { index, title ->
-                val isSelected = selectedFilterTab == index
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) DeepObsidianAmber.CardElevated else Color.Transparent)
-                        .clickable { selectedFilterTab = index }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = title,
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary
-                    )
-                }
-            }
-        }
-
-        // 4. LIST OF STORED & ACTIVE RECOMMENDATIONS
-        if (displayList.isEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = DeepObsidianAmber.SecondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.QueueMusic,
-                        contentDescription = null,
-                        tint = DeepObsidianAmber.TextMuted,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Text(
-                        text = if (selectedFilterTab == 2) "No Saved Gems Yet" else "Crate Initializing",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.TextPrimary
-                    )
-                    Text(
-                        text = if (selectedFilterTab == 2) "Tap the bookmark icon on any recommendation to save it permanently."
-                        else "Tap 'TRIGGER NEURO-PULSE' above to let Gemini synthesize discoveries for your current daypart.",
-                        fontSize = 11.sp,
-                        color = DeepObsidianAmber.TextSecondary,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
+            // 2. FILTER TABS (Active 10-Set | Stored Crate | Saved Gems)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(DeepObsidianAmber.RecessedBackground)
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                items(displayList, key = { it.id }) { item ->
-                    AiRecommendationCard(
-                        item = item,
-                        spoolRotation = spoolRotation,
-                        onPlay = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            vm.playAiRecommendation(context, item)
-                        },
-                        onToggleSave = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            vm.toggleSaveRecommendation(item.id, !item.isSaved)
-                        },
-                        onDismiss = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            vm.dismissAiRecommendation(item.id)
-                            scope.launch {
-                                val res = snackbarHostState.showSnackbar(
-                                    message = "Dismissed '${item.title}' • AI updated taste boundary",
-                                    actionLabel = "UNDO",
-                                    duration = SnackbarDuration.Short
+                val tabs = listOf(
+                    "Active 10-Set (${activeDaypartCrate.size})",
+                    "Crate Vault (${crate.size})",
+                    "Saved Gems (${savedRecs.size})"
+                )
+
+                tabs.forEachIndexed { index, title ->
+                    val isSelected = selectedFilterTab == index
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) DeepObsidianAmber.CardElevated else Color.Transparent)
+                            .clickable { selectedFilterTab = index }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = title,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary
+                        )
+                    }
+                }
+            }
+
+            // 3. STRUCTURED 10-SONG DISCOVERY CRATE
+            if (displayList.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DeepObsidianAmber.SecondaryBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.QueueMusic,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.TextMuted,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = if (selectedFilterTab == 2) "No Saved Gems Yet" else "Crate Initializing...",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.TextPrimary
+                        )
+                        Text(
+                            text = if (selectedFilterTab == 2) "Tap bookmark on any card to save tracks permanently."
+                            else "Tap 'RE-ROLL' above to let Gemini synthesize 10 tailored discoveries.",
+                            fontSize = 11.sp,
+                            color = DeepObsidianAmber.TextSecondary,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // When in Active 10-Set mode, group items cleanly by Sub-Tier
+                    if (selectedFilterTab == 0) {
+                        val coreTracks = displayList.filter { it.subTier == "CORE_DOPAMINE" }
+                        val deepCuts = displayList.filter { it.subTier == "DEEP_CUT" }
+                        val cleansers = displayList.filter { it.subTier == "PALATE_CLEANSER" }
+                        val frontiers = displayList.filter { it.subTier == "SONIC_FRONTIER" }
+                        val others = displayList.filter { it.subTier !in listOf("CORE_DOPAMINE", "DEEP_CUT", "PALATE_CLEANSER", "SONIC_FRONTIER") }
+
+                        if (coreTracks.isNotEmpty()) {
+                            item {
+                                TierHeaderBanner(
+                                    tierNumber = "01",
+                                    tierName = "CORE DOPAMINE ROTATION",
+                                    tierSubtext = "Direct high-resonance hits matching your taste anchors",
+                                    accentColor = DeepObsidianAmber.PrimaryAccent,
+                                    count = coreTracks.size
                                 )
-                                if (res == SnackbarResult.ActionPerformed) {
-                                    vm.restoreDismissedRecommendation(item.id)
-                                }
+                            }
+                            items(coreTracks, key = { it.id }) { item ->
+                                val index = displayList.indexOf(item) + 1
+                                AiRecommendationCard(
+                                    index = index,
+                                    item = item,
+                                    spoolRotation = spoolRotation,
+                                    onPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        vm.playAiRecommendation(context, item)
+                                    },
+                                    onToggleSave = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                    },
+                                    onDismiss = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.dismissAiRecommendation(item.id)
+                                        scope.launch {
+                                            val res = snackbarHostState.showSnackbar(
+                                                message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                                actionLabel = "UNDO",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (res == SnackbarResult.ActionPerformed) {
+                                                vm.restoreDismissedRecommendation(item.id)
+                                            }
+                                        }
+                                    }
+                                )
                             }
                         }
-                    )
+
+                        if (deepCuts.isNotEmpty()) {
+                            item {
+                                TierHeaderBanner(
+                                    tierNumber = "02",
+                                    tierName = "SUBGENRE DEEP CUTS",
+                                    tierSubtext = "Acclaimed b-sides & rising talent in your soundscape",
+                                    accentColor = DeepObsidianAmber.NeuralViolet,
+                                    count = deepCuts.size
+                                )
+                            }
+                            items(deepCuts, key = { it.id }) { item ->
+                                val index = displayList.indexOf(item) + 1
+                                AiRecommendationCard(
+                                    index = index,
+                                    item = item,
+                                    spoolRotation = spoolRotation,
+                                    onPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        vm.playAiRecommendation(context, item)
+                                    },
+                                    onToggleSave = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                    },
+                                    onDismiss = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.dismissAiRecommendation(item.id)
+                                        scope.launch {
+                                            val res = snackbarHostState.showSnackbar(
+                                                message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                                actionLabel = "UNDO",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (res == SnackbarResult.ActionPerformed) {
+                                                vm.restoreDismissedRecommendation(item.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        if (cleansers.isNotEmpty()) {
+                            item {
+                                TierHeaderBanner(
+                                    tierNumber = "03",
+                                    tierName = "PALATE CLEANSER",
+                                    tierSubtext = "Stripped-back acoustic melodies resetting ear fatigue",
+                                    accentColor = DeepObsidianAmber.CryoCyan,
+                                    count = cleansers.size
+                                )
+                            }
+                            items(cleansers, key = { it.id }) { item ->
+                                val index = displayList.indexOf(item) + 1
+                                AiRecommendationCard(
+                                    index = index,
+                                    item = item,
+                                    spoolRotation = spoolRotation,
+                                    onPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        vm.playAiRecommendation(context, item)
+                                    },
+                                    onToggleSave = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                    },
+                                    onDismiss = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.dismissAiRecommendation(item.id)
+                                        scope.launch {
+                                            val res = snackbarHostState.showSnackbar(
+                                                message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                                actionLabel = "UNDO",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (res == SnackbarResult.ActionPerformed) {
+                                                vm.restoreDismissedRecommendation(item.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        if (frontiers.isNotEmpty()) {
+                            item {
+                                TierHeaderBanner(
+                                    tierNumber = "04",
+                                    tierName = "SONIC FRONTIER",
+                                    tierSubtext = "Adjacent genre crossover safely expanding your dopamine reach",
+                                    accentColor = DeepObsidianAmber.Success,
+                                    count = frontiers.size
+                                )
+                            }
+                            items(frontiers, key = { it.id }) { item ->
+                                val index = displayList.indexOf(item) + 1
+                                AiRecommendationCard(
+                                    index = index,
+                                    item = item,
+                                    spoolRotation = spoolRotation,
+                                    onPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        vm.playAiRecommendation(context, item)
+                                    },
+                                    onToggleSave = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                    },
+                                    onDismiss = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.dismissAiRecommendation(item.id)
+                                        scope.launch {
+                                            val res = snackbarHostState.showSnackbar(
+                                                message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                                actionLabel = "UNDO",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (res == SnackbarResult.ActionPerformed) {
+                                                vm.restoreDismissedRecommendation(item.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        if (others.isNotEmpty()) {
+                            items(others, key = { it.id }) { item ->
+                                val index = displayList.indexOf(item) + 1
+                                AiRecommendationCard(
+                                    index = index,
+                                    item = item,
+                                    spoolRotation = spoolRotation,
+                                    onPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        vm.playAiRecommendation(context, item)
+                                    },
+                                    onToggleSave = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                    },
+                                    onDismiss = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        vm.dismissAiRecommendation(item.id)
+                                        scope.launch {
+                                            val res = snackbarHostState.showSnackbar(
+                                                message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                                actionLabel = "UNDO",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (res == SnackbarResult.ActionPerformed) {
+                                                vm.restoreDismissedRecommendation(item.id)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        // Plain list for Crate Vault and Saved Gems
+                        items(displayList, key = { it.id }) { item ->
+                            val index = displayList.indexOf(item) + 1
+                            AiRecommendationCard(
+                                index = index,
+                                item = item,
+                                spoolRotation = spoolRotation,
+                                onPlay = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    vm.playAiRecommendation(context, item)
+                                },
+                                onToggleSave = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    vm.toggleSaveRecommendation(item.id, !item.isSaved)
+                                },
+                                onDismiss = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    vm.dismissAiRecommendation(item.id)
+                                    scope.launch {
+                                        val res = snackbarHostState.showSnackbar(
+                                            message = "Dismissed '${item.title}' • AI updated taste boundary",
+                                            actionLabel = "UNDO",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (res == SnackbarResult.ActionPerformed) {
+                                            vm.restoreDismissedRecommendation(item.id)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
-    }
 
-    SnackbarHost(
-        hostState = snackbarHostState,
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(bottom = 16.dp)
-    )
-}
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp)
+        )
+    }
 
     if (showCalibrateTasteDialog) {
         CalibrateTasteDialog(
@@ -646,224 +647,252 @@ fun AiDiscoveryScreen(
 }
 
 /**
- * Individual Chrono AI Recommendation Card with Category Badging,
- * Cognitive Dopamine Rationale, Sub-Tier Classification, and Telemetry Interactions.
+ * Visual Divider for each of the 4 Neuro-Acoustic Sub-Tiers.
+ */
+@Composable
+private fun TierHeaderBanner(
+    tierNumber: String,
+    tierName: String,
+    tierSubtext: String,
+    accentColor: Color,
+    count: Int
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
+                )
+                Text(
+                    text = "$tierNumber // $tierName ($count)",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    letterSpacing = 0.8.sp
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(1.dp)
+                    .padding(start = 8.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                accentColor.copy(alpha = 0.5f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+        Text(
+            text = tierSubtext,
+            fontSize = 9.sp,
+            color = DeepObsidianAmber.TextMuted,
+            lineHeight = 12.sp,
+            modifier = Modifier.padding(start = 11.dp)
+        )
+    }
+}
+
+/**
+ * Individual Chrono AI Recommendation Card.
+ * Compact, high-density hardware cassette-style card.
  */
 @Composable
 private fun AiRecommendationCard(
+    index: Int,
     item: AiRecommendationEntity,
     spoolRotation: Float,
     onPlay: () -> Unit,
     onToggleSave: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val categoryColor = when (item.category.uppercase()) {
-        "DOPAMINE_FLOW" -> DeepObsidianAmber.PrimaryAccent
-        "PALATE_CLEANSER" -> DeepObsidianAmber.CryoCyan
-        "CHRONO_RESTORE" -> DeepObsidianAmber.SecondaryAccent
-        else -> DeepObsidianAmber.NeuralViolet
-    }
-
     val (subTierLabel, subTierColor) = when (item.subTier.uppercase()) {
-        "CORE_DOPAMINE" -> Pair("CORE DOPAMINE", DeepObsidianAmber.PrimaryAccent)
+        "CORE_DOPAMINE" -> Pair("CORE", DeepObsidianAmber.PrimaryAccent)
         "DEEP_CUT" -> Pair("DEEP CUT", DeepObsidianAmber.NeuralViolet)
-        "PALATE_CLEANSER" -> Pair("PALATE CLEANSER", DeepObsidianAmber.CryoCyan)
-        "SONIC_FRONTIER" -> Pair("SONIC FRONTIER", DeepObsidianAmber.Success)
+        "PALATE_CLEANSER" -> Pair("CLEANSER", DeepObsidianAmber.CryoCyan)
+        "SONIC_FRONTIER" -> Pair("FRONTIER", DeepObsidianAmber.Success)
         else -> Pair("DISCOVERY", DeepObsidianAmber.SecondaryAccent)
     }
 
-    val formattedDate = remember(item.recommendedAtMs) {
-        val sdf = SimpleDateFormat("MMM d • h:mm a", Locale.getDefault())
-        sdf.format(Date(item.recommendedAtMs))
-    }
-
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(10.dp),
         color = DeepObsidianAmber.CardElevated,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             Brush.horizontalGradient(
                 listOf(
-                    subTierColor.copy(alpha = 0.5f),
-                    DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
+                    subTierColor.copy(alpha = if (item.wasPlayed) 0.6f else 0.35f),
+                    DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.25f)
                 )
             )
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // Track Number & Mini Cassette Spool
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = String.format("%02d", index),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = subTierColor
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DeepObsidianAmber.RecessedBackground)
+                        .border(1.dp, subTierColor.copy(alpha = 0.4f), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Animated Mini Cassette Spool
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DeepObsidianAmber.RecessedBackground)
-                            .border(1.dp, subTierColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                            .size(22.dp)
+                            .rotate(if (item.wasPlayed) spoolRotation else 0f)
+                            .clip(CircleShape)
+                            .background(DeepObsidianAmber.SecondaryBackground)
+                            .border(1.dp, subTierColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
-                                .rotate(if (item.wasPlayed) spoolRotation else 0f)
+                                .size(6.dp)
                                 .clip(CircleShape)
-                                .background(DeepObsidianAmber.SecondaryBackground)
-                                .border(1.dp, subTierColor, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(DeepObsidianAmber.RecessedBackground)
-                            )
-                        }
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = item.title,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = item.artist,
-                            fontSize = 11.sp,
-                            color = DeepObsidianAmber.TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    // Save Gem Bookmark
-                    IconButton(
-                        onClick = onToggleSave,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (item.isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                            contentDescription = "Save Gem",
-                            tint = if (item.isSaved) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Dismiss / Negative Reinforcement
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = "Dismiss vibe",
-                            tint = DeepObsidianAmber.TextMuted,
-                            modifier = Modifier.size(17.dp)
+                                .background(if (item.wasPlayed) subTierColor else DeepObsidianAmber.RecessedBackground)
                         )
                     }
                 }
             }
 
-            // Cognitive Dopamine Rationale
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = DeepObsidianAmber.SecondaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
+            // Song Info & Neuro Rationale
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.5.dp)
             ) {
-                Text(
-                    text = item.reason,
-                    fontSize = 11.sp,
-                    color = DeepObsidianAmber.TextPrimary,
-                    lineHeight = 15.sp,
-                    modifier = Modifier.padding(10.dp)
-                )
-            }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        text = item.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
 
-            // Bottom Strip: Sub-Tier Badge, Audit Tag, and Play Button
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
+                        shape = RoundedCornerShape(3.dp),
                         color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, subTierColor.copy(alpha = 0.5f))
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, subTierColor.copy(alpha = 0.5f))
                     ) {
                         Text(
                             text = subTierLabel,
-                            fontSize = 8.sp,
+                            fontSize = 7.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             color = subTierColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-
-                    if (item.wasPlayed) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = DeepObsidianAmber.Success.copy(alpha = 0.12f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.Success.copy(alpha = 0.5f))
-                        ) {
-                            Text(
-                                text = "AUDIT ACTIVE",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.Success,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                    } else {
-                        Text(
-                            text = item.timeSlotLabel,
-                            fontSize = 8.sp,
-                            fontFamily = FontFamily.Monospace,
-                            color = DeepObsidianAmber.TextSecondary
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                         )
                     }
                 }
 
+                Text(
+                    text = item.artist,
+                    fontSize = 11.sp,
+                    color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.9f),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Text(
+                    text = item.reason,
+                    fontSize = 9.sp,
+                    color = DeepObsidianAmber.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 12.sp
+                )
+            }
+
+            // Right Action Cluster (Play / Bookmark / Dismiss)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                // Play Button
                 Button(
                     onClick = onPlay,
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(6.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = subTierColor,
                         contentColor = DeepObsidianAmber.AppBackground
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(30.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(26.dp)
                 ) {
                     Icon(
                         imageVector = if (item.wasPlayed) Icons.Default.Replay else Icons.Default.PlayArrow,
                         contentDescription = null,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(11.dp)
                     )
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(3.dp))
                     Text(
                         text = if (item.wasPlayed) "REPLAY" else "PLAY",
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Bookmark / Save Gem
+                IconButton(
+                    onClick = onToggleSave,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = if (item.isSaved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                        contentDescription = "Save Gem",
+                        tint = if (item.isSaved) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Dismiss / Negative Reinforcement
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = "Dismiss vibe",
+                        tint = DeepObsidianAmber.TextMuted,
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
