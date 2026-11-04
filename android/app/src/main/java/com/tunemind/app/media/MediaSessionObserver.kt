@@ -98,6 +98,25 @@ class MediaSessionObserver(
         controllers.values.firstOrNull()?.controller?.transportControls?.skipToPrevious()
     }
 
+    /**
+     * Attempts to trigger playback in an active background media session via MediaController.
+     * Returns true if an active session matching targetPackage was found and playFromSearch dispatched.
+     */
+    fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
+        return try {
+            val entry = controllers.values.firstOrNull { entry ->
+                targetPackage == null || entry.controller.packageName == targetPackage
+            } ?: controllers.values.firstOrNull() ?: return false
+
+            val tc = entry.controller.transportControls ?: return false
+            tc.playFromSearch(query, extras)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "playFromSearch error: ${e.message}")
+            false
+        }
+    }
+
     fun refreshSessions() {
         if (!started) {
             start()

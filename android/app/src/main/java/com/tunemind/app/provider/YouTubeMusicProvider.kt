@@ -53,6 +53,23 @@ class YouTubeMusicProvider : MusicProvider {
         val query = match.searchQuery
         val webUrl = match.webFallbackUrl ?: "https://music.youtube.com/search?q=${Uri.encode(query)}"
 
+        // 1. FAST PATH: Active Background MediaSession (Play without leaving TuneMind)
+        try {
+            val listener = com.tunemind.app.service.TuneMindListenerService.instance
+            if (listener != null) {
+                val sent = listener.playFromSearch(packageName, query)
+                if (sent) {
+                    return PlaybackLaunchResult.DirectPlaybackLaunched(
+                        providerId = providerId,
+                        providerDisplayName = displayName,
+                        trackTitle = match.title,
+                        destinationUri = "mediasession:$packageName",
+                        message = "Streaming '${match.title}' on YouTube Music in background."
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+
         if (isInstalled(context)) {
             try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {

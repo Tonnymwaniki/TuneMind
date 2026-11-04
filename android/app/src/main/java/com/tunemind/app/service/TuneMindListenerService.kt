@@ -163,6 +163,10 @@ class TuneMindListenerService : NotificationListenerService() {
         observerOrNull()?.skipPrev()
     }
 
+    fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
+        return observerOrNull()?.playFromSearch(targetPackage, query, extras) ?: false
+    }
+
     companion object {
         private const val TAG = "TuneMindListener"
 

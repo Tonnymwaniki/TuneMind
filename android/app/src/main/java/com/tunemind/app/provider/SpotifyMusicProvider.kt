@@ -93,6 +93,23 @@ class SpotifyMusicProvider : MusicProvider {
             )
         }
 
+        // 1. FAST PATH: Active Background MediaSession (Play without leaving TuneMind)
+        try {
+            val listener = com.tunemind.app.service.TuneMindListenerService.instance
+            if (listener != null) {
+                val sent = listener.playFromSearch(packageName, match.searchQuery)
+                if (sent) {
+                    return PlaybackLaunchResult.DirectPlaybackLaunched(
+                        providerId = providerId,
+                        providerDisplayName = displayName,
+                        trackTitle = match.title,
+                        destinationUri = "mediasession:$packageName",
+                        message = "Streaming '${match.title}' on Spotify in background."
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+
         val isDirectTrack = match.deepLinkUri?.startsWith("spotify:track:") == true
 
         // Launch in-app deep link

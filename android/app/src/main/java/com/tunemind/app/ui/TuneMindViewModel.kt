@@ -867,6 +867,29 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
+    fun isAlwaysAskEnabled(context: android.content.Context): Boolean {
+        return com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).isAlwaysAskEnabled()
+    }
+
+    fun setAlwaysAskEnabled(context: android.content.Context, enabled: Boolean) {
+        com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).setAlwaysAskEnabled(enabled)
+    }
+
+    fun selectPlayerAndPlay(
+        context: android.content.Context,
+        item: com.tunemind.app.domain.recommendation.AiRecommendationEntity,
+        providerId: String,
+        rememberAsDefault: Boolean
+    ): com.tunemind.app.provider.PlaybackLaunchResult {
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        registry.selectPlayer(providerId, rememberAsDefault)
+        return playAiRecommendation(context, item, providerId)
+    }
+
+    fun resetDefaultPlayer(context: android.content.Context) {
+        com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).resetDefaultPlayer()
+    }
+
 
     private fun loadOnboardingState(): Boolean {
         val ctx = AppHolder.context ?: return true
@@ -883,7 +906,7 @@ class TuneMindViewModel : ViewModel() {
 
     fun refreshRecommendations() {
         val ctx = AppHolder.context
-        val prefProvider = if (ctx != null) getPreferredProviderId(ctx) else "spotify"
+        val prefProvider = if (ctx != null) getPreferredProviderId(ctx) else "generic"
 
         // Local evidence-based baseline
         val baseline = com.tunemind.app.domain.recommendation.RecommendationEngine.generateRecommendations(
@@ -1084,7 +1107,8 @@ class TuneMindViewModel : ViewModel() {
 
     fun playAiRecommendation(
         context: android.content.Context,
-        item: com.tunemind.app.domain.recommendation.AiRecommendationEntity
+        item: com.tunemind.app.domain.recommendation.AiRecommendationEntity,
+        explicitProviderId: String? = null
     ): com.tunemind.app.provider.PlaybackLaunchResult {
         markRecommendationPlayed(item.id)
         val recCategory = when (item.category) {
@@ -1101,9 +1125,9 @@ class TuneMindViewModel : ViewModel() {
             reason = item.reason,
             confidence = item.confidence,
             category = recCategory,
-            suggestedProviderId = item.suggestedProviderId
+            suggestedProviderId = explicitProviderId ?: item.suggestedProviderId
         )
-        return playRecommendation(context, track)
+        return playRecommendation(context, track, explicitProviderId)
     }
 }
 

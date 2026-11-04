@@ -32,6 +32,7 @@ fun SettingsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val registry = remember(context) { com.tunemind.app.provider.MusicProviderRegistry.getInstance(context) }
     var selectedProviderId by remember { mutableStateOf(registry.getPreferredProviderId()) }
+    var alwaysAsk by remember { mutableStateOf(registry.isAlwaysAskEnabled()) }
     val providers = remember { registry.getInstalledProviders() }
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -163,10 +164,58 @@ fun SettingsScreen(
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "When you tap 'Play this song' in TuneMind, playback starts in your preferred music service. The intelligence belongs to TuneMind — the music belongs to your services.",
+                    text = "When you tap 'Play' on a recommendation, TuneMind dispatches directly to your chosen player or opens the player switcher.",
                     fontSize = 11.sp,
                     color = TextMuted,
                     lineHeight = 15.sp
+                )
+
+                // Always Prompt Toggle
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Always Ask Before Playing",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.TextPrimary
+                            )
+                            Text(
+                                text = "Show player chooser bottom sheet on each track play",
+                                fontSize = 10.sp,
+                                color = DeepObsidianAmber.TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = alwaysAsk,
+                            onCheckedChange = {
+                                alwaysAsk = it
+                                vm?.setAlwaysAskEnabled(context, it)
+                                    ?: registry.setAlwaysAskEnabled(it)
+                            }
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                Text(
+                    text = "DEFAULT MUSIC PLAYER (IF NOT PROMPTED):",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = DeepObsidianAmber.PrimaryAccent
                 )
 
                 providers.forEach { provider ->

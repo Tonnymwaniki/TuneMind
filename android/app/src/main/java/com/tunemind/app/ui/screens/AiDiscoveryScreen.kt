@@ -4,9 +4,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -78,6 +80,24 @@ fun AiDiscoveryScreen(
     var showCalibrateTasteDialog by remember { mutableStateOf(false) }
 
     var selectedFilterTab by remember { mutableIntStateOf(0) } // 0 = Active Daypart, 1 = Stored Archive, 2 = Saved Gems
+
+    var trackPendingPlayerChoice by remember { mutableStateOf<AiRecommendationEntity?>(null) }
+    val installedProviders = remember(context) { vm.getInstalledProviders(context) }
+    val activeSessionPackage = homeState.nowPlaying?.sourcePackage
+
+    val handlePlayRequest: (AiRecommendationEntity, Boolean) -> Unit = { item, forceChooser ->
+        if (forceChooser || vm.isAlwaysAskEnabled(context)) {
+            trackPendingPlayerChoice = item
+        } else {
+            val result = vm.playAiRecommendation(context, item)
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    message = result.message,
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -408,7 +428,11 @@ fun AiDiscoveryScreen(
                                     spoolRotation = spoolRotation,
                                     onPlay = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        vm.playAiRecommendation(context, item)
+                                        handlePlayRequest(item, false)
+                                    },
+                                    onLongClickPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        handlePlayRequest(item, true)
                                     },
                                     onToggleSave = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -450,7 +474,11 @@ fun AiDiscoveryScreen(
                                     spoolRotation = spoolRotation,
                                     onPlay = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        vm.playAiRecommendation(context, item)
+                                        handlePlayRequest(item, false)
+                                    },
+                                    onLongClickPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        handlePlayRequest(item, true)
                                     },
                                     onToggleSave = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -492,7 +520,11 @@ fun AiDiscoveryScreen(
                                     spoolRotation = spoolRotation,
                                     onPlay = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        vm.playAiRecommendation(context, item)
+                                        handlePlayRequest(item, false)
+                                    },
+                                    onLongClickPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        handlePlayRequest(item, true)
                                     },
                                     onToggleSave = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -534,7 +566,11 @@ fun AiDiscoveryScreen(
                                     spoolRotation = spoolRotation,
                                     onPlay = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        vm.playAiRecommendation(context, item)
+                                        handlePlayRequest(item, false)
+                                    },
+                                    onLongClickPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        handlePlayRequest(item, true)
                                     },
                                     onToggleSave = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -567,7 +603,11 @@ fun AiDiscoveryScreen(
                                     spoolRotation = spoolRotation,
                                     onPlay = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        vm.playAiRecommendation(context, item)
+                                        handlePlayRequest(item, false)
+                                    },
+                                    onLongClickPlay = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        handlePlayRequest(item, true)
                                     },
                                     onToggleSave = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -600,7 +640,11 @@ fun AiDiscoveryScreen(
                                 spoolRotation = spoolRotation,
                                 onPlay = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    vm.playAiRecommendation(context, item)
+                                    handlePlayRequest(item, false)
+                                },
+                                onLongClickPlay = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    handlePlayRequest(item, true)
                                 },
                                 onToggleSave = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -642,6 +686,26 @@ fun AiDiscoveryScreen(
             onDismiss = { showCalibrateTasteDialog = false },
             onAddAnchor = { anchor -> vm.addTasteAnchor(anchor) },
             onRemoveAnchor = { anchor -> vm.removeTasteAnchor(anchor) }
+        )
+    }
+
+    trackPendingPlayerChoice?.let { item ->
+        com.tunemind.app.ui.components.MusicPlayerChooserSheet(
+            trackTitle = item.title,
+            trackArtist = item.artist,
+            installedProviders = installedProviders,
+            activeSessionPackage = activeSessionPackage,
+            onSelectPlayer = { providerId, rememberAsDefault ->
+                trackPendingPlayerChoice = null
+                val result = vm.selectPlayerAndPlay(context, item, providerId, rememberAsDefault)
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = result.message,
+                        duration = SnackbarDuration.Short
+                    )
+                }
+            },
+            onDismiss = { trackPendingPlayerChoice = null }
         )
     }
 }
@@ -714,12 +778,14 @@ private fun TierHeaderBanner(
  * Individual Chrono AI Recommendation Card.
  * Compact, high-density hardware cassette-style card.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AiRecommendationCard(
     index: Int,
     item: AiRecommendationEntity,
     spoolRotation: Float,
     onPlay: () -> Unit,
+    onLongClickPlay: (() -> Unit)? = null,
     onToggleSave: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -845,29 +911,38 @@ private fun AiRecommendationCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                // Play Button
-                Button(
-                    onClick = onPlay,
-                    shape = RoundedCornerShape(6.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = subTierColor,
-                        contentColor = DeepObsidianAmber.AppBackground
-                    ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(26.dp)
+                // Play Button (supports 1-tap fast play and long-press player chooser)
+                Box(
+                    modifier = Modifier
+                        .height(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(subTierColor)
+                        .combinedClickable(
+                            onClick = onPlay,
+                            onLongClick = onLongClickPlay ?: onPlay
+                        )
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (item.wasPlayed) Icons.Default.Replay else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(11.dp)
-                    )
-                    Spacer(Modifier.width(3.dp))
-                    Text(
-                        text = if (item.wasPlayed) "REPLAY" else "PLAY",
-                        fontSize = 8.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = if (item.wasPlayed) Icons.Default.Replay else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.AppBackground,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = if (item.wasPlayed) "REPLAY" else "PLAY",
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.AppBackground
+                        )
+                    }
                 }
 
                 // Bookmark / Save Gem
