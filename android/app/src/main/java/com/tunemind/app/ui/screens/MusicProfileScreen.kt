@@ -37,7 +37,8 @@ import com.tunemind.app.ui.theme.*
 @Composable
 fun MusicProfileScreen(
     vm: TuneMindViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val historyState by vm.historyState.collectAsState()
     val userProfile by vm.userProfile.collectAsState()
@@ -82,7 +83,7 @@ fun MusicProfileScreen(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. TOP TELEMETRY STRIP
+        // 1. TOP TELEMETRY STRIP & DEDICATED SETTINGS BUTTON
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = colors.secondaryBackground,
@@ -92,7 +93,7 @@ fun MusicProfileScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -109,17 +110,37 @@ fun MusicProfileScreen(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = colors.secondaryText,
-                        letterSpacing = 1.sp
+                        letterSpacing = 0.8.sp
                     )
                 }
 
-                Text(
-                    text = "${tasteAnchors.size} ACTIVE ANCHORS",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.PrimaryAccent
-                )
+                // Dedicated Switchboard Settings button housed inside Profile
+                Surface(
+                    shape = RoundedCornerShape(7.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f)),
+                    modifier = Modifier.clickable { onOpenSettings() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Settings,
+                            contentDescription = "Studio Settings",
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "SETTINGS",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent
+                        )
+                    }
+                }
             }
         }
 
@@ -294,6 +315,64 @@ fun MusicProfileScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // 2.5. STUDIO SWITCHBOARD & ANDROID ENGINE LAUNCHER CARD
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenSettings() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DeepObsidianAmber.RecessedBackground)
+                            .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Settings,
+                            contentDescription = null,
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "Studio Switchboard & System Controls",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = "Battery shield, safe decibel alerts & player routing",
+                            fontSize = 10.sp,
+                            color = colors.secondaryText
+                        )
+                    }
+                }
+                Icon(
+                    Icons.Default.ArrowForward,
+                    contentDescription = "Open Settings",
+                    tint = DeepObsidianAmber.PrimaryAccent,
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
 

@@ -161,7 +161,11 @@ fun TuneMindAppNavigation(navController: NavHostController = rememberNavControll
                 ListeningHistoryScreen(vm = vm)
             }
             composable(Screen.Profile.route) {
-                MusicProfileScreen(vm = vm, onBack = { navController.popBackStack() })
+                MusicProfileScreen(
+                    vm = vm,
+                    onBack = { navController.popBackStack() },
+                    onOpenSettings = { navController.navigate(Screen.Settings.route) }
+                )
             }
             composable(Screen.SessionDetails.route) {
                 ListeningSessionDetailsScreen(vm = vm, onBack = { navController.popBackStack() })
@@ -298,7 +302,7 @@ fun TuneMindTopAppBar(
             }
 
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "TM // DSP-01",
                         fontSize = 10.sp,
@@ -307,6 +311,35 @@ fun TuneMindTopAppBar(
                         color = colors.secondaryText,
                         letterSpacing = 1.2.sp
                     )
+
+                    // Sleek, refined Daemon Status indicator (stored with telemetry header)
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.Warning.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.45f) else DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
+                        modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
+                            )
+                            Text(
+                                text = if (isDaemonConnected) "LIVE" else "OFFLINE",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
                 }
                 Text(
                     text = when (currentRoute) {
@@ -334,122 +367,63 @@ fun TuneMindTopAppBar(
             }
         }
 
-        // Top Right Utility Controls (AI Crate, DSP Link, Graphic EQ, Switchboard)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Satiety Lab quick shortcut
-            IconButton(
-                onClick = { onNavigate(Screen.Fatigue.route) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.cardSurface)
-            ) {
-                Icon(Icons.Outlined.LocalFireDepartment, contentDescription = "Satiety Lab", tint = DeepObsidianAmber.SatietyEmber, modifier = Modifier.size(18.dp))
-            }
-
-            // AI Discovery Crate quick shortcut
-            IconButton(
-                onClick = { onNavigate(Screen.AiDiscovery.route) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.cardSurface)
-            ) {
-                Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI Discovery Crate", tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
-            }
-
-            // Musical Moments quick shortcut
-            IconButton(
-                onClick = { onNavigate(Screen.MusicalMoments.route) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.cardSurface)
-            ) {
-                Icon(Icons.Outlined.BookmarkBorder, contentDescription = "Musical Moments", tint = colors.secondaryText, modifier = Modifier.size(18.dp))
-            }
-
-            // Hearing Insights quick shortcut
+        // Top Right Utility Controls: Exactly 3 well-placed, uncongested buttons
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 1. Decibel Headroom / Hearing Insights
             IconButton(
                 onClick = { onNavigate(Screen.HearingInsights.route) },
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(colors.cardSurface)
+                    .border(1.dp, DeepObsidianAmber.DecibelSafe.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
             ) {
-                Icon(Icons.Outlined.Headphones, contentDescription = "Hearing Insights", tint = colors.secondaryAccent, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Outlined.Headphones,
+                    contentDescription = "Decibel Headroom",
+                    tint = DeepObsidianAmber.DecibelSafe,
+                    modifier = Modifier.size(18.dp)
+                )
             }
 
-            // Live Daemon Pill Button
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = colors.elevatedSurface,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.5f) else DeepObsidianAmber.Warning.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
+            // 2. Musical Moments Marker
+            IconButton(
+                onClick = { onNavigate(Screen.MusicalMoments.route) },
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.cardSurface)
+                    .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
-                    )
-                    Text(
-                        text = if (isDaemonConnected) "LIVE" else "OFFLINE",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
-                        letterSpacing = 0.8.sp
-                    )
-                }
+                Icon(
+                    Icons.Outlined.GraphicEq,
+                    contentDescription = "Musical Moments",
+                    tint = colors.primaryAccent,
+                    modifier = Modifier.size(18.dp)
+                )
             }
 
-            // User Profile (Sonic Taste Genome & Archetype)
+            // 3. User Profile Avatar Capsule (leads to Profile Screen, where Settings resides)
             IconButton(
                 onClick = { onNavigate(Screen.Profile.route) },
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.linearGradient(
                             listOf(
-                                DeepObsidianAmber.NeuralViolet.copy(alpha = 0.85f),
-                                DeepObsidianAmber.ElectricViolet.copy(alpha = 0.85f)
+                                DeepObsidianAmber.NeuralViolet,
+                                DeepObsidianAmber.ElectricViolet
                             )
                         )
                     )
-                    .border(1.dp, DeepObsidianAmber.NeuralViolet, CircleShape)
+                    .border(1.2.dp, DeepObsidianAmber.NeuralViolet, CircleShape)
             ) {
                 Text(
                     text = "T",
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
-                )
-            }
-
-            // Studio Switchboard Settings (Gear Icon)
-            IconButton(
-                onClick = { onNavigate(Screen.Settings.route) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.cardSurface)
-                    .border(1.dp, colors.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-            ) {
-                Icon(
-                    Icons.Outlined.Settings,
-                    contentDescription = "Studio Settings",
-                    tint = colors.primaryAccent,
-                    modifier = Modifier.size(18.dp)
                 )
             }
         }

@@ -198,29 +198,121 @@ fun HomeScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. TOP HARDWARE TELEMETRY BAR
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "TUNEMIND",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.TextPrimary,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.sp
+        // 1. BESPOKE TUNEMIND BRAND EMBLEM & INTEGRATED DAEMON HERO
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DeepObsidianAmber.CardElevated,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.55f),
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                    )
                 )
-                // Live Daemon Pill
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left: Branded Emblem Logo & Typography
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Geometric Audiophile Logo Mark
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(
+                                        DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.25f),
+                                        DeepObsidianAmber.RecessedBackground,
+                                        DeepObsidianAmber.AppBackground
+                                    )
+                                )
+                            )
+                            .border(1.2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.7f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Concentric Sine/Waveform Insignia
+                        Canvas(modifier = Modifier.size(28.dp)) {
+                            val w = size.width
+                            val h = size.height
+                            // Golden Center Core
+                            drawCircle(
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                radius = 3.5.dp.toPx(),
+                                center = Offset(w / 2f, h / 2f)
+                            )
+                            // Outer Waveform Arc 1
+                            drawArc(
+                                color = DeepObsidianAmber.CopperAccent,
+                                startAngle = -140f,
+                                sweepAngle = 100f,
+                                useCenter = false,
+                                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
+                                size = Size(w - 8.dp.toPx(), h - 8.dp.toPx()),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                            // Outer Waveform Arc 2
+                            drawArc(
+                                color = DeepObsidianAmber.EQBassCyan,
+                                startAngle = 40f,
+                                sweepAngle = 100f,
+                                useCenter = false,
+                                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
+                                size = Size(w - 8.dp.toPx(), h - 8.dp.toPx()),
+                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "TUNEMIND",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = DeepObsidianAmber.TextPrimary,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.6.sp
+                        )
+                        Text(
+                            text = "NEURO-ACOUSTIC DSP ENGINE",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                }
+
+                // Right: Redesigned, Machined Daemon Status Badge
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = DeepObsidianAmber.RecessedBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isListenerBound) DeepObsidianAmber.Success.copy(alpha = 0.5f)
+                        else DeepObsidianAmber.Warning.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.clickable {
+                        if (!isListenerBound) {
+                            com.tunemind.app.MainActivity.forceRebindListener(context)
+                        }
+                    }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
@@ -231,61 +323,14 @@ fun HomeScreen(
                                 .background(if (isListenerBound) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
                         )
                         Text(
-                            text = if (isListenerBound) "DAEMON // LIVE" else "DAEMON // OFFLINE",
-                            fontSize = 9.sp,
+                            text = if (isListenerBound) "DAEMON LIVE" else "REBIND DAEMON",
+                            fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.TextSecondary,
-                            letterSpacing = 0.8.sp
+                            color = if (isListenerBound) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
+                            letterSpacing = 0.5.sp
                         )
                     }
-                }
-            }
-
-            // Tactile Rotary Utility Keys
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                IconButton(
-                    onClick = onOpenAiDiscovery,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(DeepObsidianAmber.CardElevated)
-                        .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f), CircleShape)
-                ) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = "AI Crate", tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
-                }
-
-                IconButton(
-                    onClick = onOpenFatigue,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(DeepObsidianAmber.CardElevated)
-                        .border(1.dp, DeepObsidianAmber.SatietyEmber.copy(alpha = 0.4f), CircleShape)
-                ) {
-                    Icon(Icons.Outlined.LocalFireDepartment, contentDescription = "Satiety Lab", tint = DeepObsidianAmber.SatietyEmber, modifier = Modifier.size(16.dp))
-                }
-
-                IconButton(
-                    onClick = onOpenMoments,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(DeepObsidianAmber.CardElevated)
-                        .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f), CircleShape)
-                ) {
-                    Icon(Icons.Outlined.GraphicEq, contentDescription = "Moments", tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
-                }
-
-                IconButton(
-                    onClick = onOpenHearing,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(DeepObsidianAmber.CardElevated)
-                        .border(1.dp, DeepObsidianAmber.DecibelSafe.copy(alpha = 0.4f), CircleShape)
-                ) {
-                    Icon(Icons.Outlined.Headphones, contentDescription = "Hearing", tint = DeepObsidianAmber.DecibelSafe, modifier = Modifier.size(16.dp))
                 }
             }
         }
