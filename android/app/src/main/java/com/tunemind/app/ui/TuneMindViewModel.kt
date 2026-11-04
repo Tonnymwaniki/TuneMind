@@ -41,9 +41,13 @@ data class MusicalMomentsState(
 data class HearingInsightsState(
     val recentAudioDevices: List<AudioDeviceSessionEntity> = emptyList(),
     val activeAudioDevice: AudioDeviceSessionEntity? = null,
+    val activeSnapshot: com.tunemind.app.domain.audio.AudioDeviceSnapshot? = null,
     val recentVolumeObs: List<VolumeObservationEntity> = emptyList(),
     val estimatedAverageDb: Float = 68f,
+    val currentHeadroomDb: Float = 17f,
     val dailyExposureMinutes: Int = 45,
+    val soundDoseFraction: Float = 0.32f,
+    val safeHoursRemaining: Float = 16f,
     val safetyGuidance: String = "Listening exposure within safe acoustic threshold (<80 dB)."
 )
 
@@ -365,11 +369,12 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        // Observe audio devices
+        // Observe audio devices and volume
         viewModelScope.launch {
             try {
                 audioDao?.observeRecentSessions()?.collect { sessions ->
                     val active = sessions.firstOrNull { it.disconnectedAt == null }
+                    refreshHearingInsights()
                     _hearingInsightsState.value = _hearingInsightsState.value.copy(
                         recentAudioDevices = sessions,
                         activeAudioDevice = active
@@ -379,6 +384,19 @@ class TuneMindViewModel : ViewModel() {
                 android.util.Log.w("TuneMindVM", "observeAudio notice: ${t.message}")
             }
         }
+
+        viewModelScope.launch {
+            try {
+                audioDao?.observeRecentVolume()?.collect { obs ->
+                    refreshHearingInsights()
+                    _hearingInsightsState.value = _hearingInsightsState.value.copy(
+                        recentVolumeObs = obs
+                    )
+                }
+            } catch (_: Throwable) {}
+        }
+
+        refreshHearingInsights()
 
         refreshReadiness()
         refreshGeminiState()
@@ -764,6 +782,34 @@ class TuneMindViewModel : ViewModel() {
         refreshRecommendations()
     }
 
+
+    fun refreshHearingInsights() {
+        val ctx = AppHolder.context ?: return
+        val snapshot = com.tunemind.app.domain.audio.AudioDeviceObserver.getActiveAudioDeviceSnapshot(ctx)
+        val estDb = snapshot.estimatedDb
+        val headroom = snapshot.headroomDb
+
+        val safeHours = if (estDb <= 70f) 24f else {
+            (8f / Math.pow(2.0, ((estDb - 85f) / 3f).toDouble())).toFloat().coerceIn(0.1f, 24f)
+        }
+
+        val doseFraction = ((estDb / 85f) * 0.44f).coerceIn(0.1f, 1.0f)
+        val guidance = when {
+            headroom >= 12f -> "Pristine acoustic headroom (+%.1f dB). Safe for all-day listening.".format(headroom)
+            headroom >= 4f -> "Optimal safety headroom (+%.1f dB). Stereocilia fatigue within healthy bounds.".format(headroom)
+            headroom >= 0f -> "Approaching 85 dBA threshold (+%.1f dB headroom). Max 8h daily recommended.".format(headroom)
+            else -> "Headroom exceeded (%.1f dB). High auditory fatigue risk; lower volume.".format(headroom)
+        }
+
+        _hearingInsightsState.value = _hearingInsightsState.value.copy(
+            activeSnapshot = snapshot,
+            estimatedAverageDb = estDb,
+            currentHeadroomDb = headroom,
+            soundDoseFraction = doseFraction,
+            safeHoursRemaining = safeHours,
+            safetyGuidance = guidance
+        )
+    }
 
     fun refreshGeminiState() {
         val ctx = AppHolder.context ?: return

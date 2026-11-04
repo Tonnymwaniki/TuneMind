@@ -1,6 +1,7 @@
 package com.tunemind.app.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,10 +27,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.audio.AudioDeviceObserver
+import com.tunemind.app.domain.audio.AudioDeviceSnapshot
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
 
@@ -40,30 +45,63 @@ fun HearingInsightsScreen(
 ) {
     val hearingState by vm.hearingInsightsState.collectAsState()
     val colors = TuneMindTheme.colors
-    val avgDb = hearingState.estimatedAverageDb.takeIf { it > 0f } ?: 72f
-    val activeDevice = hearingState.activeAudioDevice?.deviceName ?: "Bluetooth Headset (A2DP • LDAC)"
+    val context = LocalContext.current
 
+    // Query active hardware snapshot immediately on launch and whenever device state changes
+    LaunchedEffect(Unit) {
+        vm.refreshHearingInsights()
+    }
+
+    val snapshot: AudioDeviceSnapshot = hearingState.activeSnapshot
+        ?: remember(hearingState) { AudioDeviceObserver.getActiveAudioDeviceSnapshot(context) }
+
+    val avgDb = snapshot.estimatedDb
+    val headroomDb = snapshot.headroomDb
     val isSafe = avgDb < 85f
-    val headroomDb = (85f - avgDb).coerceAtLeast(0f)
 
     // Ballistic Dual Channel VU Meters (Spring Damping 0.52ζ)
     val needleAngleL by animateFloatAsState(
-        targetValue = -50f + (((avgDb - 1.6f) - 40f) / 80f).coerceIn(0f, 1f) * 100f,
+        targetValue = -50f + (((avgDb - 1.4f) - 40f) / 75f).coerceIn(0f, 1f) * 100f,
         animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
         label = "vuLeft"
     )
     val needleAngleR by animateFloatAsState(
-        targetValue = -50f + (((avgDb + 1.4f) - 40f) / 80f).coerceIn(0f, 1f) * 100f,
+        targetValue = -50f + (((avgDb + 1.2f) - 40f) / 75f).coerceIn(0f, 1f) * 100f,
         animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
         label = "vuRight"
     )
 
     // Circadian Sound Dose Percentage (0.0 to 1.0)
-    val soundDoseFraction = ((avgDb / 85f) * 0.44f).coerceIn(0.12f, 1.0f)
+    val soundDoseFraction = hearingState.soundDoseFraction.coerceIn(0.10f, 1.0f)
     val soundDoseColor = when {
         soundDoseFraction < 0.60f -> DeepObsidianAmber.DecibelSafe
         soundDoseFraction < 0.82f -> DeepObsidianAmber.PrimaryAccent
         else -> DeepObsidianAmber.Error
+    }
+
+    val safeHours = hearingState.safeHoursRemaining
+    val safeHoursText = when {
+        safeHours >= 16f -> "> 16.0 HOURS"
+        safeHours >= 1f -> "%.1f HOURS".format(safeHours)
+        else -> "%d MINS".format((safeHours * 60).toInt())
+    }
+
+    val (headroomBadgeText, headroomBadgeColor) = when {
+        headroomDb >= 12f -> "[PRISTINE HEADROOM]" to DeepObsidianAmber.DecibelSafe
+        headroomDb >= 4f -> "[SAFE MARGIN]" to DeepObsidianAmber.PrimaryAccent
+        headroomDb >= 0f -> "[THRESHOLD REACHED]" to DeepObsidianAmber.Warning
+        else -> "[CAUTION EXPOSURE]" to DeepObsidianAmber.Error
+    }
+
+    // Transducer category display info
+    val (categoryTitle, categoryTag, categoryColor) = when (snapshot.transducerCategory) {
+        "BLUETOOTH_EARBUDS" -> Triple("Bluetooth Earbuds / TWS", "IN-EAR SEAL", DeepObsidianAmber.DecibelSafe)
+        "BLUETOOTH_HEADPHONES" -> Triple("Bluetooth Headphones", "OVER-EAR CIRCUMAURAL", DeepObsidianAmber.PrimaryAccent)
+        "WIRED_EARPHONES" -> Triple("Wired Earphones (3.5mm)", "IN-EAR CANAL", DeepObsidianAmber.DecibelSafe)
+        "WIRED_HEADPHONES" -> Triple("Wired Headphones (3.5mm)", "OVER-EAR MONITOR", DeepObsidianAmber.SecondaryAccent)
+        "USB_EARPHONES", "USB_DAC" -> Triple("USB-C Digital Audio / DAC", "BITSTREAM DIRECT", DeepObsidianAmber.NeuralViolet)
+        "BUILTIN_SPEAKER" -> Triple("Built-in Phone Loudspeaker", "OPEN AMBIENT", DeepObsidianAmber.CopperAccent)
+        else -> Triple(snapshot.deviceType, "STANDARD", DeepObsidianAmber.SecondaryAccent)
     }
 
     Column(
@@ -72,7 +110,7 @@ fun HearingInsightsScreen(
             .background(
                 Brush.verticalGradient(
                     listOf(
-                        DeepObsidianAmber.DecibelSafe.copy(alpha = 0.07f),
+                        DeepObsidianAmber.DecibelSafe.copy(alpha = 0.08f),
                         DeepObsidianAmber.AppBackground,
                         DeepObsidianAmber.RecessedBackground
                     )
@@ -82,11 +120,11 @@ fun HearingInsightsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. TOP HARDWARE TELEMETRY STRIP & DEVICE BRIDGE
+        // 1. TOP HARDWARE TELEMETRY STRIP & RE-PROBE BRIDGE
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = colors.secondaryBackground,
-            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
+            border = BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -101,74 +139,218 @@ fun HearingInsightsScreen(
                         modifier = Modifier
                             .size(6.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF10B981))
+                            .background(DeepObsidianAmber.DecibelSafe)
                     )
                     Text(
-                        text = "HEARING HEALTH // EXPOSURE ENGINE",
+                        text = "TRANSDUCER INSPECTION // EXPOSURE ENGINE",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = colors.secondaryText,
-                        letterSpacing = 1.sp
+                        letterSpacing = 0.8.sp
                     )
                 }
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "${snapshot.sampleRate / 1000}kHz • BUS",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.SecondaryAccent
+                    )
+                    IconButton(
+                        onClick = { vm.refreshHearingInsights() },
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Refresh,
+                            contentDescription = "Refresh Device Probe",
+                            tint = colors.primaryAccent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. ACTIVE HARDWARE TRANSDUCER & ACOUSTIC COUPLING CARD
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.secondaryBackground,
+            border = BorderStroke(
+                1.2.dp,
+                Brush.horizontalGradient(
+                    listOf(
+                        categoryColor.copy(alpha = 0.6f),
+                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
+                    )
+                )
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Top Row: Transducer Badge and Connection Bus
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(
+                            imageVector = when (snapshot.transducerCategory) {
+                                "BUILTIN_SPEAKER" -> Icons.Outlined.VolumeUp
+                                "USB_EARPHONES", "USB_DAC" -> Icons.Outlined.GraphicEq
+                                else -> Icons.Outlined.Headphones
+                            },
+                            contentDescription = null,
+                            tint = categoryColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = categoryTitle,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryText
+                            )
+                            Text(
+                                text = "CONNECTION: ${snapshot.connectionType}",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = colors.secondaryText
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = BorderStroke(1.dp, categoryColor.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = categoryTag,
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = categoryColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                // Device Product Identification (e.g. "AirPods Pro", "Sony WH-1000XM4", "Built-in Speaker")
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "HARDWARE SINK PRODUCT",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = colors.secondaryText
+                            )
+                            Text(
+                                text = snapshot.productName,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(DeepObsidianAmber.DecibelSafe))
+                            Text(
+                                text = "MONITORED",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepObsidianAmber.DecibelSafe
+                            )
+                        }
+                    }
+                }
+
+                // Android Gain Step Meter (e.g. Step 8 of 15)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ANDROID MEDIA GAIN: STEP ${snapshot.volumeIndex} / ${snapshot.maxVolume}",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.secondaryText
+                        )
+                        Text(
+                            text = "${((snapshot.volumeIndex.toFloat() / maxOf(1, snapshot.maxVolume)) * 100).toInt()}% GAIN",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryAccent
+                        )
+                    }
+
+                    // 15-cell Segmented Gain Bar
+                    val totalSteps = snapshot.maxVolume.coerceIn(10, 25)
+                    val activeSteps = snapshot.volumeIndex.coerceIn(0, totalSteps)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(DeepObsidianAmber.RecessedBackground)
+                            .padding(1.5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        for (i in 0 until totalSteps) {
+                            val isActive = i < activeSteps
+                            val cellColor = when {
+                                !isActive -> DeepObsidianAmber.CardElevated.copy(alpha = 0.5f)
+                                i < (totalSteps * 0.65f) -> DeepObsidianAmber.DecibelSafe
+                                i < (totalSteps * 0.85f) -> DeepObsidianAmber.PrimaryAccent
+                                else -> DeepObsidianAmber.Error
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(cellColor)
+                            )
+                        }
+                    }
+                }
+
+                // Acoustic Coupling Physics Description
                 Text(
-                    text = "DSP BUS • 48kHz",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.SecondaryAccent
+                    text = snapshot.acousticCouplingDescription,
+                    fontSize = 11.sp,
+                    color = colors.secondaryText,
+                    lineHeight = 15.sp
                 )
             }
         }
 
-        // Active Transducer Recessed Pill
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = colors.secondaryBackground.copy(alpha = 0.8f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(
-                        Icons.Outlined.Headphones,
-                        contentDescription = null,
-                        tint = colors.primaryAccent,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = activeDevice,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primaryText
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF10B981))
-                    )
-                    Text(
-                        text = "SYNCED",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF10B981)
-                    )
-                }
-            }
-        }
-
-        // 2. MAIN CENTERPIECE: DUAL ANALOG LEFT/RIGHT VU METERS (Warm Amber Backlight)
+        // 3. MAIN CENTERPIECE: DUAL ANALOG LEFT/RIGHT VU METERS (Warm Amber Glow)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -238,7 +420,7 @@ fun HearingInsightsScreen(
                             color = DeepObsidianAmber.SecondaryAccent
                         )
                         Text(
-                            text = "${(avgDb - 1.6f).toInt()} dB",
+                            text = "${(avgDb - 1.4f).toInt()} dBA",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -329,7 +511,7 @@ fun HearingInsightsScreen(
                             color = DeepObsidianAmber.SecondaryAccent
                         )
                         Text(
-                            text = "${(avgDb + 1.4f).toInt()} dB",
+                            text = "${(avgDb + 1.2f).toInt()} dBA",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -391,34 +573,34 @@ fun HearingInsightsScreen(
                 }
             }
 
-            // Digital Exposure Readout
+            // Digital Exposure Readout & Dynamic Headroom Tag
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "PEAK INTEGRATION: ${avgDb.toInt()} dBA",
+                    text = "CALIBRATED SPL: ${avgDb.toInt()} dBA",
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
                 )
                 Text(
-                    text = if (isSafe) "[SAFE HEADROOM]" else "[CAUTION EXPOSURE]",
+                    text = headroomBadgeText,
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = if (isSafe) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
+                    color = headroomBadgeColor
                 )
             }
         }
 
-        // 2B. CIRCADIAN SOUND DOSE PROGRESS RING (Emerald -> Amber -> Crimson)
+        // 4. CIRCADIAN SOUND DOSE PROGRESS RING (Emerald -> Amber -> Crimson)
         Surface(
             shape = RoundedCornerShape(14.dp),
             color = colors.secondaryBackground,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
+            border = BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -491,8 +673,7 @@ fun HearingInsightsScreen(
                         color = colors.primaryText
                     )
                     Text(
-                        text = if (soundDoseFraction < 0.6f) "Auditory stereocilia fatigue is within pristine recovery bounds. +%.1f dB margin.".format(headroomDb)
-                               else "Auditory dose elevated. Consider acoustic recovery interval before bedtime.",
+                        text = hearingState.safetyGuidance,
                         fontSize = 11.sp,
                         color = colors.secondaryText,
                         lineHeight = 15.sp
@@ -503,7 +684,7 @@ fun HearingInsightsScreen(
                     ) {
                         Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(soundDoseColor))
                         Text(
-                            text = if (soundDoseFraction < 0.6f) "DOSE: SAFE [EMERALD]" else "DOSE: ELEVATED",
+                            text = if (soundDoseFraction < 0.6f) "DOSE: OPTIMAL [WHO 85dBA]" else "DOSE: ELEVATED",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -514,14 +695,14 @@ fun HearingInsightsScreen(
             }
         }
 
-        // 3. HEADROOM STATS
+        // 5. TRUE SIGNED ACOUSTIC HEADROOM & SAFE ALLOWANCE
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = colors.secondaryBackground,
-            border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+            border = BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = "ACOUSTIC HEADROOM TELEMETRY",
                     fontSize = 9.sp,
@@ -537,28 +718,164 @@ fun HearingInsightsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        val formattedHeadroom = if (headroomDb >= 0f) "+%.1f dB".format(headroomDb) else "%.1f dB".format(headroomDb)
                         Text(
-                            text = "+%.1f dB".format(headroomDb),
-                            fontSize = 18.sp,
+                            text = formattedHeadroom,
+                            fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = colors.primaryAccent
+                            color = if (headroomDb >= 4f) DeepObsidianAmber.DecibelSafe else if (headroomDb >= 0f) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.Error
                         )
                         Text("Headroom to 85 dBA Threshold", fontSize = 11.sp, color = colors.secondaryText)
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "8.0 HOURS",
-                            fontSize = 18.sp,
+                            text = safeHoursText,
+                            fontSize = 20.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF10B981)
+                            color = if (safeHours >= 4f) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
                         )
-                        Text("Daily Safe Listening Allowance", fontSize = 11.sp, color = colors.secondaryText)
+                        Text("Safe Listening Allowance", fontSize = 11.sp, color = colors.secondaryText)
                     }
                 }
             }
+        }
+
+        // 6. ANDROID TRANSDUCER ACOUSTIC COUPLING SPECTRUM
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.secondaryBackground,
+            border = BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TRANSDUCER COUPLING SPECTRUM",
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.secondaryText,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "ACOUSTIC CALIBRATION",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = DeepObsidianAmber.PrimaryAccent
+                    )
+                }
+
+                // 1. In-Ear Canal Earbuds / TWS
+                TransducerCouplingRow(
+                    title = "In-Ear Canal (Earbuds / TWS)",
+                    rangeText = "58 – 104 dBA",
+                    desc = "Acoustic seal in canal. Direct tympanic transfer; highest stereocilia fatigue rate.",
+                    isActive = snapshot.transducerCategory in listOf("BLUETOOTH_EARBUDS", "WIRED_EARPHONES", "USB_EARPHONES"),
+                    accentColor = DeepObsidianAmber.DecibelSafe
+                )
+
+                // 2. Over-Ear Circumaural Headphones
+                TransducerCouplingRow(
+                    title = "Over-Ear Circumaural (Headphones)",
+                    rangeText = "54 – 96 dBA",
+                    desc = "Ear cushions & pinna chamber dispersion. Balanced acoustic air cushion absorption.",
+                    isActive = snapshot.transducerCategory in listOf("BLUETOOTH_HEADPHONES", "WIRED_HEADPHONES"),
+                    accentColor = DeepObsidianAmber.PrimaryAccent
+                )
+
+                // 3. Open Phone Loudspeaker
+                TransducerCouplingRow(
+                    title = "Ambient Phone Loudspeaker",
+                    rangeText = "44 – 82 dBA",
+                    desc = "Open air inverse-square distance decay. Minimal auditory fatigue under normal distance.",
+                    isActive = snapshot.transducerCategory == "BUILTIN_SPEAKER",
+                    accentColor = DeepObsidianAmber.CopperAccent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransducerCouplingRow(
+    title: String,
+    rangeText: String,
+    desc: String,
+    isActive: Boolean,
+    accentColor: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = if (isActive) accentColor.copy(alpha = 0.12f) else DeepObsidianAmber.RecessedBackground,
+        border = BorderStroke(
+            1.dp,
+            if (isActive) accentColor.copy(alpha = 0.6f) else DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.3f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(if (isActive) accentColor else DeepObsidianAmber.TextMuted)
+                    )
+                    Text(
+                        text = title,
+                        fontSize = 11.sp,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isActive) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.TextSecondary
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = rangeText,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isActive) accentColor else DeepObsidianAmber.TextMuted
+                    )
+                    if (isActive) {
+                        Surface(
+                            shape = RoundedCornerShape(3.dp),
+                            color = accentColor.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, accentColor)
+                        ) {
+                            Text(
+                                text = "ACTIVE",
+                                fontSize = 7.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = desc,
+                fontSize = 10.sp,
+                color = DeepObsidianAmber.TextSecondary,
+                lineHeight = 14.sp
+            )
         }
     }
 }
