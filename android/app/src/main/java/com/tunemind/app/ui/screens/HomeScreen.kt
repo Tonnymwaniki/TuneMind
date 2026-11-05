@@ -1,5 +1,9 @@
 package com.tunemind.app.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -30,20 +34,26 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.RecommendationCategory
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.model.TuneMindDemoData
+import com.tunemind.app.provider.MusicProvider
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SongProfileData
 import com.tunemind.app.ui.components.SongProfileSheet
 import com.tunemind.app.ui.theme.*
+import com.tunemind.app.voice.AgentPhase
+import com.tunemind.app.voice.NeuroAcousticIntent
+import com.tunemind.app.voice.TuneMindVoiceAgent
 
 @Composable
 fun HomeScreen(
@@ -75,6 +85,26 @@ fun HomeScreen(
     val isReasoningLoading by vm.isReasoningLoading.collectAsState()
     val reasoningReport by vm.reasoningReport.collectAsState()
     val isGeneratingReport by vm.isGeneratingReport.collectAsState()
+
+    val context = LocalContext.current
+    val voiceAgent = remember { TuneMindVoiceAgent(context, vm) }
+    val agentState by voiceAgent.agentState.collectAsState()
+    var showPlayerSelectorSheet by remember { mutableStateOf(false) }
+    val installedProviders = remember(context) { vm.getInstalledProviders(context) }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceAgent.startAgentSession()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceAgent.stop()
+        }
+    }
 
     // Real Live Media Playback telemetry from Spotify / active players
     val nowPlaying = state.nowPlaying
@@ -466,6 +496,92 @@ fun HomeScreen(
                 .padding(18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // 0. NEURO-ACOUSTIC AGENT STATUS & PLAYER ROUTE STRIP
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left: Player Route Target Pill (1-Tap Change)
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f)),
+                    modifier = Modifier.clickable { showPlayerSelectorSheet = true }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.NearMe,
+                            contentDescription = "Target Player",
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "ROUTE: ${agentState.targetProviderName.uppercase()}",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.PrimaryAccent,
+                            letterSpacing = 0.6.sp
+                        )
+                        Icon(
+                            Icons.Default.ArrowDropDown,
+                            contentDescription = "Change Player",
+                            tint = DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
+                // Right: Voice Agent Activity Badge
+                val isAgentActive = agentState.phase != AgentPhase.IDLE
+                val agentBadgeColor = when (agentState.phase) {
+                    AgentPhase.IDLE -> DeepObsidianAmber.SurfaceBorder
+                    AgentPhase.PROMPTING_VOICE, AgentPhase.PROMPTING_PLAYER -> DeepObsidianAmber.PrimaryAccent
+                    AgentPhase.LISTENING_INTENT, AgentPhase.LISTENING_PLAYER -> DeepObsidianAmber.EQBassCyan
+                    AgentPhase.EXECUTING -> DeepObsidianAmber.Success
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DeepObsidianAmber.RecessedBackground,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, agentBadgeColor.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isAgentActive) agentBadgeColor else DeepObsidianAmber.TextSecondary)
+                        )
+                        Text(
+                            text = when (agentState.phase) {
+                                AgentPhase.IDLE -> "VOICE AGENT READY"
+                                AgentPhase.PROMPTING_VOICE -> "AGENT SPEAKING"
+                                AgentPhase.LISTENING_INTENT -> "LISTENING TO VIBE..."
+                                AgentPhase.PROMPTING_PLAYER -> "CONFIRMING PLAYER"
+                                AgentPhase.LISTENING_PLAYER -> "LISTENING TO PLAYER..."
+                                AgentPhase.EXECUTING -> "DISPATCHING AUDIO"
+                            },
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isAgentActive) agentBadgeColor else DeepObsidianAmber.TextSecondary,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+            }
+
             // Concentric Vinyl Turntable Platter & Machined Pivoting Tonearm
             Box(
                 modifier = Modifier
@@ -888,11 +1004,129 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Machined Transport Controls Deck
+            // 3. CONVERSATIONAL VOICE AGENT READOUT & LIVE SPEECH CHAMBER
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = DeepObsidianAmber.RecessedBackground,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER)
+                        DeepObsidianAmber.EQBassCyan.copy(alpha = 0.65f)
+                    else if (agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER)
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.65f)
+                    else DeepObsidianAmber.CopperAccent.copy(alpha = 0.35f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val hasAudioPerm = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasAudioPerm) {
+                            voiceAgent.startAgentSession()
+                        } else {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER)
+                                    Icons.Default.Mic
+                                else if (agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER)
+                                    Icons.Outlined.GraphicEq
+                                else Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER)
+                                    DeepObsidianAmber.EQBassCyan
+                                else DeepObsidianAmber.PrimaryAccent,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = when (agentState.phase) {
+                                    AgentPhase.IDLE -> "TUNEMIND AGENT // PROMPT READY"
+                                    AgentPhase.PROMPTING_VOICE -> "AGENT SPEAKING..."
+                                    AgentPhase.LISTENING_INTENT -> "LISTENING FOR VIBE..."
+                                    AgentPhase.PROMPTING_PLAYER -> "CONFIRMING TARGET PLAYER..."
+                                    AgentPhase.LISTENING_PLAYER -> "LISTENING FOR PLAYER..."
+                                    AgentPhase.EXECUTING -> "DISPATCHING TO ${agentState.targetProviderName.uppercase()}"
+                                },
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER)
+                                    DeepObsidianAmber.EQBassCyan
+                                else DeepObsidianAmber.PrimaryAccent,
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+
+                        // Subtle instruction tag
+                        Text(
+                            text = if (agentState.phase == AgentPhase.IDLE) "TAP TO SPEAK" else "LIVE DIALOGUE",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.secondaryText
+                        )
+                    }
+
+                    // Dynamic Speech Dialog Bubble
+                    if (agentState.agentSpeech.isNotBlank() || agentState.userSpeech.isNotBlank()) {
+                        if (agentState.agentSpeech.isNotBlank()) {
+                            Text(
+                                text = "Agent: \"${agentState.agentSpeech}\"",
+                                fontSize = 11.sp,
+                                color = DeepObsidianAmber.TextPrimary,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (agentState.userSpeech.isNotBlank()) {
+                            Text(
+                                text = "You: \"${agentState.userSpeech}\"",
+                                fontSize = 11.sp,
+                                color = DeepObsidianAmber.EQBassCyan,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "Say: 'Play high dopamine', 'Play my most repeated anchor', 'Play for this time of day', or 'Play in YouTube Music'",
+                            fontSize = 10.sp,
+                            color = colors.secondaryText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 4. MACHINED AGENTIC VOICE & DUAL ROTARY TRANSPORT CONSOLE
+            Surface(
+                shape = RoundedCornerShape(16.dp),
                 color = colors.primaryBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.4f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.border.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -902,42 +1136,79 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Bedtime Rest Track Toggle
-                    IconButton(
-                        onClick = { isRestTrackActive = !isRestTrackActive },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(colors.cardSurface)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Bedtime,
-                            contentDescription = "Rest Track",
-                            tint = if (isRestTrackActive) colors.secondaryAccent else colors.secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
                     // Stepper: Previous
                     IconButton(
                         onClick = { vm.skipPrev() },
                         modifier = Modifier
                             .size(38.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(9.dp))
                             .background(colors.cardSurface)
+                            .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
                     ) {
                         Icon(
                             Icons.Default.SkipPrevious,
                             contentDescription = "Previous",
                             tint = colors.primaryText,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    // Centerpiece: Laser Rotary Console Dial
+                    // Centerpiece 1: Interactive Agent Voice Mic
+                    val isListening = agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER
+                    val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER
+                    val micAnim = rememberInfiniteTransition(label = "micPulseAnim")
+                    val micPulse by micAnim.animateFloat(
+                        initialValue = 0.85f,
+                        targetValue = 1.25f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "micPulse"
+                    )
+
                     Box(
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(52.dp)
+                            .scale(if (isListening || isSpeaking) micPulse else 1f)
+                            .clip(CircleShape)
+                            .background(
+                                if (isListening) DeepObsidianAmber.EQBassCyan
+                                else if (isSpeaking) DeepObsidianAmber.BrandSoulAmber
+                                else DeepObsidianAmber.RecessedBackground
+                            )
+                            .border(
+                                1.5.dp,
+                                if (isListening) DeepObsidianAmber.EQBassCyan
+                                else DeepObsidianAmber.PrimaryAccent,
+                                CircleShape
+                            )
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                val hasAudioPerm = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasAudioPerm) {
+                                    voiceAgent.startAgentSession()
+                                } else {
+                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isSpeaking) Icons.Outlined.GraphicEq else Icons.Default.Mic,
+                            contentDescription = "Voice Agent",
+                            tint = if (isListening || isSpeaking) DeepObsidianAmber.AppBackground else DeepObsidianAmber.PrimaryAccent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    // Centerpiece 2: Laser Rotary Console Dial (Play / Pause)
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
                             .clip(CircleShape)
                             .background(colors.primaryAccent)
                             .clickable {
@@ -959,31 +1230,158 @@ fun HomeScreen(
                         onClick = { vm.skipNext() },
                         modifier = Modifier
                             .size(38.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(9.dp))
                             .background(colors.cardSurface)
+                            .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
                     ) {
                         Icon(
                             Icons.Default.SkipNext,
                             contentDescription = "Next",
                             tint = colors.primaryText,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    // Dynamic Cycle / Loop Switch
+                    // Player Route Switcher Button
                     IconButton(
-                        onClick = { isAcousticLoopActive = !isAcousticLoopActive },
+                        onClick = { showPlayerSelectorSheet = true },
                         modifier = Modifier
                             .size(38.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(9.dp))
                             .background(colors.cardSurface)
+                            .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(9.dp))
                     ) {
                         Icon(
-                            Icons.Outlined.AllInclusive,
-                            contentDescription = "Loop",
-                            tint = if (isAcousticLoopActive) colors.primaryAccent else colors.secondaryText,
+                            Icons.Outlined.NearMe,
+                            contentDescription = "Switch Music Player",
+                            tint = DeepObsidianAmber.PrimaryAccent,
                             modifier = Modifier.size(18.dp)
                         )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 5. ONE-TAP NEURO-ACOUSTIC INTENT BANK (FAST ACCESSIBLE CHIPS)
+            Text(
+                text = "NEURO-ACOUSTIC AGENT SHORTCUTS",
+                fontSize = 8.5.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                color = colors.secondaryText,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp, bottom = 4.dp)
+            )
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    // 1. Peak Dopamine
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.DOPAMINE_PEAK, bypassVoicePrompt = false)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(13.dp))
+                            Text("DOPAMINE PEAK", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                        }
+                    }
+                }
+
+                item {
+                    // 2. Auditory Anchor (Most Repeated)
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.AUDITORY_ANCHOR, bypassVoicePrompt = false)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.Repeat, contentDescription = null, tint = DeepObsidianAmber.CopperAccent, modifier = Modifier.size(13.dp))
+                            Text("SONIC ANCHOR", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CopperAccent)
+                        }
+                    }
+                }
+
+                item {
+                    // 3. Circadian Daypart
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CircadianMorning.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.CIRCADIAN_DAYPART, bypassVoicePrompt = false)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.WbSunny, contentDescription = null, tint = DeepObsidianAmber.CircadianMorning, modifier = Modifier.size(13.dp))
+                            Text("DAYPART SYNC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CircadianMorning)
+                        }
+                    }
+                }
+
+                item {
+                    // 4. Chrono AI Crate
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.EQBassCyan.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.AI_CRATE, bypassVoicePrompt = false)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.EQBassCyan, modifier = Modifier.size(13.dp))
+                            Text("CRATE GEMS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.EQBassCyan)
+                        }
+                    }
+                }
+
+                item {
+                    // 5. Timeline History
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.NeuralViolet.copy(alpha = 0.6f)),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.TIMELINE_HISTORY, bypassVoicePrompt = false)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.History, contentDescription = null, tint = DeepObsidianAmber.NeuralViolet, modifier = Modifier.size(13.dp))
+                            Text("TIMELINE VAULT", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.NeuralViolet)
+                        }
                     }
                 }
             }
@@ -1586,5 +1984,139 @@ fun HomeScreen(
             vm = vm,
             onDismiss = { selectedProfileData = null }
         )
+    }
+
+    if (showPlayerSelectorSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlayerSelectorSheet = false },
+            containerColor = DeepObsidianAmber.CardElevated,
+            contentColor = DeepObsidianAmber.TextPrimary,
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "AUDIO ROUTING SWITCHBOARD",
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = DeepObsidianAmber.PrimaryAccent,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "Select the music app or local audio player TuneMind dispatches to",
+                            fontSize = 11.sp,
+                            color = DeepObsidianAmber.TextSecondary
+                        )
+                    }
+
+                    IconButton(onClick = { showPlayerSelectorSheet = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = DeepObsidianAmber.TextSecondary)
+                    }
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // List all discovered music providers
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    installedProviders.forEach { provider ->
+                        val isSelected = provider.providerId == agentState.targetProviderId
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) DeepObsidianAmber.RecessedBackground else DeepObsidianAmber.CardBackground,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    voiceAgent.setTargetPlayer(provider.providerId, provider.displayName)
+                                    showPlayerSelectorSheet = false
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f)
+                                                else DeepObsidianAmber.RecessedBackground
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            if (provider.providerId == "local_files") Icons.Outlined.Folder
+                                            else Icons.Outlined.MusicNote,
+                                            contentDescription = null,
+                                            tint = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = provider.displayName,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextPrimary
+                                        )
+                                        Text(
+                                            text = if (provider.providerId == "local_files") "On-device MP3 / FLAC / WAV audio files"
+                                            else "External Streaming & Media Provider",
+                                            fontSize = 10.sp,
+                                            color = DeepObsidianAmber.TextSecondary
+                                        )
+                                    }
+                                }
+
+                                if (isSelected) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent)
+                                    ) {
+                                        Text(
+                                            text = "ACTIVE",
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DeepObsidianAmber.PrimaryAccent,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
     }
 }
