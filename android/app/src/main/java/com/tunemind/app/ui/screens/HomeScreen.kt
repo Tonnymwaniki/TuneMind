@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -55,6 +56,7 @@ import com.tunemind.app.voice.AgentPhase
 import com.tunemind.app.voice.NeuroAcousticIntent
 import com.tunemind.app.voice.TuneMindVoiceAgent
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     vm: TuneMindViewModel,
@@ -159,7 +161,6 @@ fun HomeScreen(
     val dynamicSatietyPercent = minOf(95, maxOf(18, currentTrackPlays * 22))
 
     val colors = TuneMindTheme.colors
-    val context = androidx.compose.ui.platform.LocalContext.current
     val hasAccess = com.tunemind.app.service.NotificationAccess.isEnabled(context)
     val isListenerBound = com.tunemind.app.service.TuneMindListenerService.isConnected
 
@@ -1273,7 +1274,7 @@ fun HomeScreen(
                 letterSpacing = 0.8.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp, bottom = 4.dp)
+                    .padding(start = 2.dp, end = 2.dp, bottom = 4.dp)
             )
 
             LazyRow(

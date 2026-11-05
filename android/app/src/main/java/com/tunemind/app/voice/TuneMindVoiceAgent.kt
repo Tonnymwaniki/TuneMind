@@ -444,7 +444,7 @@ class TuneMindVoiceAgent(
             }
 
             NeuroAcousticIntent.AI_CRATE -> {
-                val topCrate = crate.firstOrNull { !it.isPlayed } ?: crate.firstOrNull()
+                val topCrate = crate.firstOrNull { !it.wasPlayed } ?: crate.firstOrNull()
                 if (topCrate != null) {
                     vm.markRecommendationPlayed(topCrate.id)
                     RecommendedTrack(
