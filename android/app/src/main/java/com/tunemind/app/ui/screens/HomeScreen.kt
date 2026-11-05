@@ -91,6 +91,12 @@ fun HomeScreen(
     val context = LocalContext.current
     val voiceAgent = remember { TuneMindVoiceAgent(context, vm) }
     val agentState by voiceAgent.agentState.collectAsState()
+    val isListening = agentState.phase == AgentPhase.LISTENING_INTENT ||
+        agentState.phase == AgentPhase.LISTENING_PLAYER ||
+        agentState.phase == AgentPhase.LISTENING_CONFIRMATION
+    val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE ||
+        agentState.phase == AgentPhase.PROMPTING_PLAYER
+    val isThinking = agentState.phase == AgentPhase.THINKING
     var showPlayerSelectorSheet by remember { mutableStateOf(false) }
     val installedProviders = remember(context) { vm.getInstalledProviders(context) }
 
@@ -209,6 +215,15 @@ fun HomeScreen(
             repeatMode = RepeatMode.Reverse
         ),
         label = "eqPulse"
+    )
+    val cassetteRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 6000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "cassetteSpin"
     )
     val haptic = LocalHapticFeedback.current
 
@@ -627,10 +642,6 @@ fun HomeScreen(
                 )
 
                 // Central Breathing Neural Iris & Holographic Reactor
-                val isListening = agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION
-                val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER
-                val isThinking = agentState.phase == AgentPhase.THINKING
-
                 val coreColor = when {
                     isListening -> DeepObsidianAmber.EQBassCyan
                     isThinking -> DeepObsidianAmber.NeuralViolet
