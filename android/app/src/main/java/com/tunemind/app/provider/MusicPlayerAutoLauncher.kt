@@ -150,12 +150,8 @@ object MusicPlayerAutoLauncher {
                     val listener = TuneMindListenerService.instance
                     if (listener != null) {
                         listener.playFromSearch(targetPackage, query)
-                        val obs = listener.observerOrNull()
-                        val isPlaying = obs?.controllers?.values?.any {
-                            it.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-                        } ?: false
-                        if (!isPlaying) {
-                            obs?.togglePlayback()
+                        if (!listener.isPlaying()) {
+                            listener.togglePlayback()
                         }
                     }
 

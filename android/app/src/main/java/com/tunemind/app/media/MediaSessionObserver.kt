@@ -79,6 +79,12 @@ class MediaSessionObserver(
         }
     }
 
+    fun isPlaying(): Boolean {
+        return controllers.values.any {
+            it.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        }
+    }
+
     fun togglePlayback() {
         val entry = controllers.values.firstOrNull() ?: return
         val state = entry.controller.playbackState?.state
