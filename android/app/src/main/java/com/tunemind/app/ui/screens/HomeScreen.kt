@@ -203,7 +203,7 @@ fun HomeScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. BESPOKE TUNEMIND BRAND EMBLEM & INTEGRATED DAEMON HERO
+        // 1. DYNAMIC PULSE TELEMETRY & KINETIC SOUNDWAVE HERO (INTERCHANGED WITH TOP BAR)
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = DeepObsidianAmber.CardElevated,
@@ -211,9 +211,9 @@ fun HomeScreen(
                 1.dp,
                 Brush.horizontalGradient(
                     listOf(
-                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.55f),
-                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.3f),
-                        DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f)
+                        DeepObsidianAmber.EQBassCyan.copy(alpha = 0.6f),
+                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f),
+                        DeepObsidianAmber.CopperAccent.copy(alpha = 0.3f)
                     )
                 )
             ),
@@ -226,12 +226,23 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: Branded Emblem Logo & Typography
+                // Left: Pulse Soundwave Animation & Title
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Geometric Audiophile Logo Mark
+                    val pulseWaveAnim = rememberInfiniteTransition(label = "pulseHeroAnim")
+                    val pulseWave by pulseWaveAnim.animateFloat(
+                        initialValue = 0.45f,
+                        targetValue = 1.35f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseWave"
+                    )
+
+                    // Kinetic Pulse Waveform Graphic Capsule
                     Box(
                         modifier = Modifier
                             .size(46.dp)
@@ -239,59 +250,63 @@ fun HomeScreen(
                             .background(
                                 Brush.radialGradient(
                                     listOf(
-                                        DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.25f),
+                                        DeepObsidianAmber.EQBassCyan.copy(alpha = 0.25f),
                                         DeepObsidianAmber.RecessedBackground,
                                         DeepObsidianAmber.AppBackground
                                     )
                                 )
                             )
-                            .border(1.2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.7f), RoundedCornerShape(12.dp)),
+                            .border(1.2.dp, DeepObsidianAmber.EQBassCyan.copy(alpha = 0.7f), RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Concentric Sine/Waveform Insignia
-                        Canvas(modifier = Modifier.size(28.dp)) {
-                            val w = size.width
-                            val h = size.height
-                            // Golden Center Core
-                            drawCircle(
-                                color = DeepObsidianAmber.PrimaryAccent,
-                                radius = 3.5.dp.toPx(),
-                                center = Offset(w / 2f, h / 2f)
-                            )
-                            // Outer Waveform Arc 1
-                            drawArc(
-                                color = DeepObsidianAmber.CopperAccent,
-                                startAngle = -140f,
-                                sweepAngle = 100f,
-                                useCenter = false,
-                                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
-                                size = Size(w - 8.dp.toPx(), h - 8.dp.toPx()),
-                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                            // Outer Waveform Arc 2
-                            drawArc(
-                                color = DeepObsidianAmber.EQBassCyan,
-                                startAngle = 40f,
-                                sweepAngle = 100f,
-                                useCenter = false,
-                                topLeft = Offset(4.dp.toPx(), 4.dp.toPx()),
-                                size = Size(w - 8.dp.toPx(), h - 8.dp.toPx()),
-                                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                            )
+                        // Live EQ Pulse Visualizer
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val pulseBars = listOf(8, 18, 26, 15, 9)
+                            pulseBars.forEachIndexed { idx, h ->
+                                val barH = (h * (0.45f + 0.55f * kotlin.math.abs(kotlin.math.sin(idx * 0.8f + pulseWave * 3.14f)))).coerceIn(4f, 26f)
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .height(barH.dp)
+                                        .clip(RoundedCornerShape(1.5.dp))
+                                        .background(
+                                            if (idx == 2) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.EQBassCyan
+                                        )
+                                )
+                            }
                         }
                     }
 
                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "PULSE",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = DeepObsidianAmber.TextPrimary,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.8.sp
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = DeepObsidianAmber.RecessedBackground,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.EQBassCyan.copy(alpha = 0.45f))
+                            ) {
+                                Text(
+                                    text = if (state.nowPlaying != null) "STREAMING" else "MONITORING",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.EQBassCyan,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Text(
-                            text = "TUNEMIND",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = DeepObsidianAmber.TextPrimary,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.6.sp
-                        )
-                        Text(
-                            text = "NEURO-ACOUSTIC DSP ENGINE",
+                            text = "LIVE NEURO-ACOUSTIC TELEMETRY",
                             fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,

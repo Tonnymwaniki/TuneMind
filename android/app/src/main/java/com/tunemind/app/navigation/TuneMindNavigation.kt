@@ -3,6 +3,7 @@ package com.tunemind.app.navigation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,8 +18,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -203,6 +208,7 @@ fun TuneMindTopAppBar(
 ) {
     val isRootTab = currentRoute in listOf(
         Screen.Home.route,
+        Screen.AiDiscovery.route,
         Screen.Fatigue.route,
         Screen.History.route,
         Screen.SevenDayStudy.route
@@ -255,15 +261,180 @@ fun TuneMindTopAppBar(
                         modifier = Modifier.size(18.dp)
                     )
                 }
+
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "TM // DSP-01",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.secondaryText,
+                            letterSpacing = 1.2.sp
+                        )
+
+                        // Sleek, refined Daemon Status indicator
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.Warning.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.45f) else DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
+                            modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
+                                )
+                                Text(
+                                    text = if (isDaemonConnected) "LIVE" else "OFFLINE",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
+                                    letterSpacing = 0.6.sp
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = when (currentRoute) {
+                            Screen.CrossApp.route -> "Observer & Ingest"
+                            Screen.CooldownManagement.route -> "Cooldown Vault"
+                            Screen.Profile.route -> "Sonic Genome"
+                            Screen.SessionDetails.route -> "Session Breakdown"
+                            Screen.Settings.route -> "Studio Switchboard"
+                            Screen.WeeklyReport.route -> "Receptive Horizon"
+                            Screen.ManualCooldown.route -> "Manual Cooldown"
+                            Screen.MusicalMoments.route -> "Musical Moments"
+                            Screen.HearingInsights.route -> "Decibel Headroom"
+                            else -> "TuneMind"
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText,
+                        letterSpacing = (-0.3).sp
+                    )
+                }
+            } else if (currentRoute == Screen.Home.route) {
+                // AT TOP OF PULSE SCREEN: TUNEMIND EMBLEM LOGO & WORDMARK
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Bespoke Geometric Audiophile Logo Mark
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(
+                                        DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.35f),
+                                        DeepObsidianAmber.RecessedBackground,
+                                        DeepObsidianAmber.AppBackground
+                                    )
+                                )
+                            )
+                            .border(1.2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.8f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.size(22.dp)) {
+                            val w = size.width
+                            val h = size.height
+                            // Golden Center Core
+                            drawCircle(
+                                color = DeepObsidianAmber.PrimaryAccent,
+                                radius = 2.8.dp.toPx(),
+                                center = Offset(w / 2f, h / 2f)
+                            )
+                            // Outer Waveform Arc 1
+                            drawArc(
+                                color = DeepObsidianAmber.CopperAccent,
+                                startAngle = -140f,
+                                sweepAngle = 100f,
+                                useCenter = false,
+                                topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                                size = Size(w - 6.dp.toPx(), h - 6.dp.toPx()),
+                                style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                            // Outer Waveform Arc 2
+                            drawArc(
+                                color = DeepObsidianAmber.EQBassCyan,
+                                startAngle = 40f,
+                                sweepAngle = 100f,
+                                useCenter = false,
+                                topLeft = Offset(3.dp.toPx(), 3.dp.toPx()),
+                                size = Size(w - 6.dp.toPx(), h - 6.dp.toPx()),
+                                style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Text(
+                                text = "TUNEMIND",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = colors.primaryText,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.6.sp
+                            )
+
+                            // Refined daemon badge
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.Warning.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.45f) else DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
+                                modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
+                                    )
+                                    Text(
+                                        text = if (isDaemonConnected) "LIVE" else "OFFLINE",
+                                        fontSize = 8.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "NEURO-ACOUSTIC DSP ENGINE",
+                            fontSize = 8.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DeepObsidianAmber.SecondaryAccent,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                }
             } else {
-                // Section-specific dynamic accent and animated soundwave
+                // OTHER ROOT BOTTOM-BAR TABS (Crate AI, Satiety Lab, Timeline, Circadian Intel)
+                // Active Soundwave Brand Mark with live pulsing motion (NO BACK BUTTON)
                 val activeSectionColor = when (currentRoute) {
-                    Screen.Home.route -> DeepObsidianAmber.EQBassCyan
+                    Screen.AiDiscovery.route -> DeepObsidianAmber.PrimaryAccent
                     Screen.Fatigue.route -> DeepObsidianAmber.SatietyEmber
                     Screen.History.route -> DeepObsidianAmber.NeuralViolet
                     Screen.SevenDayStudy.route -> DeepObsidianAmber.CircadianMorning
-                    Screen.CooldownManagement.route -> DeepObsidianAmber.CryoCyan
-                    Screen.HearingInsights.route -> DeepObsidianAmber.DecibelSafe
                     else -> DeepObsidianAmber.PrimaryAccent
                 }
 
@@ -278,7 +449,6 @@ fun TuneMindTopAppBar(
                     label = "wavePulse"
                 )
 
-                // Radiant Soundwave Brand Mark with live pulsing motion
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.5.dp),
@@ -300,71 +470,62 @@ fun TuneMindTopAppBar(
                         )
                     }
                 }
-            }
 
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "TM // DSP-01",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.secondaryText,
-                        letterSpacing = 1.2.sp
-                    )
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "TM // DSP-01",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.secondaryText,
+                            letterSpacing = 1.2.sp
+                        )
 
-                    // Sleek, refined Daemon Status indicator (stored with telemetry header)
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.Warning.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.45f) else DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
-                        modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        // Sleek, refined Daemon Status indicator
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.15f) else DeepObsidianAmber.Warning.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, if (isDaemonConnected) DeepObsidianAmber.Success.copy(alpha = 0.45f) else DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
+                            modifier = Modifier.clickable { onNavigate(Screen.CrossApp.route) }
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
-                            )
-                            Text(
-                                text = if (isDaemonConnected) "LIVE" else "OFFLINE",
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
-                                letterSpacing = 0.6.sp
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
+                                )
+                                Text(
+                                    text = if (isDaemonConnected) "LIVE" else "OFFLINE",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDaemonConnected) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
+                                    letterSpacing = 0.6.sp
+                                )
+                            }
                         }
                     }
+
+                    Text(
+                        text = when (currentRoute) {
+                            Screen.AiDiscovery.route -> "Neuro AI Crate"
+                            Screen.Fatigue.route -> "Satiety Lab"
+                            Screen.History.route -> "Timeline"
+                            Screen.SevenDayStudy.route -> "Circadian Intel"
+                            else -> "TuneMind"
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText,
+                        letterSpacing = (-0.3).sp
+                    )
                 }
-                Text(
-                    text = when (currentRoute) {
-                        Screen.Home.route -> "Pulse"
-                        Screen.Fatigue.route -> "Satiety Lab"
-                        Screen.History.route -> "Timeline"
-                        Screen.SevenDayStudy.route -> "Circadian Intel"
-                        Screen.CrossApp.route -> "Observer & Ingest"
-                        Screen.CooldownManagement.route -> "Cooldown Vault"
-                        Screen.Profile.route -> "Sonic Genome"
-                        Screen.SessionDetails.route -> "Session Breakdown"
-                        Screen.Settings.route -> "Studio Switchboard"
-                        Screen.WeeklyReport.route -> "Receptive Horizon"
-                        Screen.ManualCooldown.route -> "Manual Cooldown"
-                        Screen.MusicalMoments.route -> "Musical Moments"
-                        Screen.HearingInsights.route -> "Decibel Headroom"
-                        Screen.AiDiscovery.route -> "Neuro AI Crate"
-                        else -> "TuneMind"
-                    },
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.primaryText,
-                    letterSpacing = (-0.3).sp
-                )
             }
         }
 
