@@ -177,18 +177,29 @@ fun HomeScreen(
         if (hasAccess) {
             com.tunemind.app.MainActivity.forceRebindListener(context)
         }
+        // Autonomous welcome greeting on open
+        voiceAgent.welcomeOnAppOpen()
     }
 
-    // Dynamic Audiophile Micro-Animations (Vinyl 33 RPM Platter & Real-Time Dynamic DSP EQ)
+    // Dynamic Audiophile Micro-Animations (Kinetic Neural Core & Real-Time Dynamic DSP EQ)
     val infiniteTransition = rememberInfiniteTransition(label = "audioAnimations")
-    val vinylRotation by infiniteTransition.animateFloat(
+    val neuralCoreRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 16000, easing = LinearEasing),
+            animation = tween(durationMillis = 12000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "vinylSpin"
+        label = "neuralSpin"
+    )
+    val neuralCorePulse by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "neuralPulse"
     )
     val eqPulse by infiniteTransition.animateFloat(
         initialValue = 0.5f,
@@ -198,23 +209,6 @@ fun HomeScreen(
             repeatMode = RepeatMode.Reverse
         ),
         label = "eqPulse"
-    )
-    val tonearmAngle by animateFloatAsState(
-        targetValue = if (isPlaying) 22f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "tonearmAngle"
-    )
-    val cassetteRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "cassetteSpin"
     )
     val haptic = LocalHapticFeedback.current
 
@@ -477,7 +471,7 @@ fun HomeScreen(
             }
         }
 
-        // 2. HERO NOW PLAYING DECK (Machined Vinyl Deck with Concentric Grooves & Equalizer)
+        // 2. TUNEMIND FULLY AGENTIC COGNITIVE NEURAL CORE DECK
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -487,17 +481,17 @@ fun HomeScreen(
                     width = 1.dp,
                     brush = Brush.horizontalGradient(
                         listOf(
-                            DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f),
-                            DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.35f),
+                            DeepObsidianAmber.CopperAccent.copy(alpha = 0.65f),
+                            DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.45f),
                             DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f)
                         )
                     ),
                     shape = RoundedCornerShape(22.dp)
                 )
-                .padding(18.dp),
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 0. NEURO-ACOUSTIC AGENT STATUS & PLAYER ROUTE STRIP
+            // A. TOP AGENT ROUTE STRIP & COGNITIVE STATUS BADGE
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -505,15 +499,15 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: Player Route Target Pill (1-Tap Change)
+                // Target Player Routing Pill (1-Tap Change)
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = DeepObsidianAmber.RecessedBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.6f)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.7f)),
                     modifier = Modifier.clickable { showPlayerSelectorSheet = true }
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
@@ -540,7 +534,7 @@ fun HomeScreen(
                     }
                 }
 
-                // Right: Voice Agent Activity Badge
+                // Autonomous Agent Core State Badge
                 val isAgentActive = agentState.phase != AgentPhase.IDLE
                 val agentBadgeColor = when (agentState.phase) {
                     AgentPhase.IDLE -> DeepObsidianAmber.SurfaceBorder
@@ -553,10 +547,10 @@ fun HomeScreen(
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = DeepObsidianAmber.RecessedBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, agentBadgeColor.copy(alpha = 0.6f))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, agentBadgeColor.copy(alpha = 0.7f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
@@ -568,15 +562,15 @@ fun HomeScreen(
                         )
                         Text(
                             text = when (agentState.phase) {
-                                AgentPhase.IDLE -> "VOICE AGENT READY"
-                                AgentPhase.THINKING -> "AGENT REASONING..."
+                                AgentPhase.IDLE -> "AGENT CORE ONLINE"
+                                AgentPhase.THINKING -> "REASONING ACROSS 90+ TRACKS..."
                                 AgentPhase.PROMPTING_VOICE -> "AGENT SPEAKING"
-                                AgentPhase.LISTENING_INTENT -> "LISTENING TO VIBE..."
+                                AgentPhase.LISTENING_INTENT -> "LISTENING (ASK ANYTHING)..."
                                 AgentPhase.WAITING_CONFIRMATION -> "AWAITING CONFIRMATION"
-                                AgentPhase.LISTENING_CONFIRMATION -> "LISTENING (YES/CHANGE)..."
-                                AgentPhase.PROMPTING_PLAYER -> "CONFIRMING PLAYER"
+                                AgentPhase.LISTENING_CONFIRMATION -> "LISTENING: SAY 'YES' OR 'CHANGE'..."
+                                AgentPhase.PROMPTING_PLAYER -> "CONFIRMING ROUTE"
                                 AgentPhase.LISTENING_PLAYER -> "LISTENING TO PLAYER..."
-                                AgentPhase.EXECUTING -> "AUTO-PLAYING AUDIO"
+                                AgentPhase.EXECUTING -> "AUTO-PLAYING TO ${agentState.targetProviderName.uppercase()}"
                             },
                             fontSize = 8.5.sp,
                             fontFamily = FontFamily.Monospace,
@@ -588,215 +582,142 @@ fun HomeScreen(
                 }
             }
 
-            // Concentric Vinyl Turntable Platter & Machined Pivoting Tonearm
+            // B. LIVING HOLOGRAPHIC NEURAL AGENT CORE (Replaced old vinyl platter)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(210.dp),
+                    .height(180.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Platter & Vinyl Record
+                // Outermost Orbital Decibel Ring
                 Box(
                     modifier = Modifier
-                        .size(196.dp)
-                        .offset(x = (-16).dp)
-                        .rotate(if (isPlaying) vinylRotation else 0f)
+                        .size(174.dp)
+                        .rotate(neuralCoreRotation)
+                        .border(
+                            1.dp,
+                            Brush.sweepGradient(
+                                listOf(
+                                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f),
+                                    DeepObsidianAmber.EQBassCyan.copy(alpha = 0.4f),
+                                    DeepObsidianAmber.NeuralViolet.copy(alpha = 0.25f),
+                                    DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f)
+                                )
+                            ),
+                            CircleShape
+                        )
+                )
+
+                // Middle Orbital Wave Halo
+                Box(
+                    modifier = Modifier
+                        .size(142.dp)
+                        .rotate(-neuralCoreRotation * 1.5f)
+                        .border(
+                            1.2.dp,
+                            Brush.sweepGradient(
+                                listOf(
+                                    DeepObsidianAmber.CopperAccent.copy(alpha = 0.3f),
+                                    DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.5f),
+                                    DeepObsidianAmber.SecondaryAccent.copy(alpha = 0.2f)
+                                )
+                            ),
+                            CircleShape
+                        )
+                )
+
+                // Central Breathing Neural Iris & Holographic Reactor
+                val isListening = agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION
+                val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER
+                val isThinking = agentState.phase == AgentPhase.THINKING
+
+                val coreColor = when {
+                    isListening -> DeepObsidianAmber.EQBassCyan
+                    isThinking -> DeepObsidianAmber.NeuralViolet
+                    isSpeaking -> DeepObsidianAmber.BrandSoulAmber
+                    else -> DeepObsidianAmber.PrimaryAccent
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(108.dp)
+                        .scale(if (isListening || isSpeaking || isThinking) neuralCorePulse else 1f)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
                                 listOf(
-                                    DeepObsidianAmber.CardBackground,
+                                    coreColor.copy(alpha = 0.35f),
                                     DeepObsidianAmber.RecessedBackground,
                                     DeepObsidianAmber.AppBackground
                                 )
                             )
                         )
-                        .border(2.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), CircleShape)
-                        .padding(8.dp),
+                        .border(1.8.dp, coreColor.copy(alpha = 0.85f), CircleShape)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val hasAudioPerm = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasAudioPerm) {
+                                voiceAgent.startAgentSession()
+                            } else {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Microgroove Ring 1
-                    Box(
-                        modifier = Modifier
-                            .size(166.dp)
-                            .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.25f), CircleShape)
-                    )
-                    // Microgroove Ring 2
-                    Box(
-                        modifier = Modifier
-                            .size(134.dp)
-                            .border(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f), CircleShape)
-                    )
-                    // Microgroove Ring 3
-                    Box(
-                        modifier = Modifier
-                            .size(102.dp)
-                            .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.35f), CircleShape)
-                    )
-
-                    // Golden Center Vinyl Label (Branded Deep Obsidian Amber Soul)
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        DeepObsidianAmber.BrandSoulAmber,
-                                        DeepObsidianAmber.PrimaryAccent
-                                    )
-                                )
-                            )
-                            .border(1.5.dp, DeepObsidianAmber.SecondaryAccent, CircleShape),
-                        contentAlignment = Alignment.Center
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Default.MusicNote,
-                                contentDescription = null,
-                                tint = DeepObsidianAmber.AccentSoft,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .clip(CircleShape)
-                                    .background(DeepObsidianAmber.AppBackground)
-                            )
-                        }
-                    }
-
-                    // Micro Monospace Hardware ID Badge
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = DeepObsidianAmber.RecessedBackground.copy(alpha = 0.9f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(4.dp)
-                    ) {
+                        Icon(
+                            imageVector = when {
+                                isThinking -> Icons.Outlined.Psychology
+                                isSpeaking -> Icons.Outlined.GraphicEq
+                                else -> Icons.Default.Mic
+                            },
+                            contentDescription = "Voice Agent",
+                            tint = coreColor,
+                            modifier = Modifier.size(34.dp)
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
-                            text = "VINYL // 33⅓ RPM",
+                            text = when {
+                                isThinking -> "THINKING"
+                                isListening -> "LISTENING"
+                                isSpeaking -> "SPEAKING"
+                                else -> "TAP TO TALK"
+                            },
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.SecondaryAccent,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            color = coreColor,
+                            letterSpacing = 0.8.sp
                         )
-                    }
-                }
-
-                // Machined Audiophile Tonearm with Gimbal Bearing & Stylus
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 12.dp)
-                        .width(76.dp)
-                        .height(180.dp)
-                        .graphicsLayer {
-                            rotationZ = tonearmAngle
-                            transformOrigin = TransformOrigin(0.75f, 0.12f)
-                        }
-                ) {
-                    // Gimbal Bearing Base (Top Pivot)
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.radialGradient(
-                                    listOf(
-                                        DeepObsidianAmber.PrimaryAccent,
-                                        DeepObsidianAmber.CardElevated,
-                                        DeepObsidianAmber.AppBackground
-                                    )
-                                )
-                            )
-                            .border(1.5.dp, DeepObsidianAmber.CopperAccent, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Counterweight inner disc
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(DeepObsidianAmber.BrandSoulAmber)
-                                .border(1.dp, DeepObsidianAmber.SecondaryAccent, CircleShape)
-                        )
-                    }
-
-                    // Tonearm Shaft (Machined brushed brass/copper alloy)
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 26.dp, end = 15.dp)
-                            .width(4.dp)
-                            .height(115.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        DeepObsidianAmber.SecondaryAccent,
-                                        DeepObsidianAmber.CopperAccent,
-                                        DeepObsidianAmber.BrandSoulAmber
-                                    )
-                                )
-                            )
-                    )
-
-                    // Cartridge Headshell & Stylus Needle Tip
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 12.dp, bottom = 12.dp)
-                            .size(width = 24.dp, height = 14.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(DeepObsidianAmber.RecessedBackground)
-                            .border(1.dp, DeepObsidianAmber.PrimaryAccent, RoundedCornerShape(3.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(4.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isPlaying) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning)
-                            )
-                            Text(
-                                text = "MC",
-                                fontSize = 7.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.SecondaryAccent
-                            )
-                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Acoustic Metadata Strip
+            // C. NOW PLAYING ACOUSTIC METADATA STRIP
             Text(
                 text = nowPlayingTitle,
-                fontSize = 20.sp,
+                fontSize = 19.sp,
                 fontWeight = FontWeight.Bold,
                 color = DeepObsidianAmber.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = nowPlayingArtist,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     color = DeepObsidianAmber.TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -809,38 +730,37 @@ fun HomeScreen(
                 )
                 Text(
                     text = "$nowPlayingSource Stream",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = DeepObsidianAmber.PrimaryAccent
                 )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Dynamic 16-Band Live Equalizer Spectrum Visualizer
+            // D. 16-BAND LIVE EQUALIZER SPECTRUM VISUALIZER
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(DeepObsidianAmber.RecessedBackground)
-                    .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
                 val eqHeights = listOf(14, 22, 10, 26, 18, 24, 16, 28, 20, 15, 25, 12, 22, 18, 26, 14)
                 eqHeights.forEachIndexed { idx, h ->
-                    // Tri-Spectrum Audiophile DSP Visualization
                     val barColor = when {
-                        idx < 5 -> DeepObsidianAmber.EQBassCyan   // Sub-bass & Bass (20-250Hz)
-                        idx < 11 -> DeepObsidianAmber.EQMidAmber  // Warm Mids (250-4000Hz)
-                        else -> DeepObsidianAmber.EQHighRose      // Crisp Highs (4k-16kHz)
+                        idx < 5 -> DeepObsidianAmber.EQBassCyan
+                        idx < 11 -> DeepObsidianAmber.EQMidAmber
+                        else -> DeepObsidianAmber.EQHighRose
                     }
                     val phase = (idx * 0.45f)
                     val dynamicMult = if (isPlaying) {
                         (0.6f + 0.65f * kotlin.math.abs(kotlin.math.sin(phase + eqPulse * 3.1415f))).toFloat()
                     } else 0.35f
-                    val animatedHeight = (h * dynamicMult).coerceIn(4f, 26f)
+                    val animatedHeight = (h * dynamicMult).coerceIn(4f, 22f)
 
                     Box(
                         modifier = Modifier
@@ -852,42 +772,12 @@ fun HomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Vibe & Harmonic Frequency Chip
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = DeepObsidianAmber.RecessedBackground,
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(DeepObsidianAmber.PrimaryAccent)
-                    )
-                    Text(
-                        text = "REFLECTIVE // 118 BPM",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.PrimaryAccent,
-                        letterSpacing = 0.8.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Satiety Meter: 30-Microcell Segmented LED Bar
+            // E. RECEPTOR SATIETY METER & EAR FATIGUE BAR
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -899,20 +789,20 @@ fun HomeScreen(
                             Icons.Outlined.BatteryChargingFull,
                             contentDescription = null,
                             tint = colors.secondaryAccent,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                         Text(
                             text = "ACOUSTIC SATIETY: $dynamicSatietyPercent%",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             color = colors.secondaryText,
-                            letterSpacing = 0.8.sp
+                            letterSpacing = 0.6.sp
                         )
                     }
                     Text(
                         text = if (dynamicSatietyPercent < 70) "[OPTIMAL FRESHNESS]" else "[ELEVATED SATURATION]",
-                        fontSize = 9.sp,
+                        fontSize = 8.5.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = if (dynamicSatietyPercent < 70) colors.primaryAccent else DeepObsidianAmber.Warning
@@ -925,11 +815,11 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(3.dp))
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
                         .background(colors.primaryBackground)
-                        .padding(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        .padding(1.5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(1.5.dp)
                 ) {
                     for (i in 0 until totalCells) {
                         val isActive = i < activeCells
@@ -948,80 +838,19 @@ fun HomeScreen(
                         )
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "DEGRADATION RISK: LOW",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = colors.secondaryText.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = "FATIGUE THRESHOLD: 85%",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = colors.secondaryText.copy(alpha = 0.7f)
-                    )
-                }
-
-                // Dedicated Satiety Lab & Cooldown Entrypoint
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = DeepObsidianAmber.RecessedBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SatietyEmber.copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenFatigue() }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(
-                                Icons.Outlined.LocalFireDepartment,
-                                contentDescription = null,
-                                tint = DeepObsidianAmber.SatietyEmber,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "RECEPTOR SATIETY LAB // COOLDOWN",
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.SatietyEmber,
-                                letterSpacing = 0.8.sp
-                            )
-                        }
-                        Text(
-                            text = "DIAGNOSE >",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent
-                        )
-                    }
-                }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 3. CONVERSATIONAL VOICE AGENT READOUT & LIVE SPEECH CHAMBER
+            // F. CONVERSATIONAL MULTI-TURN AGENT DIALOGUE CHAMBER
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = DeepObsidianAmber.RecessedBackground,
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION)
-                        DeepObsidianAmber.EQBassCyan.copy(alpha = 0.75f)
-                    else if (agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER)
-                        DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.75f)
-                    else if (agentState.phase == AgentPhase.THINKING)
-                        DeepObsidianAmber.NeuralViolet.copy(alpha = 0.75f)
+                    if (isListening) DeepObsidianAmber.EQBassCyan.copy(alpha = 0.75f)
+                    else if (isSpeaking) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.75f)
+                    else if (isThinking) DeepObsidianAmber.NeuralViolet.copy(alpha = 0.75f)
                     else DeepObsidianAmber.CopperAccent.copy(alpha = 0.35f)
                 ),
                 modifier = Modifier
@@ -1054,46 +883,38 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION)
-                                    Icons.Default.Mic
-                                else if (agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER)
-                                    Icons.Outlined.GraphicEq
-                                else if (agentState.phase == AgentPhase.THINKING)
-                                    Icons.Outlined.Psychology
+                                if (isListening) Icons.Default.Mic
+                                else if (isSpeaking) Icons.Outlined.GraphicEq
+                                else if (isThinking) Icons.Outlined.Psychology
                                 else Icons.Outlined.AutoAwesome,
                                 contentDescription = null,
-                                tint = if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION)
-                                    DeepObsidianAmber.EQBassCyan
-                                else if (agentState.phase == AgentPhase.THINKING)
-                                    DeepObsidianAmber.NeuralViolet
+                                tint = if (isListening) DeepObsidianAmber.EQBassCyan
+                                else if (isThinking) DeepObsidianAmber.NeuralViolet
                                 else DeepObsidianAmber.PrimaryAccent,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = when (agentState.phase) {
-                                    AgentPhase.IDLE -> "TUNEMIND AGENT // CHAT READY"
-                                    AgentPhase.THINKING -> "AGENT REASONING..."
+                                    AgentPhase.IDLE -> "TUNEMIND AGENT // ASK ANYTHING"
+                                    AgentPhase.THINKING -> "AGENT REASONING ACROSS 90+ SONGS..."
                                     AgentPhase.PROMPTING_VOICE -> "AGENT SPEAKING..."
-                                    AgentPhase.LISTENING_INTENT -> "LISTENING FOR VIBE..."
+                                    AgentPhase.LISTENING_INTENT -> "LISTENING TO YOUR VOICE..."
                                     AgentPhase.WAITING_CONFIRMATION -> "WOULD YOU LIKE THIS SONG?"
-                                    AgentPhase.LISTENING_CONFIRMATION -> "LISTENING: SAY 'YES' OR 'CHANGE'..."
+                                    AgentPhase.LISTENING_CONFIRMATION -> "LISTENING (YES/CHANGE)..."
                                     AgentPhase.PROMPTING_PLAYER -> "CONFIRMING TARGET PLAYER..."
                                     AgentPhase.LISTENING_PLAYER -> "LISTENING FOR PLAYER..."
                                     AgentPhase.EXECUTING -> "AUTO-PLAYING TO ${agentState.targetProviderName.uppercase()}"
                                 },
-                                fontSize = 9.sp,
+                                fontSize = 8.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER || agentState.phase == AgentPhase.LISTENING_CONFIRMATION)
-                                    DeepObsidianAmber.EQBassCyan
-                                else if (agentState.phase == AgentPhase.THINKING)
-                                    DeepObsidianAmber.NeuralViolet
+                                color = if (isListening) DeepObsidianAmber.EQBassCyan
+                                else if (isThinking) DeepObsidianAmber.NeuralViolet
                                 else DeepObsidianAmber.PrimaryAccent,
                                 letterSpacing = 0.8.sp
                             )
                         }
 
-                        // Subtle instruction tag
                         Text(
                             text = if (agentState.phase == AgentPhase.IDLE) "TAP TO SPEAK" else "LIVE DIALOGUE",
                             fontSize = 8.sp,
@@ -1103,11 +924,11 @@ fun HomeScreen(
                         )
                     }
 
-                    // Multi-Turn Conversational Dialogue Chamber
+                    // Chat Stream: Agent & User Bubbles
                     if (agentState.dialogueHistory.isNotEmpty()) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             agentState.dialogueHistory.takeLast(3).forEach { item ->
                                 val isAgent = item.sender == "agent"
@@ -1129,9 +950,7 @@ fun HomeScreen(
                                             fontSize = 11.sp,
                                             color = if (isAgent) DeepObsidianAmber.TextPrimary else DeepObsidianAmber.EQBassCyan,
                                             fontWeight = if (isAgent) FontWeight.Normal else FontWeight.SemiBold,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
+                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                                         )
                                     }
                                 }
@@ -1143,9 +962,7 @@ fun HomeScreen(
                                 text = "Agent: \"${agentState.agentSpeech}\"",
                                 fontSize = 11.sp,
                                 color = DeepObsidianAmber.TextPrimary,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                fontWeight = FontWeight.Medium
                             )
                         }
                         if (agentState.userSpeech.isNotBlank()) {
@@ -1153,14 +970,12 @@ fun HomeScreen(
                                 text = "You: \"${agentState.userSpeech}\"",
                                 fontSize = 11.sp,
                                 color = DeepObsidianAmber.EQBassCyan,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     } else {
                         Text(
-                            text = "Say: 'Change that song', 'Play from my timeline', 'What do you suggest?', or 'Play in YouTube Music'",
+                            text = "Ask me: 'Play gospel', 'Play Gikuyu song', 'Play Bongo', 'Change that song', or 'Play from my timeline'",
                             fontSize = 10.sp,
                             color = colors.secondaryText,
                             maxLines = 2,
@@ -1168,8 +983,8 @@ fun HomeScreen(
                         )
                     }
 
-                    // PROACTIVE SONG PROPOSAL & CONFIRMATION STRIP (1-Tap Follow-ups)
-                    if (agentState.pendingConfirmationTrack != null || agentState.phase == AgentPhase.WAITING_CONFIRMATION || agentState.phase == AgentPhase.LISTENING_CONFIRMATION) {
+                    // Proactive Song Confirmation / Quick Action Bar
+                    if (agentState.pendingConfirmationTrack != null || agentState.phase == AgentPhase.WAITING_CONFIRMATION) {
                         val track = agentState.pendingConfirmationTrack ?: agentState.resolvedTrack
                         if (track != null) {
                             Surface(
@@ -1183,7 +998,7 @@ fun HomeScreen(
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "WOULD YOU LIKE THIS SONG?",
+                                        text = "AUTONOMOUS RECOMMENDATION:",
                                         fontSize = 8.5.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
@@ -1202,7 +1017,6 @@ fun HomeScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        // Play Button
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = DeepObsidianAmber.PrimaryAccent,
@@ -1223,16 +1037,13 @@ fun HomeScreen(
                                             }
                                         }
 
-                                        // Change Song Button
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = DeepObsidianAmber.RecessedBackground,
                                             border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent),
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .clickable {
-                                                    voiceAgent.changeSongImmediately()
-                                                }
+                                                .clickable { voiceAgent.changeSongImmediately() }
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(vertical = 5.dp),
@@ -1245,16 +1056,13 @@ fun HomeScreen(
                                             }
                                         }
 
-                                        // Timeline Button
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = DeepObsidianAmber.RecessedBackground,
                                             border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.NeuralViolet),
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .clickable {
-                                                    voiceAgent.playFromTimeline()
-                                                }
+                                                .clickable { voiceAgent.playFromTimeline() }
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(vertical = 5.dp),
@@ -1276,7 +1084,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 4. MACHINED AGENTIC VOICE & DUAL ROTARY TRANSPORT CONSOLE
+            // G. MACHINED TRANSPORT BAR & ROTARY CONSOLE
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = colors.primaryBackground,
@@ -1290,7 +1098,6 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Stepper: Previous
                     IconButton(
                         onClick = { vm.skipPrev() },
                         modifier = Modifier
@@ -1307,24 +1114,10 @@ fun HomeScreen(
                         )
                     }
 
-                    // Centerpiece 1: Interactive Agent Voice Mic
-                    val isListening = agentState.phase == AgentPhase.LISTENING_INTENT || agentState.phase == AgentPhase.LISTENING_PLAYER
-                    val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE || agentState.phase == AgentPhase.PROMPTING_PLAYER
-                    val micAnim = rememberInfiniteTransition(label = "micPulseAnim")
-                    val micPulse by micAnim.animateFloat(
-                        initialValue = 0.85f,
-                        targetValue = 1.25f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "micPulse"
-                    )
-
+                    // Voice Mic Trigger
                     Box(
                         modifier = Modifier
                             .size(52.dp)
-                            .scale(if (isListening || isSpeaking) micPulse else 1f)
                             .clip(CircleShape)
                             .background(
                                 if (isListening) DeepObsidianAmber.EQBassCyan
@@ -1333,8 +1126,7 @@ fun HomeScreen(
                             )
                             .border(
                                 1.5.dp,
-                                if (isListening) DeepObsidianAmber.EQBassCyan
-                                else DeepObsidianAmber.PrimaryAccent,
+                                if (isListening) DeepObsidianAmber.EQBassCyan else DeepObsidianAmber.PrimaryAccent,
                                 CircleShape
                             )
                             .clickable {
@@ -1359,7 +1151,7 @@ fun HomeScreen(
                         )
                     }
 
-                    // Centerpiece 2: Laser Rotary Console Dial (Play / Pause)
+                    // Center Rotary Dial: Play / Pause
                     Box(
                         modifier = Modifier
                             .size(52.dp)
@@ -1379,24 +1171,27 @@ fun HomeScreen(
                         )
                     }
 
-                    // Stepper: Next
+                    // Instant "Change That Song" Autonomous Dial
                     IconButton(
-                        onClick = { vm.skipNext() },
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            voiceAgent.changeSongImmediately()
+                        },
                         modifier = Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(9.dp))
                             .background(colors.cardSurface)
-                            .border(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
+                            .border(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.5f), RoundedCornerShape(9.dp))
                     ) {
                         Icon(
-                            Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            tint = colors.primaryText,
+                            Icons.Default.Refresh,
+                            contentDescription = "Change Song",
+                            tint = DeepObsidianAmber.CopperAccent,
                             modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    // Player Route Switcher Button
+                    // Route Switcher Pill
                     IconButton(
                         onClick = { showPlayerSelectorSheet = true },
                         modifier = Modifier
@@ -1417,9 +1212,9 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 5. ONE-TAP NEURO-ACOUSTIC INTENT BANK (FAST ACCESSIBLE CHIPS)
+            // H. COGNITIVE PROMPT MATRIX (Gospel, Gikuyu, Bongo, Timeline 90+, Dopamine)
             Text(
-                text = "NEURO-ACOUSTIC AGENT SHORTCUTS",
+                text = "NEURAL COGNITIVE PROMPTS // 90+ TRACKS INDEXED",
                 fontSize = 8.5.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -1434,7 +1229,70 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. Instant Change That Song (Real-time autonomous switch)
+                // 1. GOSPEL PRAISE
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, DeepObsidianAmber.PrimaryAccent),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.GOSPEL)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(13.dp))
+                            Text("GOSPEL PRAISE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
+                        }
+                    }
+                }
+
+                // 2. GIKUYU ANCHORS
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, DeepObsidianAmber.CopperAccent),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.GIKUYU)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = DeepObsidianAmber.CopperAccent, modifier = Modifier.size(13.dp))
+                            Text("GIKUYU ANCHORS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CopperAccent)
+                        }
+                    }
+                }
+
+                // 3. BONGO HITS
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = DeepObsidianAmber.RecessedBackground,
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, DeepObsidianAmber.EQBassCyan),
+                        modifier = Modifier.clickable {
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.BONGO)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(Icons.Outlined.Headphones, contentDescription = null, tint = DeepObsidianAmber.EQBassCyan, modifier = Modifier.size(13.dp))
+                            Text("BONGO HITS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.EQBassCyan)
+                        }
+                    }
+                }
+
+                // 4. CHANGE SONG
                 item {
                     Surface(
                         shape = RoundedCornerShape(9.dp),
@@ -1455,7 +1313,7 @@ fun HomeScreen(
                     }
                 }
 
-                // 2. Play from Timeline Screen Archive
+                // 5. TIMELINE 90+ ARCHIVE
                 item {
                     Surface(
                         shape = RoundedCornerShape(9.dp),
@@ -1471,40 +1329,19 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(Icons.Outlined.History, contentDescription = null, tint = DeepObsidianAmber.NeuralViolet, modifier = Modifier.size(13.dp))
-                            Text("TIMELINE SONGS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.NeuralViolet)
+                            Text("90+ TIMELINE VAULT", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.NeuralViolet)
                         }
                     }
                 }
 
-                // 3. Proactive Song Suggestion ("Would you like this song?")
-                item {
-                    Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.2.dp, DeepObsidianAmber.BrandSoulAmber),
-                        modifier = Modifier.clickable {
-                            voiceAgent.suggestTrackWithConfirmation()
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(Icons.Outlined.Lightbulb, contentDescription = null, tint = DeepObsidianAmber.BrandSoulAmber, modifier = Modifier.size(13.dp))
-                            Text("SUGGEST SONG", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.BrandSoulAmber)
-                        }
-                    }
-                }
-
-                // 4. Peak Dopamine
+                // 6. PEAK DOPAMINE
                 item {
                     Surface(
                         shape = RoundedCornerShape(9.dp),
                         color = DeepObsidianAmber.RecessedBackground,
                         border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.8f)),
                         modifier = Modifier.clickable {
-                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.DOPAMINE_PEAK, bypassVoicePrompt = false)
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.DOPAMINE_PEAK)
                         }
                     ) {
                         Row(
@@ -1518,14 +1355,14 @@ fun HomeScreen(
                     }
                 }
 
-                // 5. Auditory Anchor (Most Repeated)
+                // 7. SONIC ANCHOR
                 item {
                     Surface(
                         shape = RoundedCornerShape(9.dp),
                         color = DeepObsidianAmber.RecessedBackground,
                         border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent.copy(alpha = 0.8f)),
                         modifier = Modifier.clickable {
-                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.AUDITORY_ANCHOR, bypassVoicePrompt = false)
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.AUDITORY_ANCHOR)
                         }
                     ) {
                         Row(
@@ -1539,14 +1376,14 @@ fun HomeScreen(
                     }
                 }
 
-                // 6. Circadian Daypart
+                // 8. DAYPART SYNC
                 item {
                     Surface(
                         shape = RoundedCornerShape(9.dp),
                         color = DeepObsidianAmber.RecessedBackground,
                         border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CircadianMorning.copy(alpha = 0.8f)),
                         modifier = Modifier.clickable {
-                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.CIRCADIAN_DAYPART, bypassVoicePrompt = false)
+                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.CIRCADIAN_DAYPART)
                         }
                     ) {
                         Row(
@@ -1556,27 +1393,6 @@ fun HomeScreen(
                         ) {
                             Icon(Icons.Outlined.WbSunny, contentDescription = null, tint = DeepObsidianAmber.CircadianMorning, modifier = Modifier.size(13.dp))
                             Text("DAYPART SYNC", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CircadianMorning)
-                        }
-                    }
-                }
-
-                // 7. Chrono AI Crate
-                item {
-                    Surface(
-                        shape = RoundedCornerShape(9.dp),
-                        color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.EQBassCyan.copy(alpha = 0.8f)),
-                        modifier = Modifier.clickable {
-                            voiceAgent.triggerIntentDirectly(NeuroAcousticIntent.AI_CRATE, bypassVoicePrompt = false)
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.EQBassCyan, modifier = Modifier.size(13.dp))
-                            Text("CRATE GEMS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.EQBassCyan)
                         }
                     }
                 }
