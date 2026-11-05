@@ -119,6 +119,52 @@ router.post('/discovery', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/v1/reasoning/agent-chat
+ * Real-time conversational agent endpoint: uses Gemini to reason over user's query and 90+ timeline catalog.
+ */
+router.post('/agent-chat', async (req: Request, res: Response) => {
+  try {
+    const { query, tracks, currentPlaying, userName } = req.body || {};
+    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
+    const provider = new GeminiMusicReasoningProvider();
+    const result = await provider.conversationalMusicAgent(query || '', tracks || [], currentPlaying, userName);
+    res.json({
+      status: 'ok',
+      ...result
+    });
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /agent-chat:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
+ * POST /api/v1/reasoning/tag-tracks
+ * Examines and tags mobile user's timeline library with Genre, Language, and Vibes using Gemini.
+ */
+router.post('/tag-tracks', async (req: Request, res: Response) => {
+  try {
+    const { tracks } = req.body || {};
+    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
+    const provider = new GeminiMusicReasoningProvider();
+    const tags = await provider.tagMusicCatalog(tracks || []);
+    res.json({
+      status: 'ok',
+      tags
+    });
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /tag-tracks:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
  * GET /api/v1/reasoning/status
  * Returns the operational health and configuration state of the telemetry reasoning poller.
  */

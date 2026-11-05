@@ -154,16 +154,15 @@ class TuneMindVoiceAgent(
         hasWelcomedThisSession = true
 
         scope.launch {
-            val satiety = calculateDynamicSatiety()
             val daypart = vm.currentTimeSlot.label
             val userName = vm.userProfile.value.name
-            val greeting = TuneMindAutonomousBrain.generateWelcomeGreeting(userName, daypart, satiety)
+            val greeting = TuneMindAutonomousBrain.generateWelcomeGreeting(userName, daypart, calculateDynamicSatiety())
 
             addAgentMessage(greeting)
             _agentState.value = _agentState.value.copy(
                 phase = AgentPhase.PROMPTING_VOICE,
                 agentSpeech = greeting,
-                statusMessage = "Welcoming you to TuneMind..."
+                statusMessage = "TuneMind Agent Online"
             )
             speak(greeting, UTTERANCE_INITIAL_PROMPT)
         }
@@ -171,25 +170,11 @@ class TuneMindVoiceAgent(
 
     /**
      * Starts interactive voice session when mic button or screen is tapped.
+     * Acts like a normal chatbot (ChatGPT Voice / Siri): brief prompt, then listens.
      */
     fun startAgentSession() {
         scope.launch {
-            _agentState.value = _agentState.value.copy(
-                phase = AgentPhase.THINKING,
-                isThinking = true,
-                statusMessage = "Reasoning across your listening history..."
-            )
-
-            val satiety = calculateDynamicSatiety()
-            val daypart = vm.currentTimeSlot.label
-            val userName = vm.userProfile.value.name
-            val nowPlaying = vm.homeState.value.nowPlaying
-
-            val promptText = if (nowPlaying?.isPlaying == true && !nowPlaying.title.isNullOrBlank()) {
-                "Listening to '${nowPlaying.title}' at $satiety% satiety. What vibe would you like, $userName? Say Gospel, Gikuyu favorites, Bongo, or 'change that song'."
-            } else {
-                TuneMindAutonomousBrain.generateWelcomeGreeting(userName, daypart, satiety)
-            }
+            val promptText = "I'm listening..."
 
             addAgentMessage(promptText)
             _agentState.value = _agentState.value.copy(
@@ -197,7 +182,7 @@ class TuneMindVoiceAgent(
                 isThinking = false,
                 agentSpeech = promptText,
                 userSpeech = "",
-                statusMessage = "Agent speaking..."
+                statusMessage = "Listening for your voice..."
             )
             speak(promptText, UTTERANCE_INITIAL_PROMPT)
         }

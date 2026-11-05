@@ -39,27 +39,18 @@ object MusicPlayerAutoLauncher {
     ): PlaybackLaunchResult {
         val targetPkg = if (packageName == "*") null else packageName
 
-        // 1. FAST PATH: Active MediaSession Controller
+        // 0. IMMEDIATE HARD INTERRUPTION: Silence any currently singing playback
         try {
             val listener = TuneMindListenerService.instance
-            if (listener != null) {
-                val sent = listener.playFromSearch(targetPkg, query)
-                if (sent) {
-                    scheduleAutoPlayKicker(context, targetPkg, query)
-                    return PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = track.title,
-                        destinationUri = "mediasession:${targetPkg ?: "active"}",
-                        message = "Auto-playing '${track.title}' in $displayName."
-                    )
-                }
-            }
+            listener?.pause()
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
+            audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE))
         } catch (e: Exception) {
-            Log.w(TAG, "Fast path media session play failed: ${e.message}")
+            Log.d(TAG, "Audio pause interruption note: ${e.message}")
         }
 
-        // 2. PRIMARY: INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH with autostart
+        // 1. PRIMARY: INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH with autostart
         var launched = false
         if (targetPkg != null) {
             try {

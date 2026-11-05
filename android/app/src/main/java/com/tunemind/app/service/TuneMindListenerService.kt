@@ -157,6 +157,10 @@ class TuneMindListenerService : NotificationListenerService() {
         observerOrNull()?.togglePlayback()
     }
 
+    fun pause() {
+        observerOrNull()?.pause()
+    }
+
     fun skipNext() {
         observerOrNull()?.skipNext()
     }

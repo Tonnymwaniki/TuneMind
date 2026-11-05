@@ -96,6 +96,14 @@ class MediaSessionObserver(
         }
     }
 
+    fun pause() {
+        controllers.values.forEach { entry ->
+            try {
+                entry.controller.transportControls?.pause()
+            } catch (_: Exception) {}
+        }
+    }
+
     fun skipNext() {
         controllers.values.firstOrNull()?.controller?.transportControls?.skipToNext()
     }

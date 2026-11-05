@@ -1146,7 +1146,308 @@ Output strictly a valid JSON array of 10 objects matching this schema:
       recommendations: finalRecs
     };
   }
+
+  /**
+   * Examines a catalog of user timeline tracks and tags them with Genre, Language, and Vibes using Gemini.
+   */
+  async tagMusicCatalog(tracks: Array<{ id: string; title: string; artist: string }>): Promise<Record<string, { genre: string; language: string; vibes: string[] }>> {
+    if (!tracks || tracks.length === 0) return {};
+    const tagsMap: Record<string, { genre: string; language: string; vibes: string[] }> = {};
+
+    const available = await this.isAvailable();
+    if (!available || !this.ai) {
+      // Offline fallback classifier
+      for (const t of tracks) {
+        tagsMap[t.id] = this.offlineHeuristicTag(t.title, t.artist);
+      }
+      return tagsMap;
+    }
+
+    const batch = tracks.slice(0, 50);
+    const prompt = `You are an expert East African and global musicologist.
+Examine this list of songs from a Kenyan user's music library and accurately classify each song by its true musical genre and language:
+${JSON.stringify(batch.map(t => ({ id: t.id, title: t.title, artist: t.artist })), null, 2)}
+
+Categories to use:
+- genre: "Gikuyu / Mugithi" (Samidoh, De'Mathew, Joyce wa Mamaa, Salim, Gatutura, Kikuyu folk/guitar), "Bongo Flava" (Diamond, Zuchu, Rayvanny, Harmonize, Marioo, Swahili), "Gospel" (Worship, Praise, Kikuyu/Swahili/English church anthems, Mercy Masika, Sinach, Guardian Angel), "Afrobeats" (Burna Boy, Wizkid, Asake, Rema), "Gengetone / Kenyan Urban" (Sauti Sol, Mejja, Wakadinali, Nyashinski), "Pop / R&B", "Hip Hop", "Other"
+- language: "Kikuyu", "Swahili", "English", "Yoruba", "Other"
+- vibes: 2-3 short mood tags
+
+Return JSON array format:
+[
+  { "id": "...", "genre": "...", "language": "...", "vibes": ["..."] }
+]`;
+
+    try {
+      const res = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.2
+        }
+      });
+      const text = res?.text;
+      if (text) {
+        const arr = JSON.parse(text);
+        if (Array.isArray(arr)) {
+          for (const item of arr) {
+            if (item && item.id) {
+              tagsMap[item.id] = {
+                genre: item.genre || 'Other',
+                language: item.language || 'Other',
+                vibes: Array.isArray(item.vibes) ? item.vibes : []
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[GeminiMusicReasoningProvider] LLM tagging failed, applying fallback:', (e as Error).message);
+    }
+
+    // Fill remaining with offline tagger
+    for (const t of tracks) {
+      if (!tagsMap[t.id]) {
+        tagsMap[t.id] = this.offlineHeuristicTag(t.title, t.artist);
+      }
+    }
+
+    return tagsMap;
+  }
+
+  /**
+   * Conversational music agent: reasons over user's query and their tagged timeline catalog.
+   */
+  async conversationalMusicAgent(
+    query: string,
+    tracks: Array<{ id: string; title: string; artist: string; genre?: string; language?: string }>,
+    currentPlaying?: string,
+    userName: string = 'Tonny'
+  ): Promise<{
+    matchedTrackId: string | null;
+    suggestedTitle: string | null;
+    suggestedArtist: string | null;
+    spokenText: string;
+    action: string;
+    genre: string;
+  }> {
+    const qLower = query.toLowerCase().trim();
+
+    // Negation check
+    if (['no', 'stop', 'cancel', 'not that', 'never mind', 'pause', 'hold on'].some(n => qLower === n || qLower.startsWith(n + ' '))) {
+      return {
+        matchedTrackId: null,
+        suggestedTitle: null,
+        suggestedArtist: null,
+        spokenText: "Understood, cancelled. What would you like to hear instead?",
+        action: "CANCEL",
+        genre: "None"
+      };
+    }
+
+    const available = await this.isAvailable();
+    if (available && this.ai) {
+      const sampleTracks = tracks.slice(0, 70).map(t => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        genre: t.genre || 'Unclassified',
+        language: t.language || 'Unclassified'
+      }));
+
+      const prompt = `You are TuneMind Voice Agent, a conversational music assistant for ${userName} in Kenya.
+User Spoken Query: "${query}"
+Currently Playing: "${currentPlaying || 'None'}"
+User's Real Timeline Catalog (${tracks.length} songs total):
+${JSON.stringify(sampleTracks, null, 2)}
+
+Instructions:
+1. If the user asks for a specific genre or language (e.g. "Gikuyu song in timeline", "Gospel", "Bongo", "Afrobeats"), inspect the catalog and select the BEST matching song from their catalog that is truly that genre!
+2. If the user asks to "change that song", pick a fresh energetic alternative from their catalog.
+3. If the user asks an auditory/fatigue question, provide a concise 1-sentence answer without playing.
+4. Keep the spokenText short, conversational, and natural like ChatGPT Voice or Siri (e.g., "Playing 'Wendo Wi Cama' by Samidoh from your Gikuyu collection.").
+
+Return JSON format:
+{
+  "matchedTrackId": "string or null",
+  "suggestedTitle": "string",
+  "suggestedArtist": "string",
+  "spokenText": "short spoken natural response",
+  "action": "PLAY_TRACK" or "CHANGE_TRACK" or "SPEAK_ONLY" or "CANCEL",
+  "genre": "identified genre"
+}`;
+
+      try {
+        const res = await this.ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3
+          }
+        });
+        const text = res?.text;
+        if (text) {
+          const parsed = JSON.parse(text);
+          return {
+            matchedTrackId: parsed.matchedTrackId || null,
+            suggestedTitle: parsed.suggestedTitle || null,
+            suggestedArtist: parsed.suggestedArtist || null,
+            spokenText: parsed.spokenText || `Playing ${parsed.suggestedTitle || 'selected track'}.`,
+            action: parsed.action || 'PLAY_TRACK',
+            genre: parsed.genre || 'Curated'
+          };
+        }
+      } catch (e) {
+        console.warn('[conversationalMusicAgent] LLM failed, using offline reasoning:', (e as Error).message);
+      }
+    }
+
+    // High quality offline fallback
+    return this.offlineConversationalFallback(query, tracks, currentPlaying, userName);
+  }
+
+  private offlineHeuristicTag(title: string, artist: string): { genre: string; language: string; vibes: string[] } {
+    const combined = `${title} ${artist}`.toLowerCase();
+    const GIKUYU_ARTISTS = ['samidoh', 'salim', 'demathew', "de'mathew", 'mamaa', 'gatutura', 'kamande', 'musaimo', 'kigio', 'njoroge', 'tony young', 'kioi', 'karwimbo', 'wanjiku', 'muthoni', 'njeri', 'waithaka', 'kamaru'];
+    const GIKUYU_WORDS = ['wendo', 'ngoro', 'mwanake', 'ciugo', 'kiriro', 'mutumia', 'ndoto', 'mamaa', 'mugithi', 'kigooco', 'mwathani', 'ngai', 'murata', 'kanyoni'];
+    const BONGO_ARTISTS = ['diamond', 'platnumz', 'harmonize', 'rayvanny', 'zuchu', 'mbosso', 'marioo', 'jux', 'aslay', 'nandy', 'kusah', 'barnaba', 'alikiba'];
+    const GOSPEL_WORDS = ['gospel', 'worship', 'praise', 'mwema', 'hallelujah', 'amen', 'jesus', 'god', 'kigame', 'masika', 'sinach', 'guardian angel', 'shusho', 'wanjiru'];
+    const AFRO_ARTISTS = ['burna', 'wizkid', 'davido', 'rema', 'asake', 'ayra', 'omah lay', 'fireboy', 'tems', 'kizz daniel', 'ruger'];
+
+    if (GIKUYU_ARTISTS.some(a => combined.includes(a)) || GIKUYU_WORDS.some(w => combined.includes(w))) {
+      return { genre: 'Gikuyu / Mugithi', language: 'Kikuyu', vibes: ['Acoustic', 'Mugithi', 'Heritage'] };
+    }
+    if (BONGO_ARTISTS.some(a => combined.includes(a))) {
+      return { genre: 'Bongo Flava', language: 'Swahili', vibes: ['Smooth', 'Romantic', 'Dance'] };
+    }
+    if (GOSPEL_WORDS.some(w => combined.includes(w))) {
+      return { genre: 'Gospel', language: 'Swahili/English', vibes: ['Uplifting', 'Worship', 'Praise'] };
+    }
+    if (AFRO_ARTISTS.some(a => combined.includes(a))) {
+      return { genre: 'Afrobeats', language: 'English/Pidgin', vibes: ['High Dopamine', 'Groove'] };
+    }
+    return { genre: 'Pop / R&B', language: 'English', vibes: ['Melodic', 'Radio'] };
+  }
+
+  private offlineConversationalFallback(
+    query: string,
+    tracks: Array<{ id: string; title: string; artist: string; genre?: string; language?: string }>,
+    currentPlaying?: string,
+    userName: string = 'Tonny'
+  ): {
+    matchedTrackId: string | null;
+    suggestedTitle: string | null;
+    suggestedArtist: string | null;
+    spokenText: string;
+    action: string;
+    genre: string;
+  } {
+    const q = query.toLowerCase();
+
+    // Check Gikuyu
+    if (q.includes('gikuyu') || q.includes('kikuyu') || q.includes('mugithi')) {
+      const match = tracks.find(t => {
+        const tag = this.offlineHeuristicTag(t.title, t.artist);
+        return tag.genre.includes('Gikuyu') || tag.language === 'Kikuyu';
+      });
+      if (match) {
+        return {
+          matchedTrackId: match.id,
+          suggestedTitle: match.title,
+          suggestedArtist: match.artist,
+          spokenText: `Playing '${match.title}' by ${match.artist} from your Gikuyu timeline collection.`,
+          action: 'PLAY_TRACK',
+          genre: 'Gikuyu / Mugithi'
+        };
+      }
+      return {
+        matchedTrackId: 'fallback_gikuyu',
+        suggestedTitle: 'Wendo Wi Cama',
+        suggestedArtist: 'Samidoh & Joyce wa Mamaa',
+        spokenText: "Playing 'Wendo Wi Cama' by Samidoh from your Gikuyu favorites.",
+        action: 'PLAY_TRACK',
+        genre: 'Gikuyu / Mugithi'
+      };
+    }
+
+    // Check Gospel
+    if (q.includes('gospel') || q.includes('worship') || q.includes('praise')) {
+      const match = tracks.find(t => {
+        const tag = this.offlineHeuristicTag(t.title, t.artist);
+        return tag.genre.includes('Gospel');
+      });
+      if (match) {
+        return {
+          matchedTrackId: match.id,
+          suggestedTitle: match.title,
+          suggestedArtist: match.artist,
+          spokenText: `Playing '${match.title}' by ${match.artist} for your Gospel worship.`,
+          action: 'PLAY_TRACK',
+          genre: 'Gospel'
+        };
+      }
+      return {
+        matchedTrackId: 'fallback_gospel',
+        suggestedTitle: 'Mwema',
+        suggestedArtist: 'Mercy Masika',
+        spokenText: "Playing 'Mwema' by Mercy Masika for your worship.",
+        action: 'PLAY_TRACK',
+        genre: 'Gospel'
+      };
+    }
+
+    // Check Bongo
+    if (q.includes('bongo')) {
+      const match = tracks.find(t => {
+        const tag = this.offlineHeuristicTag(t.title, t.artist);
+        return tag.genre.includes('Bongo');
+      });
+      if (match) {
+        return {
+          matchedTrackId: match.id,
+          suggestedTitle: match.title,
+          suggestedArtist: match.artist,
+          spokenText: `Playing '${match.title}' by ${match.artist} for your Bongo flow.`,
+          action: 'PLAY_TRACK',
+          genre: 'Bongo Flava'
+        };
+      }
+      return {
+        matchedTrackId: 'fallback_bongo',
+        suggestedTitle: 'Sukari',
+        suggestedArtist: 'Zuchu',
+        spokenText: "Playing 'Sukari' by Zuchu.",
+        action: 'PLAY_TRACK',
+        genre: 'Bongo Flava'
+      };
+    }
+
+    // Timeline match
+    const candidate = tracks.find(t => t.title && t.title !== currentPlaying) || tracks[0];
+    if (candidate) {
+      return {
+        matchedTrackId: candidate.id,
+        suggestedTitle: candidate.title,
+        suggestedArtist: candidate.artist,
+        spokenText: `Playing '${candidate.title}' by ${candidate.artist} from your timeline.`,
+        action: 'PLAY_TRACK',
+        genre: candidate.genre || 'Timeline'
+      };
+    }
+
+    return {
+      matchedTrackId: null,
+      suggestedTitle: 'Sukari',
+      suggestedArtist: 'Zuchu',
+      spokenText: "Playing high-dopamine Bongo track for you.",
+      action: 'PLAY_TRACK',
+      genre: 'Bongo'
+    };
+  }
 }
+
 
 
 
