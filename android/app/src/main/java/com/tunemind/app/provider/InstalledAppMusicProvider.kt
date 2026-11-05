@@ -49,63 +49,21 @@ class InstalledAppMusicProvider(
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
         val query = match.searchQuery
 
-        // 1. FAST PATH: Active Background MediaSession
-        try {
-            val listener = TuneMindListenerService.instance
-            if (listener != null) {
-                val sent = listener.playFromSearch(packageName, query)
-                if (sent) {
-                    return PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = match.title,
-                        destinationUri = "mediasession:$packageName",
-                        message = "Streaming '${match.title}' on $displayName in background."
-                    )
-                }
-            }
-        } catch (_: Exception) {}
+        val track = RecommendedTrack(
+            id = match.providerTrackId ?: match.title,
+            title = match.title,
+            artist = match.artist,
+            reason = "Dispatched to installed audio player $displayName",
+            confidence = match.confidence
+        )
 
-        // 2. Targeted Media Play From Search
-        if (isInstalled(context)) {
-            try {
-                val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE)
-                    putExtra(MediaStore.EXTRA_MEDIA_TITLE, match.title)
-                    putExtra(MediaStore.EXTRA_MEDIA_ARTIST, match.artist)
-                    putExtra(SearchManager.QUERY, query)
-                    setPackage(packageName)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-                return PlaybackLaunchResult.SearchHandoffLaunched(
-                    providerId = providerId,
-                    providerDisplayName = displayName,
-                    query = query,
-                    message = "Opened '${match.title}' in $displayName."
-                )
-            } catch (_: Exception) {}
-
-            // 3. Fallback: Launch app's main launcher activity
-            try {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)?.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                if (launchIntent != null) {
-                    context.startActivity(launchIntent)
-                    return PlaybackLaunchResult.SearchHandoffLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        query = query,
-                        message = "Launched $displayName."
-                    )
-                }
-            } catch (_: Exception) {}
-        }
-
-        return PlaybackLaunchResult.LaunchFailed(
+        return MusicPlayerAutoLauncher.launchWithAutoPlay(
+            context = context,
             providerId = providerId,
-            reason = "Could not open $displayName."
+            displayName = displayName,
+            packageName = packageName,
+            track = track,
+            query = query
         )
     }
 }

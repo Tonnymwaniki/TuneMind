@@ -53,79 +53,48 @@ class BoomplayMusicProvider : MusicProvider {
 
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
         val query = match.searchQuery
+        val webUrl = match.webFallbackUrl ?: "https://www.boomplay.com/search/${Uri.encode(query)}"
 
-        // 1. FAST PATH: Active Background MediaSession
-        try {
-            val listener = TuneMindListenerService.instance
-            if (listener != null) {
-                val sent = listener.playFromSearch(packageName, query)
-                if (sent) {
-                    return PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = match.title,
-                        destinationUri = "mediasession:$packageName",
-                        message = "Streaming '${match.title}' on Boomplay in background."
-                    )
-                }
-            }
-        } catch (_: Exception) {}
-
-        // 2. Targeted Media Play From Search
-        if (isInstalled(context)) {
-            try {
-                val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE)
-                    putExtra(MediaStore.EXTRA_MEDIA_TITLE, match.title)
-                    putExtra(MediaStore.EXTRA_MEDIA_ARTIST, match.artist)
-                    putExtra(SearchManager.QUERY, query)
-                    setPackage(packageName)
+        if (!isInstalled(context)) {
+            return try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
-                return PlaybackLaunchResult.SearchHandoffLaunched(
+                PlaybackLaunchResult.SearchHandoffLaunched(
                     providerId = providerId,
                     providerDisplayName = displayName,
                     query = query,
-                    message = "Opened '${match.title}' in Boomplay."
+                    message = "Opened Boomplay track search in browser."
                 )
-            } catch (_: Exception) {}
-
-            // Try deep link
-            try {
-                val deepLinkIntent = Intent(Intent.ACTION_VIEW, Uri.parse(match.deepLinkUri)).apply {
-                    setPackage(packageName)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(deepLinkIntent)
-                return PlaybackLaunchResult.SearchHandoffLaunched(
+            } catch (e: Exception) {
+                PlaybackLaunchResult.ProviderNotInstalled(
                     providerId = providerId,
                     providerDisplayName = displayName,
-                    query = query,
-                    message = "Opened '${match.title}' in Boomplay."
+                    playStorePackage = packageName,
+                    message = "Boomplay is not installed."
                 )
-            } catch (_: Exception) {}
-        }
-
-        // 3. Web Fallback
-        val webUrl = match.webFallbackUrl ?: "https://www.boomplay.com/search/${Uri.encode(query)}"
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(intent)
-            PlaybackLaunchResult.SearchHandoffLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                query = query,
-                message = "Opened Boomplay track search in browser."
-            )
-        } catch (e: Exception) {
-            PlaybackLaunchResult.LaunchFailed(
-                providerId = providerId,
-                reason = "Could not open Boomplay: ${e.message}"
-            )
         }
+
+        val track = RecommendedTrack(
+            id = match.providerTrackId ?: match.title,
+            title = match.title,
+            artist = match.artist,
+            reason = "Acoustically selected for Boomplay playback",
+            confidence = match.confidence
+        )
+
+        return MusicPlayerAutoLauncher.launchWithAutoPlay(
+            context = context,
+            providerId = providerId,
+            displayName = displayName,
+            packageName = packageName,
+            track = track,
+            query = query,
+            deepLinkUri = match.deepLinkUri,
+            webFallbackUrl = webUrl
+        )
     }
 
     companion object {

@@ -53,57 +53,46 @@ class YouTubeMusicProvider : MusicProvider {
         val query = match.searchQuery
         val webUrl = match.webFallbackUrl ?: "https://music.youtube.com/search?q=${Uri.encode(query)}"
 
-        // 1. FAST PATH: Active Background MediaSession (Play without leaving TuneMind)
-        try {
-            val listener = com.tunemind.app.service.TuneMindListenerService.instance
-            if (listener != null) {
-                val sent = listener.playFromSearch(packageName, query)
-                if (sent) {
-                    return PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = match.title,
-                        destinationUri = "mediasession:$packageName",
-                        message = "Streaming '${match.title}' on YouTube Music in background."
-                    )
-                }
-            }
-        } catch (_: Exception) {}
-
-        if (isInstalled(context)) {
-            try {
+        if (!isInstalled(context)) {
+            return try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
-                    setPackage(packageName)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
-                return PlaybackLaunchResult.SearchHandoffLaunched(
+                PlaybackLaunchResult.SearchHandoffLaunched(
                     providerId = providerId,
                     providerDisplayName = displayName,
                     query = query,
-                    message = "Opened '${match.title}' in YouTube Music."
+                    message = "Opened YouTube Music track search in browser."
                 )
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                PlaybackLaunchResult.ProviderNotInstalled(
+                    providerId = providerId,
+                    providerDisplayName = displayName,
+                    playStorePackage = packageName,
+                    message = "YouTube Music is not installed."
+                )
+            }
         }
 
-        // Web fallback
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            PlaybackLaunchResult.SearchHandoffLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                query = query,
-                message = "Opened YouTube Music track search in browser."
-            )
-        } catch (e: Exception) {
-            PlaybackLaunchResult.LaunchFailed(
-                providerId = providerId,
-                reason = "Could not open YouTube Music: ${e.message}"
-            )
-        }
+        val track = RecommendedTrack(
+            id = match.providerTrackId ?: match.title,
+            title = match.title,
+            artist = match.artist,
+            reason = "Calibrated for YouTube Music audio streaming",
+            confidence = match.confidence
+        )
+
+        return MusicPlayerAutoLauncher.launchWithAutoPlay(
+            context = context,
+            providerId = providerId,
+            displayName = displayName,
+            packageName = packageName,
+            track = track,
+            query = query,
+            deepLinkUri = webUrl,
+            webFallbackUrl = webUrl
+        )
     }
 
     companion object {

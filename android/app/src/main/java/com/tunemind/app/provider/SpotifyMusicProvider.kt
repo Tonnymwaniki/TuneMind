@@ -63,104 +63,47 @@ class SpotifyMusicProvider : MusicProvider {
 
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
         if (!isInstalled(context)) {
-            // Attempt web fallback if app is not installed
-            match.webFallbackUrl?.let { webUrl ->
-                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                return try {
-                    context.startActivity(webIntent)
-                    PlaybackLaunchResult.SearchHandoffLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        query = match.searchQuery,
-                        message = "Spotify app not installed. Opened track search in browser."
-                    )
-                } catch (e: Exception) {
-                    PlaybackLaunchResult.ProviderNotInstalled(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        playStorePackage = packageName,
-                        message = "Spotify is not installed on this device."
-                    )
-                }
-            }
-            return PlaybackLaunchResult.ProviderNotInstalled(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                playStorePackage = packageName,
-                message = "Spotify is not installed on this device."
-            )
-        }
-
-        // 1. FAST PATH: Active Background MediaSession (Play without leaving TuneMind)
-        try {
-            val listener = com.tunemind.app.service.TuneMindListenerService.instance
-            if (listener != null) {
-                val sent = listener.playFromSearch(packageName, match.searchQuery)
-                if (sent) {
-                    return PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = match.title,
-                        destinationUri = "mediasession:$packageName",
-                        message = "Streaming '${match.title}' on Spotify in background."
-                    )
-                }
-            }
-        } catch (_: Exception) {}
-
-        val isDirectTrack = match.deepLinkUri?.startsWith("spotify:track:") == true
-
-        // Launch in-app deep link
-        match.deepLinkUri?.let { uriString ->
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString)).apply {
-                    setPackage(packageName)
+            // Web fallback if app not installed
+            val fallback = match.webFallbackUrl ?: "https://open.spotify.com/search/${Uri.encode(match.searchQuery)}"
+            return try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fallback)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
-
-                return if (isDirectTrack) {
-                    PlaybackLaunchResult.DirectPlaybackLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        trackTitle = match.title,
-                        destinationUri = uriString,
-                        message = "Starting playback for '${match.title}' in Spotify."
-                    )
-                } else {
-                    PlaybackLaunchResult.SearchHandoffLaunched(
-                        providerId = providerId,
-                        providerDisplayName = displayName,
-                        query = match.searchQuery,
-                        message = "Opened '${match.title}' in Spotify for instant playback."
-                    )
-                }
+                PlaybackLaunchResult.SearchHandoffLaunched(
+                    providerId = providerId,
+                    providerDisplayName = displayName,
+                    query = match.searchQuery,
+                    message = "Opened Spotify in browser."
+                )
             } catch (e: Exception) {
-                // Fallback to web URL or generic search
+                PlaybackLaunchResult.ProviderNotInstalled(
+                    providerId = providerId,
+                    providerDisplayName = displayName,
+                    playStorePackage = packageName,
+                    message = "Spotify is not installed."
+                )
             }
         }
 
-        // Fallback to web URL targeting Spotify
-        return try {
-            val fallback = match.webFallbackUrl ?: "https://open.spotify.com/search/${Uri.encode(match.searchQuery)}"
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fallback)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            PlaybackLaunchResult.SearchHandoffLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                query = match.searchQuery,
-                message = "Handoff to Spotify via web link."
-            )
-        } catch (e: Exception) {
-            PlaybackLaunchResult.LaunchFailed(
-                providerId = providerId,
-                reason = "Could not launch Spotify: ${e.message}"
-            )
-        }
+        val track = RecommendedTrack(
+            id = match.providerTrackId ?: match.title,
+            title = match.title,
+            artist = match.artist,
+            reason = "Acoustically selected for instant Spotify playback",
+            confidence = match.confidence
+        )
+
+        return MusicPlayerAutoLauncher.launchWithAutoPlay(
+            context = context,
+            providerId = providerId,
+            displayName = displayName,
+            packageName = packageName,
+            track = track,
+            query = match.searchQuery,
+            deepLinkUri = match.deepLinkUri,
+            webFallbackUrl = match.webFallbackUrl
+        )
     }
 
     companion object {
