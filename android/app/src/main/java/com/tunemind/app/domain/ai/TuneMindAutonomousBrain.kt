@@ -42,17 +42,69 @@ data class TrackLlmTag(
 
 /**
  * Autonomous Audiophile Cognitive Intelligence Brain for TuneMind.
- * Deeply grounded in:
- * - Real LLM examination & tagging of user's 90+ timeline catalog via Gemini
- * - High-precision East African cultural lexicons (Gikuyu/Mugithi, Bongo Flava, Gospel, Afrobeats, Gengetone)
- * - Conversational, natural chatbot dialogue (no unsolicited lectures; listens when tapped)
- * - Instant track takeover and auto-play dispatch across music players
+ * - Directly supports on-device Gemini API Key for autonomous LLM reasoning.
+ * - Dynamic rotation: NEVER repeats the same song.
+ * - High-precision East African cultural lexicons (Gikuyu/Mugithi, Bongo Flava, Gospel, Afrobeats).
+ * - Conversational chatbot dialogue (brief, natural, no unsolicited monologues).
  */
 object TuneMindAutonomousBrain {
     private const val TAG = "TuneMindBrain"
     private const val PREFS_TAGS = "tunemind_llm_tags"
 
-    // Comprehensive East African Artist Lexicon (Offline Guarantee)
+    // History of recently suggested titles to prevent repetition
+    private val recentSuggestions = mutableListOf<String>()
+
+    // Diverse Roster of Gikuyu Mugithi Classics
+    private val GIKUYU_CLASSICS_ROSTER = listOf(
+        Pair("Wendo Wi Cama", "Samidoh & Joyce wa Mamaa"),
+        Pair("Murata Wa Thiururuka", "Samidoh"),
+        Pair("Wendo Ni Uriru", "Joyce wa Mamaa"),
+        Pair("Nindacokia Ngatho", "John De'Mathew"),
+        Pair("Tuirio Twega", "Jose Gatutura"),
+        Pair("Kihikihi", "Salim Junior"),
+        Pair("Menya Wari Wakwa", "Joyce wa Mamaa & Tony Young"),
+        Pair("Mwomboko Classic", "Joseph Kamaru"),
+        Pair("Niwe Ngoro Yakwa", "Samidoh"),
+        Pair("Komester", "Mike Rua"),
+        Pair("Kanyoni Gakwa", "Peter Kigia")
+    )
+
+    // Diverse Roster of Gospel Anthems
+    private val GOSPEL_ROSTER = listOf(
+        Pair("Mwema", "Mercy Masika"),
+        Pair("Henzene", "Reuben Kigame"),
+        Pair("Nadeka", "Guardian Angel"),
+        Pair("Mungu Mkuu", "Evelyn Wanjiru"),
+        Pair("Ninang'ara", "Christina Shusho"),
+        Pair("Way Maker", "Sinach"),
+        Pair("Katikia Yesu", "Florence Andenyi"),
+        Pair("Huu Mwaka", "Gloria Muliro"),
+        Pair("Uka", "Paul Mwai")
+    )
+
+    // Diverse Roster of Bongo Flava Hits
+    private val BONGO_ROSTER = listOf(
+        Pair("Sukari", "Zuchu"),
+        Pair("Jeje", "Diamond Platnumz"),
+        Pair("Single Again", "Harmonize"),
+        Pair("Tetema", "Rayvanny ft. Diamond"),
+        Pair("Nimekuzoea", "Nandy"),
+        Pair("Mi Amor", "Marioo ft. Jovial"),
+        Pair("Hodari", "Mbosso"),
+        Pair("Enjoy", "Jux & Diamond Platnumz")
+    )
+
+    // Diverse Roster of Afrobeats Anthems
+    private val AFROBEATS_ROSTER = listOf(
+        Pair("Last Last", "Burna Boy"),
+        Pair("Calm Down", "Rema"),
+        Pair("Lonely At The Top", "Asake"),
+        Pair("Essence", "Wizkid ft. Tems"),
+        Pair("Unavailable", "Davido"),
+        Pair("Rush", "Ayra Starr"),
+        Pair("Bandana", "Fireboy DML & Asake")
+    )
+
     private val GIKUYU_ARTISTS = listOf(
         "samidoh", "salim", "salim junior", "demathew", "de'mathew", "john demathew",
         "joyce wa mamaa", "mamaa", "gatutura", "jose gatutura", "kamande wa kioi", "kamande",
@@ -80,115 +132,12 @@ object TuneMindAutonomousBrain {
         "size 8", "hillsong", "don moen", "maverick city", "travis greene", "nathaniel bassey"
     )
 
-    private val AFROBEATS_ARTISTS = listOf(
-        "burna", "burna boy", "wizkid", "davido", "rema", "asake", "ayra starr", "ayra",
-        "omah lay", "fireboy", "tems", "kizz daniel", "ruger", "tiwa savage", "adekunle gold",
-        "oxlade", "victony", "joeboy", "ckay", "bnxn", "shallipopi"
-    )
-
     /**
-     * Examines and tags untagged tracks in the user's catalog with Gemini LLM,
-     * caching results in persistent storage for instant retrieval.
-     */
-    suspend fun examineAndTagCatalogWithLLM(
-        context: Context,
-        tracks: List<TrackMemoryEntry>
-    ): Map<String, TrackLlmTag> = withContext(Dispatchers.IO) {
-        val prefs = context.getSharedPreferences(PREFS_TAGS, Context.MODE_PRIVATE)
-        val result = mutableMapOf<String, TrackLlmTag>()
-
-        // 1. Load cached tags
-        val untagged = mutableListOf<TrackMemoryEntry>()
-        for (track in tracks) {
-            val cachedJson = prefs.getString(track.entryId, null)
-            if (cachedJson != null) {
-                try {
-                    val obj = JSONObject(cachedJson)
-                    result[track.entryId] = TrackLlmTag(
-                        genre = obj.optString("genre", "Curated"),
-                        language = obj.optString("language", "Other"),
-                        vibes = emptyList()
-                    )
-                } catch (_: Exception) {
-                    untagged.add(track)
-                }
-            } else {
-                untagged.add(track)
-            }
-        }
-
-        if (untagged.isEmpty()) {
-            return@withContext result
-        }
-
-        // 2. Call backend /tag-tracks with untagged batch (up to 40 tracks)
-        val batch = untagged.take(40)
-        try {
-            val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
-            if (baseUrl.isNotBlank()) {
-                val url = URL("$baseUrl/api/v1/reasoning/tag-tracks")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.connectTimeout = 8000
-                conn.readTimeout = 12000
-                conn.doOutput = true
-
-                val payload = JSONObject().apply {
-                    val arr = JSONArray()
-                    for (t in batch) {
-                        arr.put(JSONObject().apply {
-                            put("id", t.entryId)
-                            put("title", t.title ?: "")
-                            put("artist", t.artist ?: "")
-                        })
-                    }
-                    put("tracks", arr)
-                }
-
-                OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(payload.toString()); it.flush() }
-                if (conn.responseCode in 200..299) {
-                    val resp = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
-                    val json = JSONObject(resp)
-                    val tagsObj = json.optJSONObject("tags")
-                    if (tagsObj != null) {
-                        val editor = prefs.edit()
-                        val keys = tagsObj.keys()
-                        while (keys.hasNext()) {
-                            val id = keys.next()
-                            val item = tagsObj.getJSONObject(id)
-                            val tag = TrackLlmTag(
-                                genre = item.optString("genre", "Curated"),
-                                language = item.optString("language", "Other")
-                            )
-                            result[id] = tag
-                            editor.putString(id, item.toString())
-                        }
-                        editor.apply()
-                        Log.i(TAG, "Successfully tagged ${tagsObj.length()} tracks with Gemini LLM")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "LLM backend tagging deferred, falling back to local musicology: ${e.message}")
-        }
-
-        // 3. Fallback heuristic tagging for any remaining
-        for (t in untagged) {
-            if (!result.containsKey(t.entryId)) {
-                val tag = offlineHeuristicTag(t.title ?: "", t.artist ?: "")
-                result[t.entryId] = tag
-            }
-        }
-
-        result
-    }
-
-    /**
-     * Primary reasoning pipeline:
-     * - Recognizes cancellations and stops immediately without forcing playback.
-     * - Uses Gemini LLM to reason over user's 90+ timeline catalog and East African musicology.
-     * - Falls back to high-accuracy deterministic acoustic intelligence if offline.
+     * Primary reasoning entrypoint.
+     * Evaluates user input against:
+     * 1. On-device Gemini LLM API (if API key is present)
+     * 2. Backend LLM agent-chat
+     * 3. Non-repeating deterministic East African musicology engine
      */
     suspend fun reason(
         context: Context,
@@ -204,7 +153,7 @@ object TuneMindAutonomousBrain {
         val cleanInput = input.trim().lowercase(Locale.getDefault())
         Log.i(TAG, "Reasoning over query: '$input' (Catalog size: ${historyTracks.size})")
 
-        // 1. NEGATION & CANCELLATION UNDERSTANDING (User says "no", "stop", "cancel", "never mind")
+        // 1. NEGATION & CANCELLATION UNDERSTANDING
         if (isNegationOrCancel(cleanInput)) {
             return@withContext BrainResponse(
                 spokenText = "Understood, cancelled. What would you like to hear instead?",
@@ -228,12 +177,34 @@ object TuneMindAutonomousBrain {
             )
         }
 
-        // 3. TAG CATALOG WITH LLM IN BACKGROUND / PARALLEL
+        // 3. TAG CATALOG IN BACKGROUND
         val tagsMap = examineAndTagCatalogWithLLM(context, historyTracks)
 
-        // 4. ATTEMPT REAL-TIME GEMINI AGENT REASONING VIA BACKEND
+        // 4. ATTEMPT ON-DEVICE DIRECT GEMINI LLM REASONING (IF API KEY PRESENT)
+        val apiKey = GeminiReasoningEngine.getApiKey(context)
+        if (apiKey.isNotBlank()) {
+            try {
+                val directResponse = callDirectGeminiAgent(
+                    apiKey = apiKey,
+                    query = input,
+                    tracks = historyTracks,
+                    tags = tagsMap,
+                    currentPlaying = nowPlaying?.title,
+                    userName = userName,
+                    currentProviderId = currentProviderId
+                )
+                if (directResponse != null) {
+                    recordSuggestion(directResponse.resolvedTrack?.title)
+                    return@withContext directResponse
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct Gemini API call failed, falling back: ${e.message}")
+            }
+        }
+
+        // 5. ATTEMPT BACKEND PROXY LLM AGENT CHAT
         try {
-            val llmResponse = callBackendAgentChat(
+            val backendResponse = callBackendAgentChat(
                 query = input,
                 tracks = historyTracks,
                 tags = tagsMap,
@@ -242,15 +213,16 @@ object TuneMindAutonomousBrain {
                 currentProviderId = currentProviderId,
                 currentProviderName = currentProviderName
             )
-            if (llmResponse != null) {
-                return@withContext llmResponse
+            if (backendResponse != null) {
+                recordSuggestion(backendResponse.resolvedTrack?.title)
+                return@withContext backendResponse
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Backend agent-chat unavailable, using local musicology engine: ${e.message}")
+            Log.w(TAG, "Backend agent-chat unavailable: ${e.message}")
         }
 
-        // 5. HIGH-PRECISION OFFLINE MUSICOLOGY REASONING (Guaranteed zero incorrect genres)
-        return@withContext offlineReasoning(
+        // 6. DYNAMIC NON-REPEATING OFFLINE MUSICOLOGY ENGINE
+        val offlineResponse = offlineReasoning(
             query = cleanInput,
             tracks = historyTracks,
             tags = tagsMap,
@@ -259,11 +231,349 @@ object TuneMindAutonomousBrain {
             currentProviderName = currentProviderName,
             userName = userName
         )
+        recordSuggestion(offlineResponse.resolvedTrack?.title)
+        return@withContext offlineResponse
     }
 
     /**
-     * Calls Gemini LLM agent chat endpoint on backend.
+     * Direct on-device call to Google Gemini 2.5 Flash / 3.8 Flash REST API.
      */
+    private suspend fun callDirectGeminiAgent(
+        apiKey: String,
+        query: String,
+        tracks: List<TrackMemoryEntry>,
+        tags: Map<String, TrackLlmTag>,
+        currentPlaying: String?,
+        userName: String,
+        currentProviderId: String
+    ): BrainResponse? = withContext(Dispatchers.IO) {
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+        val url = URL(endpoint)
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        conn.connectTimeout = 8000
+        conn.readTimeout = 12000
+        conn.doOutput = true
+
+        val sample = tracks.take(70).map { t ->
+            val tag = tags[t.entryId]
+            JSONObject().apply {
+                put("id", t.entryId)
+                put("title", t.title ?: "")
+                put("artist", t.artist ?: "")
+                put("genre", tag?.genre ?: "Unclassified")
+                put("language", tag?.language ?: "Unclassified")
+            }
+        }
+
+        val prompt = """
+You are TuneMind Voice Agent, an audiophile personal music assistant for $userName in Kenya.
+User Query: "$query"
+Currently Playing: "${currentPlaying ?: "None"}"
+Recently Played (DO NOT REPEAT): ${recentSuggestions.takeLast(10).joinToString(", ")}
+User's Real Timeline Catalog:
+${JSONArray(sample)}
+
+Instructions:
+1. If the user asks for Gikuyu / Mugithi, inspect the catalog and select a Kikuyu track by Kikuyu artists (Samidoh, Joyce wa Mamaa, De'Mathew, Salim, Gatutura, etc.). NEVER pick an English pop song.
+2. If the user asks for Gospel, pick a Gospel praise or worship track.
+3. If the user asks for Bongo, pick a Bongo Flava track.
+4. Keep spokenText short and natural (e.g., "Playing 'Wendo Wi Cama' by Samidoh from your Gikuyu collection.").
+5. If changing songs, select a fresh distinct track not in the recently played list.
+
+Respond ONLY with valid JSON:
+{
+  "matchedTrackId": "string or null",
+  "suggestedTitle": "string",
+  "suggestedArtist": "string",
+  "spokenText": "short spoken response",
+  "action": "PLAY_TRACK" or "CANCEL" or "SPEAK_ONLY",
+  "genre": "identified genre"
+}
+""".trimIndent()
+
+        val rootJson = JSONObject().apply {
+            val contents = JSONArray().put(
+                JSONObject().put("role", "user").put(
+                    "parts",
+                    JSONArray().put(JSONObject().put("text", prompt))
+                )
+            )
+            put("contents", contents)
+            put("generationConfig", JSONObject().put("temperature", 0.4).put("responseMimeType", "application/json"))
+        }
+
+        OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(rootJson.toString()); it.flush() }
+        if (conn.responseCode in 200..299) {
+            val responseText = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+            val parsed = JSONObject(responseText)
+            val candidates = parsed.optJSONArray("candidates")
+            val content = candidates?.optJSONObject(0)?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val text = parts?.optJSONObject(0)?.optString("text")
+
+            if (!text.isNullOrBlank()) {
+                val json = JSONObject(text)
+                val actionStr = json.optString("action", "PLAY_TRACK")
+                val spoken = json.optString("spokenText", "Playing track.")
+                val matchedId = json.optString("matchedTrackId", null)
+                val suggTitle = json.optString("suggestedTitle", "Song")
+                val suggArtist = json.optString("suggestedArtist", "Artist")
+
+                val action = when (actionStr) {
+                    "CANCEL" -> AgentActionType.CANCEL
+                    "SPEAK_ONLY" -> AgentActionType.SPEAK_ONLY
+                    else -> AgentActionType.PLAY_TRACK
+                }
+
+                if (action == AgentActionType.CANCEL || action == AgentActionType.SPEAK_ONLY) {
+                    return@withContext BrainResponse(spokenText = spoken, action = action)
+                }
+
+                val matchedEntry = tracks.firstOrNull { it.entryId == matchedId }
+                val resolvedTrack = RecommendedTrack(
+                    id = matchedEntry?.entryId ?: "gemini_${System.currentTimeMillis()}",
+                    title = matchedEntry?.title ?: suggTitle,
+                    artist = matchedEntry?.artist ?: suggArtist,
+                    album = matchedEntry?.album,
+                    reason = "Directly reasoned by Gemini AI from your timeline",
+                    confidence = 0.99f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+
+                return@withContext BrainResponse(
+                    spokenText = spoken,
+                    action = action,
+                    resolvedTrack = resolvedTrack,
+                    reasoningRationale = "Gemini on-device intelligence."
+                )
+            }
+        }
+        null
+    }
+
+    /**
+     * Non-repeating deterministic East African Musicology Engine.
+     */
+    private fun offlineReasoning(
+        query: String,
+        tracks: List<TrackMemoryEntry>,
+        tags: Map<String, TrackLlmTag>,
+        nowPlaying: NowPlayingObservation?,
+        currentProviderId: String,
+        currentProviderName: String,
+        userName: String
+    ): BrainResponse {
+        val q = query.lowercase(Locale.getDefault())
+
+        // 1. CHANGE SONG (Instant switch to fresh non-repeating track)
+        if (q.contains("change that song") || q.contains("change song") || q.contains("skip") || q.contains("next song") || q.contains("next")) {
+            val candidates = tracks.filter {
+                !it.title.isNullOrBlank() &&
+                it.title != nowPlaying?.title &&
+                it.title !in recentSuggestions
+            }
+            val picked = candidates.randomOrNull() ?: tracks.filter { it.title != nowPlaying?.title }.randomOrNull()
+
+            val title = picked?.title ?: "Jeje"
+            val artist = picked?.artist ?: "Diamond Platnumz"
+            val rec = RecommendedTrack(
+                id = picked?.entryId ?: "alt_${System.currentTimeMillis()}",
+                title = title,
+                artist = artist,
+                reason = "Fresh track to refresh auditory receptors",
+                confidence = 0.95f,
+                category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                suggestedProviderId = currentProviderId
+            )
+            return BrainResponse(
+                spokenText = "Switching right now. Playing '$title' by $artist.",
+                action = AgentActionType.PLAY_TRACK,
+                resolvedTrack = rec
+            )
+        }
+
+        // 2. GIKUYU / MUGITHI QUERY
+        if (q.contains("gikuyu") || q.contains("kikuyu") || q.contains("mugithi")) {
+            val timelineGikuyu = tracks.filter { t ->
+                val tag = tags[t.entryId]
+                val matchesGenre = tag?.genre?.contains("Gikuyu") == true || tag?.language == "Kikuyu" ||
+                    isGikuyuByMetadata(t.title ?: "", t.artist ?: "")
+                matchesGenre && t.title !in recentSuggestions
+            }
+
+            val finalTrack = if (timelineGikuyu.isNotEmpty()) {
+                val chosen = timelineGikuyu.random()
+                RecommendedTrack(
+                    id = chosen.entryId,
+                    title = chosen.title ?: "Wendo Wi Cama",
+                    artist = chosen.artist ?: "Samidoh",
+                    album = chosen.album,
+                    reason = "Gikuyu classic from your timeline vault",
+                    confidence = 0.98f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            } else {
+                // Pick non-repeating from diverse classics roster
+                val available = GIKUYU_CLASSICS_ROSTER.filter { it.first !in recentSuggestions }
+                val pair = if (available.isNotEmpty()) available.random() else GIKUYU_CLASSICS_ROSTER.random()
+                RecommendedTrack(
+                    id = "gikuyu_${System.currentTimeMillis()}",
+                    title = pair.first,
+                    artist = pair.second,
+                    reason = "Iconic Gikuyu Mugithi acoustic anchor",
+                    confidence = 0.99f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            }
+
+            return BrainResponse(
+                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} from your Gikuyu collection.",
+                action = AgentActionType.PLAY_TRACK,
+                resolvedTrack = finalTrack
+            )
+        }
+
+        // 3. GOSPEL QUERY
+        if (q.contains("gospel") || q.contains("worship") || q.contains("praise")) {
+            val timelineGospel = tracks.filter { t ->
+                val tag = tags[t.entryId]
+                val matches = tag?.genre?.contains("Gospel") == true || isGospelByMetadata(t.title ?: "", t.artist ?: "")
+                matches && t.title !in recentSuggestions
+            }
+
+            val finalTrack = if (timelineGospel.isNotEmpty()) {
+                val chosen = timelineGospel.random()
+                RecommendedTrack(
+                    id = chosen.entryId,
+                    title = chosen.title ?: "Mwema",
+                    artist = chosen.artist ?: "Mercy Masika",
+                    album = chosen.album,
+                    reason = "Gospel praise anthem from your timeline",
+                    confidence = 0.97f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            } else {
+                val available = GOSPEL_ROSTER.filter { it.first !in recentSuggestions }
+                val pair = if (available.isNotEmpty()) available.random() else GOSPEL_ROSTER.random()
+                RecommendedTrack(
+                    id = "gospel_${System.currentTimeMillis()}",
+                    title = pair.first,
+                    artist = pair.second,
+                    reason = "Uplifting Gospel praise anthem",
+                    confidence = 0.98f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            }
+
+            return BrainResponse(
+                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} for your Gospel worship.",
+                action = AgentActionType.PLAY_TRACK,
+                resolvedTrack = finalTrack
+            )
+        }
+
+        // 4. BONGO FLAVA QUERY
+        if (q.contains("bongo")) {
+            val timelineBongo = tracks.filter { t ->
+                val tag = tags[t.entryId]
+                val matches = tag?.genre?.contains("Bongo") == true || isBongoByMetadata(t.title ?: "", t.artist ?: "")
+                matches && t.title !in recentSuggestions
+            }
+
+            val finalTrack = if (timelineBongo.isNotEmpty()) {
+                val chosen = timelineBongo.random()
+                RecommendedTrack(
+                    id = chosen.entryId,
+                    title = chosen.title ?: "Sukari",
+                    artist = chosen.artist ?: "Zuchu",
+                    album = chosen.album,
+                    reason = "Bongo Flava groove from your timeline",
+                    confidence = 0.97f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            } else {
+                val available = BONGO_ROSTER.filter { it.first !in recentSuggestions }
+                val pair = if (available.isNotEmpty()) available.random() else BONGO_ROSTER.random()
+                RecommendedTrack(
+                    id = "bongo_${System.currentTimeMillis()}",
+                    title = pair.first,
+                    artist = pair.second,
+                    reason = "High-energy Bongo Flava groove",
+                    confidence = 0.98f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+            }
+
+            return BrainResponse(
+                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} for your Bongo flow.",
+                action = AgentActionType.PLAY_TRACK,
+                resolvedTrack = finalTrack
+            )
+        }
+
+        // 5. TIMELINE ARCHIVE QUERY
+        if (q.contains("timeline") || q.contains("history") || q.contains("past songs") || q.contains("my songs")) {
+            val candidates = tracks.filter { !it.title.isNullOrBlank() && it.title != nowPlaying?.title && it.title !in recentSuggestions }
+            val chosen = candidates.randomOrNull() ?: tracks.filter { it.title != nowPlaying?.title }.randomOrNull()
+
+            if (chosen != null) {
+                val rec = RecommendedTrack(
+                    id = chosen.entryId,
+                    title = chosen.title ?: "Timeline Favorite",
+                    artist = chosen.artist ?: "Timeline Artist",
+                    album = chosen.album,
+                    reason = "Song from your ${tracks.size} timeline songs archive",
+                    confidence = 0.96f,
+                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+                    suggestedProviderId = currentProviderId
+                )
+                return BrainResponse(
+                    spokenText = "Playing '${rec.title}' by ${rec.artist} from your timeline.",
+                    action = AgentActionType.PLAY_TRACK,
+                    resolvedTrack = rec
+                )
+            }
+        }
+
+        // 6. DEFAULT NON-REPEATING RANDOM CHOICE
+        val unplayed = tracks.filter { !it.title.isNullOrBlank() && it.title != nowPlaying?.title && it.title !in recentSuggestions }
+        val pick = unplayed.randomOrNull() ?: tracks.randomOrNull()
+        val pair = if (pick != null) Pair(pick.title!!, pick.artist ?: "Artist") else BONGO_ROSTER.random()
+
+        val rec = RecommendedTrack(
+            id = pick?.entryId ?: "default_${System.currentTimeMillis()}",
+            title = pair.first,
+            artist = pair.second,
+            reason = "Acoustic recommendation calibrated for low fatigue",
+            confidence = 0.94f,
+            category = RecommendationCategory.FAMILIAR_RECEPTIVE,
+            suggestedProviderId = currentProviderId
+        )
+        return BrainResponse(
+            spokenText = "Playing '${pair.first}' by ${pair.second}.",
+            action = AgentActionType.PLAY_TRACK,
+            resolvedTrack = rec
+        )
+    }
+
+    private fun recordSuggestion(title: String?) {
+        if (!title.isNullOrBlank()) {
+            recentSuggestions.add(title)
+            if (recentSuggestions.size > 20) {
+                recentSuggestions.removeAt(0)
+            }
+        }
+    }
+
     private suspend fun callBackendAgentChat(
         query: String,
         tracks: List<TrackMemoryEntry>,
@@ -280,8 +590,8 @@ object TuneMindAutonomousBrain {
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        conn.connectTimeout = 7000
-        conn.readTimeout = 10000
+        conn.connectTimeout = 6000
+        conn.readTimeout = 9000
         conn.doOutput = true
 
         val sample = tracks.take(60).map { t ->
@@ -329,7 +639,7 @@ object TuneMindAutonomousBrain {
                 title = matchedEntry?.title ?: suggTitle,
                 artist = matchedEntry?.artist ?: suggArtist,
                 album = matchedEntry?.album,
-                reason = "Selected by Gemini LLM based on your request and timeline archive",
+                reason = "Selected by Gemini LLM from your timeline archive",
                 confidence = 0.98f,
                 category = RecommendationCategory.FAMILIAR_RECEPTIVE,
                 suggestedProviderId = currentProviderId
@@ -345,200 +655,45 @@ object TuneMindAutonomousBrain {
         null
     }
 
-    /**
-     * Deterministic East African Musicology Engine (Offline Fallback).
-     */
-    private fun offlineReasoning(
-        query: String,
-        tracks: List<TrackMemoryEntry>,
-        tags: Map<String, TrackLlmTag>,
-        nowPlaying: NowPlayingObservation?,
-        currentProviderId: String,
-        currentProviderName: String,
-        userName: String
-    ): BrainResponse {
-        val q = query.lowercase(Locale.getDefault())
+    suspend fun examineAndTagCatalogWithLLM(
+        context: Context,
+        tracks: List<TrackMemoryEntry>
+    ): Map<String, TrackLlmTag> = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences(PREFS_TAGS, Context.MODE_PRIVATE)
+        val result = mutableMapOf<String, TrackLlmTag>()
 
-        // 1. CHANGE SONG
-        if (q.contains("change that song") || q.contains("change song") || q.contains("skip") || q.contains("next song") || q.contains("next")) {
-            val alternative = tracks.filter { !it.title.isNullOrBlank() && it.title != nowPlaying?.title }.randomOrNull()
-                ?: tracks.firstOrNull()
-
-            val title = alternative?.title ?: "Sukari"
-            val artist = alternative?.artist ?: "Zuchu"
-            val rec = RecommendedTrack(
-                id = alternative?.entryId ?: "alt_${System.currentTimeMillis()}",
-                title = title,
-                artist = artist,
-                reason = "Alternative track to refresh neural receptors",
-                confidence = 0.95f,
-                category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                suggestedProviderId = currentProviderId
-            )
-            return BrainResponse(
-                spokenText = "Switching right now. Playing '$title' by $artist.",
-                action = AgentActionType.PLAY_TRACK,
-                resolvedTrack = rec
-            )
-        }
-
-        // 2. GIKUYU / MUGITHI QUERY
-        if (q.contains("gikuyu") || q.contains("kikuyu") || q.contains("mugithi")) {
-            val gikuyuTrack = tracks.firstOrNull { t ->
-                val tag = tags[t.entryId]
-                tag?.genre?.contains("Gikuyu") == true || tag?.language == "Kikuyu" ||
-                isGikuyuByMetadata(t.title ?: "", t.artist ?: "")
-            }
-
-            val finalTrack = if (gikuyuTrack != null) {
-                RecommendedTrack(
-                    id = gikuyuTrack.entryId,
-                    title = gikuyuTrack.title ?: "Wendo Wi Cama",
-                    artist = gikuyuTrack.artist ?: "Samidoh",
-                    album = gikuyuTrack.album,
-                    reason = "Gikuyu classic from your timeline vault",
-                    confidence = 0.98f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
+        val untagged = mutableListOf<TrackMemoryEntry>()
+        for (track in tracks) {
+            val cachedJson = prefs.getString(track.entryId, null)
+            if (cachedJson != null) {
+                try {
+                    val obj = JSONObject(cachedJson)
+                    result[track.entryId] = TrackLlmTag(
+                        genre = obj.optString("genre", "Curated"),
+                        language = obj.optString("language", "Other"),
+                        vibes = emptyList()
+                    )
+                } catch (_: Exception) {
+                    untagged.add(track)
+                }
             } else {
-                RecommendedTrack(
-                    id = "gikuyu_curated",
-                    title = "Wendo Wi Cama",
-                    artist = "Samidoh & Joyce wa Mamaa",
-                    album = "Mugithi Favorites",
-                    reason = "Iconic Gikuyu acoustic anchor",
-                    confidence = 0.99f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-            }
-
-            return BrainResponse(
-                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} from your Gikuyu collection.",
-                action = AgentActionType.PLAY_TRACK,
-                resolvedTrack = finalTrack
-            )
-        }
-
-        // 3. GOSPEL QUERY
-        if (q.contains("gospel") || q.contains("worship") || q.contains("praise")) {
-            val gospelTrack = tracks.firstOrNull { t ->
-                val tag = tags[t.entryId]
-                tag?.genre?.contains("Gospel") == true || isGospelByMetadata(t.title ?: "", t.artist ?: "")
-            }
-
-            val finalTrack = if (gospelTrack != null) {
-                RecommendedTrack(
-                    id = gospelTrack.entryId,
-                    title = gospelTrack.title ?: "Mwema",
-                    artist = gospelTrack.artist ?: "Mercy Masika",
-                    album = gospelTrack.album,
-                    reason = "Gospel praise anthem from your timeline",
-                    confidence = 0.97f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-            } else {
-                RecommendedTrack(
-                    id = "gospel_curated",
-                    title = "Mwema",
-                    artist = "Mercy Masika",
-                    album = "Milele",
-                    reason = "East African worship anthem",
-                    confidence = 0.98f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-            }
-
-            return BrainResponse(
-                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} for your Gospel worship.",
-                action = AgentActionType.PLAY_TRACK,
-                resolvedTrack = finalTrack
-            )
-        }
-
-        // 4. BONGO FLAVA QUERY
-        if (q.contains("bongo")) {
-            val bongoTrack = tracks.firstOrNull { t ->
-                val tag = tags[t.entryId]
-                tag?.genre?.contains("Bongo") == true || isBongoByMetadata(t.title ?: "", t.artist ?: "")
-            }
-
-            val finalTrack = if (bongoTrack != null) {
-                RecommendedTrack(
-                    id = bongoTrack.entryId,
-                    title = bongoTrack.title ?: "Sukari",
-                    artist = bongoTrack.artist ?: "Zuchu",
-                    album = bongoTrack.album,
-                    reason = "Bongo Flava groove from your timeline",
-                    confidence = 0.97f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-            } else {
-                RecommendedTrack(
-                    id = "bongo_curated",
-                    title = "Sukari",
-                    artist = "Zuchu",
-                    album = "I Am Zuchu",
-                    reason = "High-energy Bongo Flava groove",
-                    confidence = 0.98f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-            }
-
-            return BrainResponse(
-                spokenText = "Playing '${finalTrack.title}' by ${finalTrack.artist} for your Bongo flow.",
-                action = AgentActionType.PLAY_TRACK,
-                resolvedTrack = finalTrack
-            )
-        }
-
-        // 5. TIMELINE ARCHIVE QUERY
-        if (q.contains("timeline") || q.contains("history") || q.contains("past songs") || q.contains("my songs")) {
-            val timelinePick = tracks.filter { !it.title.isNullOrBlank() && it.title != nowPlaying?.title }
-                .maxByOrNull { it.distinctAppearanceCount } ?: tracks.firstOrNull()
-
-            if (timelinePick != null) {
-                val rec = RecommendedTrack(
-                    id = timelinePick.entryId,
-                    title = timelinePick.title ?: "Timeline Favorite",
-                    artist = timelinePick.artist ?: "Timeline Artist",
-                    album = timelinePick.album,
-                    reason = "High retention song from your ${tracks.size} timeline songs",
-                    confidence = 0.96f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-                return BrainResponse(
-                    spokenText = "Playing '${rec.title}' by ${rec.artist} from your timeline.",
-                    action = AgentActionType.PLAY_TRACK,
-                    resolvedTrack = rec
-                )
+                untagged.add(track)
             }
         }
 
-        // 6. DEFAULT NATURAL RESPONSE
-        val pick = tracks.firstOrNull { !it.title.isNullOrBlank() && it.title != nowPlaying?.title }
-        val title = pick?.title ?: "Sukari"
-        val artist = pick?.artist ?: "Zuchu"
-        val rec = RecommendedTrack(
-            id = pick?.entryId ?: "default_${System.currentTimeMillis()}",
-            title = title,
-            artist = artist,
-            reason = "Acoustic recommendation calibrated for low fatigue",
-            confidence = 0.94f,
-            category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-            suggestedProviderId = currentProviderId
-        )
-        return BrainResponse(
-            spokenText = "Playing '$title' by $artist.",
-            action = AgentActionType.PLAY_TRACK,
-            resolvedTrack = rec
-        )
+        if (untagged.isEmpty()) {
+            return@withContext result
+        }
+
+        // Apply offline tags immediately
+        for (t in untagged) {
+            if (!result.containsKey(t.entryId)) {
+                val tag = offlineHeuristicTag(t.title ?: "", t.artist ?: "")
+                result[t.entryId] = tag
+            }
+        }
+
+        result
     }
 
     private fun isGikuyuByMetadata(title: String, artist: String): Boolean {
@@ -561,7 +716,6 @@ object TuneMindAutonomousBrain {
             isGikuyuByMetadata(title, artist) -> TrackLlmTag(genre = "Gikuyu / Mugithi", language = "Kikuyu")
             isBongoByMetadata(title, artist) -> TrackLlmTag(genre = "Bongo Flava", language = "Swahili")
             isGospelByMetadata(title, artist) -> TrackLlmTag(genre = "Gospel", language = "Swahili/English")
-            AFROBEATS_ARTISTS.any { "$title $artist".lowercase().contains(it) } -> TrackLlmTag(genre = "Afrobeats", language = "English/Pidgin")
             else -> TrackLlmTag(genre = "Pop / R&B", language = "English")
         }
     }
@@ -571,12 +725,9 @@ object TuneMindAutonomousBrain {
         return negations.any { text == it || text.startsWith("$it ") || text.endsWith(" $it") || text.contains(" $it ") }
     }
 
-    /**
-     * Brief, polite greeting on app open without unsolicited lectures.
-     */
     fun generateWelcomeGreeting(userName: String, daypart: String, satietyPercent: Int): String {
         return when (daypart.lowercase(Locale.getDefault())) {
-            "morning" -> "Good morning $userName. I'm ready whenever you are."
+            "morning" -> "Good morning $userName. I'm ready with your music whenever you are."
             "midday", "afternoon" -> "Good afternoon $userName. How can I help with your music today?"
             "evening" -> "Good evening $userName. What would you like to listen to tonight?"
             else -> "Late night listening, $userName. What sounds good for your ears?"

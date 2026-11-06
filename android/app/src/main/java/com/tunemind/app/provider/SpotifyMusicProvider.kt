@@ -63,27 +63,12 @@ class SpotifyMusicProvider : MusicProvider {
 
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
         if (!isInstalled(context)) {
-            // Web fallback if app not installed
-            val fallback = match.webFallbackUrl ?: "https://open.spotify.com/search/${Uri.encode(match.searchQuery)}"
-            return try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fallback)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-                PlaybackLaunchResult.SearchHandoffLaunched(
-                    providerId = providerId,
-                    providerDisplayName = displayName,
-                    query = match.searchQuery,
-                    message = "Opened Spotify in browser."
-                )
-            } catch (e: Exception) {
-                PlaybackLaunchResult.ProviderNotInstalled(
-                    providerId = providerId,
-                    providerDisplayName = displayName,
-                    playStorePackage = packageName,
-                    message = "Spotify is not installed."
-                )
-            }
+            return PlaybackLaunchResult.ProviderNotInstalled(
+                providerId = providerId,
+                providerDisplayName = displayName,
+                playStorePackage = packageName,
+                message = "Spotify is not installed on this device."
+            )
         }
 
         val track = RecommendedTrack(

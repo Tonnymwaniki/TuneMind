@@ -305,8 +305,12 @@ class MediaSessionObserver(
     private fun sourcePackage(controller: MediaController): String? =
         runCatching { controller.packageName }.getOrNull()
 
-    private fun isExcludedSource(packageName: String?): Boolean =
-        packageName == EXCLUDED_YOUTUBE_PACKAGE
+    private fun isExcludedSource(packageName: String?): Boolean {
+        if (packageName == null) return false
+        return EXCLUDED_PACKAGES.contains(packageName) ||
+               packageName.contains("browser") ||
+               packageName.contains("chrome")
+    }
 
     private class Entry(val controller: MediaController) {
         lateinit var callback: MediaController.Callback
@@ -315,7 +319,19 @@ class MediaSessionObserver(
 
     companion object {
         private const val TAG = "TuneMindObserver"
-        private const val EXCLUDED_YOUTUBE_PACKAGE = "com.google.android.youtube"
+        private val EXCLUDED_PACKAGES = setOf(
+            "com.google.android.youtube",
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.chrome.canary",
+            "com.chrome.dev",
+            "org.chromium.chrome",
+            "com.sec.android.app.sbrowser",
+            "org.mozilla.firefox",
+            "com.opera.browser",
+            "com.microsoft.emmx",
+            "com.brave.browser"
+        )
 
         @Volatile
         var diagnosticStatus: String = "Observer not started"
