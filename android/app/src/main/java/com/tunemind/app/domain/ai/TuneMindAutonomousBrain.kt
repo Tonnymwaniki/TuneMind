@@ -180,7 +180,26 @@ object TuneMindAutonomousBrain {
         // 3. TAG CATALOG IN BACKGROUND
         val tagsMap = examineAndTagCatalogWithLLM(context, historyTracks)
 
-        // 4. ATTEMPT ON-DEVICE DIRECT GEMINI LLM REASONING (IF API KEY PRESENT)
+        // 4. PRIMARY INTELLIGENCE: BACKEND GEMINI LLM AGENT CHAT (Secure server-side API Key)
+        try {
+            val backendResponse = callBackendAgentChat(
+                query = input,
+                tracks = historyTracks,
+                tags = tagsMap,
+                currentPlaying = nowPlaying?.title,
+                userName = userName,
+                currentProviderId = currentProviderId,
+                currentProviderName = currentProviderName
+            )
+            if (backendResponse != null) {
+                recordSuggestion(backendResponse.resolvedTrack?.title)
+                return@withContext backendResponse
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Backend agent-chat fallback: ${e.message}")
+        }
+
+        // 5. SECONDARY ATTEMPT: ON-DEVICE DIRECT GEMINI LLM REASONING (IF PREVIOUSLY CONFIGURED)
         val apiKey = GeminiReasoningEngine.getApiKey(context)
         if (apiKey.isNotBlank()) {
             try {
@@ -200,25 +219,6 @@ object TuneMindAutonomousBrain {
             } catch (e: Exception) {
                 Log.w(TAG, "Direct Gemini API call failed, falling back: ${e.message}")
             }
-        }
-
-        // 5. ATTEMPT BACKEND PROXY LLM AGENT CHAT
-        try {
-            val backendResponse = callBackendAgentChat(
-                query = input,
-                tracks = historyTracks,
-                tags = tagsMap,
-                currentPlaying = nowPlaying?.title,
-                userName = userName,
-                currentProviderId = currentProviderId,
-                currentProviderName = currentProviderName
-            )
-            if (backendResponse != null) {
-                recordSuggestion(backendResponse.resolvedTrack?.title)
-                return@withContext backendResponse
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Backend agent-chat unavailable: ${e.message}")
         }
 
         // 6. DYNAMIC NON-REPEATING OFFLINE MUSICOLOGY ENGINE
@@ -685,13 +685,67 @@ Respond ONLY with valid JSON:
             return@withContext result
         }
 
-        // Apply offline tags immediately
+        // 1. Query backend Gemini tagger if server is available
+        val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+        if (baseUrl.isNotBlank()) {
+            try {
+                val url = URL("$baseUrl/api/v1/reasoning/tag-tracks")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.connectTimeout = 3000
+                conn.readTimeout = 5000
+                conn.doOutput = true
+
+                val sample = untagged.take(50).map { t ->
+                    JSONObject().apply {
+                        put("id", t.entryId)
+                        put("title", t.title ?: "")
+                        put("artist", t.artist ?: "")
+                    }
+                }
+                val payload = JSONObject().apply {
+                    put("tracks", JSONArray(sample))
+                }
+                OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(payload.toString()); it.flush() }
+                if (conn.responseCode in 200..299) {
+                    val respText = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+                    val json = JSONObject(respText)
+                    val tagsObj = json.optJSONObject("tags")
+                    if (tagsObj != null) {
+                        val editor = prefs.edit()
+                        for (key in tagsObj.keys()) {
+                            val item = tagsObj.getJSONObject(key)
+                            val tag = TrackLlmTag(
+                                genre = item.optString("genre", "Curated"),
+                                language = item.optString("language", "Other"),
+                                vibes = emptyList()
+                            )
+                            result[key] = tag
+                            editor.putString(key, item.toString())
+                        }
+                        editor.apply()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Backend tagging skipped/fallback: ${e.message}")
+            }
+        }
+
+        // 2. Apply robust offline heuristic tags for any remaining untagged tracks
+        val editor = prefs.edit()
         for (t in untagged) {
             if (!result.containsKey(t.entryId)) {
                 val tag = offlineHeuristicTag(t.title ?: "", t.artist ?: "")
                 result[t.entryId] = tag
+                val obj = JSONObject().apply {
+                    put("genre", tag.genre)
+                    put("language", tag.language)
+                }
+                editor.putString(t.entryId, obj.toString())
             }
         }
+        editor.apply()
 
         result
     }

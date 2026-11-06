@@ -98,9 +98,6 @@ fun HomeScreen(
         agentState.phase == AgentPhase.PROMPTING_PLAYER
     val isThinking = agentState.phase == AgentPhase.THINKING
     var showPlayerSelectorSheet by remember { mutableStateOf(false) }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
-    var candidateApiKey by remember { mutableStateOf(com.tunemind.app.domain.ai.GeminiReasoningEngine.getApiKey(context)) }
-    val hasGeminiApiKey = candidateApiKey.isNotBlank()
     val coroutineScope = rememberCoroutineScope()
     val installedProviders = remember(context) { vm.getInstalledProviders(context) }
 
@@ -557,15 +554,14 @@ fun HomeScreen(
                         }
                     }
 
-                    // Gemini AI API Key Status & 1-Tap Config Pill
+                    // Backend AI Reasoning Status Badge
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = DeepObsidianAmber.RecessedBackground,
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
-                            if (hasGeminiApiKey) DeepObsidianAmber.CryoCyan.copy(alpha = 0.8f) else DeepObsidianAmber.BrandSoulAmber.copy(alpha = 0.8f)
-                        ),
-                        modifier = Modifier.clickable { showApiKeyDialog = true }
+                            DeepObsidianAmber.CryoCyan.copy(alpha = 0.5f)
+                        )
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
@@ -574,16 +570,16 @@ fun HomeScreen(
                         ) {
                             Icon(
                                 Icons.Outlined.AutoAwesome,
-                                contentDescription = "Gemini Key",
-                                tint = if (hasGeminiApiKey) DeepObsidianAmber.CryoCyan else DeepObsidianAmber.BrandSoulAmber,
+                                contentDescription = "Backend AI",
+                                tint = DeepObsidianAmber.CryoCyan,
                                 modifier = Modifier.size(11.dp)
                             )
                             Text(
-                                text = if (hasGeminiApiKey) "GEMINI: READY" else "SET GEMINI KEY",
+                                text = "BACKEND AI: SYNCED",
                                 fontSize = 8.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (hasGeminiApiKey) DeepObsidianAmber.CryoCyan else DeepObsidianAmber.BrandSoulAmber,
+                                color = DeepObsidianAmber.CryoCyan,
                                 letterSpacing = 0.5.sp
                             )
                         }
@@ -2183,82 +2179,5 @@ fun HomeScreen(
             }
         }
     }
-
-    if (showApiKeyDialog) {
-        var keyInput by remember { mutableStateOf(candidateApiKey) }
-        var saveStatus by remember { mutableStateOf<String?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showApiKeyDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent)
-                    Text(
-                        text = "GEMINI REASONING KEY",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = DeepObsidianAmber.TextPrimary
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Enter your Google Gemini API key to activate autonomous LLM reasoning, intelligent Gikuyu / Bongo / Gospel song selection, and natural dialogue across your 90+ timeline archive.",
-                        fontSize = 12.sp,
-                        color = DeepObsidianAmber.TextSecondary
-                    )
-                    OutlinedTextField(
-                        value = keyInput,
-                        onValueChange = { keyInput = it },
-                        placeholder = { Text("AIzaSy... (Paste Gemini Key)") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = DeepObsidianAmber.PrimaryAccent,
-                            unfocusedBorderColor = DeepObsidianAmber.SurfaceBorder,
-                            focusedTextColor = DeepObsidianAmber.TextPrimary,
-                            unfocusedTextColor = DeepObsidianAmber.TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (saveStatus != null) {
-                        Text(
-                            text = saveStatus!!,
-                            fontSize = 11.sp,
-                            color = if (saveStatus!!.startsWith("Saved")) DeepObsidianAmber.Success else DeepObsidianAmber.Warning,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val trimmed = keyInput.trim()
-                        if (trimmed.isNotBlank()) {
-                            vm.saveGeminiApiKey(trimmed)
-                            candidateApiKey = trimmed
-                            saveStatus = "Saved! Gemini 2.5/3.8 Flash is now active."
-                            coroutineScope.launch {
-                                kotlinx.coroutines.delay(1000)
-                                showApiKeyDialog = false
-                            }
-                        } else {
-                            saveStatus = "Please paste a valid Gemini API key."
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent)
-                ) {
-                    Text("SAVE & ACTIVATE", color = DeepObsidianAmber.AppBackground, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showApiKeyDialog = false }) {
-                    Text("CANCEL", color = DeepObsidianAmber.TextSecondary)
-                }
-            },
-            containerColor = DeepObsidianAmber.CardElevated
-        )
-    }
 }
+
