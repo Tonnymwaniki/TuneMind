@@ -17,7 +17,8 @@
     "better-sqlite3": "^13.0.3",
     "express": "^4.21.2",
     "@supabase/supabase-js": "^2.49.1",
-    "uuid": "^14.0.3"
+    "uuid": "^14.0.3",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -26,6 +27,7 @@
     "@types/node": "^22.15.3",
     "@types/supertest": "^7.2.1",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
     "supertest": "^7.3.1",
     "ts-jest": "^29.4.15",
     "ts-node": "^10.9.2",

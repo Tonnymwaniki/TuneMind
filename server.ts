@@ -1,3 +1,5 @@
+import http from 'http';
+import { WebSocketServer } from 'ws';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -5,7 +7,6 @@ import { execSync } from 'child_process';
 import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 import rawReasoningRouter from './backend/src/api/v1/reasoning';
-import { setupVoiceStreamSocket } from './backend/src/api/v1/voiceStream';
 import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
 
 import fs from 'fs';
@@ -106,8 +107,43 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, HOST, () => {
-    console.log(`TuneMind server running on http://${HOST}:${PORT} [${process.env['NODE_ENV']}]`);
+  // 1. Create the raw HTTP server using the Express app
+  const server = http.createServer(app);
+
+  // 2. Create the WebSocket server (detached from auto-handling)
+  const wss = new WebSocketServer({ noServer: true });
+
+  // 3. Intercept the network upgrade request
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = request.url?.split('?')[0];
+    if (pathname === '/ws/stt') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  // 4. Handle the active WebSocket connection
+  wss.on('connection', (ws) => {
+    console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
+
+    ws.on('message', (message) => {
+      // Log audio chunks from Android
+      if (Buffer.isBuffer(message)) {
+        console.log(`[VoiceStream] 🔵 Received audio chunk: ${message.length} bytes`);
+      } else {
+        console.log(`[VoiceStream] 🔵 Received text message: ${message.toString()}`);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('[VoiceStream] 🔴 Android client disconnected.');
+    });
+  });
+
+  // 5. Start the server
+  server.listen(PORT, HOST, () => {
+    console.log(`TuneMind server running on http://${HOST}:${PORT} [${process.env['NODE_ENV']}] (with WebSocket STT)`);
     // Start background telemetry reasoning poller
     try {
       TelemetryReasoningPoller.getInstance().start(30000);
@@ -115,13 +151,6 @@ async function startServer() {
       console.warn('Could not start TelemetryReasoningPoller:', e);
     }
   });
-
-  try {
-    setupVoiceStreamSocket(server);
-    console.log('[VoiceStream] WebSocket server mounted at /ws/stt');
-  } catch (e) {
-    console.error('Could not setup VoiceStream WebSocket:', e);
-  }
 }
 
 startServer().catch((err) => {

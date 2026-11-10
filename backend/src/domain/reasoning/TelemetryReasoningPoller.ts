@@ -251,7 +251,7 @@ export class TelemetryReasoningPoller {
 
         if (trackTitle) {
           const key = `${trackTitle} - ${trackArtist}`;
-          const current = trackPlays.get(key) || { count: 0, completions: [], durationMs: duration };
+          const current = trackPlays.get(key) || { count: 0, completions: [] as number[], durationMs: duration };
           current.count += 1;
           const comp = duration > 0 ? Math.min(100, Math.round((pos / duration) * 100)) : 80;
           current.completions.push(comp);
