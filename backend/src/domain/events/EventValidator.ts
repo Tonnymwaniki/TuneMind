@@ -121,6 +121,29 @@ export function validateEvent(event: Record<string, unknown>): ValidationResult 
     return { valid: false, errors, clockSkewDetected: false };
   }
 
+  // Reject non-music browser media sources (Chrome, Chromium, Firefox, etc.)
+  const sourceLower = String(event.mediaSource || '').toLowerCase();
+  const isBrowserSource =
+    sourceLower.includes('chrome') ||
+    sourceLower.includes('chromium') ||
+    sourceLower.includes('browser') ||
+    sourceLower.includes('webview') ||
+    sourceLower.includes('firefox') ||
+    sourceLower.includes('fenix') ||
+    sourceLower.includes('opera') ||
+    sourceLower.includes('edge') ||
+    sourceLower.includes('brave') ||
+    sourceLower.includes('duckduckgo') ||
+    sourceLower.includes('googlequicksearchbox');
+
+  if (isBrowserSource) {
+    return {
+      valid: false,
+      errors: ['Browser and web media sessions are excluded from TuneMind music intelligence'],
+      clockSkewDetected: false
+    };
+  }
+
   // --- eventType: must be a known enum value ---
   const normalizedType = String(event.eventType).toUpperCase();
   if (VALID_EVENT_TYPES.has(normalizedType)) {

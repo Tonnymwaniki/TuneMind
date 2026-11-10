@@ -2,6 +2,7 @@ package com.tunemind.app.domain.voice
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -9,6 +10,12 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener as AndroidSpeechListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer as AndroidSpeechRecognizer
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import kotlinx.coroutines.*
@@ -32,6 +39,7 @@ enum class AgentState {
 class AgentVoiceManager(private val context: Context) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState
@@ -51,6 +59,10 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
     private var voskModel: Model? = null
     private var speechService: SpeechService? = null
     private var isVoskListening = false
+
+    // Native Speech Recognizer Fallback
+    private var nativeRecognizer: AndroidSpeechRecognizer? = null
+    private var errorResetJob: Job? = null
 
     init {
         initWakeWordEngine()
@@ -116,30 +128,30 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
     private fun checkWakeWord(jsonStr: String?) {
         if (jsonStr == null || _agentState.value != AgentState.IDLE) return
-        
-        // Vosk returns JSON like {"text": "hi tune mind"} or {"partial": "tune"}
+
         val text = jsonStr.lowercase()
         if (text.contains("tune mind") || text.contains("hi tune") || text.contains("hey tune")) {
             Log.d(TAG, "Wake Word Detected! Handoff to AssemblyAI...")
-            
-            // 1. STOP Vosk to release the microphone hardware
+
             try {
                 speechService?.stop()
             } catch (e: Exception) {
                 Log.w(TAG, "Error stopping Vosk SpeechService", e)
             }
             isVoskListening = false
-            
-            // 2. Trigger the agent flow
-            simulateWakeWordDetected() // This ducks audio and starts AssemblyAI
+
+            simulateWakeWordDetected()
         }
     }
 
-    // This is our "Phantom Trigger" / Wake Word handler. The UI or Vosk calls this.
+    // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
-        if (_agentState.value != AgentState.IDLE) return
-        
-        Log.d(TAG, "Wake Word / Phantom Trigger Activated! Waking up TuneMind Agent...")
+        // Allow tap even if currently showing ERROR to allow instant retry
+        if (_agentState.value != AgentState.IDLE && _agentState.value != AgentState.ERROR) return
+
+        errorResetJob?.cancel()
+        Log.d(TAG, "Wake Word / Orb Activated! Starting TuneMind Voice Agent...")
+
         if (isVoskListening) {
             try {
                 speechService?.stop()
@@ -148,12 +160,16 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             }
             isVoskListening = false
         }
+
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+
         _agentState.value = AgentState.LISTENING
-        
-        // 1. Duck the currently playing music so the user can speak and hear the UI sound
+
+        // 1. Duck the currently playing music
         requestAudioDucking()
 
-        // 2. Open Android AudioRecord and stream bytes via WebSocket to Backend (AssemblyAI proxy)
+        // 2. Open microphone stream (WebSocket with native Android fallback)
         startMicrophoneStream()
     }
 
@@ -181,15 +197,14 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
     private fun startMicrophoneStream() {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "Audio permission not granted!")
-            _agentState.value = AgentState.ERROR
+            handleVoiceError("RECORD_AUDIO permission not granted!")
             return
         }
 
-        // Resolves WebSocket endpoint (remote cloud backend, local LAN, or emulator 10.0.2.2)
         val wsUrl = resolveWebSocketUrl()
+        Log.d(TAG, "Connecting to voice WebSocket: $wsUrl")
         val request = Request.Builder().url(wsUrl).build()
-        
+
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket Connected to $wsUrl. Starting AudioRecord...")
@@ -199,14 +214,23 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val json = JSONObject(text)
-                    val transcript = json.getString("transcript")
-                    val isFinal = json.optBoolean("isFinal", false)
-                    
-                    scope.launch {
-                        _transcriptionFlow.emit(transcript)
+                    if (json.has("error")) {
+                        Log.w(TAG, "Server reported error: ${json.optString("error")}, falling back to native STT")
+                        stopMicrophoneStream()
+                        startNativeSpeechRecognizer()
+                        return
                     }
 
-                    if (isFinal) {
+                    val transcript = json.optString("transcript", "")
+                    val isFinal = json.optBoolean("isFinal", false)
+
+                    if (transcript.isNotBlank()) {
+                        scope.launch {
+                            _transcriptionFlow.emit(transcript)
+                        }
+                    }
+
+                    if (isFinal && transcript.isNotBlank()) {
                         Log.d(TAG, "User finished speaking: $transcript")
                         stopMicrophoneStream()
                         setThinkingState()
@@ -217,11 +241,124 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket Failure", t)
+                Log.w(TAG, "WebSocket failure (${t.message}), falling back to native SpeechRecognizer")
                 stopMicrophoneStream()
-                _agentState.value = AgentState.ERROR
+                startNativeSpeechRecognizer()
             }
         })
+    }
+
+    private fun startNativeSpeechRecognizer() {
+        mainHandler.post {
+            try {
+                if (!AndroidSpeechRecognizer.isRecognitionAvailable(context)) {
+                    handleVoiceError("Native speech recognition not available on this device")
+                    return@post
+                }
+
+                stopNativeSpeechRecognizer()
+
+                nativeRecognizer = AndroidSpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(object : AndroidSpeechListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            Log.d(TAG, "Native SpeechRecognizer ready")
+                            _agentState.value = AgentState.LISTENING
+                        }
+
+                        override fun onBeginningOfSpeech() {
+                            Log.d(TAG, "Native SpeechRecognizer speech started")
+                        }
+
+                        override fun onRmsChanged(rmsdB: Float) {}
+
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+
+                        override fun onEndOfSpeech() {
+                            Log.d(TAG, "Native SpeechRecognizer speech ended")
+                            setThinkingState()
+                        }
+
+                        override fun onError(error: Int) {
+                            Log.w(TAG, "Native SpeechRecognizer error code: $error")
+                            // 7 = NO_MATCH (didn't catch anything), 6 = SPEECH_TIMEOUT
+                            if (error == AndroidSpeechRecognizer.ERROR_NO_MATCH || error == AndroidSpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                                handleVoiceError("No speech detected")
+                            } else {
+                                handleVoiceError("Speech error: $error")
+                            }
+                        }
+
+                        override fun onResults(results: Bundle?) {
+                            val matches = results?.getStringArrayList(AndroidSpeechRecognizer.RESULTS_RECOGNITION)
+                            val transcript = matches?.firstOrNull()?.trim()
+                            if (!transcript.isNullOrBlank()) {
+                                Log.d(TAG, "Native SpeechRecognizer transcript: $transcript")
+                                setThinkingState()
+                                scope.launch {
+                                    _transcriptionFlow.emit(transcript)
+                                }
+                            } else {
+                                handleVoiceError("No speech detected")
+                            }
+                        }
+
+                        override fun onPartialResults(partialResults: Bundle?) {
+                            val matches = partialResults?.getStringArrayList(AndroidSpeechRecognizer.RESULTS_RECOGNITION)
+                            val transcript = matches?.firstOrNull()?.trim()
+                            if (!transcript.isNullOrBlank()) {
+                                scope.launch {
+                                    _transcriptionFlow.emit(transcript)
+                                }
+                            }
+                        }
+
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                }
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                }
+
+                nativeRecognizer?.startListening(intent)
+                _agentState.value = AgentState.LISTENING
+                Log.d(TAG, "Native SpeechRecognizer listening started successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start native speech recognizer", e)
+                handleVoiceError(e.message)
+            }
+        }
+    }
+
+    private fun stopNativeSpeechRecognizer() {
+        mainHandler.post {
+            try {
+                nativeRecognizer?.stopListening()
+                nativeRecognizer?.destroy()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping native recognizer", e)
+            }
+            nativeRecognizer = null
+        }
+    }
+
+    private fun handleVoiceError(reason: String?) {
+        Log.e(TAG, "Voice Error: $reason")
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+        _agentState.value = AgentState.ERROR
+
+        // Auto-recover after 2.5 seconds back to IDLE so the user is never permanently stuck
+        errorResetJob?.cancel()
+        errorResetJob = scope.launch {
+            delay(2500)
+            withContext(Dispatchers.Main) {
+                releaseAudioDucking()
+                resumeWakeWordListening()
+            }
+        }
     }
 
     private fun resolveWebSocketUrl(): String {
@@ -237,16 +374,17 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
     private fun startRecordingAndStreaming(ws: WebSocket) {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            handleVoiceError("Microphone permission missing")
             return
         }
         val sampleRate = 16000
         val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        
+
         audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
-        
+
         audioRecord?.startRecording()
         isRecording = true
-        
+
         scope.launch {
             val buffer = ByteArray(bufferSize)
             while (isRecording && _agentState.value == AgentState.LISTENING) {
@@ -273,10 +411,9 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             Log.w(TAG, "Error closing webSocket", e)
         }
         webSocket = null
-        Log.d(TAG, "AssemblyAI stream stopped. Microphone released.")
+        Log.d(TAG, "Microphone stream stopped.")
     }
 
-    // Add a public method so the Orchestrator can wake Vosk back up after TTS finishes
     fun resumeWakeWordListening() {
         if (!isVoskListening && _agentState.value == AgentState.IDLE) {
             startWakeWordListener()
@@ -298,7 +435,9 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
     }
 
     fun destroy() {
+        errorResetJob?.cancel()
         stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
         releaseAudioDucking()
         try {
             speechService?.stop()

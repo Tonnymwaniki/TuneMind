@@ -35,7 +35,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "TUNEMIND_BASE_URL", "\"https://ais-dev-j7hrc5mfe5abbddivox3ii-740908901963.europe-west2.run.app\"")
+        buildConfigField("String", "TUNEMIND_BASE_URL", "\"https://ais-dev-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 

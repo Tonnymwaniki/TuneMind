@@ -9,7 +9,10 @@ export function setupVoiceStreamSocket(server: Server) {
 
     const apiKey = process.env.ASSEMBLYAI_API_KEY;
     if (!apiKey) {
-      console.warn('[VoiceStream] ASSEMBLYAI_API_KEY is not configured in environment.');
+      console.warn('[VoiceStream] ASSEMBLYAI_API_KEY is not configured in environment. Notifying client to use device STT fallback.');
+      if (ws.readyState === NodeWebSocket.OPEN) {
+        ws.send(JSON.stringify({ error: 'ASSEMBLYAI_KEY_NOT_CONFIGURED', message: 'Use native STT fallback' }));
+      }
     }
 
     // Connect to AssemblyAI Real-Time endpoint (16kHz sample rate matching Android)
@@ -51,6 +54,9 @@ export function setupVoiceStreamSocket(server: Server) {
 
     aaiSocket.on('error', (err) => {
       console.error('[VoiceStream] AssemblyAI Socket Error:', err);
+      if (ws.readyState === NodeWebSocket.OPEN) {
+        ws.send(JSON.stringify({ error: 'AAI_SOCKET_ERROR', message: err?.message || 'Socket error' }));
+      }
     });
 
     // Receive raw PCM audio buffer from Android, encode to Base64, and send to AssemblyAI

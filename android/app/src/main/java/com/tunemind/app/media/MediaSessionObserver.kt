@@ -163,13 +163,13 @@ class MediaSessionObserver(
             return
         }
         val eligibleControllers = activeControllers.filterNot {
-            isExcludedSource(sourcePackage(it))
+            isExcludedSource(sourcePackage(it)) || isWebOrNonMusic(it.metadata, sourcePackage(it))
         }
         val excludedCount = activeControllers.size - eligibleControllers.size
         Log.i(TAG, "Active media session update: ${eligibleControllers.size} eligible sessions")
         diagnosticStatus = buildString {
             append("Watching ${eligibleControllers.size} active media session(s)")
-            if (excludedCount > 0) append("; YouTube app excluded")
+            if (excludedCount > 0) append("; non-music sessions excluded")
         }
         val activeByToken = eligibleControllers.associateBy { it.sessionToken }
 
@@ -225,9 +225,9 @@ class MediaSessionObserver(
         }
         val source = sourcePackage(entry.controller)
         // Keep this guard in the callback path as well as reconciliation so a controller
-        // cannot be persisted if its package becomes excluded during its lifecycle.
-        if (isExcludedSource(source)) {
-            diagnosticStatus = "Ignoring excluded YouTube app media session"
+        // cannot be persisted if its package or media becomes excluded during its lifecycle.
+        if (isExcludedSource(source) || isWebOrNonMusic(metadata, source)) {
+            diagnosticStatus = "Ignoring excluded browser/non-music media session"
             return
         }
         if (entry.advertisementFilterState.shouldSuppress(metadata)) {
@@ -306,10 +306,49 @@ class MediaSessionObserver(
         runCatching { controller.packageName }.getOrNull()
 
     private fun isExcludedSource(packageName: String?): Boolean {
-        if (packageName == null) return false
-        return EXCLUDED_PACKAGES.contains(packageName) ||
-               packageName.contains("browser") ||
-               packageName.contains("chrome")
+        if (packageName.isNullOrBlank()) return true
+        val pkg = packageName.lowercase()
+        if (EXCLUDED_PACKAGES.any { pkg.contains(it) }) return true
+        return pkg.contains("chrome") ||
+               pkg.contains("chromium") ||
+               pkg.contains("browser") ||
+               pkg.contains("webview") ||
+               pkg.contains("firefox") ||
+               pkg.contains("fenix") ||
+               pkg.contains("opera") ||
+               pkg.contains("brave") ||
+               pkg.contains("edge") ||
+               pkg.contains("emmx") ||
+               pkg.contains("duckduckgo") ||
+               pkg.contains("vivaldi") ||
+               pkg.contains("sbrowser") ||
+               pkg.contains("ucmini") ||
+               pkg.contains("ucbrowser") ||
+               pkg.contains("dolphin") ||
+               pkg.contains("searchbox") ||
+               pkg.contains("googlequicksearchbox")
+    }
+
+    private fun isWebOrNonMusic(metadata: MediaMetadata?, source: String?): Boolean {
+        if (isExcludedSource(source)) return true
+        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.lowercase()?.trim() ?: ""
+        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.lowercase()?.trim() ?: ""
+        val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.lowercase()?.trim() ?: ""
+
+        // Check for web page titles or URLs in title/artist
+        if (title.startsWith("http://") || title.startsWith("https://") || title.startsWith("www.") ||
+            title.contains(".com/") || title.contains(".org/") || title.contains(".net/") || title.contains(".io/")) {
+            return true
+        }
+        if (artist.startsWith("http://") || artist.startsWith("https://") || artist.startsWith("www.") ||
+            artist.contains(".com") || artist.contains(".org") || artist.contains(".net")) {
+            return true
+        }
+        if (title.contains("chrome") || title.contains("new tab") ||
+            artist.contains("chrome") || artist.contains("browser") || album.contains("chrome")) {
+            return true
+        }
+        return false
     }
 
     private class Entry(val controller: MediaController) {
@@ -326,11 +365,19 @@ class MediaSessionObserver(
             "com.chrome.canary",
             "com.chrome.dev",
             "org.chromium.chrome",
+            "org.chromium.webview_shell",
+            "com.google.android.apps.chrome",
             "com.sec.android.app.sbrowser",
             "org.mozilla.firefox",
+            "org.mozilla.fenix",
             "com.opera.browser",
+            "com.opera.mini.native",
             "com.microsoft.emmx",
-            "com.brave.browser"
+            "com.brave.browser",
+            "com.duckduckgo.mobile.android",
+            "com.kiwibrowser.browser",
+            "com.vivaldi.browser",
+            "com.google.android.googlequicksearchbox"
         )
 
         @Volatile
@@ -338,3 +385,4 @@ class MediaSessionObserver(
             private set
     }
 }
+

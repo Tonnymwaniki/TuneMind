@@ -598,8 +598,23 @@ class TuneMindViewModel : ViewModel() {
                     .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
                     .sortedByDescending { it.lastObservedAppearanceAtMs }.take(5)
 
-                val latestStateObs = rows.firstOrNull { it.playbackStateCode != null }
-                val latestTrackMeta = rows.firstOrNull { !it.trackTitle.isNullOrBlank() }
+                val isBrowserOrWeb = { pkg: String?, title: String?, artist: String? ->
+                    val p = (pkg ?: "").lowercase()
+                    val t = (title ?: "").lowercase()
+                    val a = (artist ?: "").lowercase()
+                    p.contains("chrome") || p.contains("browser") || p.contains("chromium") ||
+                    p.contains("webview") || p.contains("firefox") || p.contains("opera") ||
+                    p.contains("edge") || p.contains("brave") || p.contains("searchbox") ||
+                    t.startsWith("http") || t.contains(".com") || t.contains("chrome") ||
+                    a.startsWith("http") || a.contains(".com") || a.contains("chrome")
+                }
+
+                val latestStateObs = rows.firstOrNull { 
+                    it.playbackStateCode != null && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
+                }
+                val latestTrackMeta = rows.firstOrNull { 
+                    !it.trackTitle.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
+                }
                 val isPlayingNow = latestStateObs?.playbackStateCode == 3 // PlaybackState.STATE_PLAYING
 
                 val nowPlayingObs = if (latestTrackMeta != null || latestStateObs != null) {

@@ -214,7 +214,7 @@ object SyncConfig {
         }?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL
     }
 
-    private const val DEFAULT_BASE_URL = "https://ais-dev-j7hrc5mfe5abbddivox3ii-740908901963.europe-west2.run.app"
+    private const val DEFAULT_BASE_URL = "https://ais-dev-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app"
 }
 
 /**
