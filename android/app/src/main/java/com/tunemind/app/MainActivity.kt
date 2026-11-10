@@ -36,8 +36,10 @@ import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.AppHolder
 import com.tunemind.app.ui.components.bouncyClickable
+import com.tunemind.app.ui.onboarding.OnboardingScreen
 import com.tunemind.app.ui.screens.PulseAgentScreen
 import com.tunemind.app.ui.theme.TuneMindTheme
+import com.tunemind.app.util.PermissionUtils
 
 open class MainActivity : ComponentActivity() {
 
@@ -81,6 +83,30 @@ open class MainActivity : ComponentActivity() {
                     val homeState by vm.homeState.collectAsState()
                     val adaptiveState by vm.adaptiveThemeState.collectAsState()
 
+                    // Check onboarding permissions
+                    var hasAllPermissions by remember {
+                        mutableStateOf(
+                            PermissionUtils.hasMicrophonePermission(context) &&
+                            PermissionUtils.hasNotificationListenerPermission(context) &&
+                            PermissionUtils.isIgnoringBatteryOptimizations(context)
+                        )
+                    }
+
+                    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                hasAllPermissions = PermissionUtils.hasMicrophonePermission(context) &&
+                                                   PermissionUtils.hasNotificationListenerPermission(context) &&
+                                                   PermissionUtils.isIgnoringBatteryOptimizations(context)
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                        }
+                    }
+
                     // Voice Agent and Orchestrator
                     val agentVoiceManager = remember { AgentVoiceManager(context) }
                     val agentState by agentVoiceManager.agentState.collectAsState()
@@ -96,8 +122,10 @@ open class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    DisposableEffect(orchestrator) {
-                        orchestrator.start()
+                    DisposableEffect(orchestrator, hasAllPermissions) {
+                        if (hasAllPermissions) {
+                            orchestrator.start()
+                        }
                         onDispose {
                             orchestrator.stop()
                             agentVoiceManager.destroy()
@@ -122,20 +150,27 @@ open class MainActivity : ComponentActivity() {
                     val energy = if (nowPlaying?.isPlaying == true) 0.85f else 0.45f
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (!showSwitchboard) {
-                                // Pillar 3: Synaptic Obsidian 3-Layer Adaptive UI
-                                PulseAgentScreen(
-                                    agentState = agentState,
-                                    satietyPercentage = calculatedSatiety,
-                                    currentTrackName = trackTitle,
-                                    artistName = artistName,
-                                    energy = energy,
-                                    liveTranscript = liveTranscript,
-                                    onOrbTapped = {
-                                        agentVoiceManager.simulateWakeWordDetected()
-                                    }
-                                )
+                        if (!hasAllPermissions) {
+                            OnboardingScreen(
+                                onComplete = {
+                                    hasAllPermissions = true
+                                }
+                            )
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                if (!showSwitchboard) {
+                                    // Pillar 3: Synaptic Obsidian 3-Layer Adaptive UI
+                                    PulseAgentScreen(
+                                        agentState = agentState,
+                                        satietyPercentage = calculatedSatiety,
+                                        currentTrackName = trackTitle,
+                                        artistName = artistName,
+                                        energy = energy,
+                                        liveTranscript = liveTranscript,
+                                        onOrbTapped = {
+                                            agentVoiceManager.simulateWakeWordDetected()
+                                        }
+                                    )
 
                                 // Soft Switchboard quick toggle icon
                                 Box(
@@ -190,6 +225,7 @@ open class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
+                                }
                                 }
                             }
                         }
