@@ -24,6 +24,22 @@ export const StudioPulseView: React.FC<StudioPulseViewProps> = ({
 }) => {
   const [isRestActive, setIsRestActive] = React.useState(false);
   const [isLoopActive, setIsLoopActive] = React.useState(false);
+  const [agentVoiceState, setAgentVoiceState] = React.useState<'IDLE' | 'LISTENING' | 'THINKING' | 'SPEAKING'>('IDLE');
+
+  const handlePhantomTrigger = () => {
+    if (agentVoiceState !== 'IDLE') return;
+    setAgentVoiceState('LISTENING');
+    // Simulate audio ducking & thinking transition
+    setTimeout(() => {
+      setAgentVoiceState('THINKING');
+      setTimeout(() => {
+        setAgentVoiceState('SPEAKING');
+        setTimeout(() => {
+          setAgentVoiceState('IDLE');
+        }, 2500);
+      }, 1200);
+    }, 2000);
+  };
 
   // Dynamic Satiety
   const satiety = currentTrack?.satietyScore ?? 64;
@@ -66,24 +82,41 @@ export const StudioPulseView: React.FC<StudioPulseViewProps> = ({
 
       {/* Hero Section: Now Playing Deck */}
       <div className="flex flex-col items-center w-full">
-        {/* Floating Album Faceplate with Laser Lavender Radial Glow */}
-        <div className="relative flex items-center justify-center my-2">
-          <div className="absolute w-52 h-52 rounded-full bg-[#A997D8]/20 blur-3xl -z-10 pointer-events-none transform-gpu animate-pulse"></div>
+        {/* Floating Album Faceplate with Laser Lavender Radial Glow & Phantom Trigger */}
+        <div 
+          onClick={handlePhantomTrigger}
+          title="Tap to talk (Phantom Trigger)"
+          className="relative flex items-center justify-center my-2 cursor-pointer group active:scale-[0.98] transition-transform"
+        >
+          <div className={`absolute w-52 h-52 rounded-full ${agentVoiceState !== 'IDLE' ? 'bg-[#83B9BD]/40 scale-110' : 'bg-[#A997D8]/20'} blur-3xl -z-10 pointer-events-none transform-gpu animate-pulse transition-all duration-500`}></div>
 
           {/* Outer Machined Rim */}
-          <div className="relative w-[210px] h-[210px] rounded-full p-1 bg-gradient-to-b from-[#25344D] to-[#0C1220] shadow-[0_12px_32px_rgba(0,0,0,0.7),inset_0_1px_1px_rgba(255,255,255,0.08)] flex items-center justify-center">
+          <div className={`relative w-[210px] h-[210px] rounded-full p-1 bg-gradient-to-b from-[#25344D] to-[#0C1220] shadow-[0_12px_32px_rgba(0,0,0,0.7),inset_0_1px_1px_rgba(255,255,255,0.08)] flex items-center justify-center ${agentVoiceState !== 'IDLE' ? 'ring-2 ring-[#83B9BD]' : ''}`}>
             {/* Vinyl Bezel Ring */}
             <div className="relative w-[200px] h-[200px] rounded-[16px] overflow-hidden bg-[#131D30] shadow-[inset_0_0_12px_rgba(0,0,0,0.9)] flex items-center justify-center">
               <img
-                className="w-full h-full object-cover transition-transform duration-700 ease-out hover:scale-105"
+                className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 src="https://lh3.googleusercontent.com/aida-public/AB6AXuDw87ZCxUpLOaiazog3TSAgKf4TQGgSUT-mzJX-a1kJrga_nClyr1ufP5RFqGMMWZO2vrUOusEfzQyG1zl5tphz_YRa8yzMvawAYGfywhQo0lRuuRCukZim9iEp-J2uNFtlNNmfjtEt1qjxpODSviD3WpkzCGFevSB2Bp-jljiOD6uexKMR62sbWF0c5cjCUptXtGqF05s0_EO5MH4uYGkReI1C65WYo8E7T6oTwq__"
                 alt="Vinyl Record Sleeve"
               />
               <div className="absolute inset-0 bg-gradient-to-tr from-[#0C1220]/40 via-transparent to-white/10 pointer-events-none"></div>
               {/* Micro Monospace Hardware ID Badge */}
               <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-[#0C1220]/80 backdrop-blur-md shadow-sm border border-[#25344D]/40">
-                <span className="font-mono text-[9px] text-[#A1AEC2] tracking-widest uppercase">VINYL-EMU // 48K</span>
+                <span className="font-mono text-[9px] text-[#A1AEC2] tracking-widest uppercase">
+                  {agentVoiceState !== 'IDLE' ? `VOICE // ${agentVoiceState}` : 'VINYL-EMU // 48K'}
+                </span>
               </div>
+              {/* Phantom Trigger Tap Hint Overlay */}
+              {agentVoiceState !== 'IDLE' && (
+                <div className="absolute inset-0 bg-[#0C1220]/75 backdrop-blur-xs flex flex-col items-center justify-center gap-1.5 p-3 text-center animate-fade-in">
+                  <div className="w-8 h-8 rounded-full bg-[#83B9BD]/20 border border-[#83B9BD] flex items-center justify-center animate-ping">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#83B9BD]"></span>
+                  </div>
+                  <span className="font-mono text-[10px] font-bold text-[#83B9BD] tracking-wider uppercase">
+                    {agentVoiceState === 'LISTENING' ? 'AUDIO DUCKED // LISTENING' : agentVoiceState === 'THINKING' ? 'AI THINKING...' : 'AGENT SPEAKING'}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>

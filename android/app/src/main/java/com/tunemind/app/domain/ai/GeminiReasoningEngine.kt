@@ -14,6 +14,9 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import com.tunemind.app.domain.execution.TuneMindExecutionEngine
+import com.tunemind.app.domain.execution.ReasoningResponse
+import com.tunemind.app.domain.execution.OsExecutionCommand
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -180,6 +183,76 @@ object GeminiReasoningEngine {
             } else {
                 val err = conn.errorStream?.let { BufferedReader(InputStreamReader(it, "UTF-8")).use { r -> r.readText() } } ?: "HTTP $code"
                 Result.failure(IllegalStateException("Backend reasoning error ($code): $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sends telemetry context to POST /api/v1/reasoning/evaluate-satiety, parses the
+     * ReasoningResponse, and dispatches OS media commands and voice agent TTS via TuneMindExecutionEngine.
+     */
+    suspend fun evaluateSatietyAndExecute(
+        context: Context,
+        telemetryContext: JSONObject
+    ): Result<ReasoningResponse> = withContext(Dispatchers.IO) {
+        try {
+            val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+            if (baseUrl.isBlank()) {
+                return@withContext Result.failure(IllegalStateException("No backend URL configured in BuildConfig.TUNEMIND_BASE_URL"))
+            }
+            val url = URL("$baseUrl/api/v1/reasoning/evaluate-satiety")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.connectTimeout = 12_000
+            conn.readTimeout = 22_000
+            conn.doOutput = true
+
+            OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
+                writer.write(telemetryContext.toString())
+                writer.flush()
+            }
+
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+                val rootJson = JSONObject(text)
+
+                val cmdJson = rootJson.optJSONObject("os_execution_command")
+                val osCommand = OsExecutionCommand(
+                    intent = cmdJson?.optString("intent", "NONE") ?: "NONE",
+                    target_player = cmdJson?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
+                    search_query = cmdJson?.optString("search_query", "") ?: "",
+                    suggested_bpm_target = if (cmdJson?.has("suggested_bpm_target") == true) cmdJson.optInt("suggested_bpm_target") else null
+                )
+
+                val tagsArray = rootJson.optJSONArray("database_tags")
+                val tagsList = mutableListOf<String>()
+                if (tagsArray != null) {
+                    for (i in 0 until tagsArray.length()) {
+                        tagsList.add(tagsArray.getString(i))
+                    }
+                }
+
+                val response = ReasoningResponse(
+                    calculated_satiety_percentage = rootJson.optInt("calculated_satiety_percentage", 30),
+                    flow_state_analysis = rootJson.optString("flow_state_analysis", "Cognitive flow optimal."),
+                    voice_agent_tts = rootJson.optString("voice_agent_tts", ""),
+                    os_execution_command = osCommand,
+                    database_tags = tagsList
+                )
+
+                // Instantiate TuneMindExecutionEngine and execute the backend AI command
+                val executionEngine = TuneMindExecutionEngine(context)
+                executionEngine.executeBackendCommand(response)
+
+                Result.success(response)
+            } else {
+                val err = conn.errorStream?.let { BufferedReader(InputStreamReader(it, "UTF-8")).use { r -> r.readText() } } ?: "HTTP $code"
+                Result.failure(IllegalStateException("Backend evaluate-satiety error ($code): $err"))
             }
         } catch (e: Exception) {
             Result.failure(e)

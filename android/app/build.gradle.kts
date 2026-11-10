@@ -91,6 +91,11 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.gson)
+    implementation(libs.androidx.media)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacep:vosk-android:0.3.32@aar")
 
     // Testing
     testImplementation(libs.junit)

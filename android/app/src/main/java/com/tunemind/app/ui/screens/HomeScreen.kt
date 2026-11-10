@@ -55,6 +55,9 @@ import com.tunemind.app.ui.theme.*
 import com.tunemind.app.voice.AgentPhase
 import com.tunemind.app.voice.NeuroAcousticIntent
 import com.tunemind.app.voice.TuneMindVoiceAgent
+import com.tunemind.app.domain.voice.AgentVoiceManager
+import com.tunemind.app.domain.voice.AgentState
+import com.tunemind.app.domain.voice.AgentOrchestrator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,16 +93,30 @@ fun HomeScreen(
 
     val context = LocalContext.current
     val voiceAgent = remember { TuneMindVoiceAgent(context, vm) }
+    val agentVoiceManager = remember { AgentVoiceManager(context) }
+    val phantomVoiceState by agentVoiceManager.agentState.collectAsState()
     val agentState by voiceAgent.agentState.collectAsState()
     val isListening = agentState.phase == AgentPhase.LISTENING_INTENT ||
         agentState.phase == AgentPhase.LISTENING_PLAYER ||
-        agentState.phase == AgentPhase.LISTENING_CONFIRMATION
+        agentState.phase == AgentPhase.LISTENING_CONFIRMATION ||
+        phantomVoiceState == AgentState.LISTENING
     val isSpeaking = agentState.phase == AgentPhase.PROMPTING_VOICE ||
-        agentState.phase == AgentPhase.PROMPTING_PLAYER
-    val isThinking = agentState.phase == AgentPhase.THINKING
+        agentState.phase == AgentPhase.PROMPTING_PLAYER ||
+        phantomVoiceState == AgentState.SPEAKING
+    val isThinking = agentState.phase == AgentPhase.THINKING ||
+        phantomVoiceState == AgentState.THINKING
     var showPlayerSelectorSheet by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val installedProviders = remember(context) { vm.getInstalledProviders(context) }
+
+    val orchestrator = remember(agentVoiceManager) {
+        AgentOrchestrator(
+            context = context,
+            agentVoiceManager = agentVoiceManager,
+            getNowPlaying = { vm.homeState.value.nowPlaying },
+            scope = coroutineScope
+        )
+    }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -109,9 +126,12 @@ fun HomeScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(orchestrator) {
+        orchestrator.start()
         onDispose {
             voiceAgent.stop()
+            agentVoiceManager.destroy()
+            orchestrator.stop()
         }
     }
 
@@ -703,6 +723,7 @@ fun HomeScreen(
                         .border(1.8.dp, coreColor.copy(alpha = 0.85f), CircleShape)
                         .clickable {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            agentVoiceManager.simulateWakeWordDetected()
                             val hasAudioPerm = ContextCompat.checkSelfPermission(
                                 context,
                                 Manifest.permission.RECORD_AUDIO

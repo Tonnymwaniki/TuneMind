@@ -77,15 +77,85 @@ router.post('/trigger', async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper to fetch hyper-realistic MP3 buffer from ElevenLabs and return as Base64 string.
+ */
+async function generateElevenLabsAudio(text: string): Promise<string | null> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+
+  if (!apiKey || !voiceId) {
+    console.warn('[ElevenLabs] API Key or Voice ID missing. Falling back to native TTS.');
+    return null;
+  }
+
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_turbo_v2_5', // Lowest latency model for conversational AI
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`[ElevenLabs] Error: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString('base64'); // Send as Base64 in JSON
+  } catch (error) {
+    console.error('[ElevenLabs] Network failure:', error);
+    return null;
+  }
+}
+
+/**
+ * POST /api/v1/reasoning/evaluate-satiety
+ * Evaluates acoustic satiety and produces OS media execution commands using Claude 3.5 Haiku,
+ * enriched with ElevenLabs voice synthesis.
+ */
+router.post('/evaluate-satiety', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body || {};
+    const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
+    const provider = new ClaudeMusicReasoningProvider();
+    const result = await provider.evaluateSatiety(payload);
+
+    // Inject ElevenLabs Base64 Audio
+    let base64Audio: string | null = null;
+    if (result.voice_agent_tts) {
+      base64Audio = await generateElevenLabsAudio(result.voice_agent_tts);
+    }
+    (result as any).voice_agent_audio_base64 = base64Audio;
+
+    res.json({
+      status: 'ok',
+      ...result
+    });
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /evaluate-satiety:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
  * POST /api/v1/reasoning/analyze
- * Direct live endpoint for Android app and web client to request real-time Gemini reasoning.
- * Uses the backend's API_KEY to analyze real mobile/web telemetry without needing key on device.
+ * Direct live endpoint for Android app and web client to request real-time Claude 3.5 Haiku reasoning.
  */
 router.post('/analyze', async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
-    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
-    const provider = new GeminiMusicReasoningProvider();
+    const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
+    const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.analyzeLiveSession(payload);
     res.json(result);
   } catch (error) {
@@ -99,14 +169,13 @@ router.post('/analyze', async (req: Request, res: Response) => {
 
 /**
  * POST /api/v1/reasoning/discovery
- * Chronobiological music discovery endpoint. Generates 4 new songs tailored to the user's
- * current daypart and dopamine/satiety state using Gemini 3.8 Flash with the backend's API_KEY.
+ * Chronobiological music discovery endpoint using Claude 3.5 Haiku.
  */
 router.post('/discovery', async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
-    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
-    const provider = new GeminiMusicReasoningProvider();
+    const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
+    const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.generateChronoDiscovery(payload);
     res.json(result);
   } catch (error) {
@@ -120,13 +189,13 @@ router.post('/discovery', async (req: Request, res: Response) => {
 
 /**
  * POST /api/v1/reasoning/agent-chat
- * Real-time conversational agent endpoint: uses Gemini to reason over user's query and 90+ timeline catalog.
+ * Real-time conversational agent endpoint using Claude 3.5 Haiku.
  */
 router.post('/agent-chat', async (req: Request, res: Response) => {
   try {
     const { query, tracks, currentPlaying, userName } = req.body || {};
-    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
-    const provider = new GeminiMusicReasoningProvider();
+    const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
+    const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.conversationalMusicAgent(query || '', tracks || [], currentPlaying, userName);
     res.json({
       status: 'ok',
@@ -143,13 +212,13 @@ router.post('/agent-chat', async (req: Request, res: Response) => {
 
 /**
  * POST /api/v1/reasoning/tag-tracks
- * Examines and tags mobile user's timeline library with Genre, Language, and Vibes using Gemini.
+ * Examines and tags mobile user's timeline library with Genre, Language, and Vibes using Claude.
  */
 router.post('/tag-tracks', async (req: Request, res: Response) => {
   try {
     const { tracks } = req.body || {};
-    const { GeminiMusicReasoningProvider } = await import('../../domain/reasoning/GeminiMusicReasoningProvider');
-    const provider = new GeminiMusicReasoningProvider();
+    const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
+    const provider = new ClaudeMusicReasoningProvider();
     const tags = await provider.tagMusicCatalog(tracks || []);
     res.json({
       status: 'ok',

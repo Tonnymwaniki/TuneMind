@@ -113,6 +113,38 @@ class GeminiTelemetryReasoningWorker(
                 timeSlot = timeSlot
             )
 
+            // Trigger evaluate-satiety and dispatch OS media / TTS commands
+            try {
+                val currentTitle = nowPlaying?.title ?: recentTracks.firstOrNull()?.title ?: "Ambient Flow"
+                val currentArtist = nowPlaying?.artist ?: recentTracks.firstOrNull()?.artist ?: "Unknown Artist"
+                val currentDaypart = when {
+                    timeSlot.contains("Morning", ignoreCase = true) -> "Morning"
+                    timeSlot.contains("Midday", ignoreCase = true) || timeSlot.contains("Afternoon", ignoreCase = true) -> "Midday"
+                    timeSlot.contains("Evening", ignoreCase = true) -> "Evening"
+                    else -> "Late Night"
+                }
+
+                val satietyContext = org.json.JSONObject().apply {
+                    put("timestamp_utc", java.time.Instant.now().toString())
+                    put("circadian_daypart", currentDaypart)
+                    put("current_track", org.json.JSONObject().apply {
+                        put("title", currentTitle)
+                        put("artist", currentArtist)
+                        put("source_player", topSourcePackage)
+                    })
+                    val historyArray = org.json.JSONArray()
+                    recentTracks.take(5).forEach { t ->
+                        historyArray.put(org.json.JSONObject().apply {
+                            put("title", t.title)
+                            put("artist", t.artist)
+                        })
+                    }
+                    put("rolling_history", historyArray)
+                    put("current_satiety_percentage", minOf(95, maxOf(10, (recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1) * 20)))
+                }
+                GeminiReasoningEngine.evaluateSatietyAndExecute(applicationContext, satietyContext)
+            } catch (_: Exception) {}
+
             Result.success()
         } catch (e: Exception) {
             Result.retry()

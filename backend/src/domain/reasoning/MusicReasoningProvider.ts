@@ -140,7 +140,7 @@ export interface ReasoningReport {
 /**
  * Plug-in interface for the external AI reasoning provider.
  *
- * Implemented by GeminiMusicReasoningProvider using @google/genai.
+ * Implemented by ClaudeMusicReasoningProvider using @anthropic-ai/sdk.
  */
 export interface MusicReasoningProvider {
   readonly providerId: string;

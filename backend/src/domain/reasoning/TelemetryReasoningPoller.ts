@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { EventStore, StoredEvent } from '../events/EventStore';
-import { GeminiMusicReasoningProvider } from './GeminiMusicReasoningProvider';
+import { ClaudeMusicReasoningProvider } from './ClaudeMusicReasoningProvider';
 import {
   ReasoningReport,
   UserMusicContext,
@@ -17,6 +17,7 @@ export interface PollerStatus {
   lastAnalyzedEventCount: number;
   totalReportsGenerated: number;
   isGeminiConfigured: boolean;
+  isClaudeConfigured?: boolean;
   activeUsersObserved: string[];
   diagnostics?: any;
 }
@@ -26,12 +27,12 @@ const REPORTS_FILE = path.join(DATA_DIR, 'tunemind_reasoning_reports.json');
 
 /**
  * TelemetryReasoningPoller — Background service that periodically polls user telemetry
- * events from EventStore and triggers Gemini to produce real-time Reasoning Reports.
+ * events from EventStore and triggers Claude to produce real-time Reasoning Reports.
  */
 export class TelemetryReasoningPoller {
   private static instance: TelemetryReasoningPoller | null = null;
   private readonly store: EventStore;
-  private readonly reasoningProvider: GeminiMusicReasoningProvider;
+  private readonly reasoningProvider: ClaudeMusicReasoningProvider;
   private timer: NodeJS.Timeout | null = null;
   private isPolling = false;
 
@@ -45,9 +46,9 @@ export class TelemetryReasoningPoller {
   // History of reports
   private reportHistory: ReasoningReport[] = [];
 
-  constructor(store?: EventStore, reasoningProvider?: GeminiMusicReasoningProvider) {
+  constructor(store?: EventStore, reasoningProvider?: ClaudeMusicReasoningProvider) {
     this.store = store ?? new EventStore();
-    this.reasoningProvider = reasoningProvider ?? new GeminiMusicReasoningProvider();
+    this.reasoningProvider = reasoningProvider ?? new ClaudeMusicReasoningProvider();
     this.loadPersistedReports();
   }
 
@@ -203,7 +204,7 @@ export class TelemetryReasoningPoller {
    * Returns current poller status.
    */
   async getStatus(): Promise<PollerStatus> {
-    const isGeminiConfigured = await this.reasoningProvider.isAvailable();
+    const isConfigured = await this.reasoningProvider.isAvailable();
     const activeUsers = Array.from(this.latestReports.keys());
     const diagnostics = typeof (this.reasoningProvider as any).getLastDiagnostics === 'function'
       ? (this.reasoningProvider as any).getLastDiagnostics()
@@ -215,7 +216,8 @@ export class TelemetryReasoningPoller {
       lastPolledAt: this.lastPolledAt,
       lastAnalyzedEventCount: this.lastAnalyzedEventCount,
       totalReportsGenerated: this.totalReportsGenerated,
-      isGeminiConfigured,
+      isGeminiConfigured: isConfigured,
+      isClaudeConfigured: isConfigured,
       activeUsersObserved: activeUsers.length > 0 ? activeUsers : ['tunemind-dev'],
       diagnostics
     };

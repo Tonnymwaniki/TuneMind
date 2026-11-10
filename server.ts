@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 import rawReasoningRouter from './backend/src/api/v1/reasoning';
+import { setupVoiceStreamSocket } from './backend/src/api/v1/voiceStream';
 import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
 
 import fs from 'fs';
@@ -105,7 +106,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`TuneMind server running on http://${HOST}:${PORT} [${process.env['NODE_ENV']}]`);
     // Start background telemetry reasoning poller
     try {
@@ -114,6 +115,13 @@ async function startServer() {
       console.warn('Could not start TelemetryReasoningPoller:', e);
     }
   });
+
+  try {
+    setupVoiceStreamSocket(server);
+    console.log('[VoiceStream] WebSocket server mounted at /ws/stt');
+  } catch (e) {
+    console.error('Could not setup VoiceStream WebSocket:', e);
+  }
 }
 
 startServer().catch((err) => {
