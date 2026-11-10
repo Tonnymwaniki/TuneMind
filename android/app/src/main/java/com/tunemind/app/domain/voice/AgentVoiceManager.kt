@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.*
+import okhttp3.Response
+import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import org.vosk.Model
@@ -201,28 +203,28 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             return
         }
 
-        val wsUrl = resolveWebSocketUrl()
-        Log.d(TAG, "Connecting to voice WebSocket: $wsUrl")
-        val request = Request.Builder().url(wsUrl).build()
+        val request = Request.Builder().url("ws://localhost:3000/ws/stt").build()
+        Log.d(TAG, "Attempting WebSocket connection to ws://localhost:3000/ws/stt (ADB reverse tunnel)...")
 
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+        val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket Connected to $wsUrl. Starting AudioRecord...")
+                Log.d(TAG, "🟢 WebSocket OPENED successfully. HTTP Status: ${response.code}")
                 startRecordingAndStreaming(webSocket)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                Log.d(TAG, "🔵 WebSocket MESSAGE received: $text")
                 try {
                     val json = JSONObject(text)
                     if (json.has("error")) {
-                        Log.w(TAG, "Server reported error: ${json.optString("error")}, falling back to native STT")
+                        Log.w(TAG, "Server reported error: ${json.optString("error")}")
                         stopMicrophoneStream()
-                        startNativeSpeechRecognizer()
+                        _agentState.value = AgentState.ERROR
                         return
                     }
 
-                    val transcript = json.optString("transcript", "")
-                    val isFinal = json.optBoolean("isFinal", false)
+                    val transcript = json.optString("transcript", "").ifBlank { json.optString("text", "") }
+                    val isFinal = json.optBoolean("isFinal", false) || json.optString("message_type") == "FinalTranscript"
 
                     if (transcript.isNotBlank()) {
                         scope.launch {
@@ -240,12 +242,40 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
                 }
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w(TAG, "WebSocket failure (${t.message}), falling back to native SpeechRecognizer")
-                stopMicrophoneStream()
-                startNativeSpeechRecognizer()
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                Log.d(TAG, "🔵 WebSocket BYTES received (Length: ${bytes.size})")
             }
-        })
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Log.w(TAG, "🟡 WebSocket CLOSING. Code: $code, Reason: $reason")
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.w(TAG, "🔴 WebSocket CLOSED. Code: $code, Reason: $reason")
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.e(TAG, "❌ WebSocket FAILURE: ${t.message}", t)
+                if (response != null) {
+                    val body = runCatching { response.body?.string() }.getOrNull()
+                    Log.e(TAG, "❌ WebSocket FAILURE HTTP Code: ${response.code}, Body: $body")
+                }
+
+                stopMicrophoneStream()
+                // Force the UI out of the listening state so it doesn't hang forever
+                _agentState.value = AgentState.ERROR
+                errorResetJob?.cancel()
+                errorResetJob = scope.launch {
+                    delay(3000)
+                    withContext(Dispatchers.Main) {
+                        releaseAudioDucking()
+                        resumeWakeWordListening()
+                    }
+                }
+            }
+        }
+
+        webSocket = client.newWebSocket(request, listener)
     }
 
     private fun startNativeSpeechRecognizer() {
