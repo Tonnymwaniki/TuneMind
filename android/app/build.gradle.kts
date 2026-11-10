@@ -95,7 +95,7 @@ dependencies {
     implementation(libs.androidx.media)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
-    implementation("com.alphacep:vosk-android:0.3.32@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
 
     // Testing
     testImplementation(libs.junit)
