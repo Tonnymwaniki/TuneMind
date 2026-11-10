@@ -9,7 +9,7 @@
 import './bootstrap';
 
 import http from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket, RawData } from 'ws';
 import express from 'express';
 import { requestLogger } from './middleware/requestLogger';
 import eventsRouter from './api/v1/events';
@@ -53,7 +53,7 @@ const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (request, socket, head) => {
   const pathname = request.url?.split('?')[0];
   if (pathname === '/ws/stt') {
-    wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
       wss.emit('connection', ws, request);
     });
   } else {
@@ -62,10 +62,10 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 // ─── 4. Handle the active WebSocket connection ───────────────────────────────
-wss.on('connection', (ws) => {
+wss.on('connection', (ws: WebSocket) => {
   console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
 
-  ws.on('message', (message) => {
+  ws.on('message', (message: RawData) => {
     // We will wire this to AssemblyAI next. 
     // For now, let's verify we are receiving the raw audio bytes.
     if (Buffer.isBuffer(message)) {

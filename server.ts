@@ -1,5 +1,5 @@
 import http from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket, RawData } from 'ws';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -117,17 +117,17 @@ async function startServer() {
   server.on('upgrade', (request, socket, head) => {
     const pathname = request.url?.split('?')[0];
     if (pathname === '/ws/stt') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.handleUpgrade(request, socket, head, (ws: WebSocket) => {
         wss.emit('connection', ws, request);
       });
     }
   });
 
   // 4. Handle the active WebSocket connection
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws: WebSocket) => {
     console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
 
-    ws.on('message', (message) => {
+    ws.on('message', (message: RawData) => {
       // Log audio chunks from Android
       if (Buffer.isBuffer(message)) {
         console.log(`[VoiceStream] 🔵 Received audio chunk: ${message.length} bytes`);
