@@ -128,100 +128,132 @@ async function startServer() {
     }
   });
 
-  // 4. Handle the active WebSocket connection with AssemblyAI Real-Time
-  wss.on('connection', async (ws: WebSocket) => {
+  // 4. Handle the active WebSocket connection with AssemblyAI Universal v3
+  wss.on('connection', (ws: WebSocket) => {
     console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
 
-    const aai = new AssemblyAI({
-      apiKey: process.env.ASSEMBLYAI_API_KEY || ''
-    });
-
-    const rt = aai.realtime.createService({ sampleRate: 16000 });
-
-    rt.on('open', () => console.log('[STT] AssemblyAI connection opened.'));
-
-    rt.on('error', (error) => {
-      console.error('[STT] AssemblyAI Error:', error);
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: (error as Error)?.message || 'STT Error' }));
+    const apiKey = (process.env.ASSEMBLYAI_API_KEY || '').trim();
+    if (!apiKey) {
+      console.warn('[VoiceStream] ASSEMBLYAI_API_KEY is missing or empty. Please check your .env/.env.local.');
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ error: 'ASSEMBLYAI_KEY_NOT_CONFIGURED', message: 'ASSEMBLYAI_API_KEY not set' }));
       }
-    });
-
-    rt.on('transcript', async (transcript) => {
-      if (!transcript.text) return;
-
-      if (transcript.message_type === 'FinalTranscript') {
-        console.log(`[STT] Final Transcript: "${transcript.text}"`);
-
-        // 1. Send the text back to Android so the UI updates
-        ws.send(JSON.stringify({
-          type: 'transcript',
-          text: transcript.text,
-          transcript: transcript.text,
-          isFinal: true
-        }));
-
-        // 2. Trigger the Claude Reasoning Pipeline internally
-        try {
-          console.log('[VoiceStream] Triggering Claude Pipeline...');
-          const { ClaudeMusicReasoningProvider } = await import('./backend/src/domain/reasoning/ClaudeMusicReasoningProvider');
-          const provider = new ClaudeMusicReasoningProvider();
-          const response = await provider.evaluateSatiety({
-            timestamp_utc: new Date().toISOString(),
-            circadian_daypart: 'Midday',
-            current_track: {
-              title: 'Active Session',
-              artist: 'TuneMind Observer',
-              source_player: 'com.spotify.music'
-            },
-            user_command: transcript.text,
-            rolling_history: [],
-            current_satiety_percentage: 50
-          });
-
-          console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
-          ws.send(JSON.stringify({
-            type: 'command',
-            action: 'THINKING_COMPLETE',
-            payload: response.voice_agent_tts,
-            data: response
-          }));
-        } catch (e) {
-          console.error('[VoiceStream] Error triggering reasoning:', e);
-          ws.send(JSON.stringify({
-            type: 'command',
-            action: 'THINKING_COMPLETE',
-            payload: "I heard you. Connecting to reasoning engine."
-          }));
-        }
-      } else if (transcript.message_type === 'PartialTranscript') {
-        ws.send(JSON.stringify({
-          type: 'transcript',
-          text: transcript.text,
-          transcript: transcript.text,
-          isFinal: false
-        }));
-      }
-    });
-
-    try {
-      await rt.connect();
-    } catch (e) {
-      console.error('[STT] Failed to connect to AssemblyAI:', e);
+      return;
     }
 
+    // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint
+    const aaiSocket = new WebSocket('wss://streaming.assemblyai.com/v3/ws?sample_rate=16000', {
+      headers: { Authorization: apiKey }
+    });
+
+    aaiSocket.on('open', () => {
+      console.log('[STT] 🟢 AssemblyAI v3 Real-Time connection opened.');
+    });
+
+    aaiSocket.on('error', (error: Error) => {
+      console.error('[STT] AssemblyAI Socket Error:', error.message);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: error.message }));
+      }
+    });
+
+    aaiSocket.on('message', async (data: RawData) => {
+      try {
+        const msg = JSON.parse(data.toString());
+
+        if (msg.type === 'Begin') {
+          console.log(`[STT] Session started: ${msg.id}`);
+        } else if (msg.type === 'Turn') {
+          const text = msg.transcript?.trim();
+          if (!text) return;
+
+          if (msg.end_of_turn) {
+            console.log(`[STT] 🔵 Final Transcript: "${text}"`);
+
+            // 1. Send the text back to Android so the UI updates
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'transcript',
+                text: text,
+                transcript: text,
+                isFinal: true
+              }));
+            }
+
+            // 2. Trigger the Claude Reasoning Pipeline internally
+            try {
+              console.log('[VoiceStream] Triggering Claude Pipeline...');
+              const { ClaudeMusicReasoningProvider } = await import('./backend/src/domain/reasoning/ClaudeMusicReasoningProvider');
+              const provider = new ClaudeMusicReasoningProvider();
+              const response = await provider.evaluateSatiety({
+                timestamp_utc: new Date().toISOString(),
+                circadian_daypart: 'Midday',
+                current_track: {
+                  title: 'Active Session',
+                  artist: 'TuneMind Observer',
+                  source_player: 'com.spotify.music'
+                },
+                user_command: text,
+                rolling_history: [],
+                current_satiety_percentage: 50
+              });
+
+              console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'command',
+                  action: 'THINKING_COMPLETE',
+                  payload: response.voice_agent_tts,
+                  data: response
+                }));
+              }
+            } catch (e) {
+              console.error('[VoiceStream] Error triggering reasoning:', e);
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: 'command',
+                  action: 'THINKING_COMPLETE',
+                  payload: "I heard you. Connecting to reasoning engine."
+                }));
+              }
+            }
+          } else {
+            // Partial transcript for live UI transcription
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'transcript',
+                text: text,
+                transcript: text,
+                isFinal: false
+              }));
+            }
+          }
+        } else if (msg.type === 'Error') {
+          console.error('[STT] AssemblyAI Server Error:', msg);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: msg.error || 'Server Error' }));
+          }
+        }
+      } catch (e) {
+        console.warn('[STT] Failed to parse message from AssemblyAI:', e);
+      }
+    });
+
+    // Safe audio chunk forwarding — only send if socket is open
     ws.on('message', (message: RawData) => {
-      if (Buffer.isBuffer(message)) {
-        const arrayBuffer = message.buffer.slice(message.byteOffset, message.byteOffset + message.byteLength) as ArrayBuffer;
-        rt.sendAudio(arrayBuffer);
+      if (aaiSocket.readyState === WebSocket.OPEN && Buffer.isBuffer(message)) {
+        aaiSocket.send(message);
       }
     });
 
     ws.on('close', () => {
       console.log('[VoiceStream] 🔴 Android client disconnected.');
-      try {
-        rt.close();
-      } catch (_: unknown) {}
+      if (aaiSocket.readyState === WebSocket.OPEN) {
+        try {
+          aaiSocket.send(JSON.stringify({ type: 'Terminate' }));
+          aaiSocket.close();
+        } catch (_: unknown) {}
+      }
     });
   });
 
