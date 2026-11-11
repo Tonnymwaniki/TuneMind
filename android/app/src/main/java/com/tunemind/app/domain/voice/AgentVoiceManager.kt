@@ -46,6 +46,10 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState
 
+    private val executionEngine by lazy {
+        com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
+    }
+
     private var audioFocusRequest: AudioFocusRequest? = null
 
     private var audioRecord: AudioRecord? = null
@@ -56,6 +60,9 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
     private val _transcriptionFlow = MutableSharedFlow<String>()
     val transcriptionFlow = _transcriptionFlow.asSharedFlow()
+
+    private val _finalTranscriptFlow = MutableSharedFlow<String>()
+    val finalTranscriptFlow = _finalTranscriptFlow.asSharedFlow()
 
     // Vosk Variables
     private var voskModel: Model? = null
@@ -227,8 +234,36 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
                     if (json.optString("type") == "command" && json.optString("action") == "THINKING_COMPLETE") {
                         val payload = json.optString("payload", "")
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
-                        stopMicrophoneStream() // Fully close now that server responded
+                        stopMicrophoneStream() // Fully close socket now that server responded
                         setSpeakingState()
+
+                        // Execute TTS & OS Actions directly from the server response
+                        val dataObj = json.optJSONObject("data")
+                        val cmdObj = dataObj?.optJSONObject("os_execution_command")
+                        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
+                            calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 50) ?: 50,
+                            flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
+                            voice_agent_tts = payload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
+                            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                                intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
+                                target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
+                                search_query = cmdObj?.optString("search_query", "") ?: "",
+                                suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target")
+                            ),
+                            voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
+                        )
+
+                        executionEngine.executeBackendCommand(responseObj)
+
+                        // Auto-reset to IDLE after speaking
+                        errorResetJob?.cancel()
+                        errorResetJob = scope.launch {
+                            delay(4000)
+                            withContext(Dispatchers.Main) {
+                                releaseAudioDucking()
+                                resumeWakeWordListening()
+                            }
+                        }
                         return
                     }
 
@@ -243,10 +278,11 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
                     if (isFinal && transcript.isNotBlank()) {
                         Log.d(TAG, "User finished speaking: $transcript")
-                        // Stop audio recording so we stop streaming chunks, but keep WebSocket OPEN
-                        // to receive the server's Claude reasoning response!
                         stopAudioRecordingOnly()
                         setThinkingState()
+                        scope.launch {
+                            _finalTranscriptFlow.emit(transcript)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "JSON parse error: ${e.message}")
@@ -337,6 +373,7 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
                                 setThinkingState()
                                 scope.launch {
                                     _transcriptionFlow.emit(transcript)
+                                    _finalTranscriptFlow.emit(transcript)
                                 }
                             } else {
                                 handleVoiceError("No speech detected")
@@ -493,6 +530,11 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
         }
         speechService = null
         isVoskListening = false
+        try {
+            executionEngine.shutdown()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error shutting down executionEngine", e)
+        }
         scope.cancel()
     }
 }

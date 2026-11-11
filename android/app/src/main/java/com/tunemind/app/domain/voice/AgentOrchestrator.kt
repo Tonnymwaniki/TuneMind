@@ -36,7 +36,7 @@ class AgentOrchestrator(
         if (job != null && job?.isActive == true) return
 
         job = scope.launch {
-            agentVoiceManager.transcriptionFlow.collect { transcript ->
+            agentVoiceManager.finalTranscriptFlow.collect { transcript ->
                 Log.d(TAG, "Received final transcript: $transcript")
 
                 // Ensure agent UI is in THINKING state
