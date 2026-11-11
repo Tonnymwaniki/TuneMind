@@ -308,7 +308,36 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
 
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       const cleanJson = jsonMatch ? jsonMatch[0] : rawText;
-      aiResponse = JSON.parse(cleanJson) as TuneMindReasoningResponse;
+      const parsed = JSON.parse(cleanJson);
+
+      aiResponse = {
+        calculated_satiety_percentage: Number(
+          parsed.calculated_satiety_percentage ??
+          parsed.satiety_update?.new_percentage ??
+          context.current_satiety_percentage ??
+          50
+        ),
+        flow_state_analysis: String(
+          parsed.flow_state_analysis ??
+          parsed.satiety_update?.reason ??
+          parsed.daypart_strategy ??
+          'Acoustic telemetry processed.'
+        ),
+        voice_agent_tts: String(
+          parsed.voice_agent_tts ??
+          parsed.reply ??
+          "I've updated your acoustic balance."
+        ),
+        os_execution_command: {
+          intent: (parsed.os_execution_command?.intent || (parsed.target_search_query ? 'OS_MEDIA_NEXT_AND_DEEP_LINK' : 'NONE')) as any,
+          target_player: parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music',
+          search_query: parsed.os_execution_command?.search_query || parsed.target_search_query || '',
+          suggested_bpm_target: Number(parsed.os_execution_command?.suggested_bpm_target || (Array.isArray(parsed.target_bpm_range) ? parsed.target_bpm_range[0] : 120))
+        },
+        database_tags: Array.isArray(parsed.database_tags)
+          ? parsed.database_tags
+          : ['claude-haiku-5-5', context.circadian_daypart?.toLowerCase() || 'midday']
+      };
     } catch (error: any) {
       console.error('[Claude Provider] API Call failed:', error);
       const msg = String(error?.message || error);

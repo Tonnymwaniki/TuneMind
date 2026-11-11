@@ -223,6 +223,15 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
                         return
                     }
 
+                    // Handle backend reasoning completion
+                    if (json.optString("type") == "command" && json.optString("action") == "THINKING_COMPLETE") {
+                        val payload = json.optString("payload", "")
+                        Log.d(TAG, "🟢 Backend reasoning response received: $payload")
+                        stopMicrophoneStream() // Fully close now that server responded
+                        setSpeakingState()
+                        return
+                    }
+
                     val transcript = json.optString("transcript", "").ifBlank { json.optString("text", "") }
                     val isFinal = json.optBoolean("isFinal", false) || json.optString("message_type") == "FinalTranscript"
 
@@ -234,7 +243,9 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
 
                     if (isFinal && transcript.isNotBlank()) {
                         Log.d(TAG, "User finished speaking: $transcript")
-                        stopMicrophoneStream()
+                        // Stop audio recording so we stop streaming chunks, but keep WebSocket OPEN
+                        // to receive the server's Claude reasoning response!
+                        stopAudioRecordingOnly()
                         setThinkingState()
                     }
                 } catch (e: Exception) {
@@ -426,7 +437,7 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
         }
     }
 
-    private fun stopMicrophoneStream() {
+    private fun stopAudioRecordingOnly() {
         isRecording = false
         try {
             audioRecord?.stop()
@@ -435,6 +446,11 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
             Log.w(TAG, "Error stopping audioRecord", e)
         }
         audioRecord = null
+        Log.d(TAG, "Microphone recording stopped, socket kept open for reasoning response.")
+    }
+
+    private fun stopMicrophoneStream() {
+        stopAudioRecordingOnly()
         try {
             webSocket?.close(1000, "Finished speaking")
         } catch (e: Exception) {
