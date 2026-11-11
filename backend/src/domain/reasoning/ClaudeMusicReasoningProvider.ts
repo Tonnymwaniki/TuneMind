@@ -128,7 +128,20 @@ You possess deep expertise in East African pop culture, Sheng, Gikuyu Mugithi, G
 Respond like a human audiophile sound engineer. Keep voice_agent_tts under 2 sentences. Be concise, warm, and highly technical.
 
 OUTPUT FORMAT:
-You must respond ONLY with a raw, valid JSON object. No markdown formatting, no code blocks, no conversational filler.`;
+You must respond ONLY with a raw, valid JSON object matching this schema. No markdown formatting, no code blocks, no conversational filler.
+{
+  "calculated_satiety_percentage": 50,
+  "flow_state_analysis": "One-line acoustic analysis",
+  "voice_agent_tts": "Spoken message announcing the exact song and artist being played",
+  "os_execution_command": {
+    "intent": "OS_MEDIA_NEXT_AND_DEEP_LINK",
+    "target_player": "com.spotify.music",
+    "search_query": "Exact Song Title Exact Artist",
+    "suggested_bpm_target": 120
+  },
+  "database_tags": ["midday", "melodic-house"]
+}
+CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g. 'Calm Down Rema' or 'Huwezi Jua Mbosso') so Spotify opens and directly plays that specific synced song!`;
   }
 
   private async getSpotifyAccessToken(): Promise<string | null> {
@@ -313,6 +326,7 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
       aiResponse = {
         calculated_satiety_percentage: Number(
           parsed.calculated_satiety_percentage ??
+          parsed.computed_satiety ??
           parsed.satiety_update?.new_percentage ??
           context.current_satiety_percentage ??
           50
@@ -325,6 +339,7 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
         ),
         voice_agent_tts: String(
           parsed.voice_agent_tts ??
+          parsed.agent_tts_response ??
           parsed.reply ??
           "I've updated your acoustic balance."
         ),

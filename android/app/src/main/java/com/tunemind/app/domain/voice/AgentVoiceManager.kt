@@ -258,7 +258,7 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
                         // Auto-reset to IDLE after speaking
                         errorResetJob?.cancel()
                         errorResetJob = scope.launch {
-                            delay(4000)
+                            delay(7000)
                             withContext(Dispatchers.Main) {
                                 releaseAudioDucking()
                                 resumeWakeWordListening()

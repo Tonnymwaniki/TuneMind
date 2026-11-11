@@ -47,39 +47,74 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     fun executeBackendCommand(response: ReasoningResponse) {
-        Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent}")
+        Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent} with query: ${response.os_execution_command.search_query}")
 
-        // 1. Play ElevenLabs Audio (or fallback to native TTS if Base64 audio is missing)
-        if (!response.voice_agent_audio_base64.isNullOrEmpty()) {
-            Log.d(TAG, "Playing ElevenLabs hyper-realistic voice audio...")
-            playBase64Audio(response.voice_agent_audio_base64)
-        } else if (response.voice_agent_tts.isNotEmpty()) {
-            // Fallback to native TTS if ElevenLabs failed or key is missing
-            Log.d(TAG, "No Base64 Audio. Fallback to native TTS...")
-            if (isTtsInitialized) {
-                tts?.speak(response.voice_agent_tts, TextToSpeech.QUEUE_FLUSH, null, "TuneMindSpeech")
-            }
-        }
+        // 1. Immediately pause whatever background music was playing so the voice response is crystal clear
+        pauseCurrentMedia()
 
-        // 2. Handle OS Media Control
-        when (response.os_execution_command.intent) {
-            "OS_MEDIA_PAUSE" -> {
-                pauseCurrentMedia()
-            }
-            "OS_MEDIA_NEXT_AND_DEEP_LINK" -> {
-                pauseCurrentMedia()
+        val textToSpeak = response.voice_agent_tts.ifBlank { "Playing ${response.os_execution_command.search_query} on Spotify." }
+
+        val onSpeechFinished = {
+            // 2. Once speaking completes, launch the target player and auto-play the synced song!
+            if (response.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
                 launchTargetPlayer(
                     targetPackage = response.os_execution_command.target_player,
                     searchQuery = response.os_execution_command.search_query
                 )
             }
-            "NONE" -> {
-                Log.d(TAG, "No OS action required. Satiety normal.")
-            }
+        }
+
+        // Play ElevenLabs Audio or fallback to native TTS
+        if (!response.voice_agent_audio_base64.isNullOrEmpty()) {
+            Log.d(TAG, "Playing ElevenLabs hyper-realistic voice audio...")
+            playBase64Audio(response.voice_agent_audio_base64, onCompletion = onSpeechFinished)
+        } else if (textToSpeak.isNotEmpty()) {
+            Log.d(TAG, "Speaking voice response via TTS: $textToSpeak")
+            speakWithListener(textToSpeak, onCompletion = onSpeechFinished)
+        } else {
+            onSpeechFinished()
         }
     }
 
-    private fun playBase64Audio(base64Str: String) {
+    private fun speakWithListener(text: String, onCompletion: () -> Unit) {
+        val ttsInstance = tts
+        if (ttsInstance == null) {
+            onCompletion()
+            return
+        }
+
+        val utteranceId = "TuneMindSpeech_" + System.currentTimeMillis()
+        ttsInstance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(id: String?) {
+                Log.d(TAG, "TTS Speech started: $id")
+            }
+
+            override fun onDone(id: String?) {
+                Log.d(TAG, "TTS Speech finished: $id")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    onCompletion()
+                }
+            }
+
+            override fun onError(id: String?) {
+                Log.e(TAG, "TTS Speech error on: $id")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    onCompletion()
+                }
+            }
+        })
+
+        val params = android.os.Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+        }
+        val result = ttsInstance.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+        if (result != TextToSpeech.SUCCESS) {
+            Log.w(TAG, "TTS speak failed immediately (result=$result). Proceeding with launch.")
+            onCompletion()
+        }
+    }
+
+    private fun playBase64Audio(base64Str: String, onCompletion: () -> Unit) {
         try {
             val audioBytes = Base64.decode(base64Str, Base64.DEFAULT)
             // Write to a temporary file
@@ -99,17 +134,20 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     tempFile.delete()
                     mediaPlayer = null
                     Log.d(TAG, "Voice response playback finished.")
+                    onCompletion()
                 }
                 setOnErrorListener { mp, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
                     mp.release()
                     tempFile.delete()
                     mediaPlayer = null
+                    onCompletion()
                     true
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play Base64 audio", e)
+            onCompletion()
         }
     }
 
@@ -125,29 +163,27 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
     private fun launchTargetPlayer(targetPackage: String, searchQuery: String) {
         try {
-            var intent: Intent? = null
-            
-            // Handle Spotify Deep Linking natively
-            if (targetPackage.contains("spotify")) {
-                val encodedQuery = Uri.encode(searchQuery)
-                val uri = "spotify:search:$encodedQuery"
-                intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
-                    setPackage(targetPackage)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-            } else {
-                // Fallback: Just open the app if deep linking isn't supported (Boomplay/Audiomack)
-                intent = context.packageManager.getLaunchIntentForPackage(targetPackage)?.apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-            }
+            Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery'")
 
-            if (intent != null) {
-                context.startActivity(intent)
-                Log.d(TAG, "Launched target player: $targetPackage with query: $searchQuery")
-            } else {
-                Log.e(TAG, "Target player not installed: $targetPackage")
-            }
+            // Parse track title and artist from searchQuery (e.g. "Song Title Artist Name")
+            val cleanQuery = searchQuery.trim()
+            val fakeTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
+                id = cleanQuery,
+                title = cleanQuery,
+                artist = "",
+                reason = "Autonomous neuro-acoustic flow match",
+                confidence = 0.98f
+            )
+
+            com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
+                context = context,
+                providerId = if (targetPackage.contains("spotify")) "spotify" else targetPackage,
+                displayName = if (targetPackage.contains("spotify")) "Spotify" else "Target Player",
+                packageName = targetPackage,
+                track = fakeTrack,
+                query = cleanQuery,
+                deepLinkUri = if (targetPackage.contains("spotify")) "spotify:search:${Uri.encode(cleanQuery)}" else null
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch player", e)
         }
