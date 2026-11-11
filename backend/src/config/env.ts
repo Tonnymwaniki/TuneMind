@@ -20,25 +20,24 @@ export function loadEnvironment(): void {
     if (loaded) return;
     loaded = true;
 
-    const envPath = process.env['TUNEMIND_ENV_FILE']?.trim()
-        || path.resolve(__dirname, '..', '..', '.env');
+    const candidates = [
+        process.env['TUNEMIND_ENV_FILE']?.trim(),
+        path.resolve(process.cwd(), '.env.local'),
+        path.resolve(process.cwd(), '.env'),
+        path.resolve(__dirname, '..', '..', '.env.local'),
+        path.resolve(__dirname, '..', '..', '.env'),
+        path.resolve(__dirname, '..', '..', 'backend', '.env.local'),
+        path.resolve(__dirname, '..', '..', 'backend', '.env')
+    ].filter(Boolean) as string[];
 
-    if (!fs.existsSync(envPath)) return;
-
-    try {
-        const maybeLoadEnvFile = (process as unknown as {
-            loadEnvFile?: (file: string) => void;
-        }).loadEnvFile;
-
-        if (typeof maybeLoadEnvFile === 'function') {
-            maybeLoadEnvFile.call(process, envPath);
-            return;
+    for (const envPath of candidates) {
+        if (!fs.existsSync(envPath)) continue;
+        try {
+            applyMinimalEnvFile(envPath);
+            console.log(`[env] Loaded environment configuration from ${path.basename(envPath)}`);
+        } catch (error) {
+            console.warn(`[env] Could not load ${envPath}: ${(error as Error).message}`);
         }
-
-        applyMinimalEnvFile(envPath);
-    } catch (error) {
-        // Only the file path and message are logged — never file contents.
-        console.warn(`[env] Could not load ${envPath}: ${(error as Error).message}`);
     }
 }
 
