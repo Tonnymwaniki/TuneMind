@@ -63,8 +63,11 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 // ─── 4. Handle the active WebSocket connection with AssemblyAI Universal v3 ─
-wss.on('connection', (ws: WebSocket) => {
+wss.on('connection', async (ws: WebSocket) => {
   console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
+
+  let isAssemblyReady = false;
+  let chunkCount = 0;
 
   const apiKey = (process.env.ASSEMBLYAI_API_KEY || '').trim();
   if (!apiKey) {
@@ -85,7 +88,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   aaiSocket.on('error', (error: Error) => {
-    console.error('[STT] AssemblyAI Socket Error:', error.message);
+    console.error('[STT] AssemblyAI Error:', error);
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: error.message }));
     }
@@ -95,14 +98,19 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       const msg = JSON.parse(data.toString());
 
-      if (msg.type === 'Begin') {
-        console.log(`[STT] Session started: ${msg.id}`);
-      } else if (msg.type === 'Turn') {
-        const text = msg.transcript?.trim();
+      // We must wait for the session to officially begin before sending audio
+      if (msg.type === 'Begin' || msg.message_type === 'SessionBegins') {
+        const sessionId = msg.id || msg.session_id || 'v3-session';
+        console.log(`[STT] Session started: ${sessionId}`);
+        isAssemblyReady = true;
+      } else if (msg.type === 'Turn' || msg.message_type === 'FinalTranscript' || msg.message_type === 'PartialTranscript') {
+        const text = (msg.transcript || msg.text || '').trim();
         if (!text) return;
 
-        if (msg.end_of_turn) {
-          console.log(`[STT] 🔵 Final Transcript: "${text}"`);
+        const isFinal = Boolean(msg.end_of_turn || msg.message_type === 'FinalTranscript');
+
+        if (isFinal) {
+          console.log(`\n[STT] Final Transcript: "${text}"`);
 
           // 1. Send the text back to Android so the UI updates
           if (ws.readyState === WebSocket.OPEN) {
@@ -114,7 +122,7 @@ wss.on('connection', (ws: WebSocket) => {
             }));
           }
 
-          // 2. Trigger the Claude Reasoning Pipeline internally
+          // 2. Trigger the Claude Reasoning Pipeline
           try {
             console.log('[VoiceStream] Triggering Claude Pipeline...');
             const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
@@ -152,7 +160,8 @@ wss.on('connection', (ws: WebSocket) => {
             }
           }
         } else {
-          // Partial transcript for live UI transcription
+          // Log partial transcripts to see it working in real-time
+          process.stdout.write(`\r[STT] Partial: "${text}"`);
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
               type: 'transcript',
@@ -173,15 +182,28 @@ wss.on('connection', (ws: WebSocket) => {
     }
   });
 
-  // Safe audio chunk forwarding — only send if socket is open
+  // Safety valve: Only send if AssemblyAI session is actually ready
   ws.on('message', (message: RawData) => {
-    if (aaiSocket.readyState === WebSocket.OPEN && Buffer.isBuffer(message)) {
-      aaiSocket.send(message);
+    if (Buffer.isBuffer(message)) {
+      chunkCount++;
+      // Log every 20th chunk just to prove audio is flowing without spamming the terminal
+      if (chunkCount % 20 === 0) {
+        console.log(`[VoiceStream] 🔵 Streaming audio chunk... (x${chunkCount})`);
+      }
+
+      if (isAssemblyReady && aaiSocket.readyState === WebSocket.OPEN) {
+        try {
+          aaiSocket.send(message);
+        } catch (e) {
+          console.error('[VoiceStream] Failed to push audio to AAI:', e);
+        }
+      }
     }
   });
 
   ws.on('close', () => {
     console.log('[VoiceStream] 🔴 Android client disconnected.');
+    isAssemblyReady = false;
     if (aaiSocket.readyState === WebSocket.OPEN) {
       try {
         aaiSocket.send(JSON.stringify({ type: 'Terminate' }));
