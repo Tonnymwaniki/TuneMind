@@ -84,7 +84,13 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       return content;
     }
     if (Array.isArray(content)) {
-      return content.map((block: any) => block.text || '').join('');
+      // Claude 5.5 / 3.7 may return 'thinking' blocks before or alongside the 'text' block
+      return content.map((block: any) => {
+        if (block.type === 'text') return block.text || '';
+        if (block.type === 'thinking') return block.thinking || '';
+        if (typeof block.text === 'string') return block.text;
+        return JSON.stringify(block);
+      }).join('\n');
     }
     return JSON.stringify(content || '{}');
   }
@@ -246,7 +252,7 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
       try {
         response = await this.anthropic.messages.create({
           model: targetModel,
-          max_tokens: 500,
+          max_tokens: 2000, // Increased for 5.5 architecture overhead
           system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
           messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
         });
@@ -258,7 +264,7 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
           try {
             response = await this.anthropic.messages.create({
               model: 'claude-3-5-haiku-20241022',
-              max_tokens: 500,
+              max_tokens: 2000,
               system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
               messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
             });
@@ -266,7 +272,7 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
           } catch {
             response = await this.anthropic.messages.create({
               model: 'claude-3-haiku-20240307',
-              max_tokens: 500,
+              max_tokens: 2000,
               system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
               messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
             });
@@ -277,17 +283,27 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
         }
       }
 
+      // --- NEW DIAGNOSTIC LOG ---
+      console.log('[Claude Provider] 🟢 RAW ANTHROPIC RESPONSE:');
+      console.log(JSON.stringify(response, null, 2));
+      // --------------------------
+
       let rawText = '';
       if (typeof response?.content === 'string') {
         rawText = response.content;
       } else if (Array.isArray(response?.content)) {
-        rawText = response.content.map((block: any) => block.text || '').join('');
+        // Claude 5.5 might return 'thinking' blocks before the 'text' block
+        rawText = response.content.map((block: any) => {
+          if (block.type === 'text') return block.text;
+          if (block.type === 'thinking') return block.thinking;
+          return JSON.stringify(block);
+        }).join('\n');
       } else {
         rawText = JSON.stringify(response?.content || '{}');
       }
 
-      if (!rawText || !rawText.trim()) {
-        throw new Error('Claude returned an empty response.');
+      if (!rawText || rawText.trim() === '') {
+        throw new Error('Claude returned an empty response. Check the raw log above.');
       }
 
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
