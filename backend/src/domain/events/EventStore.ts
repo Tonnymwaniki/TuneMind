@@ -240,6 +240,36 @@ export class EventStore {
     return [...EventStore.events].sort((a, b) => a.ingested_at.localeCompare(b.ingested_at));
   }
 
+  getRecentObservedTracks(limit: number = 20): Array<{ title: string; artist: string; album?: string; source: string; playCount: number }> {
+    const tracksMap = new Map<string, { title: string; artist: string; album?: string; source: string; playCount: number }>();
+    
+    // Scan events in reverse chronological order
+    const sorted = [...EventStore.events].reverse();
+    for (const evt of sorted) {
+      try {
+        const payload = JSON.parse(evt.payload_json);
+        const trk = payload.track || payload.current_track || payload.nowPlaying;
+        if (trk?.title && trk?.artist && trk.title !== 'Active Session' && trk.title !== 'Standing By') {
+          const key = `${trk.title.trim().toLowerCase()} - ${trk.artist.trim().toLowerCase()}`;
+          const existing = tracksMap.get(key);
+          if (existing) {
+            existing.playCount++;
+          } else {
+            tracksMap.set(key, {
+              title: trk.title.trim(),
+              artist: trk.artist.trim(),
+              album: trk.album,
+              source: evt.media_source || 'com.spotify.music',
+              playCount: 1
+            });
+          }
+          if (tracksMap.size >= limit) break;
+        }
+      } catch (_e) {}
+    }
+    return Array.from(tracksMap.values());
+  }
+
   count(): number {
     return EventStore.events.length;
   }

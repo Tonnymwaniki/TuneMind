@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../../config/supabase';
+import { EventStore } from '../events/EventStore';
 import {
   MusicReasoningProvider,
   UserMusicContext,
@@ -124,22 +125,30 @@ CORE DIRECTIVES & SENSOR LOGIC:
 4. CULTURAL LEXICON:
 You possess deep expertise in East African pop culture, Sheng, Gikuyu Mugithi, Gospel, and Bongo Flava. When a user requests a Kikuyu song, route them to authentic artists (e.g., Samidoh, Joyce wa Mamaa) without repetition.
 
-5. VOICE AGENT PERSONA:
-Respond like a human audiophile sound engineer. Keep voice_agent_tts under 2 sentences. Be concise, warm, and highly technical.
+5. VOICE AGENT PERSONA (ATTENTIVE PERSONAL AUDIO ASSISTANT):
+You are the listener's dedicated personal sound engineer and music companion.
+- Address the user with conversational warmth and intelligence, like an audiophile friend who knows their taste intimately.
+- In 'voice_agent_tts', explicitly reference why you chose this specific song for them right now (e.g., grounding in their favorite artists, current focus rhythm, or fatigue relief).
+- Keep voice_agent_tts conversational, natural, and under 2-3 sentences. Speak with clear enthusiasm and audio empathy.
+
+6. TASTE GENOME & USER HISTORY GROUNDING:
+- You are provided with 'user_observed_listening_history' (songs and artists the user has actively played and loves).
+- When the user asks to "play a song", "play me a song", "put on some music", or similar open-ended requests, PRIORITIZE their known artists, favorite genres, and sonic universe from their listening history, or genre-congruent tracks that fit their established taste profile! Never recommend disconnected random artists.
+- If auditory satiety is high, pick a soothing palate cleanser from an adjacent genre that still respects their core taste anchors.
 
 OUTPUT FORMAT:
 You must respond ONLY with a raw, valid JSON object matching this schema. No markdown formatting, no code blocks, no conversational filler.
 {
   "calculated_satiety_percentage": 50,
   "flow_state_analysis": "One-line acoustic analysis",
-  "voice_agent_tts": "Spoken message announcing the exact song and artist being played",
+  "voice_agent_tts": "Conversational reply explaining what you're queuing and why it fits their current flow",
   "os_execution_command": {
     "intent": "OS_MEDIA_NEXT_AND_DEEP_LINK",
     "target_player": "com.spotify.music",
     "search_query": "Exact Song Title Exact Artist",
     "suggested_bpm_target": 120
   },
-  "database_tags": ["midday", "melodic-house"]
+  "database_tags": ["midday", "personal-taste-aligned"]
 }
 CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g. 'Calm Down Rema' or 'Huwezi Jua Mbosso') so Spotify opens and directly plays that specific synced song!`;
   }
@@ -245,9 +254,20 @@ CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g.
       console.warn('[Claude Provider] Supabase fetch failed, continuing without history.');
     }
 
-    // 3. Inject history into the payload for Claude
+    // 3. FETCH USER'S REAL LISTENING HISTORY FROM LOCAL EVENTSTORE
+    let userListeningHistory: any[] = [];
+    try {
+      const eventStore = new EventStore();
+      userListeningHistory = eventStore.getRecentObservedTracks(25);
+      console.log(`[Claude Provider] 🎧 Injected ${userListeningHistory.length} real listener tracks into Taste Genome.`);
+    } catch (e) {
+      console.warn('[Claude Provider] Could not load EventStore history:', e);
+    }
+
+    // 4. Inject history into the payload for Claude
     const claudePayload = {
       ...context,
+      user_observed_listening_history: userListeningHistory,
       historical_agent_memory: recentInterventions
     };
 
@@ -266,7 +286,7 @@ CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g.
         response = await this.anthropic.messages.create({
           model: targetModel,
           max_tokens: 2000, // Increased for 5.5 architecture overhead
-          system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
+          system: this.getSystemPrompt() + `\n\nUSER CATALOG & MEMORY:\n- 'user_observed_listening_history' contains the user's real listening history and favored tracks. When they say "play me a song", prioritize songs or artists from their catalog, or close genre matches they love!\n- Do not recommend the exact same 'target_search_query' you used in the last 3 interventions ('historical_agent_memory').\n- Speak conversationally like a personal audio assistant in 'voice_agent_tts'.`,
           messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
         });
         this.activeModelUsed = targetModel;

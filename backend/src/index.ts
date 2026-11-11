@@ -16,6 +16,7 @@ import { requestLogger } from './middleware/requestLogger';
 import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
+import { EventStore } from './domain/events/EventStore';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -127,16 +128,36 @@ wss.on('connection', async (ws: WebSocket) => {
             console.log('[VoiceStream] Triggering Claude Pipeline...');
             const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
             const provider = new ClaudeMusicReasoningProvider();
+
+            // Extract the user's most recent active track from the EventStore
+            const eventStore = new EventStore();
+            const recentTracks = eventStore.getRecentObservedTracks(10);
+            const latestTrack = recentTracks[0] || {
+              title: 'Active Session',
+              artist: 'TuneMind Observer',
+              source: 'com.spotify.music'
+            };
+
+            const hour = new Date().getHours();
+            const circadianDaypart = hour >= 6 && hour < 12 ? 'Morning'
+              : hour >= 12 && hour < 17 ? 'Midday'
+              : hour >= 17 && hour < 22 ? 'Evening'
+              : 'Late Night';
+
             const response = await provider.evaluateSatiety({
               timestamp_utc: new Date().toISOString(),
-              circadian_daypart: 'Midday',
+              circadian_daypart: circadianDaypart,
               current_track: {
-                title: 'Active Session',
-                artist: 'TuneMind Observer',
-                source_player: 'com.spotify.music'
+                title: latestTrack.title,
+                artist: latestTrack.artist,
+                source_player: latestTrack.source || 'com.spotify.music'
               },
               user_command: text,
-              rolling_history: [],
+              rolling_history: recentTracks.slice(1, 6).map(t => ({
+                title: t.title,
+                artist: t.artist,
+                source_player: t.source
+              })),
               current_satiety_percentage: 50
             });
 
