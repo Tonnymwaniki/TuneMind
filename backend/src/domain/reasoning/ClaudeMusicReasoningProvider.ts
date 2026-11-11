@@ -49,12 +49,13 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private anthropic: Anthropic;
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = 'claude-3-5-haiku-latest';
+  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
   private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
   constructor() {
     this.anthropic = new Anthropic(); // Uses ANTHROPIC_API_KEY from .env
+    this.activeModelUsed = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   }
 
   getLastDiagnostics() {
@@ -230,12 +231,41 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
     let aiResponse: TuneMindReasoningResponse;
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-haiku-latest',
-        max_tokens: 500,
-        system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
-        messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
-      });
+      const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+      let response;
+      try {
+        response = await this.anthropic.messages.create({
+          model: targetModel,
+          max_tokens: 500,
+          system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
+          messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
+        });
+        this.activeModelUsed = targetModel;
+      } catch (modelErr: any) {
+        const errMsg = String(modelErr?.message || modelErr);
+        if (errMsg.includes('not_found_error') || errMsg.includes('404')) {
+          console.warn(`[Claude Provider] Model ${targetModel} not found. Falling back to claude-3-5-haiku-20241022 or claude-3-haiku-20240307...`);
+          try {
+            response = await this.anthropic.messages.create({
+              model: 'claude-3-5-haiku-20241022',
+              max_tokens: 500,
+              system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
+              messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
+            });
+            this.activeModelUsed = 'claude-3-5-haiku-20241022';
+          } catch {
+            response = await this.anthropic.messages.create({
+              model: 'claude-3-haiku-20240307',
+              max_tokens: 500,
+              system: this.getSystemPrompt() + `\n\nLONG-TERM MEMORY: You are provided with 'historical_agent_memory'. Do not recommend the exact same 'target_search_query' you used in the last 3 interventions. If satiety is high and you recently recommended acoustic, pivot to ambient or lo-fi to ensure receptor novelty.`,
+              messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
+            });
+            this.activeModelUsed = 'claude-3-haiku-20240307';
+          }
+        } else {
+          throw modelErr;
+        }
+      }
 
       const rawText = (response.content[0] as any).text;
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
@@ -372,8 +402,9 @@ Respond ONLY with a valid JSON object matching this schema:
 }`;
 
     try {
+      const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-haiku-latest',
+        model: targetModel,
         max_tokens: 800,
         system: this.getSystemPrompt(),
         messages: [{ role: 'user', content: prompt }]
@@ -446,7 +477,7 @@ Respond ONLY with a valid JSON object matching this schema:
           fatigueRisk: f.estimatedFatigue >= 0.75 ? 'HIGH' : f.estimatedFatigue >= 0.45 ? 'MODERATE' : 'LOW'
         })),
         isAiGenerated: true,
-        modelUsed: 'claude-3-5-haiku-latest'
+        modelUsed: targetModel
       };
     } catch (err: any) {
       console.warn('[Claude Provider] Report generation failed or unconfigured, using baseline:', err?.message || err);
@@ -583,8 +614,9 @@ Respond ONLY with a JSON object:
   "probabilisticInferences": [{"inference": "High structural tolerance in current session", "confidence": 0.91, "basis": "Completion rates remain above 80%"}]
 }`;
 
+        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
         const res = await this.anthropic.messages.create({
-          model: 'claude-3-5-haiku-latest',
+          model: targetModel,
           max_tokens: 600,
           system: this.getSystemPrompt(),
           messages: [{ role: 'user', content: prompt }]
@@ -596,7 +628,7 @@ Respond ONLY with a JSON object:
         return {
           status: 'ok',
           isAiGenerated: true,
-          modelUsed: 'claude-3-5-haiku-latest',
+          modelUsed: targetModel,
           generatedAt: new Date().toISOString(),
           ...parsed
         };
@@ -662,8 +694,9 @@ Generate 10 real, genre-congruent song recommendations (4 CORE_DOPAMINE, 3 DEEP_
 Respond ONLY with a JSON array:
 [{"title": "Song Title", "artist": "Artist", "album": "Album", "category": "DOPAMINE_FLOW", "subTier": "CORE_DOPAMINE", "reason": "Reason", "confidence": 0.95}]`;
 
+        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
         const res = await this.anthropic.messages.create({
-          model: 'claude-3-5-haiku-latest',
+          model: targetModel,
           max_tokens: 1000,
           system: this.getSystemPrompt(),
           messages: [{ role: 'user', content: prompt }]
@@ -676,7 +709,7 @@ Respond ONLY with a JSON array:
           return {
             status: 'ok',
             isAiGenerated: true,
-            modelUsed: 'claude-3-5-haiku-latest',
+            modelUsed: targetModel,
             recommendations: parsed.slice(0, 10)
           };
         }
@@ -731,7 +764,7 @@ Respond ONLY with a JSON array:
   }
 
   /**
-   * Conversational music agent endpoint powered by Claude 3.5 Haiku.
+   * Conversational music agent endpoint powered by Claude Haiku.
    */
   async conversationalMusicAgent(query: string, tracks: any[], currentPlaying?: any, userName?: string): Promise<any> {
     const available = await this.isAvailable();
@@ -742,8 +775,9 @@ Recent Catalog: ${tracks.slice(0, 15).map(t => `${t.title} by ${t.artist}`).join
 Respond with conversational audiophile assistance in JSON:
 {"reply": "short audiophile advice", "suggestedAction": "NEXT_TRACK" | "PLAY" | "PAUSE" | "NONE", "recommendedTrack": {"title": "Title", "artist": "Artist"}}`;
 
+        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
         const res = await this.anthropic.messages.create({
-          model: 'claude-3-5-haiku-latest',
+          model: targetModel,
           max_tokens: 400,
           system: this.getSystemPrompt(),
           messages: [{ role: 'user', content: prompt }]
