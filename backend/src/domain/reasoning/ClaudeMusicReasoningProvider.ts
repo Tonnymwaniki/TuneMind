@@ -79,6 +79,16 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     return trimmed;
   }
 
+  private extractRawText(content: any): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content.map((block: any) => block.text || '').join('');
+    }
+    return JSON.stringify(content || '{}');
+  }
+
   public async isAvailable(): Promise<boolean> {
     const rawKey = process.env.ANTHROPIC_API_KEY;
     return Boolean(this.cleanKey(rawKey) && !this.hasInvalidKey);
@@ -267,7 +277,19 @@ You must respond ONLY with a raw, valid JSON object. No markdown formatting, no 
         }
       }
 
-      const rawText = (response.content[0] as any).text;
+      let rawText = '';
+      if (typeof response?.content === 'string') {
+        rawText = response.content;
+      } else if (Array.isArray(response?.content)) {
+        rawText = response.content.map((block: any) => block.text || '').join('');
+      } else {
+        rawText = JSON.stringify(response?.content || '{}');
+      }
+
+      if (!rawText || !rawText.trim()) {
+        throw new Error('Claude returned an empty response.');
+      }
+
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       const cleanJson = jsonMatch ? jsonMatch[0] : rawText;
       aiResponse = JSON.parse(cleanJson) as TuneMindReasoningResponse;
@@ -410,7 +432,10 @@ Respond ONLY with a valid JSON object matching this schema:
         messages: [{ role: 'user', content: prompt }]
       });
 
-      const rawText = (response.content[0] as any).text;
+      const rawText = this.extractRawText(response?.content);
+      if (!rawText || !rawText.trim()) {
+        throw new Error('Claude returned an empty response.');
+      }
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
 
@@ -622,7 +647,10 @@ Respond ONLY with a JSON object:
           messages: [{ role: 'user', content: prompt }]
         });
 
-        const raw = (res.content[0] as any).text;
+        const raw = this.extractRawText(res?.content);
+        if (!raw || !raw.trim()) {
+          throw new Error('Claude returned an empty response.');
+        }
         const match = raw.match(/\{[\s\S]*\}/);
         const parsed = JSON.parse(match ? match[0] : raw);
         return {
@@ -702,7 +730,10 @@ Respond ONLY with a JSON array:
           messages: [{ role: 'user', content: prompt }]
         });
 
-        const raw = (res.content[0] as any).text;
+        const raw = this.extractRawText(res?.content);
+        if (!raw || !raw.trim()) {
+          throw new Error('Claude returned an empty response.');
+        }
         const match = raw.match(/\[[\s\S]*\]/);
         const parsed = JSON.parse(match ? match[0] : raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -783,7 +814,10 @@ Respond with conversational audiophile assistance in JSON:
           messages: [{ role: 'user', content: prompt }]
         });
 
-        const raw = (res.content[0] as any).text;
+        const raw = this.extractRawText(res?.content);
+        if (!raw || !raw.trim()) {
+          throw new Error('Claude returned an empty response.');
+        }
         const match = raw.match(/\{[\s\S]*\}/);
         return JSON.parse(match ? match[0] : raw);
       } catch (err) {
