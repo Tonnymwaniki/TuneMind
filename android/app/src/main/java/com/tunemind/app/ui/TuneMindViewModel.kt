@@ -400,14 +400,50 @@ class TuneMindViewModel : ViewModel() {
         recomputeAdaptiveTheme()
     }
 
-    fun recomputeAdaptiveTheme() {
+    fun recomputeAdaptiveTheme(overrideTitle: String? = null, overrideArtist: String? = null) {
         val currentNowPlaying = _homeState.value.nowPlaying
+        val latestRecent = _homeState.value.recentTracks.firstOrNull()
+        val effectiveTitle = overrideTitle ?: currentNowPlaying?.title ?: latestRecent?.title
+        val effectiveArtist = overrideArtist ?: currentNowPlaying?.artist ?: latestRecent?.artist
         _adaptiveThemeState.value = com.tunemind.app.ui.theme.AdaptiveThemeEngine.composeTheme(
             preferences = _themePreferences.value,
-            trackTitle = currentNowPlaying?.title,
-            trackArtist = currentNowPlaying?.artist,
-            trackEnergy = if (currentNowPlaying?.isPlaying == true) 0.7f else 0.45f
+            trackTitle = effectiveTitle,
+            trackArtist = effectiveArtist,
+            trackEnergy = if (currentNowPlaying?.isPlaying == true) 0.78f else 0.55f
         )
+    }
+
+    fun cycleAtmospherePalette() {
+        val cycleOrder = listOf("morning", "afternoon", "evening", "night")
+        val currentId = _adaptiveThemeState.value.activePalette.id
+        val nextIndex = (cycleOrder.indexOf(currentId) + 1) % cycleOrder.size
+        val nextId = cycleOrder[nextIndex]
+        val updated = _themePreferences.value.copy(
+            behavior = com.tunemind.app.ui.theme.ThemeBehavior.FIXED,
+            fixedPaletteId = nextId,
+            enableMoodAdaptation = true
+        )
+        updateThemePreferences(updated)
+    }
+
+    fun syncAtmosphereToTrack(title: String, artist: String) {
+        val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(title, artist)
+        val targetPaletteId = when (mood) {
+            com.tunemind.app.ui.theme.MusicalMood.CALM -> "morning"
+            com.tunemind.app.ui.theme.MusicalMood.ENERGETIC -> "afternoon"
+            com.tunemind.app.ui.theme.MusicalMood.UPLIFTING -> "evening"
+            com.tunemind.app.ui.theme.MusicalMood.REFLECTIVE,
+            com.tunemind.app.ui.theme.MusicalMood.INTENSE -> "night"
+            com.tunemind.app.ui.theme.MusicalMood.UNKNOWN -> _adaptiveThemeState.value.activePalette.id
+        }
+        val updated = _themePreferences.value.copy(
+            behavior = com.tunemind.app.ui.theme.ThemeBehavior.FIXED,
+            fixedPaletteId = targetPaletteId,
+            enableMoodAdaptation = true
+        )
+        _themePreferences.value = updated
+        themePrefsRepo?.savePreferences(updated)
+        recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
     }
 
     val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()

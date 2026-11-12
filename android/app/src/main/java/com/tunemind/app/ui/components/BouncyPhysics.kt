@@ -13,7 +13,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 fun Modifier.bouncyClickable(onClick: () -> Unit): Modifier = composed {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1f,
+        targetValue = if (isPressed) 0.94f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
@@ -26,12 +26,17 @@ fun Modifier.bouncyClickable(onClick: () -> Unit): Modifier = composed {
             scaleX = scale
             scaleY = scale
         }
-        .pointerInput(Unit) {
+        .pointerInput(onClick) {
             detectTapGestures(
                 onPress = {
                     isPressed = true
-                    tryAwaitRelease()
-                    isPressed = false
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        isPressed = false
+                    }
+                },
+                onTap = {
                     onClick()
                 }
             )

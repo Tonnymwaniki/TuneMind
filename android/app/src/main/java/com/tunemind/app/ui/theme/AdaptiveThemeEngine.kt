@@ -1,24 +1,15 @@
 package com.tunemind.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import java.util.Calendar
-import java.util.TimeZone
 
 /**
  * Pure, testable Adaptive Theme Engine.
  * Combines Time of Day, Musical Mood, Musical Energy, and Personal Preferences
- * into one coherent AdaptiveThemeState.
+ * into one coherent AdaptiveThemeState that visibly transforms the app's atmosphere.
  */
 object AdaptiveThemeEngine {
 
-    /**
-     * Resolves the active TimePeriod based on hour (0-23) and minute (0-59).
-     * Morning:   05:00 – 11:59
-     * Afternoon: 12:00 – 16:59
-     * Evening:   17:00 – 20:59
-     * Night:     21:00 – 04:59
-     */
     fun resolveTimePeriod(hour: Int, minute: Int = 0): TimePeriod {
         val totalMinutes = hour * 60 + minute
         return when {
@@ -29,9 +20,6 @@ object AdaptiveThemeEngine {
         }
     }
 
-    /**
-     * Resolves the current TimePeriod from the device's local calendar & time zone.
-     */
     fun resolveCurrentTimePeriod(calendar: Calendar = Calendar.getInstance()): TimePeriod {
         val hour = calendar.get(Calendar.HOUR_OF_DAY)
         val minute = calendar.get(Calendar.MINUTE)
@@ -39,8 +27,7 @@ object AdaptiveThemeEngine {
     }
 
     /**
-     * Infer or extract reliable musical mood from track metadata and features.
-     * Only returns a mood if there is genuine signal. Otherwise UNKNOWN.
+     * Infer musical mood from track title, artist, genre, or audio features.
      */
     fun resolveTrackMood(
         title: String?,
@@ -49,47 +36,44 @@ object AdaptiveThemeEngine {
         energy: Float? = null,
         valence: Float? = null
     ): MusicalMood {
-        // If quantitative audio features exist:
-        if (energy != null && valence != null) {
-            return when {
-                energy > 0.7f && valence > 0.6f -> MusicalMood.ENERGETIC
-                energy > 0.7f && valence <= 0.6f -> MusicalMood.INTENSE
-                energy <= 0.4f && valence > 0.5f -> MusicalMood.CALM
-                energy <= 0.45f && valence <= 0.5f -> MusicalMood.REFLECTIVE
-                valence > 0.7f -> MusicalMood.UPLIFTING
-                else -> MusicalMood.UNKNOWN
-            }
-        }
-
-        // Semantic heuristic from title / artist / genre (without fabricating)
         val combined = "${title ?: ""} ${artist ?: ""} ${genre ?: ""}".lowercase()
+
         return when {
+            combined.contains("adventist") || combined.contains("gospel") || combined.contains("anaweza") ||
+                combined.contains("praise") || combined.contains("worship") || combined.contains("choir") ||
+                combined.contains("blessing") || combined.contains("uplift") || combined.contains("joy") ||
+                combined.contains("hope") || combined.contains("malaika") || combined.contains("sauti sol") ->
+                MusicalMood.UPLIFTING
+
+            combined.contains("wizkid") || combined.contains("burna") || combined.contains("rema") ||
+                combined.contains("afrobeats") || combined.contains("dance") || combined.contains("essence") ||
+                combined.contains("kuna") || combined.contains("party") || combined.contains("vibe") ||
+                combined.contains("last last") || combined.contains("energy") ->
+                MusicalMood.ENERGETIC
+
             combined.contains("calm") || combined.contains("peace") || combined.contains("ambient") ||
-                combined.contains("acoustic") || combined.contains("sleep") || combined.contains("meditat") ||
-                combined.contains("chill") -> MusicalMood.CALM
+                combined.contains("acoustic") || combined.contains("sleep") || combined.contains("lofi") ||
+                combined.contains("chill") || combined.contains("tems") ->
+                MusicalMood.CALM
 
-            combined.contains("energy") || combined.contains("dance") || combined.contains("electronic") ||
-                combined.contains("upbeat") || combined.contains("running") || combined.contains("workout") ||
-                combined.contains("party") -> MusicalMood.ENERGETIC
+            combined.contains("weeknd") || combined.contains("starboy") || combined.contains("midnight") ||
+                combined.contains("reflect") || combined.contains("night") || combined.contains("soul") ||
+                combined.contains("drake") ->
+                MusicalMood.REFLECTIVE
 
-            combined.contains("reflect") || combined.contains("nostalg") || combined.contains("midnight") ||
-                combined.contains("memory") || combined.contains("piano") || combined.contains("melancholy") ||
-                combined.contains("solitude") -> MusicalMood.REFLECTIVE
+            combined.contains("rock") || combined.contains("metal") || combined.contains("workout") ||
+                combined.contains("rage") || combined.contains("heavy") || combined.contains("drill") ->
+                MusicalMood.INTENSE
 
-            combined.contains("uplift") || combined.contains("joy") || combined.contains("sunshine") ||
-                combined.contains("happy") || combined.contains("bright") || combined.contains("hope") ||
-                combined.contains("inspire") -> MusicalMood.UPLIFTING
-
-            combined.contains("metal") || combined.contains("rock") || combined.contains("intense") ||
-                combined.contains("hyper") || combined.contains("rage") || combined.contains("heavy") -> MusicalMood.INTENSE
-
+            energy != null && energy > 0.75f -> MusicalMood.ENERGETIC
+            energy != null && energy < 0.42f -> MusicalMood.CALM
             else -> MusicalMood.UNKNOWN
         }
     }
 
     /**
-     * Composes the final AdaptiveThemeState by combining foundational palette,
-     * musical mood modifications, energy adjustments, and user preferences.
+     * Composes the final AdaptiveThemeState by combining the active Circadian or Fixed palette
+     * with live Song Mood & Energy blending.
      */
     fun composeTheme(
         preferences: ThemePreferences,
@@ -99,17 +83,10 @@ object AdaptiveThemeEngine {
         trackEnergy: Float = 0.5f,
         trackMood: MusicalMood? = null
     ): AdaptiveThemeState {
-        // 1. Determine foundational palette
         val timePeriod = resolveCurrentTimePeriod(calendar)
         val basePalette = when (preferences.behavior) {
             ThemeBehavior.FIXED -> TuneMindPalettes.forId(preferences.fixedPaletteId)
-            ThemeBehavior.TIME_BASED -> when (timePeriod) {
-                TimePeriod.MORNING -> TuneMindPalettes.Morning
-                TimePeriod.AFTERNOON -> TuneMindPalettes.Afternoon
-                TimePeriod.EVENING -> TuneMindPalettes.Evening
-                TimePeriod.NIGHT -> TuneMindPalettes.Night
-            }
-            ThemeBehavior.ADAPTIVE -> when (timePeriod) {
+            ThemeBehavior.TIME_BASED, ThemeBehavior.ADAPTIVE -> when (timePeriod) {
                 TimePeriod.MORNING -> TuneMindPalettes.Morning
                 TimePeriod.AFTERNOON -> TuneMindPalettes.Afternoon
                 TimePeriod.EVENING -> TuneMindPalettes.Evening
@@ -117,21 +94,37 @@ object AdaptiveThemeEngine {
             }
         }
 
-        // 2. Resolve mood profile
         val resolvedMood = if (preferences.behavior == ThemeBehavior.ADAPTIVE && preferences.enableMoodAdaptation) {
-            trackMood ?: resolveTrackMood(trackTitle, trackArtist)
+            trackMood ?: resolveTrackMood(trackTitle, trackArtist, energy = trackEnergy)
         } else {
             MusicalMood.UNKNOWN
         }
 
         val moodProfile = TuneMindPalettes.MoodProfiles[resolvedMood]
-        val blendFactor = if (moodProfile != null && preferences.enableMoodAdaptation) {
-            preferences.visualIntensity.factor
+        val blendFactor = if (moodProfile != null && preferences.behavior == ThemeBehavior.ADAPTIVE && preferences.enableMoodAdaptation) {
+            (preferences.visualIntensity.factor * 0.65f).coerceIn(0.25f, 0.75f)
         } else {
             0.0f
         }
 
-        // 3. Blend Accents with Mood Profile
+        val primaryBackground = if (blendFactor > 0f && moodProfile != null) {
+            blendColors(basePalette.primaryBackground, moodProfile.backgroundTint, blendFactor * 0.6f)
+        } else {
+            basePalette.primaryBackground
+        }
+
+        val secondaryBackground = if (blendFactor > 0f && moodProfile != null) {
+            blendColors(basePalette.secondaryBackground, moodProfile.backgroundTint, blendFactor * 0.5f)
+        } else {
+            basePalette.secondaryBackground
+        }
+
+        val cardSurface = if (blendFactor > 0f && moodProfile != null) {
+            blendColors(basePalette.cardSurface, moodProfile.moodAccent.copy(alpha = 0.14f), 0.25f)
+        } else {
+            basePalette.cardSurface
+        }
+
         val primaryAccent = if (blendFactor > 0f && moodProfile != null) {
             blendColors(basePalette.primaryAccent, moodProfile.moodAccent, blendFactor)
         } else if (preferences.customAccentHex != null) {
@@ -147,70 +140,54 @@ object AdaptiveThemeEngine {
             basePalette.secondaryAccent
         }
 
-        // 4. Subtle background/card gradient depth influenced by energy
-        val energyBoost = if (preferences.enableEnergyAdaptation && resolvedMood != MusicalMood.UNKNOWN) {
-            ((trackEnergy - 0.5f) * 0.15f).coerceIn(-0.1f, 0.1f)
+        val border = blendColors(basePalette.border, primaryAccent, 0.35f)
+        val highlight = primaryAccent.copy(alpha = 0.18f)
+
+        val energyBoost = if (preferences.enableEnergyAdaptation) {
+            ((trackEnergy - 0.5f) * 0.20f).coerceIn(-0.1f, 0.15f)
         } else 0f
 
-        val gradientIntensity = ((moodProfile?.gradientIntensity ?: 0.35f) + energyBoost)
-            .coerceIn(0.15f, 0.85f)
+        val gradientIntensity = ((moodProfile?.gradientIntensity ?: 0.38f) + energyBoost)
+            .coerceIn(0.20f, 0.85f)
 
-        // 5. High contrast accessibility adjustments
-        val primaryText = if (preferences.highContrast) Color.White else basePalette.primaryText
-        val secondaryText = if (preferences.highContrast) Color(0xFFE2E8F0) else basePalette.secondaryText
-        val border = if (preferences.highContrast) {
-            blendColors(basePalette.border, primaryAccent, 0.4f)
-        } else {
-            basePalette.border
-        }
-
-        val movement = moodProfile?.visualMovement ?: "Calm and composed"
-        val animDuration = if (preferences.reducedMotion) {
-            0
-        } else {
-            val baseAnim = 700 // ms
-            val factor = moodProfile?.animationSpeedFactor ?: 1.0f
-            (baseAnim / factor).toInt().coerceIn(500, 950)
-        }
+        val movement = moodProfile?.visualMovement ?: basePalette.name
+        val animDuration = if (preferences.reducedMotion) 200 else 750
 
         return AdaptiveThemeState(
             timePeriod = timePeriod,
             activePalette = basePalette,
             musicMood = resolvedMood,
             musicEnergy = trackEnergy,
-            primaryBackground = DeepObsidianAmber.AppBackground,
-            secondaryBackground = DeepObsidianAmber.SecondaryBackground,
-            cardSurface = DeepObsidianAmber.CardBackground,
-            elevatedSurface = DeepObsidianAmber.CardElevated,
-            primaryText = DeepObsidianAmber.TextPrimary,
-            secondaryText = DeepObsidianAmber.TextSecondary,
-            primaryAccent = DeepObsidianAmber.PrimaryAccent,
-            secondaryAccent = DeepObsidianAmber.SecondaryAccent,
-            highlight = DeepObsidianAmber.SurfaceHighlight,
-            border = DeepObsidianAmber.SurfaceBorder,
-            visualMovement = "Fixed Deep Amber",
-            gradientIntensity = 0.20f,
-            animationDurationMs = 0,
-            adaptationEnabled = false,
+            primaryBackground = primaryBackground,
+            secondaryBackground = secondaryBackground,
+            cardSurface = cardSurface,
+            elevatedSurface = basePalette.elevatedSurface,
+            primaryText = basePalette.primaryText,
+            secondaryText = basePalette.secondaryText,
+            primaryAccent = primaryAccent,
+            secondaryAccent = secondaryAccent,
+            highlight = highlight,
+            border = border,
+            visualMovement = movement,
+            gradientIntensity = gradientIntensity,
+            animationDurationMs = animDuration,
+            adaptationEnabled = preferences.behavior != ThemeBehavior.FIXED,
             confidence = 1.0f,
             lastUpdated = System.currentTimeMillis(),
-            recessedBackground = DeepObsidianAmber.RecessedBackground,
-            surfaceHighlight = DeepObsidianAmber.SurfaceHighlight,
-            copperAccent = DeepObsidianAmber.CopperAccent,
-            accentLight = DeepObsidianAmber.AccentLight,
-            accentSoft = DeepObsidianAmber.AccentSoft,
-            textMuted = DeepObsidianAmber.TextMuted,
-            textDisabled = DeepObsidianAmber.TextDisabled,
-            success = DeepObsidianAmber.Success,
-            warning = DeepObsidianAmber.Warning,
-            error = DeepObsidianAmber.Error,
-            info = DeepObsidianAmber.Info
+            recessedBackground = basePalette.recessedBackground,
+            surfaceHighlight = highlight,
+            copperAccent = basePalette.copperAccent,
+            accentLight = primaryAccent,
+            accentSoft = primaryAccent.copy(alpha = 0.15f),
+            textMuted = basePalette.secondaryText.copy(alpha = 0.7f),
+            textDisabled = basePalette.secondaryText.copy(alpha = 0.4f),
+            success = Color(0xFF10B981),
+            warning = Color(0xFFFFB000),
+            error = Color(0xFFFF2A55),
+            info = Color(0xFF00E5FF)
         )
     }
 
-    /**
-     * Linearly interpolates two colors in sRGB space.
-     */
     fun blendColors(color1: Color, color2: Color, ratio: Float): Color {
         val clamped = ratio.coerceIn(0.0f, 1.0f)
         val r = color1.red + (color2.red - color1.red) * clamped

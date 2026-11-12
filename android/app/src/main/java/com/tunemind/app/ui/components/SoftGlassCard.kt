@@ -8,23 +8,41 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
 fun SoftGlassCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    // 32.dp rounding creates a "Squircle" effect
-    val squircleShape = RoundedCornerShape(32.dp)
-    
+    val theme = LocalAdaptiveTheme.current
+    val squircleShape = RoundedCornerShape(28.dp)
+
     Box(
         modifier = modifier
             .clip(squircleShape)
-            .background(Color.White.copy(alpha = 0.04f)) // Frosted translucent feel
-            .border(1.dp, Color.White.copy(alpha = 0.08f), squircleShape) // Microscopic light catch
-            .padding(20.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        theme.cardSurface.copy(alpha = 0.72f),
+                        theme.secondaryBackground.copy(alpha = 0.82f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        theme.primaryAccent.copy(alpha = 0.28f),
+                        theme.border.copy(alpha = 0.55f),
+                        theme.secondaryAccent.copy(alpha = 0.22f)
+                    )
+                ),
+                shape = squircleShape
+            )
+            .padding(18.dp)
     ) {
         content()
     }

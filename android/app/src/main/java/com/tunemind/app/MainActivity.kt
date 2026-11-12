@@ -84,6 +84,7 @@ open class MainActivity : ComponentActivity() {
                     val vaultState by vm.vaultState.collectAsState()
                     val hearingInsights by vm.hearingInsightsState.collectAsState()
                     val adaptiveState by vm.adaptiveThemeState.collectAsState()
+                    val themePreferences by vm.themePreferences.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -186,7 +187,7 @@ open class MainActivity : ComponentActivity() {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color(0xFF050508))
+                                    .background(adaptiveState.primaryBackground)
                             ) {
                                 HorizontalPager(
                                     state = pagerState,
@@ -200,6 +201,7 @@ open class MainActivity : ComponentActivity() {
                                                 nowPlayingTitle = nowPlaying?.title,
                                                 onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
                                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                                    vm.recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
                                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                                         title = title,
                                                         artist = artist,
@@ -207,11 +209,29 @@ open class MainActivity : ComponentActivity() {
                                                         targetPlayer = targetPkg
                                                     )
                                                 },
-                                                onAskAgentAboutTrack = { title, artist ->
+                                                onAskAgentAboutTrack = { title, artist, freshness, spotifyUri ->
                                                     coroutineScope.launch {
                                                         pagerState.animateScrollToPage(1)
-                                                        agentVoiceManager.askAgentAboutTrack(title, artist)
+                                                        agentVoiceManager.askAgentAboutTrack(
+                                                            title = title,
+                                                            artist = artist,
+                                                            freshnessPercent = freshness,
+                                                            spotifyUri = spotifyUri,
+                                                            targetPlayer = selectedTargetPlayer
+                                                        )
                                                     }
+                                                },
+                                                onSyncAtmosphereToTrack = { title, artist ->
+                                                    vm.syncAtmosphereToTrack(title, artist)
+                                                },
+                                                onQuarantineTrack = { title, artist ->
+                                                    vm.quarantineTrack(title, artist)
+                                                },
+                                                onRestoreVaultTrack = { vaultId ->
+                                                    vm.restoreFromVault(vaultId)
+                                                },
+                                                onCycleAtmospherePalette = {
+                                                    vm.cycleAtmospherePalette()
                                                 }
                                             )
                                         }
@@ -225,6 +245,9 @@ open class MainActivity : ComponentActivity() {
                                                 liveTranscript = liveTranscript,
                                                 onOrbTapped = {
                                                     agentVoiceManager.simulateWakeWordDetected()
+                                                },
+                                                onCycleAtmospherePalette = {
+                                                    vm.cycleAtmospherePalette()
                                                 }
                                             )
                                         }
@@ -233,12 +256,17 @@ open class MainActivity : ComponentActivity() {
                                                 recentTracks = combinedRecentTracks,
                                                 hearingInsights = hearingInsights,
                                                 selectedTargetPlayer = selectedTargetPlayer,
+                                                themePreferences = themePreferences,
+                                                onUpdateThemePreferences = { newPrefs ->
+                                                    vm.updateThemePreferences(newPrefs)
+                                                },
                                                 onSelectTargetPlayer = { newPkg ->
                                                     selectedTargetPlayer = newPkg
                                                     playerPrefs.edit().putString("target_player_pkg", newPkg).apply()
                                                 },
                                                 onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
                                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                                    vm.recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
                                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                                         title = title,
                                                         artist = artist,
@@ -246,11 +274,23 @@ open class MainActivity : ComponentActivity() {
                                                         targetPlayer = targetPkg
                                                     )
                                                 },
-                                                onAskAgentAboutTrack = { title, artist ->
+                                                onAskAgentAboutTrack = { title, artist, freshness, spotifyUri ->
                                                     coroutineScope.launch {
                                                         pagerState.animateScrollToPage(1)
-                                                        agentVoiceManager.askAgentAboutTrack(title, artist)
+                                                        agentVoiceManager.askAgentAboutTrack(
+                                                            title = title,
+                                                            artist = artist,
+                                                            freshnessPercent = freshness,
+                                                            spotifyUri = spotifyUri,
+                                                            targetPlayer = selectedTargetPlayer
+                                                        )
                                                     }
+                                                },
+                                                onSyncAtmosphereToTrack = { title, artist ->
+                                                    vm.syncAtmosphereToTrack(title, artist)
+                                                },
+                                                onQuarantineTrack = { title, artist ->
+                                                    vm.quarantineTrack(title, artist)
                                                 }
                                             )
                                         }

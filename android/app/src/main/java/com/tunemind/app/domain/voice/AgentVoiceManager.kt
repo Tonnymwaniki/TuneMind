@@ -305,14 +305,73 @@ class AgentVoiceManager(
     }
 
     /**
-     * Triggered when the user taps "🎙 Ask" on any song card.
-     * Pre-fills the live transcript hint and opens the Voice Orb microphone immediately.
+     * Triggered when the user selects Neural Voice Breakdown & Dialogue on any song card.
+     * Speaks a tailored dopamine & mood insight about the track, then automatically opens
+     * the microphone after 650ms to listen for the user's approval or follow-up dialogue.
      */
-    fun askAgentAboutTrack(title: String, artist: String) {
-        scope.launch {
-            _transcriptionFlow.emit("Ask about \"$title\" by $artist...")
+    fun askAgentAboutTrack(
+        title: String,
+        artist: String,
+        freshnessPercent: Int = 92,
+        spotifyUri: String? = null,
+        targetPlayer: String = "com.spotify.music"
+    ) {
+        errorResetJob?.cancel()
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+        executionEngine.stopSpeaking()
+
+        val cleanTitle = title.trim()
+        val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
+        val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(cleanTitle, cleanArtist)
+
+        val spokenProposal = if (freshnessPercent >= 65) {
+            if (cleanArtist.isNotEmpty()) {
+                "$cleanTitle by $cleanArtist is at $freshnessPercent percent dopamine freshness with a ${mood.label.lowercase()} vibe. Want me to spin it for you right now?"
+            } else {
+                "$cleanTitle is sitting at $freshnessPercent percent dopamine freshness. Want me to spin it right now?"
+            }
+        } else {
+            if (cleanArtist.isNotEmpty()) {
+                "$cleanTitle by $cleanArtist has been in heavy rotation lately, sitting at $freshnessPercent percent freshness. Want me to spin it anyway, or find a fresh reset?"
+            } else {
+                "$cleanTitle is cooling down at $freshnessPercent percent freshness. Want me to play it anyway, or pick something fresh?"
+            }
         }
-        simulateWakeWordDetected()
+
+        _agentState.value = AgentState.SPEAKING
+        scope.launch {
+            _transcriptionFlow.emit(spokenProposal)
+        }
+
+        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
+            calculated_satiety_percentage = (100 - freshnessPercent).coerceIn(10, 90),
+            flow_state_analysis = "Neural breakdown for $cleanTitle ($freshnessPercent% fresh)",
+            voice_agent_tts = spokenProposal,
+            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                intent = "NONE",
+                target_player = targetPlayer,
+                search_query = if (cleanArtist.isNotEmpty()) "$cleanTitle $cleanArtist" else cleanTitle,
+                suggested_bpm_target = 108,
+                track_title = cleanTitle,
+                track_artist = cleanArtist,
+                spotify_uri = spotifyUri
+            )
+        )
+
+        executionEngine.executeBackendCommand(
+            response = responseObj,
+            onFinished = {
+                mainHandler.post {
+                    _agentState.value = AgentState.IDLE
+                    mainHandler.postDelayed({
+                        if (_agentState.value == AgentState.IDLE) {
+                            simulateWakeWordDetected()
+                        }
+                    }, 650L)
+                }
+            }
+        )
     }
 
     private fun requestAudioDucking() {

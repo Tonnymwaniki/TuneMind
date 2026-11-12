@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.voice.AgentState
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
 fun FloatingGlassDock(
@@ -28,6 +29,7 @@ fun FloatingGlassDock(
     onSelectPage: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val theme = LocalAdaptiveTheme.current
     val dockShape = RoundedCornerShape(32.dp)
     val isAgentActive = agentState != AgentState.IDLE
 
@@ -44,32 +46,32 @@ fun FloatingGlassDock(
 
     val agentAccentColor = when (agentState) {
         AgentState.LISTENING -> Color(0xFF00E5FF)
-        AgentState.THINKING -> Color(0xFF7000FF)
+        AgentState.THINKING -> Color(0xFFA855F7)
         AgentState.SPEAKING -> Color(0xFFFFB000)
         AgentState.ERROR -> Color(0xFFFF2A55)
-        AgentState.IDLE -> Color(0xFF00E5FF)
+        AgentState.IDLE -> theme.primaryAccent
     }
 
     Box(
         modifier = modifier
             .height(60.dp)
-            .widthIn(min = 288.dp, max = 336.dp)
+            .widthIn(min = 292.dp, max = 340.dp)
             .clip(dockShape)
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF141622).copy(alpha = 0.90f),
-                        Color(0xFF0A0B12).copy(alpha = 0.95f)
+                        theme.elevatedSurface.copy(alpha = 0.92f),
+                        theme.primaryBackground.copy(alpha = 0.96f)
                     )
                 )
             )
             .border(
-                width = 1.dp,
+                width = 1.2.dp,
                 brush = Brush.horizontalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.12f),
-                        agentAccentColor.copy(alpha = if (isAgentActive) 0.55f else 0.22f),
-                        Color.White.copy(alpha = 0.12f)
+                        theme.primaryAccent.copy(alpha = 0.35f),
+                        agentAccentColor.copy(alpha = if (isAgentActive) 0.70f else 0.40f),
+                        theme.secondaryAccent.copy(alpha = 0.35f)
                     )
                 ),
                 shape = dockShape
@@ -85,7 +87,7 @@ fun FloatingGlassDock(
             DockPillItem(
                 label = "DOPAMINE",
                 isSelected = currentPage == 0,
-                activeColor = Color(0xFF00E5FF),
+                activeColor = theme.primaryAccent,
                 badgeDotColor = if (freshTrackCount > 0) Color(0xFF10B981) else null,
                 isCenterOrb = false,
                 orbPulseAlpha = 1f,
@@ -109,7 +111,7 @@ fun FloatingGlassDock(
             DockPillItem(
                 label = "RHYTHM",
                 isSelected = currentPage == 2,
-                activeColor = Color(0xFF9D4EDD),
+                activeColor = theme.secondaryAccent,
                 badgeDotColor = null,
                 isCenterOrb = false,
                 orbPulseAlpha = 1f,
@@ -133,12 +135,12 @@ private fun DockPillItem(
 ) {
     val pillShape = RoundedCornerShape(26.dp)
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) activeColor.copy(alpha = 0.16f) else Color.Transparent,
+        targetValue = if (isSelected) activeColor.copy(alpha = 0.20f) else Color.Transparent,
         animationSpec = tween(250),
         label = "DockTabBg"
     )
     val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.52f),
+        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
         animationSpec = tween(250),
         label = "DockTabText"
     )
@@ -152,7 +154,7 @@ private fun DockPillItem(
             .background(bgColor)
             .then(
                 if (isSelected) {
-                    Modifier.border(1.dp, activeColor.copy(alpha = 0.45f), pillShape)
+                    Modifier.border(1.dp, activeColor.copy(alpha = 0.55f), pillShape)
                 } else {
                     Modifier
                 }
