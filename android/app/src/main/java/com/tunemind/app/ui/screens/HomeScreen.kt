@@ -31,7 +31,9 @@ fun HomeScreen(
         AgentVoiceManager(
             context = context,
             getNowPlaying = { vm.homeState.value.nowPlaying },
-            getRecentTracks = { vm.homeState.value.recentTracks }
+            getRecentTracks = {
+                vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks }
+            }
         )
     }
     val agentState by agentVoiceManager.agentState.collectAsState()

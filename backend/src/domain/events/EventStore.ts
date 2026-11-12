@@ -263,17 +263,58 @@ export class EventStore {
     return [...EventStore.events].sort((a, b) => a.ingested_at.localeCompare(b.ingested_at));
   }
 
-  getRecentObservedTracks(limit: number = 20): Array<{ title: string; artist: string; album?: string; source: string; playCount: number }> {
-    const tracksMap = new Map<string, { title: string; artist: string; album?: string; source: string; playCount: number }>();
-    
-    // Scan events in reverse chronological order
+  syncClientTracks(tracks: Array<{ title: string; artist: string; source?: string; trackId?: string; playCount?: number }>): void {
+    let added = 0;
+    for (const t of tracks) {
+      if (!t.title || t.title === 'Standing By' || t.title === 'Active Session') continue;
+      const safeKey = `${t.title.trim().toLowerCase()}-${(t.artist || '').trim().toLowerCase()}`.replace(/[^a-z0-9-]/g, '_');
+      const eventId = `client-sync-${safeKey}`;
+      if (!EventStore.eventIdSet.has(eventId)) {
+        const now = new Date().toISOString();
+        EventStore.eventIdSet.add(eventId);
+        EventStore.events.push({
+          event_id: eventId,
+          user_id: 'tunemind-default-user',
+          session_id: 'live-phone-sync',
+          device_id: 'android-client',
+          schema_version: '1.0',
+          event_type: 'METADATA_CHANGED',
+          occurred_at: now,
+          received_at: now,
+          media_source: t.source || 'com.spotify.music',
+          payload_json: JSON.stringify({
+            track: {
+              trackId: t.trackId || undefined,
+              title: t.title.trim(),
+              artist: (t.artist || '').trim(),
+              playCount: t.playCount || 1
+            }
+          }),
+          ingested_at: now
+        });
+        added++;
+      }
+    }
+    if (added > 0) {
+      this.persistToDisk();
+      console.log(`[EventStore] 💾 Persisted ${added} new tracks from Android phone memory to disk.`);
+    }
+  }
+
+  getRecentObservedTracks(limit: number = 40): Array<{ title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }> {
+    const tracksMap = new Map<string, { title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }>();
+
+    const isSeedEvent = (id: string) => id.startsWith('evt-play-') || id.startsWith('evt-meta-') || id.startsWith('evt-sc-') || id.startsWith('evt-stop-');
+    const hasRealEvents = EventStore.events.some(e => !isSeedEvent(e.event_id));
+
+    // Scan events in reverse chronological order, ignoring synthetic seed tracks if real user tracks exist
     const sorted = [...EventStore.events].reverse();
     for (const evt of sorted) {
+      if (hasRealEvents && isSeedEvent(evt.event_id)) continue;
       try {
         const payload = JSON.parse(evt.payload_json);
         const trk = payload.track || payload.current_track || payload.nowPlaying;
         if (trk?.title && trk?.artist && trk.title !== 'Active Session' && trk.title !== 'Standing By') {
-          // Guard against legacy synthetic tracks
           const art = trk.artist.toLowerCase();
           if (art.includes('neon hearts') || art.includes('solar pulse') || art.includes('vektor drift') || art.includes('luna rivers') || art.includes('komorebi')) {
             continue;
@@ -282,13 +323,17 @@ export class EventStore {
           const existing = tracksMap.get(key);
           if (existing) {
             existing.playCount++;
+            if (!existing.trackId && trk.trackId) {
+              existing.trackId = trk.trackId;
+            }
           } else {
             tracksMap.set(key, {
               title: trk.title.trim(),
               artist: trk.artist.trim(),
               album: trk.album,
+              trackId: trk.trackId || undefined,
               source: evt.media_source || 'com.spotify.music',
-              playCount: 1
+              playCount: trk.playCount || 1
             });
           }
           if (tracksMap.size >= limit) break;

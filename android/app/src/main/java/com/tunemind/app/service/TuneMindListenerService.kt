@@ -157,6 +157,10 @@ class TuneMindListenerService : NotificationListenerService() {
         observerOrNull()?.togglePlayback()
     }
 
+    fun play(targetPackage: String? = null) {
+        observerOrNull()?.play(targetPackage)
+    }
+
     fun pause() {
         observerOrNull()?.pause()
     }
@@ -171,6 +175,14 @@ class TuneMindListenerService : NotificationListenerService() {
 
     fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
         return observerOrNull()?.playFromSearch(targetPackage, query, extras) ?: false
+    }
+
+    fun playFromMediaId(targetPackage: String?, mediaId: String, extras: android.os.Bundle? = null): Boolean {
+        return observerOrNull()?.playFromMediaId(targetPackage, mediaId, extras) ?: false
+    }
+
+    fun playFromUri(targetPackage: String?, uri: android.net.Uri, extras: android.os.Bundle? = null): Boolean {
+        return observerOrNull()?.playFromUri(targetPackage, uri, extras) ?: false
     }
 
     companion object {

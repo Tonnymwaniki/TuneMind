@@ -596,7 +596,7 @@ class TuneMindViewModel : ViewModel() {
                 val summary = memory.summary
                 val recent = memory.tracks
                     .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
-                    .sortedByDescending { it.lastObservedAppearanceAtMs }.take(5)
+                    .sortedByDescending { it.lastObservedAppearanceAtMs }.take(50)
 
                 val isBrowserOrWeb = { pkg: String?, title: String?, artist: String? ->
                     val p = (pkg ?: "").lowercase()

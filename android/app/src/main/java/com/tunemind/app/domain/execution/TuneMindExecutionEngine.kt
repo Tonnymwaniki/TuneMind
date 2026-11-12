@@ -35,38 +35,84 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     private var mediaPlayer: MediaPlayer? = null
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
+    private var pendingSpeech: Pair<String, () -> Unit>? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     init {
-        tts = TextToSpeech(context, this)
+        tts = TextToSpeech(context.applicationContext, this)
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
+            tts?.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
             isTtsInitialized = true
+            Log.d(TAG, "TTS initialized successfully.")
+            val pending = pendingSpeech
+            if (pending != null) {
+                pendingSpeech = null
+                Log.d(TAG, "Speaking queued first-attempt utterance now that TTS is ready.")
+                speakWithListener(pending.first, pending.second)
+            }
         } else {
-            Log.e(TAG, "TTS Initialization failed!")
+            Log.e(TAG, "TTS Initialization failed (status=$status)!")
+            val pending = pendingSpeech
+            if (pending != null) {
+                pendingSpeech = null
+                mainHandler.post { pending.second() }
+            }
         }
     }
 
-    fun executeBackendCommand(response: ReasoningResponse) {
+    fun executeBackendCommand(
+        response: ReasoningResponse,
+        onBeforeLaunch: (() -> Unit)? = null,
+        onFinished: (() -> Unit)? = null
+    ) {
         Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent} with query: ${response.os_execution_command.search_query}")
 
         // 1. Immediately pause whatever background music was playing so the voice response is crystal clear
         pauseCurrentMedia()
 
-        val textToSpeak = response.voice_agent_tts.ifBlank { "Playing ${response.os_execution_command.search_query} on Spotify." }
-
-        val onSpeechFinished = {
-            // 2. Once speaking completes, launch the target player and auto-play the synced song!
+        val textToSpeak = response.voice_agent_tts.ifBlank {
             if (response.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
-                launchTargetPlayer(
-                    targetPackage = response.os_execution_command.target_player,
-                    searchQuery = response.os_execution_command.search_query,
-                    trackTitle = response.os_execution_command.track_title,
-                    trackArtist = response.os_execution_command.track_artist,
-                    spotifyUri = response.os_execution_command.spotify_uri
-                )
+                "Playing ${response.os_execution_command.search_query} on Spotify."
+            } else {
+                "I'm here with you. Tell me what you feel like hearing."
+            }
+        }
+
+        var hasExecutedPostSpeech = false
+        val onSpeechFinished = {
+            if (!hasExecutedPostSpeech) {
+                hasExecutedPostSpeech = true
+                // 2. Release assistant AudioFocus BEFORE launching Spotify so Spotify can claim AudioFocus and auto-play!
+                onBeforeLaunch?.invoke()
+
+                when (response.os_execution_command.intent) {
+                    "OS_MEDIA_NEXT_AND_DEEP_LINK" -> {
+                        launchTargetPlayer(
+                            targetPackage = response.os_execution_command.target_player,
+                            searchQuery = response.os_execution_command.search_query,
+                            trackTitle = response.os_execution_command.track_title,
+                            trackArtist = response.os_execution_command.track_artist,
+                            spotifyUri = response.os_execution_command.spotify_uri
+                        )
+                        onFinished?.invoke()
+                    }
+                    "OS_MEDIA_PAUSE" -> {
+                        pauseCurrentMedia()
+                        onFinished?.invoke()
+                    }
+                    else -> {
+                        onFinished?.invoke()
+                    }
+                }
             }
         }
 
@@ -89,6 +135,21 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             return
         }
 
+        if (!isTtsInitialized) {
+            Log.d(TAG, "TTS still initializing on first attempt; queuing utterance: $text")
+            pendingSpeech = Pair(text, onCompletion)
+            // Safety fallback in case device TTS service hangs
+            mainHandler.postDelayed({
+                val stillPending = pendingSpeech
+                if (stillPending != null) {
+                    Log.w(TAG, "TTS init timed out after 4.5s; proceeding with completion.")
+                    pendingSpeech = null
+                    stillPending.second()
+                }
+            }, 4500L)
+            return
+        }
+
         val utteranceId = "TuneMindSpeech_" + System.currentTimeMillis()
         ttsInstance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(id: String?) {
@@ -97,14 +158,14 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
             override fun onDone(id: String?) {
                 Log.d(TAG, "TTS Speech finished: $id")
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                mainHandler.post {
                     onCompletion()
                 }
             }
 
             override fun onError(id: String?) {
                 Log.e(TAG, "TTS Speech error on: $id")
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                mainHandler.post {
                     onCompletion()
                 }
             }

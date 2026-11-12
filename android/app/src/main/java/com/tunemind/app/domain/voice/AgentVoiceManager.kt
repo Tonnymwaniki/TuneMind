@@ -50,13 +50,14 @@ class AgentVoiceManager(
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState
 
-    private val executionEngine by lazy {
-        com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
-    }
+    // Eagerly initialize TTS so the very first voice response is ready with zero initialization delay
+    private val executionEngine = com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
 
     private var audioFocusRequest: AudioFocusRequest? = null
 
     private var audioRecord: AudioRecord? = null
+    private var noiseSuppressor: android.media.audiofx.NoiseSuppressor? = null
+    private var echoCanceler: android.media.audiofx.AcousticEchoCanceler? = null
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient()
     private var isRecording = false
@@ -177,17 +178,24 @@ class AgentVoiceManager(
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
 
+        // Pause any playing background music immediately so speaker audio never bleeds into the microphone
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.pause()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not pause media session before listening: ${e.message}")
+        }
+
         _agentState.value = AgentState.LISTENING
 
-        // 1. Duck the currently playing music
+        // 1. Acquire exclusive transient audio focus while listening and speaking
         requestAudioDucking()
 
-        // 2. Open microphone stream (WebSocket with native Android fallback)
+        // 2. Open microphone stream (WebSocket with AssemblyAI v3)
         startMicrophoneStream()
     }
 
     private fun requestAudioDucking() {
-        audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -205,7 +213,7 @@ class AgentVoiceManager(
             .build()
 
         audioFocusRequest?.let { audioManager.requestAudioFocus(it) }
-        Log.d(TAG, "Audio ducking requested. Music volume lowered.")
+        Log.d(TAG, "Exclusive assistant audio focus requested for clean voice capture.")
     }
 
     private fun startMicrophoneStream() {
@@ -221,27 +229,32 @@ class AgentVoiceManager(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "🟢 WebSocket OPENED successfully. HTTP Status: ${response.code}")
 
-                // Send initial client playback context to backend
+                // Send initial client playback context & full user track memory to backend
                 try {
                     val np = getNowPlaying?.invoke()
                     val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
 
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
+                        val currentTrackId = np?.let { cur ->
+                            recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }?.providerTrackId
+                        } ?: ""
                         val currentObj = JSONObject().apply {
                             put("title", np?.title ?: "Standing By")
                             put("artist", np?.artist ?: "")
                             put("source_player", np?.sourcePackage ?: "com.spotify.music")
+                            put("trackId", currentTrackId)
                         }
                         put("current_track", currentObj)
 
                         val historyArr = org.json.JSONArray()
-                        for (r in recents.take(15)) {
+                        for (r in recents.take(40)) {
                             historyArr.put(JSONObject().apply {
                                 put("title", r.title ?: "")
                                 put("artist", r.artist ?: "")
                                 put("source", r.sourcePackage ?: "com.spotify.music")
                                 put("playCount", r.distinctAppearanceCount)
+                                put("trackId", r.providerTrackId ?: "")
                             })
                         }
                         put("recent_tracks", historyArr)
@@ -272,9 +285,29 @@ class AgentVoiceManager(
                         stopMicrophoneStream() // Fully close socket now that server responded
                         setSpeakingState()
 
-                        // Execute TTS & OS Actions directly from the server response
                         val dataObj = json.optJSONObject("data")
                         val cmdObj = dataObj?.optJSONObject("os_execution_command")
+                        val rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+                        val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+                        val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
+                        var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+
+                        // Look up exact Spotify URI from local phone TrackMemoryEntry if not already populated
+                        if (resolvedSpotifyUri.isNullOrBlank()) {
+                            val recents = getRecentTracks?.invoke() ?: emptyList()
+                            val matchedLocal = recents.firstOrNull { r ->
+                                val rTitle = r.title?.trim() ?: ""
+                                rTitle.isNotEmpty() && (
+                                    (rawTrackTitle != null && rTitle.equals(rawTrackTitle.trim(), ignoreCase = true)) ||
+                                    rawSearchQuery.lowercase().contains(rTitle.lowercase())
+                                )
+                            }
+                            if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
+                                resolvedSpotifyUri = matchedLocal.providerTrackId
+                                Log.d(TAG, "Bound exact Spotify URI from local memory: $resolvedSpotifyUri")
+                            }
+                        }
+
                         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
                             calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 50) ?: 50,
                             flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
@@ -282,26 +315,42 @@ class AgentVoiceManager(
                             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                                 intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
                                 target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
-                                search_query = cmdObj?.optString("search_query", "") ?: "",
+                                search_query = rawSearchQuery,
                                 suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
-                                track_title = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() },
-                                track_artist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() },
-                                spotify_uri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                                track_title = rawTrackTitle,
+                                track_artist = rawTrackArtist,
+                                spotify_uri = resolvedSpotifyUri
                             ),
                             voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
                         )
 
-                        executionEngine.executeBackendCommand(responseObj)
-
-                        // Auto-reset to IDLE after speaking
                         errorResetJob?.cancel()
-                        errorResetJob = scope.launch {
-                            delay(7000)
-                            withContext(Dispatchers.Main) {
-                                releaseAudioDucking()
-                                resumeWakeWordListening()
+                        executionEngine.executeBackendCommand(
+                            response = responseObj,
+                            onBeforeLaunch = {
+                                // Abandon assistant audio focus right before Spotify opens so Spotify is allowed to auto-play!
+                                mainHandler.post {
+                                    abandonAssistantAudioFocusOnly()
+                                }
+                            },
+                            onFinished = {
+                                mainHandler.post {
+                                    if (responseObj.os_execution_command.intent == "NONE") {
+                                        // Conversational turn: automatically re-open microphone so user can reply naturally!
+                                        Log.d(TAG, "Conversational turn complete; re-opening mic for multi-turn dialog.")
+                                        _agentState.value = AgentState.IDLE
+                                        mainHandler.postDelayed({
+                                            if (_agentState.value == AgentState.IDLE) {
+                                                simulateWakeWordDetected()
+                                            }
+                                        }, 450L)
+                                    } else {
+                                        releaseAudioDucking()
+                                        resumeWakeWordListening()
+                                    }
+                                }
                             }
-                        }
+                        )
                         return
                     }
 
@@ -318,9 +367,7 @@ class AgentVoiceManager(
                         Log.d(TAG, "User finished speaking: $transcript")
                         stopAudioRecordingOnly()
                         setThinkingState()
-                        scope.launch {
-                            _finalTranscriptFlow.emit(transcript)
-                        }
+                        // Note: WebSocket handles reasoning directly via THINKING_COMPLETE, so do not emit to _finalTranscriptFlow here
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "JSON parse error: ${e.message}")
@@ -494,19 +541,41 @@ class AgentVoiceManager(
             return
         }
         val sampleRate = 16000
-        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val bufferSize = maxOf(minBufferSize * 4, 16000)
 
-        audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize
+        )
+
+        val sessionId = audioRecord?.audioSessionId ?: 0
+        if (sessionId != 0) {
+            try {
+                if (android.media.audiofx.NoiseSuppressor.isAvailable()) {
+                    noiseSuppressor = android.media.audiofx.NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+                }
+                if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) {
+                    echoCanceler = android.media.audiofx.AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio effects initialization notice: ${e.message}")
+            }
+        }
 
         audioRecord?.startRecording()
         isRecording = true
 
         scope.launch {
-            val buffer = ByteArray(bufferSize)
+            // Read 100ms frames (3200 bytes at 16kHz 16-bit mono) for optimal AssemblyAI v3 streaming
+            val frameBuffer = ByteArray(3200)
             while (isRecording && _agentState.value == AgentState.LISTENING) {
-                val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                val read = audioRecord?.read(frameBuffer, 0, frameBuffer.size) ?: 0
                 if (read > 0) {
-                    ws.send(buffer.copyOfRange(0, read).toByteString())
+                    ws.send(frameBuffer.copyOfRange(0, read).toByteString())
                 }
             }
         }
@@ -514,6 +583,14 @@ class AgentVoiceManager(
 
     private fun stopAudioRecordingOnly() {
         isRecording = false
+        try {
+            noiseSuppressor?.release()
+        } catch (_: Exception) {}
+        noiseSuppressor = null
+        try {
+            echoCanceler?.release()
+        } catch (_: Exception) {}
+        echoCanceler = null
         try {
             audioRecord?.stop()
             audioRecord?.release()
@@ -541,10 +618,22 @@ class AgentVoiceManager(
         }
     }
 
+    fun abandonAssistantAudioFocusOnly() {
+        audioFocusRequest?.let {
+            try {
+                audioManager.abandonAudioFocusRequest(it)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error abandoning audio focus: ${e.message}")
+            }
+        }
+        audioFocusRequest = null
+        Log.d(TAG, "Assistant audio focus abandoned so target music player can claim audio focus.")
+    }
+
     fun releaseAudioDucking() {
-        audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        abandonAssistantAudioFocusOnly()
         _agentState.value = AgentState.IDLE
-        Log.d(TAG, "Audio ducking released. Music volume restored.")
+        Log.d(TAG, "Audio ducking released. Agent state returned to IDLE.")
     }
 
     fun setThinkingState() {

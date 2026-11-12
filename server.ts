@@ -9,6 +9,7 @@ import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 import rawReasoningRouter from './backend/src/api/v1/reasoning';
 import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
+import { EventStore } from './backend/src/domain/events/EventStore';
 
 import fs from 'fs';
 
@@ -134,6 +135,7 @@ async function startServer() {
 
     let isAssemblyReady = false;
     let chunkCount = 0;
+    const pendingAudioBuffer: Buffer[] = [];
 
     const apiKey = (process.env.ASSEMBLYAI_API_KEY || '').trim();
     if (!apiKey) {
@@ -169,6 +171,18 @@ async function startServer() {
           const sessionId = msg.id || msg.session_id || 'v3-session';
           console.log(`[STT] Session started: ${sessionId}`);
           isAssemblyReady = true;
+
+          if (pendingAudioBuffer.length > 0 && aaiSocket.readyState === WebSocket.OPEN) {
+            console.log(`[STT] ⚡ Flushing ${pendingAudioBuffer.length} buffered pre-session audio chunks to AssemblyAI...`);
+            while (pendingAudioBuffer.length > 0) {
+              const chunk = pendingAudioBuffer.shift();
+              if (chunk) {
+                try {
+                  aaiSocket.send(chunk);
+                } catch (_e) {}
+              }
+            }
+          }
         } else if (msg.type === 'Turn' || msg.message_type === 'FinalTranscript' || msg.message_type === 'PartialTranscript') {
           const text = (msg.transcript || msg.text || '').trim();
           if (!text) return;
@@ -196,7 +210,7 @@ async function startServer() {
               const provider = new ClaudeMusicReasoningProvider();
 
               const eventStore = new EventStore();
-              const storedTracks = eventStore.getRecentObservedTracks(10);
+              const storedTracks = eventStore.getRecentObservedTracks(40);
 
               const liveCurrent = clientContext?.current_track;
               const liveRecents = clientContext?.recent_tracks || [];
@@ -214,14 +228,18 @@ async function startServer() {
                   });
 
               const effectiveHistory = liveRecents.length > 0
-                ? liveRecents.slice(0, 10).map(t => ({
+                ? liveRecents.slice(0, 40).map(t => ({
                     title: t.title,
                     artist: t.artist,
+                    trackId: t.trackId,
+                    playCount: t.playCount,
                     source_player: t.source || 'com.spotify.music'
                   }))
-                : storedTracks.slice(1, 10).map(t => ({
+                : storedTracks.slice(0, 40).map(t => ({
                     title: t.title,
                     artist: t.artist,
+                    trackId: t.trackId,
+                    playCount: t.playCount,
                     source_player: t.source
                   }));
 
@@ -287,8 +305,8 @@ async function startServer() {
     });
 
     let clientContext: {
-      current_track?: { title: string; artist: string; source_player?: string };
-      recent_tracks?: Array<{ title: string; artist: string; source?: string; playCount?: number }>;
+      current_track?: { title: string; artist: string; trackId?: string; source_player?: string };
+      recent_tracks?: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>;
     } | null = null;
 
     // Safety valve: Only send if AssemblyAI session is actually ready
@@ -300,7 +318,15 @@ async function startServer() {
           const json = JSON.parse(textData);
           if (json.type === 'client_context') {
             clientContext = json;
-            console.log(`[VoiceStream] 📱 Received live client playback context: Now Playing: "${json.current_track?.title}" by "${json.current_track?.artist}", Recent tracks: ${json.recent_tracks?.length || 0}`);
+            const recentsList = Array.isArray(json.recent_tracks) ? json.recent_tracks : [];
+            console.log(`[VoiceStream] 📱 Received live client playback context: Now Playing: "${json.current_track?.title}" by "${json.current_track?.artist}", Recent tracks: ${recentsList.length}`);
+            if (recentsList.length > 0) {
+              console.log(`[VoiceStream] 🎵 Phone History Sample: ${recentsList.slice(0, 8).map((r: any) => `"${r.title}" by ${r.artist}`).join(' | ')}`);
+              try {
+                const store = new EventStore();
+                store.syncClientTracks(recentsList);
+              } catch (_err) {}
+            }
             return;
           }
         } catch (_e) {
@@ -310,7 +336,6 @@ async function startServer() {
 
       if (Buffer.isBuffer(message)) {
         chunkCount++;
-        // Log every 20th chunk just to prove audio is flowing without spamming the terminal
         if (chunkCount % 20 === 0) {
           console.log(`[VoiceStream] 🔵 Streaming audio chunk... (x${chunkCount})`);
         }
@@ -320,6 +345,10 @@ async function startServer() {
             aaiSocket.send(message);
           } catch (e) {
             console.error('[VoiceStream] Failed to push audio to AAI:', e);
+          }
+        } else {
+          if (pendingAudioBuffer.length < 150) {
+            pendingAudioBuffer.push(Buffer.from(message));
           }
         }
       }

@@ -96,6 +96,18 @@ class MediaSessionObserver(
         }
     }
 
+    fun play(targetPackage: String? = null) {
+        refreshSessions()
+        val entry = controllers.values.firstOrNull { entry ->
+            targetPackage == null || entry.controller.packageName == targetPackage
+        } ?: controllers.values.firstOrNull() ?: return
+        try {
+            entry.controller.transportControls?.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "play error: ${e.message}")
+        }
+    }
+
     fun pause() {
         controllers.values.forEach { entry ->
             try {
@@ -118,6 +130,7 @@ class MediaSessionObserver(
      */
     fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
         return try {
+            refreshSessions()
             val entry = controllers.values.firstOrNull { entry ->
                 targetPackage == null || entry.controller.packageName == targetPackage
             } ?: controllers.values.firstOrNull() ?: return false
@@ -127,6 +140,38 @@ class MediaSessionObserver(
             true
         } catch (e: Exception) {
             Log.w(TAG, "playFromSearch error: ${e.message}")
+            false
+        }
+    }
+
+    fun playFromMediaId(targetPackage: String?, mediaId: String, extras: android.os.Bundle? = null): Boolean {
+        return try {
+            refreshSessions()
+            val entry = controllers.values.firstOrNull { entry ->
+                targetPackage == null || entry.controller.packageName == targetPackage
+            } ?: controllers.values.firstOrNull() ?: return false
+
+            val tc = entry.controller.transportControls ?: return false
+            tc.playFromMediaId(mediaId, extras)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "playFromMediaId error: ${e.message}")
+            false
+        }
+    }
+
+    fun playFromUri(targetPackage: String?, uri: android.net.Uri, extras: android.os.Bundle? = null): Boolean {
+        return try {
+            refreshSessions()
+            val entry = controllers.values.firstOrNull { entry ->
+                targetPackage == null || entry.controller.packageName == targetPackage
+            } ?: controllers.values.firstOrNull() ?: return false
+
+            val tc = entry.controller.transportControls ?: return false
+            tc.playFromUri(uri, extras)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "playFromUri error: ${e.message}")
             false
         }
     }

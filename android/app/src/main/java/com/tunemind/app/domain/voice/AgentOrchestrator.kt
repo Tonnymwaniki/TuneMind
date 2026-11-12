@@ -61,16 +61,22 @@ class AgentOrchestrator(
                     // 2. Set UI to SPEAKING
                     agentVoiceManager.setSpeakingState()
 
-                    // 3. Execute OS Commands (Duck music -> Speak -> Launch new track)
-                    tuneMindExecutionEngine.executeBackendCommand(aiResponse)
+                    // 3. Execute OS Commands (Pause music -> Speak -> Release focus -> Launch new track)
+                    tuneMindExecutionEngine.executeBackendCommand(
+                        response = aiResponse,
+                        onBeforeLaunch = {
+                            agentVoiceManager.abandonAssistantAudioFocusOnly()
+                        },
+                        onFinished = {
+                            agentVoiceManager.releaseAudioDucking()
+                            agentVoiceManager.resumeWakeWordListening()
+                        }
+                    )
                 } else {
                     Log.e(TAG, "AI Reasoning failed.")
+                    agentVoiceManager.releaseAudioDucking()
+                    agentVoiceManager.resumeWakeWordListening()
                 }
-
-                // 4. Return to IDLE
-                delay(3000) // Brief delay to let TTS finish starting before UI resets
-                agentVoiceManager.releaseAudioDucking() // Releases audio ducking and resets state to IDLE
-                agentVoiceManager.resumeWakeWordListening() // Resumes background Vosk wake word listening
             }
         }
     }
