@@ -45,6 +45,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
+            tts?.setSpeechRate(1.08f)
             tts?.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
@@ -67,6 +68,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 mainHandler.post { pending.second() }
             }
         }
+    }
+
+    fun stopSpeaking() {
+        pendingSpeech = null
+        try {
+            tts?.stop()
+        } catch (_: Exception) {}
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (_: Exception) {}
+        mediaPlayer = null
     }
 
     fun executeBackendCommand(

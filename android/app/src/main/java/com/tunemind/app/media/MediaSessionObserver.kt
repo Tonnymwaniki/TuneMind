@@ -85,6 +85,20 @@ class MediaSessionObserver(
         }
     }
 
+    fun hasActiveSession(targetPackage: String? = null): Boolean {
+        refreshSessions()
+        return controllers.values.any { entry ->
+            targetPackage == null || entry.controller.packageName == targetPackage
+        }
+    }
+
+    fun getActiveTitle(targetPackage: String? = null): String? {
+        val entry = controllers.values.firstOrNull { entry ->
+            targetPackage == null || entry.controller.packageName == targetPackage
+        } ?: controllers.values.firstOrNull() ?: return null
+        return entry.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+    }
+
     fun togglePlayback() {
         val entry = controllers.values.firstOrNull() ?: return
         val state = entry.controller.playbackState?.state
@@ -116,8 +130,16 @@ class MediaSessionObserver(
         }
     }
 
-    fun skipNext() {
-        controllers.values.firstOrNull()?.controller?.transportControls?.skipToNext()
+    fun skipNext(targetPackage: String? = null) {
+        refreshSessions()
+        val entry = controllers.values.firstOrNull { entry ->
+            targetPackage == null || entry.controller.packageName == targetPackage
+        } ?: controllers.values.firstOrNull() ?: return
+        try {
+            entry.controller.transportControls?.skipToNext()
+        } catch (e: Exception) {
+            Log.w(TAG, "skipNext error: ${e.message}")
+        }
     }
 
     fun skipPrev() {

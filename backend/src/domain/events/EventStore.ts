@@ -263,11 +263,28 @@ export class EventStore {
     return [...EventStore.events].sort((a, b) => a.ingested_at.localeCompare(b.ingested_at));
   }
 
+  private static recentAgentTracks: string[] = [];
+
+  recordAgentTrackAction(title: string): void {
+    const clean = (title || '').trim().toLowerCase();
+    if (!clean) return;
+    EventStore.recentAgentTracks = [
+      clean,
+      ...EventStore.recentAgentTracks.filter(t => t !== clean)
+    ].slice(0, 25);
+  }
+
+  getRecentAgentTracks(): string[] {
+    return [...EventStore.recentAgentTracks];
+  }
+
   syncClientTracks(tracks: Array<{ title: string; artist: string; source?: string; trackId?: string; playCount?: number }>): void {
     let added = 0;
     for (const t of tracks) {
-      if (!t.title || t.title === 'Standing By' || t.title === 'Active Session') continue;
-      const safeKey = `${t.title.trim().toLowerCase()}-${(t.artist || '').trim().toLowerCase()}`.replace(/[^a-z0-9-]/g, '_');
+      if (!t.title || t.title === 'Standing By' || t.title === 'Active Session' || t.title === 'Deep Flow State') continue;
+      const cleanTitle = t.title.trim();
+      const cleanArtist = (t.artist || 'Unknown Artist').trim();
+      const safeKey = `${cleanTitle.toLowerCase()}-${cleanArtist.toLowerCase()}`.replace(/[^a-z0-9-]/g, '_');
       const eventId = `client-sync-${safeKey}`;
       if (!EventStore.eventIdSet.has(eventId)) {
         const now = new Date().toISOString();
@@ -285,8 +302,8 @@ export class EventStore {
           payload_json: JSON.stringify({
             track: {
               trackId: t.trackId || undefined,
-              title: t.title.trim(),
-              artist: (t.artist || '').trim(),
+              title: cleanTitle,
+              artist: cleanArtist,
               playCount: t.playCount || 1
             }
           }),
@@ -301,7 +318,7 @@ export class EventStore {
     }
   }
 
-  getRecentObservedTracks(limit: number = 40): Array<{ title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }> {
+  getRecentObservedTracks(limit: number = 50): Array<{ title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }> {
     const tracksMap = new Map<string, { title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }>();
 
     const isSeedEvent = (id: string) => id.startsWith('evt-play-') || id.startsWith('evt-meta-') || id.startsWith('evt-sc-') || id.startsWith('evt-stop-');
@@ -314,12 +331,14 @@ export class EventStore {
       try {
         const payload = JSON.parse(evt.payload_json);
         const trk = payload.track || payload.current_track || payload.nowPlaying;
-        if (trk?.title && trk?.artist && trk.title !== 'Active Session' && trk.title !== 'Standing By') {
-          const art = trk.artist.toLowerCase();
+        if (trk?.title && trk.title !== 'Active Session' && trk.title !== 'Standing By' && trk.title !== 'Deep Flow State') {
+          const cleanTitle = String(trk.title).trim();
+          const cleanArtist = String(trk.artist || 'Unknown Artist').trim();
+          const art = cleanArtist.toLowerCase();
           if (art.includes('neon hearts') || art.includes('solar pulse') || art.includes('vektor drift') || art.includes('luna rivers') || art.includes('komorebi')) {
             continue;
           }
-          const key = `${trk.title.trim().toLowerCase()} - ${trk.artist.trim().toLowerCase()}`;
+          const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
           const existing = tracksMap.get(key);
           if (existing) {
             existing.playCount++;
@@ -328,8 +347,8 @@ export class EventStore {
             }
           } else {
             tracksMap.set(key, {
-              title: trk.title.trim(),
-              artist: trk.artist.trim(),
+              title: cleanTitle,
+              artist: cleanArtist,
               album: trk.album,
               trackId: trk.trackId || undefined,
               source: evt.media_source || 'com.spotify.music',

@@ -91,8 +91,118 @@ wss.on('connection', async (ws: WebSocket) => {
     return;
   }
 
-  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint
-  const aaiSocket = new WebSocket('wss://streaming.assemblyai.com/v3/ws?sample_rate=16000', {
+  let hasTriggeredReasoning = false;
+  let silenceTimer: NodeJS.Timeout | null = null;
+  let latestPartialText = '';
+
+  let clientContext: {
+    current_track?: { title: string; artist: string; trackId?: string; source_player?: string };
+    recent_tracks?: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>;
+    recently_played_by_agent?: string[];
+  } | null = null;
+
+  const triggerReasoningForTranscript = async (finalText: string) => {
+    if (hasTriggeredReasoning || !finalText.trim()) return;
+    hasTriggeredReasoning = true;
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+
+    console.log(`\n[STT] ⚡ Finalized Transcript: "${finalText}"`);
+
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'transcript',
+        text: finalText,
+        transcript: finalText,
+        isFinal: true
+      }));
+    }
+
+    try {
+      console.log('[VoiceStream] ⚡ Triggering Fast Claude Pipeline...');
+      const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
+      const provider = new ClaudeMusicReasoningProvider();
+
+      const eventStore = new EventStore();
+      const storedTracks = eventStore.getRecentObservedTracks(50);
+
+      const liveCurrent = clientContext?.current_track;
+      const liveRecents = clientContext?.recent_tracks || [];
+
+      const effectiveCurrentTrack = (liveCurrent?.title && liveCurrent.title !== 'Standing By' && liveCurrent.title !== 'Active Session' && liveCurrent.title !== 'Deep Flow State')
+        ? {
+            title: liveCurrent.title,
+            artist: liveCurrent.artist || '',
+            source_player: liveCurrent.source_player || 'com.spotify.music'
+          }
+        : (storedTracks[0] || {
+            title: 'Active Session',
+            artist: 'TuneMind Observer',
+            source_player: 'com.spotify.music'
+          });
+
+      const effectiveHistory = liveRecents.length > 0
+        ? liveRecents.slice(0, 50).map(t => ({
+            title: t.title,
+            artist: t.artist,
+            trackId: t.trackId,
+            playCount: t.playCount,
+            source_player: t.source || 'com.spotify.music'
+          }))
+        : storedTracks.slice(0, 50).map(t => ({
+            title: t.title,
+            artist: t.artist,
+            trackId: t.trackId,
+            playCount: t.playCount,
+            source_player: t.source
+          }));
+
+      const hour = new Date().getHours();
+      const circadianDaypart = hour >= 6 && hour < 12 ? 'Morning'
+        : hour >= 12 && hour < 17 ? 'Midday'
+        : hour >= 17 && hour < 22 ? 'Evening'
+        : 'Late Night';
+
+      const response = await provider.evaluateSatiety({
+        timestamp_utc: new Date().toISOString(),
+        circadian_daypart: circadianDaypart,
+        current_track: {
+          title: effectiveCurrentTrack.title,
+          artist: effectiveCurrentTrack.artist,
+          source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music'
+        },
+        user_command: finalText,
+        rolling_history: effectiveHistory,
+        recently_played_by_agent: clientContext?.recently_played_by_agent || [],
+        current_satiety_percentage: 50
+      });
+
+      console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'command',
+          action: 'THINKING_COMPLETE',
+          payload: response.voice_agent_tts,
+          data: response
+        }));
+      }
+    } catch (e) {
+      console.error('[VoiceStream] Error triggering reasoning:', e);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'command',
+          action: 'THINKING_COMPLETE',
+          payload: "I heard you. Let me know which vibe you'd like next."
+        }));
+      }
+    }
+  };
+
+  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint with fast turn detection
+  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true&end_of_turn_confidence_threshold=0.4&min_end_of_turn_silence_when_confident=300&max_turn_silence=800';
+  const aaiSocket = new WebSocket(aaiUrl, {
     headers: { Authorization: apiKey }
   });
 
@@ -111,13 +221,11 @@ wss.on('connection', async (ws: WebSocket) => {
     try {
       const msg = JSON.parse(data.toString());
 
-      // We must wait for the session to officially begin before sending audio
       if (msg.type === 'Begin' || msg.message_type === 'SessionBegins') {
         const sessionId = msg.id || msg.session_id || 'v3-session';
         console.log(`[STT] Session started: ${sessionId}`);
         isAssemblyReady = true;
 
-        // Immediately flush any audio chunks captured while AssemblyAI was shaking hands
         if (pendingAudioBuffer.length > 0 && aaiSocket.readyState === WebSocket.OPEN) {
           console.log(`[STT] ⚡ Flushing ${pendingAudioBuffer.length} buffered pre-session audio chunks to AssemblyAI...`);
           while (pendingAudioBuffer.length > 0) {
@@ -131,103 +239,14 @@ wss.on('connection', async (ws: WebSocket) => {
         }
       } else if (msg.type === 'Turn' || msg.message_type === 'FinalTranscript' || msg.message_type === 'PartialTranscript') {
         const text = (msg.transcript || msg.text || '').trim();
-        if (!text) return;
+        if (!text || hasTriggeredReasoning) return;
 
         const isFinal = Boolean(msg.end_of_turn || msg.message_type === 'FinalTranscript');
 
         if (isFinal) {
-          console.log(`\n[STT] Final Transcript: "${text}"`);
-
-          // 1. Send the text back to Android so the UI updates
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'transcript',
-              text: text,
-              transcript: text,
-              isFinal: true
-            }));
-          }
-
-          // 2. Trigger the Claude Reasoning Pipeline
-          try {
-            console.log('[VoiceStream] Triggering Claude Pipeline...');
-            const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
-            const provider = new ClaudeMusicReasoningProvider();
-
-            const eventStore = new EventStore();
-            const storedTracks = eventStore.getRecentObservedTracks(40);
-
-            const liveCurrent = clientContext?.current_track;
-            const liveRecents = clientContext?.recent_tracks || [];
-
-            const effectiveCurrentTrack = (liveCurrent?.title && liveCurrent.title !== 'Standing By' && liveCurrent.title !== 'Active Session')
-              ? {
-                  title: liveCurrent.title,
-                  artist: liveCurrent.artist || '',
-                  source_player: liveCurrent.source_player || 'com.spotify.music'
-                }
-              : (storedTracks[0] || {
-                  title: 'Active Session',
-                  artist: 'TuneMind Observer',
-                  source_player: 'com.spotify.music'
-                });
-
-            const effectiveHistory = liveRecents.length > 0
-              ? liveRecents.slice(0, 40).map(t => ({
-                  title: t.title,
-                  artist: t.artist,
-                  trackId: t.trackId,
-                  playCount: t.playCount,
-                  source_player: t.source || 'com.spotify.music'
-                }))
-              : storedTracks.slice(0, 40).map(t => ({
-                  title: t.title,
-                  artist: t.artist,
-                  trackId: t.trackId,
-                  playCount: t.playCount,
-                  source_player: t.source
-                }));
-
-            const hour = new Date().getHours();
-            const circadianDaypart = hour >= 6 && hour < 12 ? 'Morning'
-              : hour >= 12 && hour < 17 ? 'Midday'
-              : hour >= 17 && hour < 22 ? 'Evening'
-              : 'Late Night';
-
-            const response = await provider.evaluateSatiety({
-              timestamp_utc: new Date().toISOString(),
-              circadian_daypart: circadianDaypart,
-              current_track: {
-                title: effectiveCurrentTrack.title,
-                artist: effectiveCurrentTrack.artist,
-                source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music'
-              },
-              user_command: text,
-              rolling_history: effectiveHistory,
-              current_satiety_percentage: 50
-            });
-
-            console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'command',
-                action: 'THINKING_COMPLETE',
-                payload: response.voice_agent_tts,
-                data: response
-              }));
-            }
-          } catch (e) {
-            console.error('[VoiceStream] Error triggering reasoning:', e);
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'command',
-                action: 'THINKING_COMPLETE',
-                payload: "I heard you. Connecting to reasoning engine."
-              }));
-            }
-          }
+          await triggerReasoningForTranscript(text);
         } else {
-          // Log partial transcripts to see it working in real-time
+          latestPartialText = text;
           process.stdout.write(`\r[STT] Partial: "${text}"`);
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
@@ -237,6 +256,14 @@ wss.on('connection', async (ws: WebSocket) => {
               isFinal: false
             }));
           }
+
+          // Smart silence finalizer: if user stops speaking for 850ms after saying a command, finalize immediately!
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
+              triggerReasoningForTranscript(latestPartialText);
+            }
+          }, 850);
         }
       } else if (msg.type === 'Error') {
         console.error('[STT] AssemblyAI Server Error:', msg);
@@ -248,11 +275,6 @@ wss.on('connection', async (ws: WebSocket) => {
       console.warn('[STT] Failed to parse message from AssemblyAI:', e);
     }
   });
-
-  let clientContext: {
-    current_track?: { title: string; artist: string; trackId?: string; source_player?: string };
-    recent_tracks?: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>;
-  } | null = null;
 
   // Handle incoming messages from the Android client
   ws.on('message', (message: RawData) => {

@@ -30,7 +30,8 @@ class GenericMediaAdapter : MediaSourceAdapter {
             ?.trim()?.takeIf(String::isNotEmpty)
         val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)
             ?.trim()?.takeIf(String::isNotEmpty)
-        val trackId = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+        val trackId = (metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID)
+            ?: metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI))
             ?.trim()?.takeIf(String::isNotEmpty)
         val duration = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
             ?.getLong(MediaMetadata.METADATA_KEY_DURATION)

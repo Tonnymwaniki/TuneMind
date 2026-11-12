@@ -153,6 +153,12 @@ class TuneMindListenerService : NotificationListenerService() {
 
     fun isPlaying(): Boolean = observerOrNull()?.isPlaying() ?: false
 
+    fun hasActiveSession(targetPackage: String? = null): Boolean =
+        observerOrNull()?.hasActiveSession(targetPackage) ?: false
+
+    fun getActiveTitle(targetPackage: String? = null): String? =
+        observerOrNull()?.getActiveTitle(targetPackage)
+
     fun togglePlayback() {
         observerOrNull()?.togglePlayback()
     }
@@ -165,8 +171,8 @@ class TuneMindListenerService : NotificationListenerService() {
         observerOrNull()?.pause()
     }
 
-    fun skipNext() {
-        observerOrNull()?.skipNext()
+    fun skipNext(targetPackage: String? = null) {
+        observerOrNull()?.skipNext(targetPackage)
     }
 
     fun skipPrev() {

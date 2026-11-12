@@ -179,10 +179,31 @@ class AgentVoiceManager(
         }
     }
 
+    private val prefs by lazy {
+        context.getSharedPreferences("tunemind_agent_memory", Context.MODE_PRIVATE)
+    }
+
+    private fun getRecentlyPlayedByAgent(): List<String> {
+        val raw = prefs.getString("recent_agent_tracks", "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("|||").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    private fun recordAgentSuggestedTrack(title: String?) {
+        val clean = title?.trim() ?: return
+        if (clean.isEmpty()) return
+        val existing = getRecentlyPlayedByAgent().filterNot { it.equals(clean, ignoreCase = true) }
+        val updated = (listOf(clean) + existing).take(25)
+        prefs.edit().putString("recent_agent_tracks", updated.joinToString("|||")).apply()
+    }
+
     // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
-        // Allow tap even if currently showing ERROR to allow instant retry
-        if (_agentState.value != AgentState.IDLE && _agentState.value != AgentState.ERROR) return
+        // Allow interrupting SPEAKING or THINKING or retrying from ERROR!
+        if (_agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
+            Log.d(TAG, "Interrupting active agent speech/thinking to start new voice turn...")
+            executionEngine.stopSpeaking()
+        }
 
         errorResetJob?.cancel()
         Log.d(TAG, "Wake Word / Orb Activated! Starting TuneMind Voice Agent...")
@@ -282,7 +303,7 @@ class AgentVoiceManager(
                         put("current_track", currentObj)
 
                         val historyArr = org.json.JSONArray()
-                        for (r in recents.take(40)) {
+                        for (r in recents.take(50)) {
                             historyArr.put(JSONObject().apply {
                                 put("title", r.title ?: "")
                                 put("artist", r.artist ?: "")
@@ -292,6 +313,7 @@ class AgentVoiceManager(
                             })
                         }
                         put("recent_tracks", historyArr)
+                        put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
                     }
                     webSocket.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -325,6 +347,10 @@ class AgentVoiceManager(
                         val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
                         val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
                         var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+
+                        if (!rawTrackTitle.isNullOrBlank()) {
+                            recordAgentSuggestedTrack(rawTrackTitle)
+                        }
 
                         // Look up exact Spotify URI from local phone TrackMemoryEntry if not already populated
                         if (resolvedSpotifyUri.isNullOrBlank()) {
@@ -370,14 +396,14 @@ class AgentVoiceManager(
                             onFinished = {
                                 mainHandler.post {
                                     if (responseObj.os_execution_command.intent == "NONE") {
-                                        // Conversational turn: automatically re-open microphone so user can reply naturally!
+                                        // Conversational turn: automatically re-open microphone immediately so user can approve or change the song!
                                         Log.d(TAG, "Conversational turn complete; re-opening mic for multi-turn dialog.")
                                         _agentState.value = AgentState.IDLE
                                         mainHandler.postDelayed({
                                             if (_agentState.value == AgentState.IDLE) {
                                                 simulateWakeWordDetected()
                                             }
-                                        }, 450L)
+                                        }, 250L)
                                     } else {
                                         releaseAudioDucking()
                                         resumeWakeWordListening()

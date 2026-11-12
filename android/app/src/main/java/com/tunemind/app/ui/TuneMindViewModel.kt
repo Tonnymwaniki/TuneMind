@@ -594,10 +594,6 @@ class TuneMindViewModel : ViewModel() {
                 }
 
                 val summary = memory.summary
-                val recent = memory.tracks
-                    .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
-                    .sortedByDescending { it.lastObservedAppearanceAtMs }.take(50)
-
                 val isBrowserOrWeb = { pkg: String?, title: String?, artist: String? ->
                     val p = (pkg ?: "").lowercase()
                     val t = (title ?: "").lowercase()
@@ -608,6 +604,45 @@ class TuneMindViewModel : ViewModel() {
                     t.startsWith("http") || t.contains(".com") || t.contains("chrome") ||
                     a.startsWith("http") || a.contains(".com") || a.contains("chrome")
                 }
+
+                // Merge reconstructed memory.tracks WITH all raw observed tracks in Room so no played song is ever dropped!
+                val combinedTrackMap = linkedMapOf<String, TrackMemoryEntry>()
+                for (t in memory.tracks.filter { !it.title.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.title, it.artist) }.sortedByDescending { it.lastObservedAppearanceAtMs }) {
+                    val key = "${t.title?.trim()?.lowercase()}|${t.artist?.trim()?.lowercase() ?: ""}"
+                    combinedTrackMap[key] = t
+                }
+                val rawGrouped = rows
+                    .filter { !it.trackTitle.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist) }
+                    .groupBy { "${it.trackTitle?.trim()?.lowercase()}|${it.trackArtist?.trim()?.lowercase() ?: ""}" }
+                for ((key, group) in rawGrouped) {
+                    val latest = group.maxByOrNull { it.eventTimeMs } ?: group.first()
+                    val rawTrackId = group.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.firstOrNull()
+                    val existing = combinedTrackMap[key]
+                    if (existing == null) {
+                        combinedTrackMap[key] = TrackMemoryEntry(
+                            entryId = "raw:$key",
+                            sourcePackage = latest.sourcePackage ?: "com.spotify.music",
+                            providerTrackId = rawTrackId,
+                            title = latest.trackTitle?.trim(),
+                            artist = latest.trackArtist?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown Artist",
+                            album = latest.trackAlbum?.trim(),
+                            distinctAppearanceCount = group.size,
+                            firstObservedAppearanceAtMs = group.minOfOrNull { it.eventTimeMs },
+                            lastObservedAppearanceAtMs = latest.eventTimeMs,
+                            supportingObservationIds = group.map { it.eventId }.take(10),
+                            identityBasis = if (rawTrackId != null) TrackIdentityBasis.PROVIDER_TRACK_ID else TrackIdentityBasis.METADATA_FINGERPRINT,
+                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
+                            historyMayBeIncomplete = false,
+                            appearances = emptyList()
+                        )
+                    } else if (existing.providerTrackId.isNullOrBlank() && !rawTrackId.isNullOrBlank()) {
+                        combinedTrackMap[key] = existing.copy(providerTrackId = rawTrackId)
+                    }
+                }
+
+                val recent = combinedTrackMap.values
+                    .sortedByDescending { it.lastObservedAppearanceAtMs ?: 0L }
+                    .take(60)
 
                 val latestStateObs = rows.firstOrNull { 
                     it.playbackStateCode != null && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
@@ -633,7 +668,7 @@ class TuneMindViewModel : ViewModel() {
                 } else null
 
                 _homeState.value = HomeState(
-                    identifiableTrackCount = summary.identifiableTrackCount,
+                    identifiableTrackCount = maxOf(summary.identifiableTrackCount, recent.size),
                     distinctAppearanceCount = summary.distinctReconstructedAppearanceCount,
                     recurringTrackCount = summary.recurringTrackIdentityCount,
                     recentTracks = recent,
@@ -644,7 +679,7 @@ class TuneMindViewModel : ViewModel() {
                 recomputeAdaptiveTheme()
 
                 _historyState.value = HistoryState(
-                    tracks = memory.tracks.sortedByDescending { it.lastObservedAppearanceAtMs },
+                    tracks = recent,
                     isLoading = false,
                 )
 
