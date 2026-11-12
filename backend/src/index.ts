@@ -93,7 +93,20 @@ wss.on('connection', async (ws: WebSocket) => {
 
   let hasTriggeredReasoning = false;
   let silenceTimer: NodeJS.Timeout | null = null;
+  let formatWaitTimer: NodeJS.Timeout | null = null;
   let latestPartialText = '';
+
+  const normalizeMusicTranscript = (raw: string): string => {
+    let cleaned = raw.trim();
+    cleaned = cleaned
+      .replace(/\b(clean|claim|blame|flame|let|leave|bleed|plane|plan)\s+me\s+a\s+song\b/gi, 'play me a song')
+      .replace(/\b(please|playing|played|place)\s+(me\s+)?a\s+song\b/gi, 'play me a song')
+      .replace(/\bplay\s+(mia|mere|near|mayor)\s+song\b/gi, 'play me a song')
+      .replace(/\b(bongo\s+flower|bongo\s+lover|congo\s+flava|bongo\s+flavor)\b/gi, 'Bongo Flava')
+      .replace(/\b(change|switch)\s+(the|this)\s+(some|son|sun|phone)\b/gi, '$1 $2 song')
+      .replace(/\bplay\s+(some|son|sun)\b/gi, 'play a song');
+    return cleaned;
+  };
 
   let clientContext: {
     current_track?: { title: string; artist: string; trackId?: string; source_player?: string };
@@ -101,15 +114,20 @@ wss.on('connection', async (ws: WebSocket) => {
     recently_played_by_agent?: string[];
   } | null = null;
 
-  const triggerReasoningForTranscript = async (finalText: string) => {
+  const triggerReasoningForTranscript = async (rawFinalText: string) => {
+    const finalText = normalizeMusicTranscript(rawFinalText);
     if (hasTriggeredReasoning || !finalText.trim()) return;
     hasTriggeredReasoning = true;
     if (silenceTimer) {
       clearTimeout(silenceTimer);
       silenceTimer = null;
     }
+    if (formatWaitTimer) {
+      clearTimeout(formatWaitTimer);
+      formatWaitTimer = null;
+    }
 
-    console.log(`\n[STT] ⚡ Finalized Transcript: "${finalText}"`);
+    console.log(`\n[STT] ⚡ Finalized Transcript: "${finalText}" (raw: "${rawFinalText}")`);
 
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -241,29 +259,38 @@ wss.on('connection', async (ws: WebSocket) => {
         const text = (msg.transcript || msg.text || '').trim();
         if (!text || hasTriggeredReasoning) return;
 
-        const isFinal = Boolean(msg.end_of_turn || msg.message_type === 'FinalTranscript');
+        latestPartialText = text;
+        const isEndOfTurn = Boolean(msg.end_of_turn || msg.message_type === 'FinalTranscript');
+        const isFormatted = Boolean(msg.turn_is_formatted || msg.message_type === 'FinalTranscript');
 
-        if (isFinal) {
+        if (isEndOfTurn && isFormatted) {
           await triggerReasoningForTranscript(text);
+        } else if (isEndOfTurn) {
+          // Wait up to 220ms for AssemblyAI v3's context-formatted turn (turn_is_formatted: true) which fixes phonetic errors
+          if (formatWaitTimer) clearTimeout(formatWaitTimer);
+          formatWaitTimer = setTimeout(() => {
+            if (!hasTriggeredReasoning) {
+              triggerReasoningForTranscript(latestPartialText);
+            }
+          }, 220);
         } else {
-          latestPartialText = text;
           process.stdout.write(`\r[STT] Partial: "${text}"`);
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
               type: 'transcript',
-              text: text,
-              transcript: text,
+              text: normalizeMusicTranscript(text),
+              transcript: normalizeMusicTranscript(text),
               isFinal: false
             }));
           }
 
-          // Smart silence finalizer: if user stops speaking for 1100ms after saying a command, finalize immediately
+          // Backup silence finalizer: only finalize if user has stopped speaking for 2000ms and end_of_turn hasn't arrived
           if (silenceTimer) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
-            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 3) {
+            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 1100);
+          }, 2000);
         }
       } else if (msg.type === 'Error') {
         console.error('[STT] AssemblyAI Server Error:', msg);

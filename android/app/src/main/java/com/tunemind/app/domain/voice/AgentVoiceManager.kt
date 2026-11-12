@@ -58,6 +58,10 @@ class AgentVoiceManager(
     private var audioRecord: AudioRecord? = null
     private var noiseSuppressor: android.media.audiofx.NoiseSuppressor? = null
     private var echoCanceler: android.media.audiofx.AcousticEchoCanceler? = null
+    private var automaticGainControl: android.media.audiofx.AutomaticGainControl? = null
+    private val preConnectAudioBuffer = java.util.concurrent.ConcurrentLinkedQueue<ByteString>()
+    @Volatile
+    private var isWsOpenForAudio = false
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
         .connectTimeout(15000, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -267,6 +271,9 @@ class AgentVoiceManager(
             return
         }
 
+        // Start capturing microphone audio immediately into memory so 0ms of initial speech is lost during WebSocket handshake!
+        startLocalAudioCapture()
+
         val candidates = com.tunemind.app.domain.network.BackendEndpointManager.getCandidateWebSocketUrls(context)
         connectToCandidateWebSocket(candidates, 0)
     }
@@ -325,7 +332,12 @@ class AgentVoiceManager(
                     Log.w(TAG, "Failed to send initial client context over WS: ${e.message}")
                 }
 
-                startRecordingAndStreaming(ws)
+                // Flush all pre-connection audio frames captured while the WebSocket was opening
+                while (preConnectAudioBuffer.isNotEmpty()) {
+                    val frame = preConnectAudioBuffer.poll() ?: break
+                    ws.send(frame)
+                }
+                isWsOpenForAudio = true
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
@@ -411,8 +423,19 @@ class AgentVoiceManager(
                             },
                             onFinished = {
                                 mainHandler.post {
-                                    releaseAudioDucking()
-                                    resumeWakeWordListening()
+                                    if (responseObj.os_execution_command.intent == "NONE") {
+                                        // Conversational proposal turn: wait 650ms for speaker tail to clear, then open mic to wait for user's approval!
+                                        Log.d(TAG, "Waiting for user approval on proposed track; re-opening mic in 650ms...")
+                                        _agentState.value = AgentState.IDLE
+                                        mainHandler.postDelayed({
+                                            if (_agentState.value == AgentState.IDLE) {
+                                                simulateWakeWordDetected()
+                                            }
+                                        }, 650L)
+                                    } else {
+                                        releaseAudioDucking()
+                                        resumeWakeWordListening()
+                                    }
                                 }
                             }
                         )
@@ -610,11 +633,15 @@ class AgentVoiceManager(
         }
     }
 
-    private fun startRecordingAndStreaming(ws: WebSocket) {
+    private fun startLocalAudioCapture() {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             handleVoiceError("Microphone permission missing")
             return
         }
+        stopAudioRecordingOnly()
+        preConnectAudioBuffer.clear()
+        isWsOpenForAudio = false
+
         val sampleRate = 16000
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val bufferSize = maxOf(minBufferSize * 4, 16000)
@@ -630,6 +657,9 @@ class AgentVoiceManager(
         val sessionId = audioRecord?.audioSessionId ?: 0
         if (sessionId != 0) {
             try {
+                if (android.media.audiofx.AutomaticGainControl.isAvailable()) {
+                    automaticGainControl = android.media.audiofx.AutomaticGainControl.create(sessionId)?.apply { enabled = true }
+                }
                 if (android.media.audiofx.NoiseSuppressor.isAvailable()) {
                     noiseSuppressor = android.media.audiofx.NoiseSuppressor.create(sessionId)?.apply { enabled = true }
                 }
@@ -650,14 +680,54 @@ class AgentVoiceManager(
             while (isRecording && _agentState.value == AgentState.LISTENING) {
                 val read = audioRecord?.read(frameBuffer, 0, frameBuffer.size) ?: 0
                 if (read > 0) {
-                    ws.send(frameBuffer.copyOfRange(0, read).toByteString())
+                    val boostedBytes = boostPcm16VoiceClarity(frameBuffer, read)
+                    val byteStr = boostedBytes.toByteString()
+                    val activeWs = webSocket
+                    if (isWsOpenForAudio && activeWs != null) {
+                        while (preConnectAudioBuffer.isNotEmpty()) {
+                            val buffered = preConnectAudioBuffer.poll() ?: break
+                            activeWs.send(buffered)
+                        }
+                        activeWs.send(byteStr)
+                    } else {
+                        // Keep up to 4 seconds (40 frames) of pre-connection speech in memory while socket connects
+                        if (preConnectAudioBuffer.size < 40) {
+                            preConnectAudioBuffer.offer(byteStr)
+                        }
+                    }
                 }
             }
         }
     }
 
+    /**
+     * Applies a clean 1.75x software microphone gain with soft saturation clamping on 16-bit little-endian PCM
+     * so quiet or arm's-length speech is crystal clear for AssemblyAI word recognition.
+     */
+    private fun boostPcm16VoiceClarity(buffer: ByteArray, length: Int): ByteArray {
+        val out = ByteArray(length)
+        var i = 0
+        while (i + 1 < length) {
+            val low = buffer[i].toInt() and 0xFF
+            val high = buffer[i + 1].toInt()
+            val sample = (high shl 8) or low // signed 16-bit
+            val boosted = (sample * 7) / 4   // 1.75x gain
+            val clamped = boosted.coerceIn(-32760, 32760)
+            out[i] = (clamped and 0xFF).toByte()
+            out[i + 1] = ((clamped shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
+    }
+
     private fun stopAudioRecordingOnly() {
         isRecording = false
+        isWsOpenForAudio = false
+        preConnectAudioBuffer.clear()
+        try {
+            automaticGainControl?.release()
+        } catch (_: Exception) {}
+        automaticGainControl = null
         try {
             noiseSuppressor?.release()
         } catch (_: Exception) {}

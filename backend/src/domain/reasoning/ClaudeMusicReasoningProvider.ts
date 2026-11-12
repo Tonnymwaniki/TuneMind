@@ -130,20 +130,17 @@ You have live access to the listener's active media session ('current_track'), t
 CORE DIRECTIVES:
 1. STRICT GROUNDING & VARIETY FROM USER'S STORED HISTORY:
 - 'fresh_unplayed_user_tracks' contains real songs from the user's phone that have NOT been played or suggested recently.
-- Whenever the user asks to play a song, switch/change the song, or play a genre (like Bongo, Gospel, Afrobeats, R&B, etc.), pick the best matching track from 'fresh_unplayed_user_tracks' (defaulting to the #1 track in 'fresh_unplayed_user_tracks' so you never repeat songs).
+- Always select from 'fresh_unplayed_user_tracks' (defaulting to the #1 track in 'fresh_unplayed_user_tracks' so you never repeat songs).
 - NEVER repeat 'current_track' or any track in 'recently_suggested_or_played_titles'.
-- NEVER use robotic or repetitive phrases like "Soundstage is clean and focus velocity is locked in." Speak naturally, warmly, and specifically about the actual song title and artist you chose!
 
-2. EXECUTION & CONVERSATIONAL FLOW:
-- Keep 'voice_agent_tts' natural, warm, and concise (1-2 sentences, max 30 words).
-- PLAY / SWITCH COMMANDS ('intent': "OS_MEDIA_NEXT_AND_DEEP_LINK"):
-  * Whenever the user says "play me a song", "play a song", "play something", "change the song", "next song", "switch it", "yes", "play it", or asks for a genre/artist/song:
-  * Set 'os_execution_command.intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK".
-  * Populate 'track_title', 'track_artist', 'search_query' ("<Exact Title> <Exact Artist>"), and 'spotify_uri' (from the chosen track's 'trackId' if it starts with "spotify:track:").
-  * In 'voice_agent_tts', tell the user which song and artist you are putting on and why it fits their vibe, and invite them to let you know if they want to switch it.
-- PURE CONVERSATION ('intent': "NONE"):
-  * Only set 'intent' to "NONE" if the user is just chatting or asking a question without wanting to play or change music right now.
-- PAUSE / STOP ('intent': "OS_MEDIA_PAUSE"):
+2. STRICT TWO-STEP APPROVAL DIALOGUE (SUGGEST FIRST -> WAIT FOR USER TO APPROVE -> THEN PLAY):
+- Keep 'voice_agent_tts' natural, warm, and concise (1-2 short sentences, max 26 words).
+- STEP 1 — PROPOSE A SONG & WAIT FOR APPROVAL ('intent': "NONE"):
+  * Whenever the user asks to play a song, switch/change the song, or rejects the previous suggestion ("no", "another one", "change it", "play me a song", "play a Bongo song"):
+  * Pick the best track from 'fresh_unplayed_user_tracks', tell the user its title and artist and why it fits their vibe, and ASK if they want you to play it (e.g., "How about 'Utaniinua' by Paul Clement? Should I play it for you, or try another song?").
+  * Set 'os_execution_command.intent' to "NONE" so the app WAITS for the user's answer before playing!
+  * Populate 'track_title', 'track_artist', 'search_query', and 'spotify_uri' with your proposed song so the system remembers what song you just proposed.
+- STEP 2 — PAUSE / STOP ('intent': "OS_MEDIA_PAUSE"):
   * If the user asks to pause, stop, or hold the music, set 'intent' to "OS_MEDIA_PAUSE".
 
 OUTPUT FORMAT:
@@ -151,9 +148,9 @@ Respond ONLY with raw valid JSON matching this schema:
 {
   "calculated_satiety_percentage": 35,
   "flow_state_analysis": "1 short sentence about why this track fits",
-  "voice_agent_tts": "Natural spoken response naming the song and artist being played",
+  "voice_agent_tts": "1-2 short natural sentences proposing the song and asking if they want to play it",
   "os_execution_command": {
-    "intent": "OS_MEDIA_NEXT_AND_DEEP_LINK",
+    "intent": "NONE",
     "target_player": "com.spotify.music",
     "search_query": "Exact Song Title Exact Artist",
     "track_title": "Exact Song Title",
@@ -161,7 +158,7 @@ Respond ONLY with raw valid JSON matching this schema:
     "spotify_uri": "spotify:track:... if available else empty string",
     "suggested_bpm_target": 105
   },
-  "database_tags": ["history-grounded", "live-agent"]
+  "database_tags": ["history-grounded", "awaiting-approval"]
 }`;
   }
 
@@ -192,7 +189,7 @@ Respond ONLY with raw valid JSON matching this schema:
       if (data.access_token) {
         this.spotifyAccessToken = {
           token: data.access_token,
-          expiresAt: Date.now() + (data.expires_in * 1000) - 60000 // Expire 1 min early for safety
+          expiresAt: Date.now() + (data.expires_in * 1000) - 60000
         };
         return data.access_token;
       }
@@ -269,16 +266,20 @@ Respond ONLY with raw valid JSON matching this schema:
     const userCommandRaw = (context.user_command || '').trim();
     const userCommandLower = userCommandRaw.toLowerCase();
 
-    // 1. INSTANT CONFIRMATION FAST-PATH (<20ms response if user approves a previously proposed song)
+    // 1. INSTANT CONFIRMATION FAST-PATH (<20ms response when user approves the proposed song!)
     const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
-    const isApproval = pending !== null &&
-      /^(yes|yeah|yep|yup|sure|ok|okay|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|please)\b/i.test(userCommandLower) &&
-      !/\b(no|not|don'?t|another|different|change|else)\b/i.test(userCommandLower);
+    const isRejected = /\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\b/i.test(userCommandLower);
+    const isApproval = pending !== null && !isRejected && (
+      /\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|please|approve|confirm|start)\b/i.test(userCommandLower) ||
+      /^(guess|yet|chess|yea|yah|yess)\b/i.test(userCommandLower) ||
+      userCommandLower.includes(pending.title.toLowerCase().slice(0, 5))
+    );
 
     if (isApproval && pending) {
       ClaudeMusicReasoningProvider.pendingProposedTrack = null;
       eventStore.recordAgentTrackAction(pending.title);
-      const tts = `Playing "${pending.title}" by ${pending.artist} for you right now.`;
+      const artistPart = pending.artist && pending.artist !== 'Unknown Artist' ? ` by ${pending.artist}` : '';
+      const tts = `Awesome, playing "${pending.title}"${artistPart} for you right now.`;
       ClaudeMusicReasoningProvider.recentDialogueTurns.push(
         { role: 'user', text: userCommandRaw },
         { role: 'assistant', text: tts }
@@ -287,14 +288,15 @@ Respond ONLY with raw valid JSON matching this schema:
         ClaudeMusicReasoningProvider.recentDialogueTurns = ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-8);
       }
 
+      console.log(`[Claude Provider] ✅ USER APPROVED PROPOSED TRACK: Playing "${pending.title}"${artistPart}`);
       return {
         calculated_satiety_percentage: 25,
-        flow_state_analysis: `User approved "${pending.title}" in dialogue.`,
+        flow_state_analysis: `User approved "${pending.title}" in dialogue; executing playback now.`,
         voice_agent_tts: tts,
         os_execution_command: {
           intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
           target_player: pending.source || context.current_track?.source_player || 'com.spotify.music',
-          search_query: `${pending.title} ${pending.artist}`.trim(),
+          search_query: `${pending.title} ${pending.artist !== 'Unknown Artist' ? pending.artist : ''}`.trim(),
           track_title: pending.title,
           track_artist: pending.artist,
           spotify_uri: pending.trackId || '',
@@ -304,6 +306,8 @@ Respond ONLY with raw valid JSON matching this schema:
       };
     }
 
+    // If there was a pending track and the user did NOT approve it (e.g., said "no", "change it", or asked for something else),
+    // record it as already proposed so we pick a brand new track now!
     if (pending) {
       eventStore.recordAgentTrackAction(pending.title);
       ClaudeMusicReasoningProvider.pendingProposedTrack = null;
@@ -475,23 +479,9 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
-      // Check if user is asking to play/switch/change music
-      const wantsPlayOrSwitch =
-        /\b(play|put on|spin|start|change|switch|next|another|different|song|music|track|bongo|gospel|afrobeat|vibe|listen|something)\b/i.test(userCommandLower) &&
-        !/\b(pause|stop|quiet|mute|silence|don'?t play)\b/i.test(userCommandLower);
-
       const wantsPause = /\b(pause|stop|quiet|mute|silence|hold)\b/i.test(userCommandLower);
 
-      let resolvedIntent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'NONE' =
-        parsed.os_execution_command?.intent || 'NONE';
-
-      if (wantsPause) {
-        resolvedIntent = 'OS_MEDIA_PAUSE';
-      } else if (wantsPlayOrSwitch && resolvedIntent === 'NONE') {
-        resolvedIntent = 'OS_MEDIA_NEXT_AND_DEEP_LINK';
-      }
-
-      // If we are playing/proposing a track and Claude didn't pick a valid fresh track, bind to freshTracks[0]
+      // If Claude didn't pick a valid fresh track, bind to freshTracks[0]
       if (freshTracks.length > 0 && (!trackTitle || excludedSet.has(trackTitle.toLowerCase().trim()))) {
         const mentionedTrack = freshTracks.find(ft => ttsText.toLowerCase().includes(ft.title.toLowerCase()));
         const chosen = mentionedTrack || freshTracks[0];
@@ -520,8 +510,8 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
-      // If no Spotify URI is stored locally and Spotify API credentials exist, look up exact URI
-      if (!spotifyUri && resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' && trackTitle) {
+      // Pre-resolve Spotify URI now so when the user says "Yes" on the next turn, playback is instantaneous!
+      if (!spotifyUri && trackTitle) {
         const cleanArtist = trackArtist && trackArtist !== 'Unknown Artist' ? trackArtist : undefined;
         const resolved = await this.lookupSpotifyTrack(trackTitle, cleanArtist);
         if (resolved) {
@@ -532,21 +522,38 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
-      if (!ttsText || ttsText.includes('Soundstage is clean')) {
-        if (resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' && trackTitle) {
-          const artistPart = trackArtist && trackArtist !== 'Unknown Artist' ? ` by ${trackArtist}` : '';
-          ttsText = `Putting on "${trackTitle}"${artistPart} from your history right now. Let me know if you want to switch it!`;
-        } else if (resolvedIntent === 'OS_MEDIA_PAUSE') {
-          ttsText = 'Pausing your music now.';
-        } else {
-          ttsText = "I'm right here with you. Tell me what song or vibe you want to hear!";
-        }
-      }
-
       const targetPlayer = parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music';
 
-      if (trackTitle) {
+      // STRICT 2-STEP DIALOGUE ENFORCEMENT:
+      // Unless the user asked to PAUSE, Turn 1 ALWAYS proposes the track and sets intent = 'NONE' to wait for user approval!
+      let resolvedIntent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'NONE' = 'NONE';
+      if (wantsPause) {
+        resolvedIntent = 'OS_MEDIA_PAUSE';
+      } else {
+        resolvedIntent = 'NONE';
+      }
+
+      if (resolvedIntent === 'NONE' && trackTitle) {
+        ClaudeMusicReasoningProvider.pendingProposedTrack = {
+          title: trackTitle,
+          artist: trackArtist,
+          trackId: spotifyUri || undefined,
+          source: targetPlayer
+        };
         eventStore.recordAgentTrackAction(trackTitle);
+        console.log(`[Claude Provider] 💬 Proposed "${trackTitle}" by ${trackArtist} — waiting for user approval before executing!`);
+      }
+
+      // Make sure ttsText clearly names the proposed track and asks for approval
+      const artistPart = trackArtist && trackArtist !== 'Unknown Artist' ? ` by ${trackArtist}` : '';
+      if (!ttsText || !ttsText.includes('?')) {
+        if (resolvedIntent === 'OS_MEDIA_PAUSE') {
+          ttsText = 'Pausing your music right now.';
+        } else if (trackTitle) {
+          ttsText = `How about "${trackTitle}"${artistPart} from your library? Should I play it for you, or would you like another song?`;
+        } else {
+          ttsText = "I'm listening—what song or vibe would you like me to find for you?";
+        }
       }
 
       ClaudeMusicReasoningProvider.recentDialogueTurns.push(
@@ -566,7 +573,7 @@ Respond ONLY with raw valid JSON matching this schema:
         ),
         flow_state_analysis: String(
           parsed.flow_state_analysis ??
-          `Selected "${trackTitle}" based on listener history and acoustic freshness.`
+          `Proposed "${trackTitle}" — awaiting listener approval in dialogue.`
         ),
         voice_agent_tts: ttsText,
         os_execution_command: {
@@ -580,7 +587,7 @@ Respond ONLY with raw valid JSON matching this schema:
         },
         database_tags: Array.isArray(parsed.database_tags)
           ? parsed.database_tags
-          : ['claude-haiku-5-5', 'history-grounded']
+          : ['claude-haiku-5-5', 'awaiting-approval']
       };
     } catch (error: any) {
       console.error('[Claude Provider] API Call failed, using smart history fallback:', error?.message || error);
@@ -625,15 +632,6 @@ Respond ONLY with raw valid JSON matching this schema:
       source: targetPlayer
     };
 
-    eventStore.recordAgentTrackAction(chosen.title);
-    const artistPart = chosen.artist && chosen.artist !== 'Unknown Artist' ? ` by ${chosen.artist}` : '';
-    const spokenVariations = [
-      `Playing "${chosen.title}"${artistPart} from your listening history right now. Tell me anytime if you want to switch it up!`,
-      `I've got you—putting on "${chosen.title}"${artistPart} for you now.`,
-      `Spinning "${chosen.title}"${artistPart} from your library right now. Let me know how this vibe feels!`
-    ];
-    const tts = spokenVariations[ClaudeMusicReasoningProvider.rotationIndex % spokenVariations.length];
-
     let spotifyUri = '';
     if (chosen.trackId) {
       const tid = String(chosen.trackId).trim();
@@ -644,12 +642,28 @@ Respond ONLY with raw valid JSON matching this schema:
       }
     }
 
+    ClaudeMusicReasoningProvider.pendingProposedTrack = {
+      title: chosen.title,
+      artist: chosen.artist,
+      trackId: spotifyUri || undefined,
+      source: chosen.source || targetPlayer
+    };
+    eventStore.recordAgentTrackAction(chosen.title);
+
+    const artistPart = chosen.artist && chosen.artist !== 'Unknown Artist' ? ` by ${chosen.artist}` : '';
+    const spokenVariations = [
+      `I found "${chosen.title}"${artistPart} in your listening history. Would you like me to play it, or try another song?`,
+      `How about "${chosen.title}"${artistPart} from your library? Say yes if you want me to put it on, or tell me to switch it!`,
+      `I have "${chosen.title}"${artistPart} ready for you. Should I play that now, or pick something else?`
+    ];
+    const tts = spokenVariations[ClaudeMusicReasoningProvider.rotationIndex % spokenVariations.length];
+
     return {
       calculated_satiety_percentage: 35,
-      flow_state_analysis: `Selected "${chosen.title}"${artistPart} from listener's stored history.`,
+      flow_state_analysis: `Proposed "${chosen.title}"${artistPart} from listener's stored history — awaiting approval.`,
       voice_agent_tts: tts,
       os_execution_command: {
-        intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
+        intent: 'NONE',
         target_player: chosen.source || targetPlayer,
         search_query: `${chosen.title} ${chosen.artist !== 'Unknown Artist' ? chosen.artist : ''}`.trim(),
         track_title: chosen.title,
@@ -657,7 +671,7 @@ Respond ONLY with raw valid JSON matching this schema:
         spotify_uri: spotifyUri,
         suggested_bpm_target: 105
       },
-      database_tags: ['smart-history-execution', context.circadian_daypart.toLowerCase()]
+      database_tags: ['smart-history-proposal', 'awaiting-approval']
     };
   }
 
