@@ -1,11 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Mic,
-  Volume2,
   Play,
   Pause,
-  Sparkles,
-  Radio,
   X
 } from 'lucide-react';
 
@@ -29,7 +25,7 @@ const PALETTES: Record<PaletteId, AtmospherePalette> = {
     name: 'Glacier Dawn',
     moodLabel: 'Calm Sanctuary',
     bgGradient: 'from-[#05101F] via-[#0A1B32] to-[#030912]',
-    cardBg: 'rgba(16, 36, 66, 0.72)',
+    cardBg: 'rgba(16, 36, 66, 0.78)',
     primaryAccent: '#00E5FF',
     secondaryAccent: '#38BDF8',
   },
@@ -38,7 +34,7 @@ const PALETTES: Record<PaletteId, AtmospherePalette> = {
     name: 'Emerald Velocity',
     moodLabel: 'Electric Groove',
     bgGradient: 'from-[#04130E] via-[#092118] to-[#020B08]',
-    cardBg: 'rgba(14, 46, 34, 0.72)',
+    cardBg: 'rgba(14, 46, 34, 0.78)',
     primaryAccent: '#10B981',
     secondaryAccent: '#00E5FF',
   },
@@ -47,7 +43,7 @@ const PALETTES: Record<PaletteId, AtmospherePalette> = {
     name: 'Solar Ember',
     moodLabel: 'Golden Uplift',
     bgGradient: 'from-[#160A07] via-[#24110C] to-[#0E0504]',
-    cardBg: 'rgba(50, 24, 17, 0.72)',
+    cardBg: 'rgba(50, 24, 17, 0.78)',
     primaryAccent: '#FFB000',
     secondaryAccent: '#FF5E36',
   },
@@ -56,7 +52,7 @@ const PALETTES: Record<PaletteId, AtmospherePalette> = {
     name: 'Synaptic Violet',
     moodLabel: 'Midnight Reflective',
     bgGradient: 'from-[#080516] via-[#120B29] to-[#04020C]',
-    cardBg: 'rgba(27, 17, 58, 0.72)',
+    cardBg: 'rgba(27, 17, 58, 0.78)',
     primaryAccent: '#A855F7',
     secondaryAccent: '#00E5FF',
   },
@@ -76,10 +72,10 @@ interface DopamineTrack {
 }
 
 const INITIAL_SONGS: DopamineTrack[] = [
-  { id: '1', title: 'Anaweza Yote', artist: 'The Adventist Police Ministers', freshness: 97, playCount: 1, bpm: 98, energy: 0.72, moodPalette: 'evening', moodName: 'Golden Uplift', isCoolingDown: false },
-  { id: '2', title: 'Essence', artist: 'Wizkid, Tems', freshness: 94, playCount: 1, bpm: 104, energy: 0.78, moodPalette: 'afternoon', moodName: 'Electric Groove', isCoolingDown: false },
-  { id: '3', title: 'Malaika', artist: 'Sauti Sol', freshness: 91, playCount: 2, bpm: 102, energy: 0.65, moodPalette: 'morning', moodName: 'Calm Sanctuary', isCoolingDown: false },
-  { id: '4', title: 'Last Last', artist: 'Burna Boy', freshness: 88, playCount: 2, bpm: 115, energy: 0.84, moodPalette: 'afternoon', moodName: 'Electric Groove', isCoolingDown: false },
+  { id: '1', title: 'Essence', artist: 'Wizkid, Tems', freshness: 96, playCount: 1, bpm: 104, energy: 0.78, moodPalette: 'afternoon', moodName: 'Electric Groove', isCoolingDown: false },
+  { id: '2', title: 'Malaika', artist: 'Sauti Sol', freshness: 93, playCount: 1, bpm: 102, energy: 0.65, moodPalette: 'morning', moodName: 'Calm Sanctuary', isCoolingDown: false },
+  { id: '3', title: 'Last Last', artist: 'Burna Boy', freshness: 89, playCount: 2, bpm: 115, energy: 0.84, moodPalette: 'afternoon', moodName: 'Electric Groove', isCoolingDown: false },
+  { id: '4', title: 'Anaweza Yote', artist: 'The Adventist Police Ministers', freshness: 85, playCount: 2, bpm: 98, energy: 0.72, moodPalette: 'evening', moodName: 'Golden Uplift', isCoolingDown: false },
   { id: '5', title: 'Calm Down', artist: 'Rema', freshness: 34, playCount: 6, bpm: 107, energy: 0.79, moodPalette: 'evening', moodName: 'Golden Uplift', isCoolingDown: true },
   { id: '6', title: 'Starboy', artist: 'The Weeknd', freshness: 28, playCount: 7, bpm: 186, energy: 0.85, moodPalette: 'night', moodName: 'Midnight Reflective', isCoolingDown: true },
 ];
@@ -95,17 +91,37 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<ScreenTab>('AGENT');
   const [vaultFilter, setVaultFilter] = useState<'FRESH' | 'COOLING'>('FRESH');
   const [selectedPhaseIdx, setSelectedPhaseIdx] = useState<number>(1);
-  const [activePaletteId, setActivePaletteId] = useState<PaletteId>('evening');
+  const [activePaletteId, setActivePaletteId] = useState<PaletteId>('afternoon');
   const [isAutoTheme, setIsAutoTheme] = useState<boolean>(true);
-  const [targetPlayer, setTargetPlayer] = useState<string>('com.spotify.music');
 
   const [songs, setSongs] = useState<DopamineTrack[]>(INITIAL_SONGS);
   const [currentTrack, setCurrentTrack] = useState<DopamineTrack>(INITIAL_SONGS[0]);
+  const [isMusicPlaying, setIsMusicPlaying] = useState<boolean>(true);
+  const [tickerIndex, setTickerIndex] = useState<number>(0);
   const [activeSyncSong, setActiveSyncSong] = useState<DopamineTrack | null>(null);
   const [agentState, setAgentState] = useState<AgentState>('IDLE');
-  const [satietyPercentage, setSatietyPercentage] = useState<number>(18);
+  const [satietyPercentage, setSatietyPercentage] = useState<number>(14);
   const [liveTranscript, setLiveTranscript] = useState<string>('');
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [flowAnalysis, setFlowAnalysis] = useState<string>(
+    'Shifting into smooth Afrobeats groove at 104 BPM — 96% Dopamine Readiness.'
+  );
+  const [waveTick, setWaveTick] = useState<number>(0);
+
+  // Live harmonic animation loop for the 36-petal Studio Mascot & Equalizer
+  useEffect(() => {
+    const id = setInterval(() => {
+      setWaveTick(t => (t + 1) % 360);
+    }, 65);
+    return () => clearInterval(id);
+  }, []);
+
+  // Rotate standby queue in header when paused
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTickerIndex(i => (i + 1) % songs.length);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [songs.length]);
 
   const theme = PALETTES[activePaletteId];
 
@@ -144,11 +160,16 @@ export default function App() {
     IDLE: theme.primaryAccent,
   }[agentState];
 
-  const satietyColor = satietyPercentage > 75 ? '#FF2A55' : satietyPercentage > 50 ? '#FFB000' : theme.secondaryAccent;
+  const secondaryGlowColor =
+    agentState === 'SPEAKING'
+      ? '#00E5FF'
+      : agentState === 'LISTENING'
+      ? '#10B981'
+      : theme.secondaryAccent;
 
   const speakNative = (text: string, onDone?: () => void) => {
     if (!('speechSynthesis' in window)) {
-      setTimeout(() => onDone?.(), 2200);
+      setTimeout(() => onDone?.(), 2400);
       return;
     }
     window.speechSynthesis.cancel();
@@ -163,28 +184,35 @@ export default function App() {
     if (agentState === 'SPEAKING' || agentState === 'THINKING') {
       window.speechSynthesis?.cancel();
       setAgentState('LISTENING');
-      setLiveTranscript('Listening to you...');
+      setLiveTranscript('Listening to your voice...');
       return;
     }
     setAgentState('LISTENING');
-    setLiveTranscript('Listening to you...');
+    setLiveTranscript('Listening to your voice...');
     setTimeout(() => {
-      const nextFresh = songs.find(s => !s.isCoolingDown && s.id !== currentTrack.id) || songs[0];
-      const proposal = `How about "${nextFresh.title}" by ${nextFresh.artist}? It's at ${nextFresh.freshness}% dopamine freshness with a ${nextFresh.moodName.toLowerCase()} vibe—want me to spin it right now?`;
-      setLiveTranscript(proposal);
-      setAgentState('SPEAKING');
-      speakNative(proposal, () => setAgentState('IDLE'));
-    }, 1500);
+      setAgentState('THINKING');
+      setFlowAnalysis('Synthesizing your Taste Genome & live dopamine freshness...');
+      setTimeout(() => {
+        const nextFresh = songs.find(s => !s.isCoolingDown && s.id !== currentTrack.id) || songs[0];
+        const proposal = `How about "${nextFresh.title}" by ${nextFresh.artist}? It's sitting at ${nextFresh.freshness}% dopamine freshness with an ${nextFresh.moodName.toLowerCase()} vibe—want me to spin it right now?`;
+        setLiveTranscript(proposal);
+        setFlowAnalysis(`Mood DNA: ${nextFresh.moodName} • ${nextFresh.freshness}% Dopamine Readiness`);
+        setAgentState('SPEAKING');
+        speakNative(proposal, () => setAgentState('IDLE'));
+      }, 750);
+    }, 1300);
   };
 
   const handlePlaySongButtonOnly = (track: DopamineTrack) => {
     setCurrentTrack(track);
+    setIsMusicPlaying(true);
     if (isAutoTheme) {
       setActivePaletteId(track.moodPalette);
     }
     setSatietyPercentage(100 - track.freshness);
     const spoken = `Playing ${track.title} by ${track.artist} now.`;
     setLiveTranscript(spoken);
+    setFlowAnalysis(`Direct Studio Launch • ${track.moodName} (${track.bpm} BPM)`);
     setAgentState('SPEAKING');
     speakNative(spoken, () => setAgentState('IDLE'));
   };
@@ -197,6 +225,7 @@ export default function App() {
     }
     const proposal = `${track.title} by ${track.artist} is sitting at ${track.freshness}% dopamine freshness with a ${track.moodName.toLowerCase()} vibe. Want me to spin it for you right now?`;
     setLiveTranscript(proposal);
+    setFlowAnalysis(`Mood DNA: ${track.moodName} • ${track.freshness}% Dopamine Readiness`);
     setAgentState('SPEAKING');
     speakNative(proposal, () => {
       setAgentState('LISTENING');
@@ -220,26 +249,59 @@ export default function App() {
   const displayedVaultSongs = vaultFilter === 'FRESH' ? freshSongs : coolingSongs;
   const avgFreshness = Math.round(songs.reduce((acc, s) => acc + s.freshness, 0) / songs.length);
   const activePhase = CIRCADIAN_PHASES[selectedPhaseIdx];
+  const rotatingCandidate = songs[tickerIndex % songs.length];
+
+  // Dynamic Header Telemetry for Center Screen
+  const headerBadge =
+    agentState === 'LISTENING'
+      ? '🎙 VOICE CAPTURE LIVE'
+      : agentState === 'THINKING'
+      ? '🧠 NEURAL REASONING'
+      : agentState === 'SPEAKING'
+      ? '🔊 AGENT SPEAKING'
+      : isMusicPlaying
+      ? '● LIVE IN STUDIO'
+      : '✦ PEAK DOPAMINE QUEUE';
+
+  const headerTitle =
+    agentState === 'LISTENING'
+      ? 'Listening to your request...'
+      : agentState === 'THINKING'
+      ? 'Matching your Taste Genome...'
+      : isMusicPlaying
+      ? currentTrack.title
+      : rotatingCandidate.title;
+
+  const headerSubtitle =
+    agentState === 'LISTENING'
+      ? 'Studio microphone active • 16kHz voice stream'
+      : agentState === 'THINKING'
+      ? `Evaluating dopamine freshness & ${theme.moodLabel}`
+      : isMusicPlaying
+      ? `${currentTrack.artist} • ${currentTrack.moodName}`
+      : `${rotatingCandidate.artist} • ${rotatingCandidate.freshness}% Fresh in Vault`;
 
   return (
     <div
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className={`min-h-screen bg-gradient-to-b ${theme.bgGradient} text-white flex flex-col justify-between relative overflow-hidden select-none font-sans transition-colors duration-700`}
+      className={`h-screen bg-gradient-to-b ${theme.bgGradient} text-white flex flex-col justify-between relative overflow-hidden select-none font-sans transition-colors duration-700`}
     >
-      <audio ref={audioRef} className="hidden" />
-
-      {/* Ambient Adaptive Atmosphere Halo */}
+      {/* Studio Spotlights */}
       <div
-        className="fixed -top-16 right-0 w-72 h-72 rounded-full blur-[95px] pointer-events-none transition-all duration-700"
-        style={{ backgroundColor: `${theme.primaryAccent}33` }}
+        className="fixed -top-16 left-1/2 -translate-x-1/2 w-80 h-80 rounded-full blur-[95px] pointer-events-none transition-all duration-700"
+        style={{ backgroundColor: `${targetOrbColor}38` }}
+      />
+      <div
+        className="fixed bottom-16 left-1/2 -translate-x-1/2 w-72 h-72 rounded-full blur-[95px] pointer-events-none transition-all duration-700"
+        style={{ backgroundColor: `${secondaryGlowColor}28` }}
       />
 
-      {/* MAIN 3-SCREEN CANVAS */}
-      <main className="flex-1 w-full max-w-md mx-auto px-5 pt-6 pb-28 flex flex-col relative z-10">
+      {/* MAIN 3-SCREEN CANVAS (pb-24 reserves space so Floating Dock never collides with bottom console) */}
+      <main className="flex-1 w-full max-w-md mx-auto px-5 pt-4 pb-24 flex flex-col justify-between relative z-10 overflow-hidden">
         {/* SCREEN 0: DOPAMINE VAULT */}
         {activeScreen === 'DOPAMINE' && (
-          <div className="flex-1 flex flex-col space-y-4">
+          <div className="flex-1 flex flex-col space-y-3.5 overflow-hidden">
             <div className="flex items-center justify-between">
               <div>
                 <span
@@ -267,13 +329,13 @@ export default function App() {
 
             {/* Dopamine Readiness Hero Card */}
             <div
-              className="rounded-[28px] border p-4 flex items-center gap-4"
+              className="rounded-[26px] border p-3.5 flex items-center gap-4"
               style={{
                 backgroundColor: theme.cardBg,
                 borderColor: `${theme.primaryAccent}44`,
               }}
             >
-              <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+              <div className="relative w-14 h-14 flex items-center justify-center shrink-0">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 72 72">
                   <circle cx="36" cy="36" r="28" stroke="rgba(255,255,255,0.08)" strokeWidth="6" fill="none" />
                   <circle
@@ -287,7 +349,7 @@ export default function App() {
                     strokeLinecap="round"
                   />
                 </svg>
-                <span className="absolute text-sm font-bold text-white">{avgFreshness}%</span>
+                <span className="absolute text-xs font-bold text-white">{avgFreshness}%</span>
               </div>
               <div>
                 <h2 className="text-sm font-bold text-white">
@@ -295,7 +357,7 @@ export default function App() {
                     ? `${freshSongs.length} Peak Dopamine Tracks`
                     : `${coolingSongs.length} Tracks Cooling Down`}
                 </h2>
-                <p className="text-xs text-white/65 mt-1 leading-relaxed">
+                <p className="text-xs text-white/65 mt-0.5 leading-relaxed">
                   Tap ▶ to play a song, or tap SYNC for neural track actions & mood sync.
                 </p>
               </div>
@@ -305,7 +367,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-1.5 p-1 rounded-full bg-white/[0.05] border border-white/[0.08]">
               <button
                 onClick={() => setVaultFilter('FRESH')}
-                className="py-2.5 rounded-full text-[11px] font-bold tracking-wider transition-all"
+                className="py-2 rounded-full text-[11px] font-bold tracking-wider transition-all"
                 style={{
                   backgroundColor: vaultFilter === 'FRESH' ? `${theme.primaryAccent}33` : 'transparent',
                   border: vaultFilter === 'FRESH' ? `1px solid ${theme.primaryAccent}88` : '1px solid transparent',
@@ -316,7 +378,7 @@ export default function App() {
               </button>
               <button
                 onClick={() => setVaultFilter('COOLING')}
-                className="py-2.5 rounded-full text-[11px] font-bold tracking-wider transition-all"
+                className="py-2 rounded-full text-[11px] font-bold tracking-wider transition-all"
                 style={{
                   backgroundColor: vaultFilter === 'COOLING' ? 'rgba(255,176,0,0.22)' : 'transparent',
                   border: vaultFilter === 'COOLING' ? '1px solid rgba(255,176,0,0.6)' : '1px solid transparent',
@@ -327,21 +389,20 @@ export default function App() {
               </button>
             </div>
 
-            {/* Scroll-Safe Song Cards (Row is NOT clickable; only ▶ Play and SYNC buttons fire) */}
+            {/* Scroll-Safe Song Cards */}
             <div className="space-y-2.5 flex-1 overflow-y-auto pr-0.5">
               {displayedVaultSongs.map(song => {
-                const isPlayingNow = currentTrack.id === song.id;
+                const isPlayingNow = currentTrack.id === song.id && isMusicPlaying;
                 const accent = isPlayingNow ? '#10B981' : song.isCoolingDown ? '#FFB000' : theme.primaryAccent;
                 return (
                   <div
                     key={song.id}
-                    className="rounded-3xl border p-3.5 flex items-center gap-3.5 transition-all"
+                    className="rounded-3xl border p-3 flex items-center gap-3.5 transition-all"
                     style={{
                       backgroundColor: isPlayingNow ? `${accent}22` : theme.cardBg,
                       borderColor: isPlayingNow ? `${accent}88` : `${theme.primaryAccent}33`,
                     }}
                   >
-                    {/* Dedicated 48x48 Play Button */}
                     <button
                       onClick={() => handlePlaySongButtonOnly(song)}
                       className="relative w-12 h-12 rounded-full flex items-center justify-center shrink-0 cursor-pointer active:scale-92 transition-transform"
@@ -366,7 +427,6 @@ export default function App() {
                       )}
                     </button>
 
-                    {/* Title & Artist */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-white truncate">{song.title}</p>
                       <p className="text-xs text-white/65 truncate">{song.artist}</p>
@@ -382,10 +442,9 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* Upgraded Sculpted Neural Sonic SYNC Button */}
                     <button
                       onClick={() => setActiveSyncSong(song)}
-                      className="min-w-[78px] min-h-[44px] px-3 py-2 rounded-2xl border flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all shrink-0"
+                      className="min-w-[78px] min-h-[42px] px-3 py-2 rounded-2xl border flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all shrink-0"
                       style={{
                         background: `linear-gradient(90deg, ${accent}28, ${theme.secondaryAccent}22)`,
                         borderColor: `${accent}88`,
@@ -406,142 +465,270 @@ export default function App() {
           </div>
         )}
 
-        {/* SCREEN 1: CENTER HOME — 100% DEDICATED LIVING VOICE ORB */}
+        {/* SCREEN 1: CENTER HOME — FULL-SCREEN STUDIO AI MASCOT & SONIC ENTITY */}
         {activeScreen === 'AGENT' && (
-          <div className="flex-1 flex flex-col justify-between items-center py-2">
-            {/* Top Now Syncing & Atmosphere Header Pill */}
+          <div className="flex-1 flex flex-col justify-between items-center h-full">
+            {/* 1. TOP: LIVE STUDIO TELEMETRY HEADER (Never Hardcoded) */}
             <div
-              className="w-full rounded-[28px] border px-5 py-3.5"
+              className="w-full rounded-[26px] border px-4 py-3 flex items-center gap-3"
               style={{
                 backgroundColor: theme.cardBg,
-                borderColor: `${theme.primaryAccent}55`,
+                borderColor: `${targetOrbColor}66`,
+              }}
+            >
+              {/* Animated 4-bar Equalizer Badge */}
+              <button
+                onClick={() => setIsMusicPlaying(p => !p)}
+                className="w-10 h-10 rounded-full flex items-center justify-center gap-[2.5px] border shrink-0 cursor-pointer"
+                style={{
+                  backgroundColor: `${targetOrbColor}22`,
+                  borderColor: `${targetOrbColor}66`,
+                }}
+                title="Toggle Live Studio Playback Simulation"
+              >
+                {[0, 1, 2, 3].map(i => {
+                  const active = agentState !== 'IDLE' || isMusicPlaying;
+                  const h = active
+                    ? 6 + Math.round(9 * ((Math.sin((waveTick * 0.25) + i * 1.2) + 1) / 2))
+                    : 6 + (i % 2) * 4;
+                  return (
+                    <span
+                      key={i}
+                      className="w-[3px] rounded-full transition-all duration-75"
+                      style={{
+                        height: `${h}px`,
+                        backgroundColor: i % 2 === 0 ? targetOrbColor : secondaryGlowColor,
+                      }}
+                    />
+                  );
+                })}
+              </button>
+
+              <div className="flex-1 min-w-0">
+                <span
+                  className="text-[9px] font-extrabold tracking-[0.16em] uppercase block truncate"
+                  style={{ color: targetOrbColor }}
+                >
+                  {headerBadge}
+                </span>
+                <h2 className="text-sm font-bold text-white truncate">{headerTitle}</h2>
+                <p className="text-[11px] text-white/68 truncate">{headerSubtitle}</p>
+              </div>
+
+              <button
+                onClick={cycleAtmospherePalette}
+                className="px-2.5 py-1.5 rounded-2xl text-center border shrink-0 transition-all active:scale-95 cursor-pointer"
+                style={{
+                  backgroundColor: `${targetOrbColor}22`,
+                  borderColor: `${targetOrbColor}66`,
+                }}
+              >
+                <span className="text-[8px] font-extrabold tracking-wider block" style={{ color: targetOrbColor }}>
+                  ✦ MOOD
+                </span>
+                <span className="text-[10px] font-bold text-white block">
+                  {theme.name.split(' ')[0].toUpperCase()}
+                </span>
+              </button>
+            </div>
+
+            {/* 2. CENTER: LIVING STUDIO MASCOT & 36-PETAL RADIAL SPECTRUM VISUALIZER */}
+            <div className="flex flex-col items-center justify-center my-auto">
+              <div
+                onClick={handleOrbClick}
+                className="relative w-72 h-72 flex items-center justify-center cursor-pointer group"
+              >
+                {/* Ambient Studio Spotlight */}
+                <div
+                  className="absolute w-52 h-52 rounded-full blur-[55px] pointer-events-none transition-all duration-500"
+                  style={{ backgroundColor: `${targetOrbColor}48` }}
+                />
+
+                {/* 36-Petal Radial Spectrum + Gyroscope + Satiety Arc SVG */}
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 280 280">
+                  {/* Outer Satiety & Dopamine Arc */}
+                  <circle
+                    cx="140"
+                    cy="140"
+                    r="128"
+                    stroke="rgba(255,255,255,0.07)"
+                    strokeWidth="4"
+                    fill="none"
+                    strokeDasharray="600 210"
+                    strokeLinecap="round"
+                    transform="rotate(135 140 140)"
+                  />
+                  <circle
+                    cx="140"
+                    cy="140"
+                    r="128"
+                    stroke={targetOrbColor}
+                    strokeWidth="5"
+                    fill="none"
+                    strokeDasharray={`${((100 - satietyPercentage) / 100) * 600} 810`}
+                    strokeLinecap="round"
+                    transform="rotate(135 140 140)"
+                  />
+
+                  {/* 36 Radial Vocal & Musical Spectrum Petals */}
+                  {Array.from({ length: 36 }).map((_, i) => {
+                    const angleDeg = i * 10;
+                    const angleRad = (angleDeg * Math.PI) / 180;
+                    const amp =
+                      agentState === 'SPEAKING'
+                        ? 0.35 + 0.65 * ((Math.sin(waveTick * 0.35 + i * 0.55) * Math.cos(waveTick * 0.2 - i * 0.35) + 1) / 2)
+                        : agentState === 'LISTENING'
+                        ? 0.25 + 0.5 * ((Math.sin(waveTick * 0.28 + i * 0.4) + 1) / 2)
+                        : isMusicPlaying
+                        ? 0.22 + 0.6 * ((Math.sin(waveTick * 0.25 + i * 0.65) + 1) / 2)
+                        : 0.14 + 0.14 * ((Math.sin(waveTick * 0.12 + i * 0.3) + 1) / 2);
+
+                    const rStart = 76;
+                    const rEnd = rStart + 30 * amp;
+                    const x1 = 140 + rStart * Math.cos(angleRad);
+                    const y1 = 140 + rStart * Math.sin(angleRad);
+                    const x2 = 140 + rEnd * Math.cos(angleRad);
+                    const y2 = 140 + rEnd * Math.sin(angleRad);
+                    return (
+                      <line
+                        key={i}
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        stroke={i % 2 === 0 ? targetOrbColor : secondaryGlowColor}
+                        strokeWidth={agentState === 'SPEAKING' ? '4' : '3'}
+                        strokeLinecap="round"
+                        opacity="0.88"
+                      />
+                    );
+                  })}
+                </svg>
+
+                {/* 3D Studio Mascot Core Sphere & Expressive Visor */}
+                <div
+                  className="relative w-36 h-36 rounded-full flex items-center justify-center transition-transform duration-300 group-active:scale-92"
+                  style={{
+                    background: `radial-gradient(circle at 30% 30%, ${targetOrbColor} 0%, ${secondaryGlowColor} 65%, #070812 100%)`,
+                    boxShadow: `0 0 46px ${targetOrbColor}77`,
+                  }}
+                >
+                  {/* Obsidian Mascot Visor */}
+                  <div className="w-24 h-16 rounded-full bg-[#070811]/90 border border-white/20 flex flex-col items-center justify-center px-3 py-2 shadow-inner">
+                    {/* Expressive Glowing Mascot Eyes */}
+                    <div className="flex items-center justify-between w-14 mb-1.5">
+                      <span
+                        className="w-3.5 rounded-full bg-white transition-all duration-150"
+                        style={{
+                          height: agentState === 'LISTENING' ? '15px' : '11px',
+                          boxShadow: `0 0 10px ${targetOrbColor}`,
+                        }}
+                      />
+                      <span
+                        className="w-3.5 rounded-full bg-white transition-all duration-150"
+                        style={{
+                          height: agentState === 'LISTENING' ? '15px' : '11px',
+                          boxShadow: `0 0 10px ${targetOrbColor}`,
+                        }}
+                      />
+                    </div>
+
+                    {/* Expressive Vocal Mouth / Studio Equalizer inside Visor */}
+                    <div className="flex items-center justify-center gap-[3px] h-4">
+                      {agentState === 'SPEAKING' ? (
+                        [0, 1, 2, 3, 4, 5, 6].map(b => {
+                          const h = 4 + Math.round(11 * ((Math.sin(waveTick * 0.45 + b * 0.9) + 1) / 2));
+                          return (
+                            <span
+                              key={b}
+                              className="w-[2.5px] rounded-full bg-[#FFB000]"
+                              style={{ height: `${h}px` }}
+                            />
+                          );
+                        })
+                      ) : isMusicPlaying ? (
+                        [0, 1, 2, 3, 4].map(b => {
+                          const h = 4 + Math.round(9 * ((Math.sin(waveTick * 0.3 + b * 1.1) + 1) / 2));
+                          return (
+                            <span
+                              key={b}
+                              className="w-[3px] rounded-full"
+                              style={{ height: `${h}px`, backgroundColor: targetOrbColor }}
+                            />
+                          );
+                        })
+                      ) : (
+                        <span
+                          className="w-6 h-1.5 rounded-full"
+                          style={{ backgroundColor: targetOrbColor }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Studio Mode Badge */}
+              <div
+                className="px-3.5 py-1.5 rounded-2xl border text-[10px] font-extrabold tracking-[0.14em] uppercase mt-1"
+                style={{
+                  backgroundColor: `${targetOrbColor}22`,
+                  borderColor: `${targetOrbColor}66`,
+                  color: '#FFFFFF',
+                }}
+              >
+                {agentState === 'LISTENING'
+                  ? '🎙 LISTENING TO YOUR VOICE • SPEAK FREELY'
+                  : agentState === 'THINKING'
+                  ? '🧠 CLAUDE SYNTHESIZING DOPAMINE & MOOD...'
+                  : agentState === 'SPEAKING'
+                  ? '🔊 TALKING TO YOU • TAP MASCOT TO INTERRUPT'
+                  : isMusicPlaying
+                  ? '🎵 STUDIO VISUALIZER LIVE • TAP MASCOT TO TALK'
+                  : '✦ STUDIO AGENT READY • TAP MASCOT TO TALK'}
+              </div>
+            </div>
+
+            {/* 3. BOTTOM (ABOVE FLOATING DOCK — ZERO COLLISION): STUDIO DIALOGUE & AI REASONING CONSOLE */}
+            <div
+              className="w-full rounded-[24px] border px-4 py-3 space-y-1.5"
+              style={{
+                backgroundColor: theme.cardBg,
+                borderColor: `${targetOrbColor}55`,
               }}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: targetOrbColor }} />
                   <span
-                    className="w-2 h-2 rounded-full animate-pulse"
-                    style={{ backgroundColor: targetOrbColor }}
-                  />
-                  <span
-                    className="text-[10px] font-bold tracking-[0.2em] uppercase"
+                    className="text-[9px] font-extrabold tracking-[0.16em] uppercase"
                     style={{ color: targetOrbColor }}
                   >
-                    NOW SYNCING
+                    {agentState === 'IDLE' ? 'STUDIO VOICE CONSOLE' : `LIVE • ${agentState}`}
                   </span>
                 </div>
-
-                <button
-                  onClick={cycleAtmospherePalette}
-                  className="px-2.5 py-1 rounded-xl text-[9px] font-bold tracking-wider border transition-all active:scale-95"
-                  style={{
-                    backgroundColor: `${theme.primaryAccent}24`,
-                    borderColor: `${theme.primaryAccent}66`,
-                    color: '#FFFFFF',
-                  }}
-                >
-                  ✦ {theme.name.toUpperCase()}
-                </button>
+                <span className="text-[10px] font-bold" style={{ color: secondaryGlowColor }}>
+                  {currentTrack.moodName} • {100 - satietyPercentage}% Fresh
+                </span>
               </div>
-              <h2 className="text-base font-bold text-white mt-1.5 truncate text-center">
-                {currentTrack.title}
-              </h2>
-              <p className="text-xs text-white/65 truncate text-center">
-                {currentTrack.artist} • {currentTrack.moodName}
+
+              <p className="text-xs text-white/95 font-medium leading-relaxed line-clamp-2">
+                "{liveTranscript || 'Tap the Studio Mascot and say "Play me a song" or "Change the vibe".'}"
               </p>
-            </div>
 
-            {/* Center 300px Living Voice Orb & Satiety Arc */}
-            <div className="flex flex-col items-center my-auto">
-              <div className="relative w-72 h-72 flex items-center justify-center">
-                <div
-                  className="absolute w-56 h-56 rounded-full blur-[60px] pointer-events-none transition-all duration-700"
-                  style={{ backgroundColor: `${targetOrbColor}44` }}
-                />
-
-                <svg className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none" viewBox="0 0 240 240">
-                  <circle
-                    cx="120"
-                    cy="120"
-                    r="104"
-                    stroke="rgba(255,255,255,0.07)"
-                    strokeWidth="6"
-                    fill="none"
-                    strokeDasharray="490 170"
-                    strokeLinecap="round"
-                  />
-                  <circle
-                    cx="120"
-                    cy="120"
-                    r="104"
-                    stroke={satietyColor}
-                    strokeWidth="6"
-                    fill="none"
-                    strokeDasharray={`${((100 - satietyPercentage) / 100) * 490} 660`}
-                    strokeLinecap="round"
-                    className="transition-all duration-700"
-                  />
-                </svg>
-
-                <button
-                  onClick={handleOrbClick}
-                  className="relative w-38 h-38 rounded-full flex items-center justify-center cursor-pointer transition-transform duration-300 active:scale-92"
-                  style={{
-                    background: `radial-gradient(circle at 35% 35%, rgba(255,255,255,0.48) 0%, ${targetOrbColor} 60%, ${theme.secondaryAccent} 100%)`,
-                    boxShadow: `0 0 52px ${targetOrbColor}77`,
-                  }}
-                >
-                  <div className="w-20 h-20 rounded-full bg-white/25 backdrop-blur-sm flex items-center justify-center">
-                    {agentState === 'LISTENING' && <Mic className="w-8 h-8 text-black animate-pulse" />}
-                    {agentState === 'THINKING' && <Sparkles className="w-8 h-8 text-white animate-spin" />}
-                    {agentState === 'SPEAKING' && <Volume2 className="w-8 h-8 text-black animate-bounce" />}
-                    {agentState === 'IDLE' && <Radio className="w-7 h-7 text-white" />}
-                  </div>
-                </button>
+              <div className="rounded-xl bg-white/[0.04] px-2.5 py-1.5 flex items-center gap-1.5">
+                <span className="text-[10px] font-extrabold shrink-0" style={{ color: targetOrbColor }}>
+                  🧠 AI:
+                </span>
+                <span className="text-[10px] text-white/75 truncate">{flowAnalysis}</span>
               </div>
-
-              <span
-                className="text-[11px] font-bold tracking-[0.2em] uppercase mt-2"
-                style={{ color: agentState === 'IDLE' ? 'rgba(255,255,255,0.65)' : targetOrbColor }}
-              >
-                {agentState === 'IDLE'
-                  ? 'TAP ORB TO TALK'
-                  : agentState === 'LISTENING'
-                  ? 'LISTENING TO YOU...'
-                  : agentState === 'THINKING'
-                  ? 'SYNTHESIZING FLOW...'
-                  : 'AGENT SPEAKING • TAP TO INTERRUPT'}
-              </span>
-            </div>
-
-            {/* Bottom Live Dialogue Card */}
-            <div className="w-full min-h-[76px] flex items-end">
-              {(agentState !== 'IDLE' || liveTranscript) && (
-                <div
-                  className="w-full rounded-[28px] border p-4 text-center"
-                  style={{
-                    backgroundColor: theme.cardBg,
-                    borderColor: `${theme.primaryAccent}44`,
-                  }}
-                >
-                  <span
-                    className="text-[10px] font-bold tracking-[0.2em] uppercase block"
-                    style={{ color: targetOrbColor }}
-                  >
-                    {agentState === 'IDLE' ? 'LAST DIALOGUE' : agentState}
-                  </span>
-                  <p className="text-sm text-white/95 mt-1.5 leading-relaxed">
-                    "{liveTranscript}"
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         )}
 
         {/* SCREEN 2: RHYTHM DNA & ADAPTIVE ATMOSPHERE ENGINE */}
         {activeScreen === 'RHYTHM' && (
-          <div className="flex-1 flex flex-col space-y-4">
+          <div className="flex-1 flex flex-col space-y-3.5 overflow-y-auto pr-0.5">
             <div className="flex items-center justify-between">
               <div>
                 <span
@@ -566,7 +753,7 @@ export default function App() {
 
             {/* Adaptive Atmosphere Engine Switcher Card */}
             <div
-              className="rounded-[28px] border p-4 space-y-3"
+              className="rounded-[26px] border p-3.5 space-y-2.5"
               style={{
                 backgroundColor: theme.cardBg,
                 borderColor: `${theme.primaryAccent}44`,
@@ -631,13 +818,13 @@ export default function App() {
 
             {/* 24-Hour Circadian Sonic Ring */}
             <div
-              className="rounded-[28px] border p-4 flex flex-col items-center"
+              className="rounded-[26px] border p-3.5 flex flex-col items-center"
               style={{
                 backgroundColor: theme.cardBg,
                 borderColor: `${theme.primaryAccent}33`,
               }}
             >
-              <div className="relative w-36 h-36 flex items-center justify-center">
+              <div className="relative w-34 h-34 flex items-center justify-center">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 160 160">
                   {CIRCADIAN_PHASES.map((phase, idx) => {
                     const isSelected = idx === selectedPhaseIdx;
@@ -672,7 +859,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-1.5 w-full mt-3">
+              <div className="grid grid-cols-4 gap-1.5 w-full mt-2.5">
                 {CIRCADIAN_PHASES.map((phase, idx) => {
                   const isSelected = idx === selectedPhaseIdx;
                   return (
@@ -682,7 +869,7 @@ export default function App() {
                         setSelectedPhaseIdx(idx);
                         setActivePaletteId(phase.paletteId);
                       }}
-                      className="py-2 rounded-xl text-[10px] font-bold tracking-wider border transition-all"
+                      className="py-1.5 rounded-xl text-[10px] font-bold tracking-wider border transition-all"
                       style={{
                         backgroundColor: isSelected ? `${phase.color}28` : 'rgba(255,255,255,0.03)',
                         borderColor: isSelected ? `${phase.color}80` : 'rgba(255,255,255,0.07)',
@@ -696,18 +883,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Power Rotation Header */}
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-[11px] font-bold tracking-wider text-white/85">
-                🔥 POWER ROTATION • {activePhase.short}
-              </span>
-              <span className="text-[10px] font-bold" style={{ color: activePhase.color }}>
-                TAP ▶ TO PLAY
-              </span>
-            </div>
-
-            {/* Scroll-Safe Power Rotation Tracks */}
-            <div className="space-y-2 flex-1 overflow-y-auto">
+            {/* Power Rotation Tracks */}
+            <div className="space-y-2">
               {songs.slice(0, 4).map(song => (
                 <div
                   key={song.id}
@@ -734,7 +911,7 @@ export default function App() {
                   </div>
                   <button
                     onClick={() => setActiveSyncSong(song)}
-                    className="min-w-[74px] min-h-[42px] px-3 py-1.5 rounded-2xl border flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    className="min-w-[74px] min-h-[40px] px-3 py-1.5 rounded-2xl border flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                     style={{
                       background: `linear-gradient(90deg, ${activePhase.color}28, ${theme.secondaryAccent}22)`,
                       borderColor: `${activePhase.color}77`,
@@ -887,11 +1064,11 @@ export default function App() {
       )}
 
       {/* CENTERED FLOATING GLASS PILL DOCK */}
-      <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
         <div
-          className="h-[60px] w-[316px] rounded-[32px] backdrop-blur-xl border shadow-2xl p-1.5 grid grid-cols-3 items-center"
+          className="h-[58px] w-[316px] rounded-[32px] backdrop-blur-xl border shadow-2xl p-1.5 grid grid-cols-3 items-center"
           style={{
-            backgroundColor: 'rgba(12, 14, 24, 0.92)',
+            backgroundColor: 'rgba(12, 14, 24, 0.94)',
             borderColor: `${theme.primaryAccent}55`,
           }}
         >

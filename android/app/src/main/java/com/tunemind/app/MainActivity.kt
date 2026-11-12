@@ -126,10 +126,15 @@ open class MainActivity : ComponentActivity() {
                             getNowPlaying = { vm.homeState.value.nowPlaying },
                             getRecentTracks = {
                                 vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks }
+                            },
+                            onTrackDispatched = { dispatchedTitle, dispatchedArtist, dispatchedPkg ->
+                                vm.setAgentActiveTrack(dispatchedTitle, dispatchedArtist, dispatchedPkg)
                             }
                         )
                     }
                     val agentState by agentVoiceManager.agentState.collectAsState()
+                    val flowAnalysis by agentVoiceManager.flowAnalysisFlow.collectAsState()
+                    val agentSatiety by agentVoiceManager.agentSatietyFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
                     val coroutineScope = rememberCoroutineScope()
 
@@ -160,11 +165,10 @@ open class MainActivity : ComponentActivity() {
 
                     // Live Spotify / Audio Telemetry
                     val nowPlaying = homeState.nowPlaying
-                    val trackTitle = nowPlaying?.title?.takeIf { it.isNotBlank() } ?: "Deep Flow State"
-                    val artistName = nowPlaying?.artist?.takeIf { it.isNotBlank() } ?: "Autonomous Intelligence"
-                    val distinctPlays = homeState.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
-                    val calculatedSatiety = minOf(95, maxOf(20, distinctPlays * 20))
-                    val energy = if (nowPlaying?.isPlaying == true) 0.85f else 0.45f
+                    val trackTitle = nowPlaying?.title?.takeIf { it.isNotBlank() }
+                    val artistName = nowPlaying?.artist?.takeIf { it.isNotBlank() }
+                    val isMusicPlaying = nowPlaying?.isPlaying == true
+                    val energy = if (isMusicPlaying) 0.85f else 0.55f
 
                     val combinedRecentTracks = remember(historyState.tracks, homeState.recentTracks) {
                         historyState.tracks.ifEmpty { homeState.recentTracks }
@@ -201,7 +205,7 @@ open class MainActivity : ComponentActivity() {
                                                 nowPlayingTitle = nowPlaying?.title,
                                                 onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
                                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
-                                                    vm.recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
+                                                    vm.setAgentActiveTrack(title, artist, targetPkg)
                                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                                         title = title,
                                                         artist = artist,
@@ -238,11 +242,14 @@ open class MainActivity : ComponentActivity() {
                                         1 -> {
                                             PulseAgentScreen(
                                                 agentState = agentState,
-                                                satietyPercentage = calculatedSatiety,
+                                                satietyPercentage = agentSatiety,
                                                 currentTrackName = trackTitle,
                                                 artistName = artistName,
+                                                isMusicPlaying = isMusicPlaying,
                                                 energy = energy,
                                                 liveTranscript = liveTranscript,
+                                                flowAnalysis = flowAnalysis,
+                                                recentTracks = combinedRecentTracks,
                                                 onOrbTapped = {
                                                     agentVoiceManager.simulateWakeWordDetected()
                                                 },
@@ -266,7 +273,7 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
                                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
-                                                    vm.recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
+                                                    vm.setAgentActiveTrack(title, artist, targetPkg)
                                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                                         title = title,
                                                         artist = artist,

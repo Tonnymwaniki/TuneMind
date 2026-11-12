@@ -41,7 +41,8 @@ enum class AgentState {
 class AgentVoiceManager(
     private val context: Context,
     private val getNowPlaying: (() -> com.tunemind.app.ui.NowPlayingObservation?)? = null,
-    private val getRecentTracks: (() -> List<com.tunemind.app.domain.model.TrackMemoryEntry>)? = null
+    private val getRecentTracks: (() -> List<com.tunemind.app.domain.model.TrackMemoryEntry>)? = null,
+    private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -49,6 +50,12 @@ class AgentVoiceManager(
 
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState
+
+    private val _flowAnalysisFlow = MutableStateFlow("Studio Neural Engine calibrated to your circadian flow.")
+    val flowAnalysisFlow: StateFlow<String> = _flowAnalysisFlow
+
+    private val _agentSatietyFlow = MutableStateFlow(22)
+    val agentSatietyFlow: StateFlow<Int> = _agentSatietyFlow
 
     // Eagerly initialize TTS so the very first voice response is ready with zero initialization delay
     private val executionEngine = com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
@@ -268,6 +275,11 @@ class AgentVoiceManager(
 
         recordAgentSuggestedTrack(cleanTitle)
         _agentState.value = AgentState.SPEAKING
+        _flowAnalysisFlow.value = "Direct studio launch: spinning $cleanTitle in peak dopamine state."
+        _agentSatietyFlow.value = 18
+        mainHandler.post {
+            onTrackDispatched?.invoke(cleanTitle, cleanArtist, targetPlayer.ifBlank { "com.spotify.music" })
+        }
         scope.launch {
             _transcriptionFlow.emit(spokenLine)
         }
@@ -275,7 +287,7 @@ class AgentVoiceManager(
         val searchQuery = if (cleanArtist.isNotEmpty()) "$cleanTitle $cleanArtist" else cleanTitle
         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
             calculated_satiety_percentage = 18,
-            flow_state_analysis = "Direct 1-tap dopamine selection from user vault.",
+            flow_state_analysis = "Direct studio launch: spinning $cleanTitle in peak dopamine state.",
             voice_agent_tts = spokenLine,
             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                 intent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
@@ -340,13 +352,15 @@ class AgentVoiceManager(
         }
 
         _agentState.value = AgentState.SPEAKING
+        _flowAnalysisFlow.value = "Mood DNA: ${mood.label} • $freshnessPercent% Dopamine Readiness"
+        _agentSatietyFlow.value = (100 - freshnessPercent).coerceIn(10, 90)
         scope.launch {
             _transcriptionFlow.emit(spokenProposal)
         }
 
         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
             calculated_satiety_percentage = (100 - freshnessPercent).coerceIn(10, 90),
-            flow_state_analysis = "Neural breakdown for $cleanTitle ($freshnessPercent% fresh)",
+            flow_state_analysis = "Mood DNA: ${mood.label} • $freshnessPercent% Dopamine Readiness",
             voice_agent_tts = spokenProposal,
             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                 intent = "NONE",
@@ -528,7 +542,7 @@ class AgentVoiceManager(
                         }
 
                         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
-                            calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 50) ?: 50,
+                            calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 30) ?: 30,
                             flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
                             voice_agent_tts = payload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
                             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
@@ -543,6 +557,16 @@ class AgentVoiceManager(
                             voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
                         )
 
+                        if (responseObj.voice_agent_tts.isNotBlank()) {
+                            scope.launch {
+                                _transcriptionFlow.emit(responseObj.voice_agent_tts)
+                            }
+                        }
+                        if (responseObj.flow_state_analysis.isNotBlank()) {
+                            _flowAnalysisFlow.value = responseObj.flow_state_analysis
+                        }
+                        _agentSatietyFlow.value = responseObj.calculated_satiety_percentage
+
                         errorResetJob?.cancel()
                         executionEngine.executeBackendCommand(
                             response = responseObj,
@@ -550,6 +574,15 @@ class AgentVoiceManager(
                                 // Abandon assistant audio focus right before Spotify opens so Spotify is allowed to auto-play!
                                 mainHandler.post {
                                     abandonAssistantAudioFocusOnly()
+                                    if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
+                                        val dispatchedTitle = rawTrackTitle ?: rawSearchQuery.ifBlank { "Fresh Selection" }
+                                        val dispatchedArtist = rawTrackArtist ?: "Autonomous Studio Flow"
+                                        onTrackDispatched?.invoke(
+                                            dispatchedTitle,
+                                            dispatchedArtist,
+                                            responseObj.os_execution_command.target_player
+                                        )
+                                    }
                                 }
                             },
                             onFinished = {

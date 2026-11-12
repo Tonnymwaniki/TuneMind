@@ -446,6 +446,31 @@ class TuneMindViewModel : ViewModel() {
         recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
     }
 
+    @Volatile
+    private var manualActiveTrackOverride: NowPlayingObservation? = null
+
+    fun setAgentActiveTrack(
+        title: String,
+        artist: String,
+        sourcePackage: String = "com.spotify.music"
+    ) {
+        val nowObs = NowPlayingObservation(
+            title = title.trim(),
+            artist = artist.trim().ifBlank { "Autonomous Studio Flow" },
+            album = null,
+            sourcePackage = sourcePackage,
+            isPlaying = true,
+            playbackStateCode = 3,
+            positionMs = 0L,
+            durationMs = 210_000L,
+            speed = 1.0f,
+            updatedAtMs = System.currentTimeMillis()
+        )
+        manualActiveTrackOverride = nowObs
+        _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
+        syncAtmosphereToTrack(title, artist)
+    }
+
     val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()
 
     fun refreshCrossAppData() {
@@ -686,22 +711,32 @@ class TuneMindViewModel : ViewModel() {
                 val latestTrackMeta = rows.firstOrNull { 
                     !it.trackTitle.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
                 }
-                val isPlayingNow = latestStateObs?.playbackStateCode == 3 // PlaybackState.STATE_PLAYING
+                val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
+                val isRecentObservation = (System.currentTimeMillis() - latestObsTimeMs) < 12 * 60 * 1000L
+                val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
 
-                val nowPlayingObs = if (latestTrackMeta != null || latestStateObs != null) {
-                    NowPlayingObservation(
-                        title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
-                        artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
-                        album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
-                        sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
-                        isPlaying = isPlayingNow,
-                        playbackStateCode = latestStateObs?.playbackStateCode,
-                        positionMs = latestStateObs?.positionMs ?: 0L,
-                        durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
-                        speed = latestStateObs?.playbackSpeed ?: 1.0f,
-                        updatedAtMs = latestStateObs?.eventTimeMs ?: System.currentTimeMillis()
-                    )
-                } else null
+                val overrideObs = manualActiveTrackOverride
+                val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
+
+                val nowPlayingObs = when {
+                    useAgentOverride -> overrideObs
+                    (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
+                        NowPlayingObservation(
+                            title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
+                            artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
+                            album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
+                            sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
+                            isPlaying = isPlayingNow,
+                            playbackStateCode = latestStateObs?.playbackStateCode,
+                            positionMs = latestStateObs?.positionMs ?: 0L,
+                            durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
+                            speed = latestStateObs?.playbackSpeed ?: 1.0f,
+                            updatedAtMs = latestObsTimeMs
+                        )
+                    }
+                    overrideObs != null -> overrideObs
+                    else -> null
+                }
 
                 _homeState.value = HomeState(
                     identifiableTrackCount = maxOf(summary.identifiableTrackCount, recent.size),
