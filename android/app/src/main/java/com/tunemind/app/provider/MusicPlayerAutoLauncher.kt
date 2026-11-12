@@ -58,60 +58,8 @@ object MusicPlayerAutoLauncher {
             track.title.trim()
         }
 
-        // 1. HEADLESS BACKGROUND EXECUTION FIRST (Zero UI switch if active MediaSession accepts URI/Search)
-        if (listener != null && listener.hasActiveSession(targetPkg)) {
-            val extras = android.os.Bundle().apply {
-                putString(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-                putString(SearchManager.QUERY, fullSearchQuery)
-                putBoolean("android.intent.extra.START_PLAYBACK", true)
-                putBoolean("autostart", true)
-            }
-            var dispatchedHeadless = false
-            if (!deepLinkUri.isNullOrBlank() && (deepLinkUri.startsWith("spotify:track:") || deepLinkUri.startsWith("https://open.spotify.com/track/"))) {
-                dispatchedHeadless = listener.playFromUri(targetPkg, Uri.parse(deepLinkUri), extras) ||
-                    listener.playFromMediaId(targetPkg, deepLinkUri, extras)
-            }
-            if (!dispatchedHeadless) {
-                dispatchedHeadless = listener.playFromSearch(targetPkg, fullSearchQuery, extras)
-            }
-
-            if (dispatchedHeadless) {
-                // Check at 450ms if Spotify switched tracks headlessly in the background.
-                // If it switched, keep user 100% inside TuneMind without ever opening Spotify UI!
-                // If Spotify ignored headless transport controls, fall back to background-assisted launch + auto-return to TuneMind.
-                mainHandler.postDelayed({
-                    val currentTitleAfterHeadless = listener.getActiveTitle(targetPkg)?.trim()
-                    val switchedHeadlessly = !currentTitleAfterHeadless.isNullOrBlank() &&
-                        (currentTitleAfterHeadless.contains(track.title.trim(), ignoreCase = true) ||
-                            !currentTitleAfterHeadless.equals(previousTitle, ignoreCase = true))
-
-                    if (switchedHeadlessly) {
-                        Log.i(TAG, "Headless background switch succeeded ('$currentTitleAfterHeadless') — staying in TuneMind!")
-                        listener.play(targetPkg)
-                    } else {
-                        Log.i(TAG, "Spotify required Activity intent to load new track — launching & returning to TuneMind in background")
-                        launchIntentAndReturnToTuneMind(
-                            context = context,
-                            targetPkg = targetPkg,
-                            track = track,
-                            fullSearchQuery = fullSearchQuery,
-                            deepLinkUri = deepLinkUri,
-                            previousTitle = previousTitle
-                        )
-                    }
-                }, 450L)
-
-                return PlaybackLaunchResult.DirectPlaybackLaunched(
-                    providerId = providerId,
-                    providerDisplayName = displayName,
-                    trackTitle = track.title,
-                    destinationUri = deepLinkUri ?: "intent:$targetPkg",
-                    message = "Playing '${track.title}' in background on $displayName."
-                )
-            }
-        }
-
-        // 2. FALLBACK WHEN NO ACTIVE MEDIA SESSION EXISTS YET: Launch & immediately return to TuneMind
+        // Immediately launch direct track or search intent so Spotify loads the new track right away,
+        // and only return to TuneMind once playback of the new song is confirmed active!
         val launched = launchIntentAndReturnToTuneMind(
             context = context,
             targetPkg = targetPkg,
@@ -156,7 +104,7 @@ object MusicPlayerAutoLauncher {
                 }
                 context.startActivity(uriIntent)
                 scheduleDirectTrackKicker(context, targetPkg, deepLinkUri, track, previousTitle)
-                scheduleReturnToTuneMind(context)
+                scheduleReturnToTuneMindWhenPlaying(context)
                 return true
             } catch (e: Exception) {
                 Log.w(TAG, "Direct track URI launch failed, falling back: ${e.message}")
@@ -176,7 +124,7 @@ object MusicPlayerAutoLauncher {
                 }
                 context.startActivity(mediaPlayIntent)
                 scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
-                scheduleReturnToTuneMind(context)
+                scheduleReturnToTuneMindWhenPlaying(context)
                 return true
             } catch (e: Exception) {
                 Log.d(TAG, "Media play from search not accepted by $targetPkg, falling back: ${e.message}")
@@ -194,7 +142,7 @@ object MusicPlayerAutoLauncher {
                 }
                 context.startActivity(uriIntent)
                 scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
-                scheduleReturnToTuneMind(context)
+                scheduleReturnToTuneMindWhenPlaying(context)
                 return true
             } catch (e: Exception) {
                 Log.w(TAG, "Deep link launch failed: ${e.message}")
@@ -204,14 +152,14 @@ object MusicPlayerAutoLauncher {
     }
 
     /**
-     * Automatically brings TuneMind back to the foreground after Spotify queues the track
-     * so the user stays in TuneMind for continuous voice dialogue.
+     * Brings TuneMind back to the foreground ONLY AFTER Spotify has started playing the new song
+     * (at 3400ms), so Spotify is never interrupted while loading the track.
      */
-    private fun scheduleReturnToTuneMind(context: Context) {
-        val returnDelays = listOf(1100L, 2100L)
-        for (delay in returnDelays) {
-            mainHandler.postDelayed({
-                try {
+    private fun scheduleReturnToTuneMindWhenPlaying(context: Context) {
+        mainHandler.postDelayed({
+            try {
+                val listener = TuneMindListenerService.instance
+                if (listener != null && listener.isPlaying()) {
                     val returnIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
                         addFlags(
                             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
@@ -221,11 +169,11 @@ object MusicPlayerAutoLauncher {
                         )
                     }
                     context.startActivity(returnIntent)
-                } catch (e: Exception) {
-                    Log.d(TAG, "Return to TuneMind foreground notice: ${e.message}")
                 }
-            }, delay)
-        }
+            } catch (e: Exception) {
+                Log.d(TAG, "Return to TuneMind foreground notice: ${e.message}")
+            }
+        }, 3400L)
     }
 
     private fun scheduleDirectTrackKicker(

@@ -99,12 +99,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       return content;
     }
     if (Array.isArray(content)) {
-      // Claude 5.5 / 3.7 may return 'thinking' blocks before or alongside the 'text' block
+      // Prefer 'text' blocks first so 'thinking' blocks never interfere with JSON extraction
+      const textOnly = content
+        .filter((block: any) => block && block.type === 'text' && typeof block.text === 'string')
+        .map((block: any) => block.text.trim())
+        .filter(Boolean)
+        .join('\n');
+      if (textOnly) {
+        return textOnly;
+      }
       return content.map((block: any) => {
         if (block.type === 'text') return block.text || '';
         if (block.type === 'thinking') return block.thinking || '';
         if (typeof block.text === 'string') return block.text;
-        return JSON.stringify(block);
+        return '';
       }).join('\n');
     }
     return JSON.stringify(content || '{}');
@@ -116,45 +124,44 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getSystemPrompt(): string {
-    return `You are TuneMind, a fast, lively, conversational personal music AI on Android.
+    return `You are TuneMind, a lively, intelligent, conversational personal music AI on Android.
 You have live access to the listener's active media session ('current_track'), their fresh unplayed phone listening history ('fresh_unplayed_user_tracks'), and recent dialogue turns ('recent_dialogue_turns').
 
 CORE DIRECTIVES:
 1. STRICT GROUNDING & VARIETY FROM USER'S STORED HISTORY:
-- 'fresh_unplayed_user_tracks' contains tracks from the user's phone that have NOT been played or suggested recently.
-- Always select from the top of 'fresh_unplayed_user_tracks' (unless the user explicitly names a specific external song/artist).
+- 'fresh_unplayed_user_tracks' contains real songs from the user's phone that have NOT been played or suggested recently.
+- Whenever the user asks to play a song, switch/change the song, or play a genre (like Bongo, Gospel, Afrobeats, R&B, etc.), pick the best matching track from 'fresh_unplayed_user_tracks' (defaulting to the #1 track in 'fresh_unplayed_user_tracks' so you never repeat songs).
 - NEVER repeat 'current_track' or any track in 'recently_suggested_or_played_titles'.
+- NEVER use robotic or repetitive phrases like "Soundstage is clean and focus velocity is locked in." Speak naturally, warmly, and specifically about the actual song title and artist you chose!
 
-2. TWO-STEP CONVERSATIONAL DIALOGUE PROTOCOL (PROPOSE FIRST -> WAIT FOR APPROVAL -> PLAY):
-- Keep 'voice_agent_tts' brief, punchy, warm, and natural (1-2 short sentences, max 28 words so voice playback is fast!).
-- STEP A — PROPOSE & ASK FOR APPROVAL ('intent': "NONE"):
-  * When the user says "play me a song", "change this song", "switch the song", "no, give me another one", or "what should I listen to" (without naming a specific song title to play immediately):
-  * Pick the #1 track from 'fresh_unplayed_user_tracks', mention its title and artist and a brief reason it fits their mood/satiety, and ASK if they want you to play it (e.g., "Want me to put that on, or are you feeling a different vibe?").
-  * Set 'os_execution_command.intent' to "NONE" (while still filling 'track_title', 'track_artist', 'search_query', and 'spotify_uri' with your proposed song so the system remembers what you proposed!).
-- STEP B — EXECUTE PLAYBACK ('intent': "OS_MEDIA_NEXT_AND_DEEP_LINK"):
-  * ONLY set 'intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK" when:
-    (a) The user approves a proposed song ("yes", "sure", "play it", "go ahead", "okay"), OR
-    (b) The user explicitly names a specific song/artist to play immediately (e.g., "play Utaniinua right now").
-  * When 'intent' is "OS_MEDIA_NEXT_AND_DEEP_LINK", NEVER end 'voice_agent_tts' with a question! State warmly that you are playing it now in the background.
-- STEP C — PAUSE ('intent': "OS_MEDIA_PAUSE"):
-  * If the user asks to pause or stop the music, set 'intent' to "OS_MEDIA_PAUSE".
+2. EXECUTION & CONVERSATIONAL FLOW:
+- Keep 'voice_agent_tts' natural, warm, and concise (1-2 sentences, max 30 words).
+- PLAY / SWITCH COMMANDS ('intent': "OS_MEDIA_NEXT_AND_DEEP_LINK"):
+  * Whenever the user says "play me a song", "play a song", "play something", "change the song", "next song", "switch it", "yes", "play it", or asks for a genre/artist/song:
+  * Set 'os_execution_command.intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK".
+  * Populate 'track_title', 'track_artist', 'search_query' ("<Exact Title> <Exact Artist>"), and 'spotify_uri' (from the chosen track's 'trackId' if it starts with "spotify:track:").
+  * In 'voice_agent_tts', tell the user which song and artist you are putting on and why it fits their vibe, and invite them to let you know if they want to switch it.
+- PURE CONVERSATION ('intent': "NONE"):
+  * Only set 'intent' to "NONE" if the user is just chatting or asking a question without wanting to play or change music right now.
+- PAUSE / STOP ('intent': "OS_MEDIA_PAUSE"):
+  * If the user asks to pause, stop, or hold the music, set 'intent' to "OS_MEDIA_PAUSE".
 
 OUTPUT FORMAT:
 Respond ONLY with raw valid JSON matching this schema:
 {
   "calculated_satiety_percentage": 35,
-  "flow_state_analysis": "1 short sentence",
-  "voice_agent_tts": "1-2 short, natural spoken sentences",
+  "flow_state_analysis": "1 short sentence about why this track fits",
+  "voice_agent_tts": "Natural spoken response naming the song and artist being played",
   "os_execution_command": {
-    "intent": "NONE",
+    "intent": "OS_MEDIA_NEXT_AND_DEEP_LINK",
     "target_player": "com.spotify.music",
     "search_query": "Exact Song Title Exact Artist",
     "track_title": "Exact Song Title",
     "track_artist": "Exact Artist",
-    "spotify_uri": "spotify:track:... if present",
+    "spotify_uri": "spotify:track:... if available else empty string",
     "suggested_bpm_target": 105
   },
-  "database_tags": ["history-grounded", "dialog-first"]
+  "database_tags": ["history-grounded", "live-agent"]
 }`;
   }
 
@@ -200,7 +207,6 @@ Respond ONLY with raw valid JSON matching this schema:
     if (!token) return { bpm: null, energy: null, key: null };
 
     try {
-      // 1. Search for the track ID
       const query = encodeURIComponent(`track:${trackTitle} artist:${artist}`);
       const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -210,18 +216,14 @@ Respond ONLY with raw valid JSON matching this schema:
       const trackId = searchData.tracks?.items?.[0]?.id;
 
       if (!trackId) {
-        console.log(`[Spotify Middleware] Track not found in Spotify catalog: ${trackTitle}`);
         return { bpm: null, energy: null, key: null };
       }
 
-      // 2. Fetch the Acoustic Features for that Track ID
       const featuresRes = await fetch(`https://api.spotify.com/v1/audio-features/${trackId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       const features = (await featuresRes.json()) as any;
-
-      console.log(`[Spotify Middleware] Fetched acoustics for ${trackTitle}: BPM ${Math.round(features.tempo)}`);
 
       return {
         bpm: features.tempo ? Math.round(features.tempo) : null,
@@ -230,8 +232,7 @@ Respond ONLY with raw valid JSON matching this schema:
       };
 
     } catch (error) {
-      console.error("[Spotify Middleware] Error fetching acoustic features:", error);
-      return { bpm: null, energy: null, key: null }; // Fail gracefully so Claude can still infer
+      return { bpm: null, energy: null, key: null };
     }
   }
 
@@ -252,7 +253,7 @@ Respond ONLY with raw valid JSON matching this schema:
         console.log(`[Spotify Lookup] 🎯 Resolved exact Spotify URI for "${query}": ${item.uri} (${item.name} by ${item.artists?.[0]?.name})`);
         return {
           trackId: item.id,
-          uri: item.uri, // e.g. "spotify:track:6rqhFgbbKwnb9MLmUQDhG6"
+          uri: item.uri,
           title: item.name,
           artist: item.artists?.[0]?.name || ''
         };
@@ -264,12 +265,11 @@ Respond ONLY with raw valid JSON matching this schema:
   }
 
   public async evaluateSatiety(context: TuneMindTelemetryContext): Promise<TuneMindReasoningResponse> {
-    const userId = 'tunemind-default-user';
     const eventStore = new EventStore();
     const userCommandRaw = (context.user_command || '').trim();
     const userCommandLower = userCommandRaw.toLowerCase();
 
-    // 1. INSTANT CONFIRMATION FAST-PATH (<20ms response when approving a proposed song!)
+    // 1. INSTANT CONFIRMATION FAST-PATH (<20ms response if user approves a previously proposed song)
     const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
     const isApproval = pending !== null &&
       /^(yes|yeah|yep|yup|sure|ok|okay|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|please)\b/i.test(userCommandLower) &&
@@ -278,12 +278,7 @@ Respond ONLY with raw valid JSON matching this schema:
     if (isApproval && pending) {
       ClaudeMusicReasoningProvider.pendingProposedTrack = null;
       eventStore.recordAgentTrackAction(pending.title);
-      const confirmations = [
-        `Playing "${pending.title}" by ${pending.artist} for you in the background now.`,
-        `Locking in "${pending.title}" by ${pending.artist} right now.`,
-        `On it—spinning "${pending.title}" by ${pending.artist} in the background.`
-      ];
-      const tts = confirmations[ClaudeMusicReasoningProvider.rotationIndex++ % confirmations.length];
+      const tts = `Playing "${pending.title}" by ${pending.artist} for you right now.`;
       ClaudeMusicReasoningProvider.recentDialogueTurns.push(
         { role: 'user', text: userCommandRaw },
         { role: 'assistant', text: tts }
@@ -292,10 +287,9 @@ Respond ONLY with raw valid JSON matching this schema:
         ClaudeMusicReasoningProvider.recentDialogueTurns = ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-8);
       }
 
-      console.log(`[Claude Provider] ⚡ INSTANT CONFIRMATION FAST-PATH: Playing "${pending.title}" by ${pending.artist}`);
       return {
         calculated_satiety_percentage: 25,
-        flow_state_analysis: `User approved "${pending.title}" in live multi-turn dialogue.`,
+        flow_state_analysis: `User approved "${pending.title}" in dialogue.`,
         voice_agent_tts: tts,
         os_execution_command: {
           intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
@@ -310,8 +304,6 @@ Respond ONLY with raw valid JSON matching this schema:
       };
     }
 
-    // If there was a pending track and the user did NOT approve it (e.g., said "no", "change it", or asked something else),
-    // mark that pending track as already used so we pick a different track now!
     if (pending) {
       eventStore.recordAgentTrackAction(pending.title);
       ClaudeMusicReasoningProvider.pendingProposedTrack = null;
@@ -374,13 +366,11 @@ Respond ONLY with raw valid JSON matching this schema:
 
     let freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()));
     if (freshTracks.length === 0 && allUserTracks.length > 0) {
-      // User cycled through all tracks in history — reset exclusions except the currently playing track
       const curTitle = (context.current_track?.title || '').toLowerCase().trim();
       freshTracks = allUserTracks.filter(t => t.title.toLowerCase().trim() !== curTitle);
       if (freshTracks.length === 0) freshTracks = [...allUserTracks];
     }
 
-    // Rotate freshTracks by rotationIndex so #1 track is always fresh on every request
     if (freshTracks.length > 1) {
       const offset = ClaudeMusicReasoningProvider.rotationIndex % freshTracks.length;
       ClaudeMusicReasoningProvider.rotationIndex++;
@@ -404,11 +394,10 @@ Respond ONLY with raw valid JSON matching this schema:
 
     const available = await this.isAvailable();
     if (!available) {
-      return this.buildDeterministicSatietyResponse(context);
+      return this.buildSmartHistoryFallbackResponse(context, freshTracks, allUserTracks, eventStore);
     }
 
-    console.log('[Claude Provider] ⚡ Dispatching fast reasoning to Claude...');
-    let aiResponse: TuneMindReasoningResponse;
+    console.log('[Claude Provider] ⚡ Dispatching reasoning to Claude...');
 
     try {
       const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
@@ -417,7 +406,7 @@ Respond ONLY with raw valid JSON matching this schema:
       try {
         response = await this.anthropic.messages.create({
           model: targetModel,
-          max_tokens: 350,
+          max_tokens: 1600,
           system: systemPromptWithMemory,
           messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
         });
@@ -428,7 +417,7 @@ Respond ONLY with raw valid JSON matching this schema:
           try {
             response = await this.anthropic.messages.create({
               model: 'claude-3-5-haiku-20241022',
-              max_tokens: 350,
+              max_tokens: 1000,
               system: systemPromptWithMemory,
               messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
             });
@@ -436,7 +425,7 @@ Respond ONLY with raw valid JSON matching this schema:
           } catch {
             response = await this.anthropic.messages.create({
               model: 'claude-3-haiku-20240307',
-              max_tokens: 350,
+              max_tokens: 1000,
               system: systemPromptWithMemory,
               messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
             });
@@ -456,11 +445,11 @@ Respond ONLY with raw valid JSON matching this schema:
       const cleanJson = jsonMatch ? jsonMatch[0] : rawText;
       const parsed = JSON.parse(cleanJson);
 
-      const ttsText = String(
+      let ttsText = String(
         parsed.voice_agent_tts ??
         parsed.agent_tts_response ??
         parsed.reply ??
-        "I'm here with you. Tell me what you feel like hearing."
+        ''
       ).trim();
 
       const rawSearch = parsed.os_execution_command?.search_query || parsed.target_search_query || '';
@@ -468,7 +457,7 @@ Respond ONLY with raw valid JSON matching this schema:
       let trackArtist = parsed.os_execution_command?.track_artist || parsed.track_artist || '';
       let spotifyUri = parsed.os_execution_command?.spotify_uri || parsed.spotify_uri || '';
 
-      if (spotifyUri && (spotifyUri.includes('Optional') || spotifyUri === 'none' || spotifyUri === 'null')) {
+      if (spotifyUri && (spotifyUri.includes('Optional') || spotifyUri.includes('if available') || spotifyUri === 'none' || spotifyUri === 'null')) {
         spotifyUri = '';
       }
 
@@ -486,12 +475,26 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
-      // If Claude didn't fill trackTitle or repeated an excluded track when freshTracks exist, bind to freshTracks[0]
+      // Check if user is asking to play/switch/change music
+      const wantsPlayOrSwitch =
+        /\b(play|put on|spin|start|change|switch|next|another|different|song|music|track|bongo|gospel|afrobeat|vibe|listen|something)\b/i.test(userCommandLower) &&
+        !/\b(pause|stop|quiet|mute|silence|don'?t play)\b/i.test(userCommandLower);
+
+      const wantsPause = /\b(pause|stop|quiet|mute|silence|hold)\b/i.test(userCommandLower);
+
+      let resolvedIntent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'NONE' =
+        parsed.os_execution_command?.intent || 'NONE';
+
+      if (wantsPause) {
+        resolvedIntent = 'OS_MEDIA_PAUSE';
+      } else if (wantsPlayOrSwitch && resolvedIntent === 'NONE') {
+        resolvedIntent = 'OS_MEDIA_NEXT_AND_DEEP_LINK';
+      }
+
+      // If we are playing/proposing a track and Claude didn't pick a valid fresh track, bind to freshTracks[0]
       if (freshTracks.length > 0 && (!trackTitle || excludedSet.has(trackTitle.toLowerCase().trim()))) {
-        const topFresh = freshTracks[0];
-        // Check if Claude mentioned a specific freshTrack in ttsText first
         const mentionedTrack = freshTracks.find(ft => ttsText.toLowerCase().includes(ft.title.toLowerCase()));
-        const chosen = mentionedTrack || topFresh;
+        const chosen = mentionedTrack || freshTracks[0];
         trackTitle = chosen.title;
         trackArtist = chosen.artist;
         if (chosen.trackId) spotifyUri = chosen.trackId;
@@ -517,33 +520,32 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
-      const targetPlayer = parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music';
-      let resolvedIntent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'NONE' =
-        parsed.os_execution_command?.intent || 'NONE';
-
-      // CRITICAL DIALOGUE GUARD:
-      // If the voice response asks the user a question (ends with '?' or asks "want me to" / "should I" / "how about"),
-      // it is PROPOSING a song in conversation — NEVER execute playback until the user approves it!
-      const isAskingConfirmation =
-        ttsText.includes('?') ||
-        /\b(want me to|should i|would you like|shall i|how about|sound good|do you want)\b/i.test(ttsText);
-
-      if (isAskingConfirmation && resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK') {
-        console.log(`[Claude Provider] 💬 Dialogue question detected in TTS ("${ttsText}"). Holding playback & waiting for user approval.`);
-        resolvedIntent = 'NONE';
+      // If no Spotify URI is stored locally and Spotify API credentials exist, look up exact URI
+      if (!spotifyUri && resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' && trackTitle) {
+        const cleanArtist = trackArtist && trackArtist !== 'Unknown Artist' ? trackArtist : undefined;
+        const resolved = await this.lookupSpotifyTrack(trackTitle, cleanArtist);
+        if (resolved) {
+          spotifyUri = resolved.uri;
+          if (!trackArtist || trackArtist === 'Unknown Artist') {
+            trackArtist = resolved.artist;
+          }
+        }
       }
 
-      if (resolvedIntent === 'NONE' && trackTitle) {
-        ClaudeMusicReasoningProvider.pendingProposedTrack = {
-          title: trackTitle,
-          artist: trackArtist,
-          trackId: spotifyUri || undefined,
-          source: targetPlayer
-        };
-        eventStore.recordAgentTrackAction(trackTitle);
-        console.log(`[Claude Provider] 📌 Saved pending proposed track for next dialogue turn: "${trackTitle}" by ${trackArtist}`);
-      } else if (resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' && trackTitle) {
-        ClaudeMusicReasoningProvider.pendingProposedTrack = null;
+      if (!ttsText || ttsText.includes('Soundstage is clean')) {
+        if (resolvedIntent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' && trackTitle) {
+          const artistPart = trackArtist && trackArtist !== 'Unknown Artist' ? ` by ${trackArtist}` : '';
+          ttsText = `Putting on "${trackTitle}"${artistPart} from your history right now. Let me know if you want to switch it!`;
+        } else if (resolvedIntent === 'OS_MEDIA_PAUSE') {
+          ttsText = 'Pausing your music now.';
+        } else {
+          ttsText = "I'm right here with you. Tell me what song or vibe you want to hear!";
+        }
+      }
+
+      const targetPlayer = parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music';
+
+      if (trackTitle) {
         eventStore.recordAgentTrackAction(trackTitle);
       }
 
@@ -555,22 +557,22 @@ Respond ONLY with raw valid JSON matching this schema:
         ClaudeMusicReasoningProvider.recentDialogueTurns = ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-8);
       }
 
-      aiResponse = {
+      return {
         calculated_satiety_percentage: Number(
           parsed.calculated_satiety_percentage ??
           parsed.computed_satiety ??
           context.current_satiety_percentage ??
-          40
+          35
         ),
         flow_state_analysis: String(
           parsed.flow_state_analysis ??
-          'Acoustic telemetry processed.'
+          `Selected "${trackTitle}" based on listener history and acoustic freshness.`
         ),
         voice_agent_tts: ttsText,
         os_execution_command: {
           intent: resolvedIntent,
           target_player: targetPlayer,
-          search_query: `${trackTitle} ${trackArtist}`.trim() || rawSearch,
+          search_query: `${trackTitle} ${trackArtist !== 'Unknown Artist' ? trackArtist : ''}`.trim() || rawSearch,
           track_title: trackTitle,
           track_artist: trackArtist,
           spotify_uri: spotifyUri,
@@ -578,47 +580,84 @@ Respond ONLY with raw valid JSON matching this schema:
         },
         database_tags: Array.isArray(parsed.database_tags)
           ? parsed.database_tags
-          : ['claude-haiku-5-5', 'dialog-aware']
+          : ['claude-haiku-5-5', 'history-grounded']
       };
     } catch (error: any) {
-      console.error('[Claude Provider] API Call failed:', error);
+      console.error('[Claude Provider] API Call failed, using smart history fallback:', error?.message || error);
       const msg = String(error?.message || error);
       if (msg.includes('401') || msg.includes('auth') || msg.includes('api_key')) {
         this.hasInvalidKey = true;
       }
-      return this.buildDeterministicSatietyResponse(context);
+      return this.buildSmartHistoryFallbackResponse(context, freshTracks, allUserTracks, eventStore);
     }
-
-    return aiResponse;
   }
 
-  private buildDeterministicSatietyResponse(context: TuneMindTelemetryContext): TuneMindReasoningResponse {
-    const historyLen = context.rolling_history?.length || 0;
-    const baseSatiety = Math.min(95, Math.max(10, (context.current_satiety_percentage || 30) + (historyLen >= 3 ? 15 : 0)));
-    const needsCleanser = baseSatiety >= 70;
+  private buildSmartHistoryFallbackResponse(
+    context: TuneMindTelemetryContext,
+    freshTracks: Array<{ title: string; artist: string; trackId?: string; source?: string }>,
+    allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string }>,
+    eventStore: EventStore
+  ): TuneMindReasoningResponse {
+    const userCommandLower = (context.user_command || '').toLowerCase();
+    const wantsPause = /\b(pause|stop|quiet|mute|silence)\b/i.test(userCommandLower);
+    const targetPlayer = context.current_track?.source_player || 'com.spotify.music';
+
+    if (wantsPause) {
+      return {
+        calculated_satiety_percentage: 30,
+        flow_state_analysis: 'User requested playback pause.',
+        voice_agent_tts: 'Pausing your playback right now.',
+        os_execution_command: {
+          intent: 'OS_MEDIA_PAUSE',
+          target_player: targetPlayer,
+          search_query: '',
+          suggested_bpm_target: 90
+        },
+        database_tags: ['pause-command']
+      };
+    }
+
+    const pool = freshTracks.length > 0 ? freshTracks : allUserTracks;
+    const chosen = pool[0] || {
+      title: 'Utaniinua',
+      artist: 'Paul Clement',
+      trackId: undefined,
+      source: targetPlayer
+    };
+
+    eventStore.recordAgentTrackAction(chosen.title);
+    const artistPart = chosen.artist && chosen.artist !== 'Unknown Artist' ? ` by ${chosen.artist}` : '';
+    const spokenVariations = [
+      `Playing "${chosen.title}"${artistPart} from your listening history right now. Tell me anytime if you want to switch it up!`,
+      `I've got you—putting on "${chosen.title}"${artistPart} for you now.`,
+      `Spinning "${chosen.title}"${artistPart} from your library right now. Let me know how this vibe feels!`
+    ];
+    const tts = spokenVariations[ClaudeMusicReasoningProvider.rotationIndex % spokenVariations.length];
+
+    let spotifyUri = '';
+    if (chosen.trackId) {
+      const tid = String(chosen.trackId).trim();
+      if (tid.startsWith('spotify:track:') || tid.startsWith('https://open.spotify.com/track/')) {
+        spotifyUri = tid;
+      } else if (/^[A-Za-z0-9]{22}$/.test(tid)) {
+        spotifyUri = `spotify:track:${tid}`;
+      }
+    }
 
     return {
-      calculated_satiety_percentage: baseSatiety,
-      flow_state_analysis: needsCleanser
-        ? `Auditory fatigue elevated (${baseSatiety}%). Repetitive transients detected across ${historyLen} recent tracks. Recommend tempo modulation.`
-        : `Cognitive flow optimal. Satiety index at ${baseSatiety}%. Harmonic variety is maintaining receptor freshness.`,
-      voice_agent_tts: needsCleanser
-        ? "We're hitting ear fatigue on this loop. Let's switch up the cadence with an acoustic palate cleanser."
-        : "Soundstage is clean and focus velocity is locked in.",
-      os_execution_command: needsCleanser
-        ? {
-            intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
-            target_player: context.current_track?.source_player || 'com.spotify.music',
-            search_query: 'acoustic chillout reset',
-            suggested_bpm_target: 95
-          }
-        : {
-            intent: 'NONE',
-            target_player: context.current_track?.source_player || 'com.spotify.music',
-            search_query: '',
-            suggested_bpm_target: 120
-          },
-      database_tags: ['claude-haiku-neuro-engine', context.circadian_daypart.toLowerCase(), needsCleanser ? 'fatigue-cleanser' : 'flow-state']
+      calculated_satiety_percentage: 35,
+      flow_state_analysis: `Selected "${chosen.title}"${artistPart} from listener's stored history.`,
+      voice_agent_tts: tts,
+      os_execution_command: {
+        intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
+        target_player: chosen.source || targetPlayer,
+        search_query: `${chosen.title} ${chosen.artist !== 'Unknown Artist' ? chosen.artist : ''}`.trim(),
+        track_title: chosen.title,
+        track_artist: chosen.artist,
+        spotify_uri: spotifyUri,
+        suggested_bpm_target: 105
+      },
+      database_tags: ['smart-history-execution', context.circadian_daypart.toLowerCase()]
     };
   }
 

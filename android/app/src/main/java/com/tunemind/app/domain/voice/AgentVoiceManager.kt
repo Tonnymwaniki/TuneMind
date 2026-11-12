@@ -199,6 +199,9 @@ class AgentVoiceManager(
 
     // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
+        // Do not restart/kill the active WebSocket if already LISTENING
+        if (_agentState.value == AgentState.LISTENING) return
+
         // Allow interrupting SPEAKING or THINKING or retrying from ERROR!
         if (_agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
             Log.d(TAG, "Interrupting active agent speech/thinking to start new voice turn...")
@@ -278,9 +281,11 @@ class AgentVoiceManager(
         Log.d(TAG, "Attempting WebSocket connection (${index + 1}/${candidates.size}) to $targetUrl ...")
 
         var hasOpened = false
+        var hasCompletedReasoning = false
 
         val listener = object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
+            override fun onOpen(ws: WebSocket, response: Response) {
+                if (ws != this@AgentVoiceManager.webSocket) return
                 hasOpened = true
                 Log.d(TAG, "🟢 WebSocket OPENED successfully on $targetUrl. HTTP Status: ${response.code}")
 
@@ -315,27 +320,38 @@ class AgentVoiceManager(
                         put("recent_tracks", historyArr)
                         put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
                     }
-                    webSocket.send(metaJson.toString())
+                    ws.send(metaJson.toString())
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to send initial client context over WS: ${e.message}")
                 }
 
-                startRecordingAndStreaming(webSocket)
+                startRecordingAndStreaming(ws)
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
+            override fun onMessage(ws: WebSocket, text: String) {
+                if (ws != this@AgentVoiceManager.webSocket && !hasCompletedReasoning) return
                 Log.d(TAG, "🔵 WebSocket MESSAGE received: $text")
                 try {
                     val json = JSONObject(text)
                     if (json.has("error")) {
+                        if (hasCompletedReasoning || _agentState.value == AgentState.SPEAKING) return
                         Log.w(TAG, "Server reported error: ${json.optString("error")}")
                         stopMicrophoneStream()
                         _agentState.value = AgentState.ERROR
+                        errorResetJob?.cancel()
+                        errorResetJob = scope.launch {
+                            delay(2500)
+                            withContext(Dispatchers.Main) {
+                                releaseAudioDucking()
+                                resumeWakeWordListening()
+                            }
+                        }
                         return
                     }
 
                     // Handle backend reasoning completion
                     if (json.optString("type") == "command" && json.optString("action") == "THINKING_COMPLETE") {
+                        hasCompletedReasoning = true
                         val payload = json.optString("payload", "")
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
                         stopMicrophoneStream() // Fully close socket now that server responded
@@ -395,19 +411,8 @@ class AgentVoiceManager(
                             },
                             onFinished = {
                                 mainHandler.post {
-                                    if (responseObj.os_execution_command.intent == "NONE") {
-                                        // Conversational turn: automatically re-open microphone immediately so user can approve or change the song!
-                                        Log.d(TAG, "Conversational turn complete; re-opening mic for multi-turn dialog.")
-                                        _agentState.value = AgentState.IDLE
-                                        mainHandler.postDelayed({
-                                            if (_agentState.value == AgentState.IDLE) {
-                                                simulateWakeWordDetected()
-                                            }
-                                        }, 250L)
-                                    } else {
-                                        releaseAudioDucking()
-                                        resumeWakeWordListening()
-                                    }
+                                    releaseAudioDucking()
+                                    resumeWakeWordListening()
                                 }
                             }
                         )
@@ -427,26 +432,31 @@ class AgentVoiceManager(
                         Log.d(TAG, "User finished speaking: $transcript")
                         stopAudioRecordingOnly()
                         setThinkingState()
-                        // Note: WebSocket handles reasoning directly via THINKING_COMPLETE, so do not emit to _finalTranscriptFlow here
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "JSON parse error: ${e.message}")
                 }
             }
 
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            override fun onMessage(ws: WebSocket, bytes: ByteString) {
                 Log.d(TAG, "🔵 WebSocket BYTES received (Length: ${bytes.size})")
             }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "🟡 WebSocket CLOSING. Code: $code, Reason: $reason")
             }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "🔴 WebSocket CLOSED. Code: $code, Reason: $reason")
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                // Ignore failures from already-closed or superseded WebSockets
+                if (hasCompletedReasoning || ws != this@AgentVoiceManager.webSocket) {
+                    Log.d(TAG, "Ignoring non-active WebSocket close/failure notice: ${t.message}")
+                    return
+                }
+
                 Log.e(TAG, "❌ WebSocket FAILURE on $targetUrl: ${t.message}")
                 if (!hasOpened && index + 1 < candidates.size) {
                     Log.d(TAG, "🔄 Failing over to next candidate WebSocket endpoint (${index + 2}/${candidates.size})...")
@@ -460,11 +470,10 @@ class AgentVoiceManager(
                 }
 
                 stopMicrophoneStream()
-                // Force the UI out of the listening state so it doesn't hang forever
                 _agentState.value = AgentState.ERROR
                 errorResetJob?.cancel()
                 errorResetJob = scope.launch {
-                    delay(3000)
+                    delay(2500)
                     withContext(Dispatchers.Main) {
                         releaseAudioDucking()
                         resumeWakeWordListening()

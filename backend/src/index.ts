@@ -200,8 +200,8 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   };
 
-  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint with fast turn detection
-  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true&end_of_turn_confidence_threshold=0.4&min_end_of_turn_silence_when_confident=300&max_turn_silence=800';
+  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint
+  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true';
   const aaiSocket = new WebSocket(aaiUrl, {
     headers: { Authorization: apiKey }
   });
@@ -212,7 +212,7 @@ wss.on('connection', async (ws: WebSocket) => {
 
   aaiSocket.on('error', (error: Error) => {
     console.error('[STT] AssemblyAI Error:', error);
-    if (ws.readyState === WebSocket.OPEN) {
+    if (!hasTriggeredReasoning && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: error.message }));
     }
   });
@@ -257,17 +257,17 @@ wss.on('connection', async (ws: WebSocket) => {
             }));
           }
 
-          // Smart silence finalizer: if user stops speaking for 850ms after saying a command, finalize immediately!
+          // Smart silence finalizer: if user stops speaking for 1100ms after saying a command, finalize immediately
           if (silenceTimer) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
-            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
+            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 3) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 850);
+          }, 1100);
         }
       } else if (msg.type === 'Error') {
         console.error('[STT] AssemblyAI Server Error:', msg);
-        if (ws.readyState === WebSocket.OPEN) {
+        if (!hasTriggeredReasoning && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: msg.error || 'Server Error' }));
         }
       }
