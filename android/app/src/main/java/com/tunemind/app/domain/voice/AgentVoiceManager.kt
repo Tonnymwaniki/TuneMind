@@ -60,7 +60,7 @@ class AgentVoiceManager(
     private var echoCanceler: android.media.audiofx.AcousticEchoCanceler? = null
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
-        .connectTimeout(3500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .connectTimeout(15000, java.util.concurrent.TimeUnit.MILLISECONDS)
         .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
     private var isRecording = false
@@ -83,6 +83,24 @@ class AgentVoiceManager(
 
     init {
         initWakeWordEngine()
+        startCloudKeepAlivePing()
+    }
+
+    private fun startCloudKeepAlivePing() {
+        scope.launch {
+            while (isActive) {
+                try {
+                    val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
+                    val healthUrl = "${baseUrl.trimEnd('/')}/health"
+                    val req = Request.Builder().url(healthUrl).get().build()
+                    client.newCall(req).execute().close()
+                    Log.d(TAG, "☁️ Cloud Brain keep-alive ping succeeded: $healthUrl")
+                } catch (e: Exception) {
+                    Log.w(TAG, "☁️ Cloud Brain keep-alive ping notice: ${e.message}")
+                }
+                delay(8 * 60 * 1000L) // Ping every 8 minutes so Render free tier never spins down while app is open
+            }
+        }
     }
 
     private fun initWakeWordEngine() {

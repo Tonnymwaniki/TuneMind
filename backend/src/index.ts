@@ -32,6 +32,16 @@ app.use('/api/v1/events', eventsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/reasoning', reasoningRouter);
 
+app.get('/', (_req, res) => {
+  res.json({
+    status: 'online',
+    service: 'TuneMind Cloud Brain (24/7 Online)',
+    websocket_endpoint: '/ws/stt',
+    health_endpoint: '/health',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',

@@ -50,11 +50,14 @@ object BackendEndpointManager {
         }
     }
 
+    const val RENDER_PRODUCTION_URL = "https://tunemind-backend-iudp.onrender.com"
+
     /**
      * Ordered list of WebSocket endpoints to try:
      * 1. Custom Online / Wi-Fi URL configured inside the app (if set)
-     * 2. BuildConfig.TUNEMIND_BASE_URL (configured in local.properties / build.gradle.kts)
-     * 3. USB ADB reverse tunnel fallback (ws://localhost:3000/ws/stt)
+     * 2. Permanent Render Cloud URL (wss://tunemind-backend-iudp.onrender.com/ws/stt)
+     * 3. BuildConfig.TUNEMIND_BASE_URL
+     * 4. USB ADB reverse tunnel fallback (ws://localhost:3000/ws/stt)
      */
     fun getCandidateWebSocketUrls(context: Context): List<String> {
         val candidates = mutableListOf<String>()
@@ -62,6 +65,11 @@ object BackendEndpointManager {
         val custom = getCustomBaseUrl(context)
         if (custom.isNotBlank()) {
             candidates.add(toWebSocketUrl(custom))
+        }
+
+        val renderWs = toWebSocketUrl(RENDER_PRODUCTION_URL)
+        if (!candidates.contains(renderWs)) {
+            candidates.add(renderWs)
         }
 
         val buildConfigUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
@@ -77,11 +85,6 @@ object BackendEndpointManager {
             candidates.add(usbFallback)
         }
 
-        val sharedCloudUrl = toWebSocketUrl("https://ais-pre-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app")
-        if (!candidates.contains(sharedCloudUrl)) {
-            candidates.add(sharedCloudUrl)
-        }
-
         return candidates
     }
 
@@ -89,12 +92,7 @@ object BackendEndpointManager {
         val custom = getCustomBaseUrl(context)
         if (custom.isNotBlank()) return custom
 
-        val buildConfigUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
-        if (buildConfigUrl.isNotBlank() && !buildConfigUrl.contains("ais-dev-")) {
-            return normalizeHttpBaseUrl(buildConfigUrl)
-        }
-
-        return "http://localhost:3000"
+        return RENDER_PRODUCTION_URL
     }
 
     fun getDisplayConnectionLabel(context: Context): String {
@@ -103,11 +101,6 @@ object BackendEndpointManager {
             val host = custom.removePrefix("https://").removePrefix("http://")
             return if (custom.startsWith("https://")) "ONLINE CLOUD ($host)" else "WI-FI LAN ($host)"
         }
-        val buildConfigUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
-        if (buildConfigUrl.isNotBlank() && !buildConfigUrl.contains("ais-dev-")) {
-            val host = buildConfigUrl.removePrefix("https://").removePrefix("http://")
-            return "ONLINE ($host)"
-        }
-        return "TAP TO SET WIRELESS / CLOUD URL"
+        return "ONLINE CLOUD (tunemind-backend-iudp.onrender.com)"
     }
 }

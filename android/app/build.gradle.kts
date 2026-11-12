@@ -24,7 +24,7 @@ val geminiKey: String = localProps.getProperty("API_KEY")
 val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
     ?: (project.findProperty("TUNEMIND_BASE_URL") as? String)
     ?: System.getenv("TUNEMIND_BASE_URL")
-    ?: "https://ais-pre-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app"
+    ?: "https://tunemind-backend-iudp.onrender.com"
 
 android {
     namespace = "com.tunemind.app"
