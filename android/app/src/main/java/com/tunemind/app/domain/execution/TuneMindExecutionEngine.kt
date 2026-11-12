@@ -178,14 +178,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri'")
 
             val cleanQuery = searchQuery.trim()
+            val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
             val resolvedTitle = trackTitle?.trim()?.ifBlank { null } ?: run {
                 if (cleanQuery.contains(" - ")) cleanQuery.substringBefore(" - ").trim()
-                else if (cleanQuery.contains(" by ", ignoreCase = true)) cleanQuery.substringBefore(" by ", ignoreCase = true).trim()
+                else if (byParts.size == 2) byParts[0].trim()
                 else cleanQuery
             }
             val resolvedArtist = trackArtist?.trim()?.ifBlank { null } ?: run {
                 if (cleanQuery.contains(" - ")) cleanQuery.substringAfter(" - ").trim()
-                else if (cleanQuery.contains(" by ", ignoreCase = true)) cleanQuery.substringAfter(" by ", ignoreCase = true).trim()
+                else if (byParts.size == 2) byParts[1].trim()
                 else ""
             }
 

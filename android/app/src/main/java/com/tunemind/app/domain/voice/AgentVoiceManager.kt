@@ -41,7 +41,7 @@ enum class AgentState {
 class AgentVoiceManager(
     private val context: Context,
     private val getNowPlaying: (() -> com.tunemind.app.ui.NowPlayingObservation?)? = null,
-    private val getRecentTracks: (() -> List<com.tunemind.app.ui.RecentTrackItem>)? = null
+    private val getRecentTracks: (() -> List<com.tunemind.app.domain.model.TrackMemoryEntry>)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -224,7 +224,7 @@ class AgentVoiceManager(
                 // Send initial client playback context to backend
                 try {
                     val np = getNowPlaying?.invoke()
-                    val recents = getRecentTracks?.invoke() ?: emptyList()
+                    val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
 
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
@@ -238,9 +238,9 @@ class AgentVoiceManager(
                         val historyArr = org.json.JSONArray()
                         for (r in recents.take(15)) {
                             historyArr.put(JSONObject().apply {
-                                put("title", r.title)
-                                put("artist", r.artist)
-                                put("source", r.sourceApp)
+                                put("title", r.title ?: "")
+                                put("artist", r.artist ?: "")
+                                put("source", r.sourcePackage ?: "com.spotify.music")
                                 put("playCount", r.distinctAppearanceCount)
                             })
                         }
@@ -283,7 +283,10 @@ class AgentVoiceManager(
                                 intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
                                 target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
                                 search_query = cmdObj?.optString("search_query", "") ?: "",
-                                suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target")
+                                suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
+                                track_title = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() },
+                                track_artist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() },
+                                spotify_uri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
                             ),
                             voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
                         )
