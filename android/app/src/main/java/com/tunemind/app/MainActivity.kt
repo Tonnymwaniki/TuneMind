@@ -9,11 +9,15 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -26,15 +30,20 @@ import com.tunemind.app.domain.voice.AgentVoiceManager
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.AppHolder
+import com.tunemind.app.ui.components.FloatingGlassDock
 import com.tunemind.app.ui.onboarding.OnboardingScreen
+import com.tunemind.app.ui.screens.DopamineVaultScreen
 import com.tunemind.app.ui.screens.PulseAgentScreen
+import com.tunemind.app.ui.screens.RhythmDnaScreen
 import com.tunemind.app.ui.theme.TuneMindTheme
 import com.tunemind.app.util.PermissionUtils
+import kotlinx.coroutines.launch
 
 open class MainActivity : ComponentActivity() {
 
     private var startupError: Throwable? = null
 
+    @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppHolder.context = applicationContext
@@ -71,7 +80,19 @@ open class MainActivity : ComponentActivity() {
                         factory = com.tunemind.app.ui.TuneMindViewModelFactory()
                     )
                     val homeState by vm.homeState.collectAsState()
+                    val historyState by vm.historyState.collectAsState()
+                    val vaultState by vm.vaultState.collectAsState()
+                    val hearingInsights by vm.hearingInsightsState.collectAsState()
                     val adaptiveState by vm.adaptiveThemeState.collectAsState()
+
+                    val playerPrefs = remember {
+                        context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
+                    }
+                    var selectedTargetPlayer by remember {
+                        mutableStateOf(
+                            playerPrefs.getString("target_player_pkg", "com.spotify.music") ?: "com.spotify.music"
+                        )
+                    }
 
                     // Check onboarding permissions
                     var hasAllPermissions by remember {
@@ -141,30 +162,122 @@ open class MainActivity : ComponentActivity() {
                     val trackTitle = nowPlaying?.title?.takeIf { it.isNotBlank() } ?: "Deep Flow State"
                     val artistName = nowPlaying?.artist?.takeIf { it.isNotBlank() } ?: "Autonomous Intelligence"
                     val distinctPlays = homeState.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
-                    val calculatedSatiety = minOf(95, maxOf(25, distinctPlays * 22))
+                    val calculatedSatiety = minOf(95, maxOf(20, distinctPlays * 20))
                     val energy = if (nowPlaying?.isPlaying == true) 0.85f else 0.45f
+
+                    val combinedRecentTracks = remember(historyState.tracks, homeState.recentTracks) {
+                        historyState.tracks.ifEmpty { homeState.recentTracks }
+                    }
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
                         if (!hasAllPermissions) {
-                            // Step through required permissions
                             OnboardingScreen(
                                 onComplete = {
                                     hasAllPermissions = true
                                 }
                             )
                         } else {
-                            // Pure Agent-First Synaptic Obsidian Screen
-                            PulseAgentScreen(
-                                agentState = agentState,
-                                satietyPercentage = calculatedSatiety,
-                                currentTrackName = trackTitle,
-                                artistName = artistName,
-                                energy = energy,
-                                liveTranscript = liveTranscript,
-                                onOrbTapped = {
-                                    agentVoiceManager.simulateWakeWordDetected()
-                                }
+                            // 3-Screen Horizontal Pager: 0 = DOPAMINE, 1 = AGENT (Default Center Home), 2 = RHYTHM
+                            val pagerState = rememberPagerState(
+                                initialPage = 1,
+                                pageCount = { 3 }
                             )
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF050508))
+                            ) {
+                                HorizontalPager(
+                                    state = pagerState,
+                                    modifier = Modifier.fillMaxSize()
+                                ) { page ->
+                                    when (page) {
+                                        0 -> {
+                                            DopamineVaultScreen(
+                                                recentTracks = combinedRecentTracks,
+                                                vaultTracks = vaultState,
+                                                nowPlayingTitle = nowPlaying?.title,
+                                                onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
+                                                    val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                                    agentVoiceManager.playTrackImmediatelyWithVoice(
+                                                        title = title,
+                                                        artist = artist,
+                                                        spotifyUri = spotifyUri,
+                                                        targetPlayer = targetPkg
+                                                    )
+                                                },
+                                                onAskAgentAboutTrack = { title, artist ->
+                                                    coroutineScope.launch {
+                                                        pagerState.animateScrollToPage(1)
+                                                        agentVoiceManager.askAgentAboutTrack(title, artist)
+                                                    }
+                                                }
+                                            )
+                                        }
+                                        1 -> {
+                                            PulseAgentScreen(
+                                                agentState = agentState,
+                                                satietyPercentage = calculatedSatiety,
+                                                currentTrackName = trackTitle,
+                                                artistName = artistName,
+                                                energy = energy,
+                                                liveTranscript = liveTranscript,
+                                                onOrbTapped = {
+                                                    agentVoiceManager.simulateWakeWordDetected()
+                                                }
+                                            )
+                                        }
+                                        2 -> {
+                                            RhythmDnaScreen(
+                                                recentTracks = combinedRecentTracks,
+                                                hearingInsights = hearingInsights,
+                                                selectedTargetPlayer = selectedTargetPlayer,
+                                                onSelectTargetPlayer = { newPkg ->
+                                                    selectedTargetPlayer = newPkg
+                                                    playerPrefs.edit().putString("target_player_pkg", newPkg).apply()
+                                                },
+                                                onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
+                                                    val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                                    agentVoiceManager.playTrackImmediatelyWithVoice(
+                                                        title = title,
+                                                        artist = artist,
+                                                        spotifyUri = spotifyUri,
+                                                        targetPlayer = targetPkg
+                                                    )
+                                                },
+                                                onAskAgentAboutTrack = { title, artist ->
+                                                    coroutineScope.launch {
+                                                        pagerState.animateScrollToPage(1)
+                                                        agentVoiceManager.askAgentAboutTrack(title, artist)
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Centered Floating Glass Pill Dock
+                                FloatingGlassDock(
+                                    currentPage = pagerState.currentPage,
+                                    agentState = agentState,
+                                    freshTrackCount = combinedRecentTracks.count { it.distinctAppearanceCount <= 3 },
+                                    onSelectPage = { targetPage ->
+                                        coroutineScope.launch {
+                                            if (targetPage == 1 && pagerState.currentPage == 1) {
+                                                // Tapping AGENT while already on the center screen wakes the Voice Orb
+                                                agentVoiceManager.simulateWakeWordDetected()
+                                            } else {
+                                                pagerState.animateScrollToPage(targetPage)
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .navigationBarsPadding()
+                                        .padding(bottom = 18.dp)
+                                )
+                            }
                         }
                     }
                 }

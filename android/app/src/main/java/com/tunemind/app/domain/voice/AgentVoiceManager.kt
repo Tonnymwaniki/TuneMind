@@ -243,6 +243,78 @@ class AgentVoiceManager(
         startMicrophoneStream()
     }
 
+    /**
+     * Triggered when the user taps a song card on the Dopamine Vault or Rhythm DNA screen.
+     * Speaks a brief confirmation and immediately launches playback on the target player.
+     */
+    fun playTrackImmediatelyWithVoice(
+        title: String,
+        artist: String,
+        spotifyUri: String? = null,
+        targetPlayer: String = "com.spotify.music"
+    ) {
+        errorResetJob?.cancel()
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+        executionEngine.stopSpeaking()
+
+        val cleanTitle = title.trim()
+        val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
+        val spokenLine = if (cleanArtist.isNotEmpty()) {
+            "Playing $cleanTitle by $cleanArtist now."
+        } else {
+            "Playing $cleanTitle now."
+        }
+
+        recordAgentSuggestedTrack(cleanTitle)
+        _agentState.value = AgentState.SPEAKING
+        scope.launch {
+            _transcriptionFlow.emit(spokenLine)
+        }
+
+        val searchQuery = if (cleanArtist.isNotEmpty()) "$cleanTitle $cleanArtist" else cleanTitle
+        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
+            calculated_satiety_percentage = 18,
+            flow_state_analysis = "Direct 1-tap dopamine selection from user vault.",
+            voice_agent_tts = spokenLine,
+            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                intent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
+                target_player = targetPlayer.ifBlank { "com.spotify.music" },
+                search_query = searchQuery,
+                suggested_bpm_target = 108,
+                track_title = cleanTitle,
+                track_artist = cleanArtist,
+                spotify_uri = spotifyUri
+            )
+        )
+
+        executionEngine.executeBackendCommand(
+            response = responseObj,
+            onBeforeLaunch = {
+                mainHandler.post {
+                    abandonAssistantAudioFocusOnly()
+                }
+            },
+            onFinished = {
+                mainHandler.post {
+                    releaseAudioDucking()
+                    resumeWakeWordListening()
+                }
+            }
+        )
+    }
+
+    /**
+     * Triggered when the user taps "🎙 Ask" on any song card.
+     * Pre-fills the live transcript hint and opens the Voice Orb microphone immediately.
+     */
+    fun askAgentAboutTrack(title: String, artist: String) {
+        scope.launch {
+            _transcriptionFlow.emit("Ask about \"$title\" by $artist...")
+        }
+        simulateWakeWordDetected()
+    }
+
     private fun requestAudioDucking() {
         audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(
