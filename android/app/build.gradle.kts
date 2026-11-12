@@ -21,6 +21,11 @@ val geminiKey: String = localProps.getProperty("API_KEY")
     ?: System.getenv("GEMINI_API_KEY")
     ?: ""
 
+val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
+    ?: (project.findProperty("TUNEMIND_BASE_URL") as? String)
+    ?: System.getenv("TUNEMIND_BASE_URL")
+    ?: "https://ais-pre-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app"
+
 android {
     namespace = "com.tunemind.app"
     compileSdk = 36
@@ -35,7 +40,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "TUNEMIND_BASE_URL", "\"https://ais-dev-4huynt6jd7qje6edirlmma-740908901963.europe-west2.run.app\"")
+        buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 

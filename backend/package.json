@@ -8,6 +8,7 @@
     "build:emit": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "tunnel": "npx --yes localtunnel --port 3000",
     "test": "jest"
   },
   "engines": {

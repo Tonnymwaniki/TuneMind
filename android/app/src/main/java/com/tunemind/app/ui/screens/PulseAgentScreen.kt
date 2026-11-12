@@ -82,25 +82,104 @@ fun PulseAgentScreen(
         label = "OrbBreathe"
     )
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var showServerDialog by remember { mutableStateOf(false) }
+    var serverUrlInput by remember {
+        mutableStateOf(com.tunemind.app.domain.network.BackendEndpointManager.getCustomBaseUrl(context))
+    }
+    var connectionLabel by remember {
+        mutableStateOf(com.tunemind.app.domain.network.BackendEndpointManager.getDisplayConnectionLabel(context))
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(animatedBgColor)
             .padding(24.dp)
     ) {
-        // TOP: Soft Telemetry Card
+        // TOP: Soft Telemetry Card (Tap to configure Wireless / Cloud Server URL)
         SoftGlassCard(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .bouncyClickable { /* Optional tap action */ }
+                .bouncyClickable {
+                    serverUrlInput = com.tunemind.app.domain.network.BackendEndpointManager.getCustomBaseUrl(context)
+                    showServerDialog = true
+                }
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Text("NOW SYNCING", color = animatedOrbColor.copy(alpha = 0.7f), fontSize = 10.sp, letterSpacing = 2.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(currentTrackName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(artistName, color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = connectionLabel,
+                    color = Color(0xFF00E5FF).copy(alpha = 0.75f),
+                    fontSize = 10.sp,
+                    letterSpacing = 1.sp
+                )
             }
+        }
+
+        if (showServerDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showServerDialog = false },
+                containerColor = Color(0xFF12101B),
+                titleContentColor = Color.White,
+                textContentColor = Color.White.copy(alpha = 0.85f),
+                title = {
+                    Text("Wireless / Cloud Brain URL", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Run without a USB cable! Enter either:\n" +
+                            "• Your 24/7 Cloud or Tunnel URL (e.g. https://xxxx.loca.lt or https://tunemind.onrender.com)\n" +
+                            "• Your PC's Wi-Fi IP printed in the backend terminal (e.g. 192.168.1.25:3000)",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.75f)
+                        )
+                        androidx.compose.material3.OutlinedTextField(
+                            value = serverUrlInput,
+                            onValueChange = { serverUrlInput = it },
+                            placeholder = {
+                                Text(
+                                    "e.g. https://tunemind.loca.lt or 192.168.1.25:3000",
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.4f)
+                                )
+                            },
+                            singleLine = true,
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF00E5FF),
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            com.tunemind.app.domain.network.BackendEndpointManager.setCustomBaseUrl(context, serverUrlInput)
+                            connectionLabel = com.tunemind.app.domain.network.BackendEndpointManager.getDisplayConnectionLabel(context)
+                            showServerDialog = false
+                        }
+                    ) {
+                        Text("Save Wireless URL", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { showServerDialog = false }
+                    ) {
+                        Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+            )
         }
 
         // CENTER: The Agent Core (Orb & Satiety Gauge)

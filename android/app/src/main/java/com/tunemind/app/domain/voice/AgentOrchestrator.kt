@@ -23,10 +23,6 @@ class AgentOrchestrator(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 ) {
     private val TAG = "AgentLoop"
-    private val reasoningApiClient: ReasoningApiClient by lazy {
-        val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/').ifBlank { "http://10.0.2.2:3000" }
-        ReasoningApiClient(baseUrl)
-    }
     private val tuneMindExecutionEngine: TuneMindExecutionEngine by lazy {
         TuneMindExecutionEngine(context)
     }
@@ -50,6 +46,8 @@ class AgentOrchestrator(
 
                 Log.d(TAG, "Evaluating with track: '$currentTrackTitle' by '$currentTrackArtist' ($sourcePlayer)")
 
+                val activeBaseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
+                val reasoningApiClient = ReasoningApiClient(activeBaseUrl)
                 val aiResponse = reasoningApiClient.evaluateSatiety(
                     transcript = transcript,
                     currentTrackTitle = currentTrackTitle,

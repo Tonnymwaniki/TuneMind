@@ -9,6 +9,7 @@
 import './bootstrap';
 
 import http from 'http';
+import os from 'os';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import { AssemblyAI } from 'assemblyai';
 import express from 'express';
@@ -304,6 +305,29 @@ wss.on('connection', async (ws: WebSocket) => {
 // ─── 5. Start the server ─────────────────────────────────────────────────────
 server.listen(PORT, HOST, () => {
   console.log(`TuneMind backend listening on ${HOST}:${PORT} (Phase 2 — with WebSocket STT)`);
+
+  const interfaces = os.networkInterfaces();
+  const lanUrls: string[] = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        lanUrls.push(`http://${net.address}:${PORT}`);
+      }
+    }
+  }
+
+  console.log('===================================================================');
+  if (lanUrls.length > 0) {
+    console.log('📡 WIRELESS MODE (Same Wi-Fi / Hotspot — NO USB CABLE NEEDED):');
+    console.log('   Tap the top card in the TuneMind phone app and enter:');
+    for (const url of lanUrls) {
+      console.log(`   👉 ${url}`);
+    }
+  }
+  console.log('🌍 GLOBAL ONLINE MODE (Works on 4G/5G anywhere without Wi-Fi):');
+  console.log('   Run in a 2nd terminal: npm run tunnel');
+  console.log('   Then paste the https://xxxx.loca.lt URL into the phone app!');
+  console.log('===================================================================');
 });
 
 export default app;

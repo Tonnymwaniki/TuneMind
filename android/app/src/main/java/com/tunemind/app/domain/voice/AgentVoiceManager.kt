@@ -59,7 +59,10 @@ class AgentVoiceManager(
     private var noiseSuppressor: android.media.audiofx.NoiseSuppressor? = null
     private var echoCanceler: android.media.audiofx.AcousticEchoCanceler? = null
     private var webSocket: WebSocket? = null
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(3500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
     private var isRecording = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -222,12 +225,25 @@ class AgentVoiceManager(
             return
         }
 
-        val request = Request.Builder().url("ws://localhost:3000/ws/stt").build()
-        Log.d(TAG, "Attempting WebSocket connection to ws://localhost:3000/ws/stt (ADB reverse tunnel)...")
+        val candidates = com.tunemind.app.domain.network.BackendEndpointManager.getCandidateWebSocketUrls(context)
+        connectToCandidateWebSocket(candidates, 0)
+    }
+
+    private fun connectToCandidateWebSocket(candidates: List<String>, index: Int) {
+        val targetUrl = candidates.getOrElse(index) { "ws://localhost:3000/ws/stt" }
+        val request = Request.Builder()
+            .url(targetUrl)
+            .addHeader("Bypass-Tunnel-Reminder", "true")
+            .addHeader("ngrok-skip-browser-warning", "true")
+            .build()
+        Log.d(TAG, "Attempting WebSocket connection (${index + 1}/${candidates.size}) to $targetUrl ...")
+
+        var hasOpened = false
 
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "🟢 WebSocket OPENED successfully. HTTP Status: ${response.code}")
+                hasOpened = true
+                Log.d(TAG, "🟢 WebSocket OPENED successfully on $targetUrl. HTTP Status: ${response.code}")
 
                 // Send initial client playback context & full user track memory to backend
                 try {
@@ -387,7 +403,13 @@ class AgentVoiceManager(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "❌ WebSocket FAILURE: ${t.message}", t)
+                Log.e(TAG, "❌ WebSocket FAILURE on $targetUrl: ${t.message}")
+                if (!hasOpened && index + 1 < candidates.size) {
+                    Log.d(TAG, "🔄 Failing over to next candidate WebSocket endpoint (${index + 2}/${candidates.size})...")
+                    connectToCandidateWebSocket(candidates, index + 1)
+                    return
+                }
+
                 if (response != null) {
                     val body = runCatching { response.body?.string() }.getOrNull()
                     Log.e(TAG, "❌ WebSocket FAILURE HTTP Code: ${response.code}, Body: $body")
