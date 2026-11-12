@@ -129,14 +129,36 @@ wss.on('connection', async (ws: WebSocket) => {
             const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
             const provider = new ClaudeMusicReasoningProvider();
 
-            // Extract the user's most recent active track from the EventStore
+            // Extract the user's most recent active track: prioritize live Android client telemetry!
             const eventStore = new EventStore();
-            const recentTracks = eventStore.getRecentObservedTracks(10);
-            const latestTrack = recentTracks[0] || {
-              title: 'Active Session',
-              artist: 'TuneMind Observer',
-              source: 'com.spotify.music'
-            };
+            const storedTracks = eventStore.getRecentObservedTracks(10);
+
+            const liveCurrent = clientContext?.current_track;
+            const liveRecents = clientContext?.recent_tracks || [];
+
+            const effectiveCurrentTrack = (liveCurrent?.title && liveCurrent.title !== 'Standing By' && liveCurrent.title !== 'Active Session')
+              ? {
+                  title: liveCurrent.title,
+                  artist: liveCurrent.artist || '',
+                  source_player: liveCurrent.source_player || 'com.spotify.music'
+                }
+              : (storedTracks[0] || {
+                  title: 'Active Session',
+                  artist: 'TuneMind Observer',
+                  source_player: 'com.spotify.music'
+                });
+
+            const effectiveHistory = liveRecents.length > 0
+              ? liveRecents.slice(0, 8).map(t => ({
+                  title: t.title,
+                  artist: t.artist,
+                  source_player: t.source || 'com.spotify.music'
+                }))
+              : storedTracks.slice(1, 8).map(t => ({
+                  title: t.title,
+                  artist: t.artist,
+                  source_player: t.source
+                }));
 
             const hour = new Date().getHours();
             const circadianDaypart = hour >= 6 && hour < 12 ? 'Morning'
@@ -148,16 +170,12 @@ wss.on('connection', async (ws: WebSocket) => {
               timestamp_utc: new Date().toISOString(),
               circadian_daypart: circadianDaypart,
               current_track: {
-                title: latestTrack.title,
-                artist: latestTrack.artist,
-                source_player: latestTrack.source || 'com.spotify.music'
+                title: effectiveCurrentTrack.title,
+                artist: effectiveCurrentTrack.artist,
+                source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music'
               },
               user_command: text,
-              rolling_history: recentTracks.slice(1, 6).map(t => ({
-                title: t.title,
-                artist: t.artist,
-                source_player: t.source
-              })),
+              rolling_history: effectiveHistory,
               current_satiety_percentage: 50
             });
 
@@ -203,8 +221,28 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   });
 
-  // Safety valve: Only send if AssemblyAI session is actually ready
+  let clientContext: {
+    current_track?: { title: string; artist: string; source_player?: string };
+    recent_tracks?: Array<{ title: string; artist: string; source?: string; playCount?: number }>;
+  } | null = null;
+
+  // Handle incoming messages from the Android client
   ws.on('message', (message: RawData) => {
+    // If it's a string, it may be JSON client telemetry (now playing, recent tracks)
+    if (typeof message === 'string' || (Buffer.isBuffer(message) && message.length > 0 && message[0] === 123)) { // 123 is '{'
+      try {
+        const textData = message.toString();
+        const json = JSON.parse(textData);
+        if (json.type === 'client_context') {
+          clientContext = json;
+          console.log(`[VoiceStream] 📱 Received live client playback context: Now Playing: "${json.current_track?.title}" by "${json.current_track?.artist}", Recent tracks: ${json.recent_tracks?.length || 0}`);
+          return;
+        }
+      } catch (_e) {
+        // Not a JSON text command; treat as PCM audio buffer below
+      }
+    }
+
     if (Buffer.isBuffer(message)) {
       chunkCount++;
       // Log every 20th chunk just to prove audio is flowing without spamming the terminal

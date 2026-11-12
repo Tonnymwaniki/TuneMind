@@ -39,6 +39,9 @@ export interface TuneMindReasoningResponse {
     intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'NONE';
     target_player: string;
     search_query: string;
+    track_title?: string;
+    track_artist?: string;
+    spotify_uri?: string;
     suggested_bpm_target: number;
   };
   database_tags: string[];
@@ -103,7 +106,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
 
   private getSystemPrompt(): string {
     return `You are the core logic engine for TuneMind, an autonomous neuro-acoustic music intelligence platform. 
-You act as a studio hardware console and cognitive brain that commands Android's OS-level media players (Spotify, Apple Music, Boomplay, Audiomack, Local Files). 
+You act as a personal audio console and cognitive brain that commands Android's OS-level media players (Spotify, Apple Music, Boomplay, Audiomack, Local Files). 
 Your primary goal is to monitor "Acoustic Satiety"—the auditory fatigue caused by repetitive tempos, keys, and timbres—and intervene to maintain the user's cognitive flow.
 
 CORE DIRECTIVES & SENSOR LOGIC:
@@ -120,21 +123,20 @@ CORE DIRECTIVES & SENSOR LOGIC:
 - Morning (06:00-11:59): Favor crisp clarity, acoustic instruments.
 - Midday (12:00-16:59): Favor high-focus cognitive flow (110-128 BPM).
 - Evening (17:00-21:59): Favor harmonic decompression.
-- Late Night (22:00-05:59): Favor atmospheric depth, low-transient warmth (Deep House, Lo-Fi, slow Mugithi).
+- Late Night (22:00-05:59): Favor atmospheric depth, low-transient warmth (Deep House, Lo-Fi, slow Mugithi, acoustic R&B).
 
-4. CULTURAL LEXICON:
-You possess deep expertise in East African pop culture, Sheng, Gikuyu Mugithi, Gospel, and Bongo Flava. When a user requests a Kikuyu song, route them to authentic artists (e.g., Samidoh, Joyce wa Mamaa) without repetition.
+4. DIVERSE GENRE REASONING & TASTE GENOME GROUNDING:
+You are provided with 'user_observed_listening_history' (the real tracks and artists the user has actively played and loved).
+- CRITICAL: Reason directly on whatever artists and tracks appear in their listening history!
+- Understand diverse genres across the world: Bongo Flava (Mbosso, Diamond Platnumz, Jux, Marioo, Harmonize, Rayvanny, Ali Kiba), Afrobeats & Amapiano (Rema, Burna Boy, Asake, Wizkid, Davido, Tyla), Kenyan Pop/Mugithi (Otile Brown, Nadia Mukami, Samidoh), Hip-Hop, R&B, Pop, Reggae, Soul, etc.
+- NEVER recommend synthetic, cheesy, or weird unrelated tracks like generic synthwave unless the user explicitly asks for it or it is in their history.
+- When the user asks to "play a song", "play me a song", "put on some music", or asks for a tune, look at their listening history: recommend either a top track by one of their favorite artists, or an aligned hit from the same genre they love!
 
-5. VOICE AGENT PERSONA (ATTENTIVE PERSONAL AUDIO ASSISTANT):
-You are the listener's dedicated personal sound engineer and music companion.
-- Address the user with conversational warmth and intelligence, like an audiophile friend who knows their taste intimately.
-- In 'voice_agent_tts', explicitly reference why you chose this specific song for them right now (e.g., grounding in their favorite artists, current focus rhythm, or fatigue relief).
-- Keep voice_agent_tts conversational, natural, and under 2-3 sentences. Speak with clear enthusiasm and audio empathy.
-
-6. TASTE GENOME & USER HISTORY GROUNDING:
-- You are provided with 'user_observed_listening_history' (songs and artists the user has actively played and loves).
-- When the user asks to "play a song", "play me a song", "put on some music", or similar open-ended requests, PRIORITIZE their known artists, favorite genres, and sonic universe from their listening history, or genre-congruent tracks that fit their established taste profile! Never recommend disconnected random artists.
-- If auditory satiety is high, pick a soothing palate cleanser from an adjacent genre that still respects their core taste anchors.
+5. VOICE AGENT PERSONA (ATTENTIVE PERSONAL AUDIO COMPANION):
+You are the listener's dedicated personal audio assistant.
+- In 'voice_agent_tts', talk to the listener conversationally and warmly BEFORE playing the song!
+- Explicitly tell the listener what song and artist you picked and why it fits their current state and taste (e.g. "I've got you. Putting on Huwezi Jua by Mbosso to keep your focus smooth with that signature acoustic guitar melody.").
+- Keep voice_agent_tts conversational, natural, and under 2-3 sentences. Speak with warmth, enthusiasm, and audio empathy.
 
 OUTPUT FORMAT:
 You must respond ONLY with a raw, valid JSON object matching this schema. No markdown formatting, no code blocks, no conversational filler.
@@ -146,11 +148,13 @@ You must respond ONLY with a raw, valid JSON object matching this schema. No mar
     "intent": "OS_MEDIA_NEXT_AND_DEEP_LINK",
     "target_player": "com.spotify.music",
     "search_query": "Exact Song Title Exact Artist",
-    "suggested_bpm_target": 120
+    "track_title": "Exact Song Title",
+    "track_artist": "Exact Artist",
+    "suggested_bpm_target": 105
   },
   "database_tags": ["midday", "personal-taste-aligned"]
 }
-CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g. 'Calm Down Rema' or 'Huwezi Jua Mbosso') so Spotify opens and directly plays that specific synced song!`;
+CRITICAL: For 'search_query', provide an exact real track and artist name (e.g. 'Huwezi Jua Mbosso' or 'Calm Down Rema') and fill 'track_title' and 'track_artist' so Spotify opens and plays that exact synced song!`;
   }
 
   private async getSpotifyAccessToken(): Promise<string | null> {
@@ -230,6 +234,34 @@ CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g.
     }
   }
 
+  public async lookupSpotifyTrack(query: string, artist?: string): Promise<{ trackId: string; uri: string; title: string; artist: string } | null> {
+    const token = await this.getSpotifyAccessToken();
+    if (!token) return null;
+
+    try {
+      const q = artist ? `track:${query} artist:${artist}` : query;
+      const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const searchData = (await searchRes.json()) as any;
+      const item = searchData.tracks?.items?.[0];
+
+      if (item && item.uri) {
+        console.log(`[Spotify Lookup] 🎯 Resolved exact Spotify URI for "${query}": ${item.uri} (${item.name} by ${item.artists?.[0]?.name})`);
+        return {
+          trackId: item.id,
+          uri: item.uri, // e.g. "spotify:track:6rqhFgbbKwnb9MLmUQDhG6"
+          title: item.name,
+          artist: item.artists?.[0]?.name || ''
+        };
+      }
+    } catch (error) {
+      console.warn('[Spotify Lookup] Error resolving Spotify track:', error);
+    }
+    return null;
+  }
+
   public async evaluateSatiety(context: TuneMindTelemetryContext): Promise<TuneMindReasoningResponse> {
     const userId = 'tunemind-default-user'; // Replace with actual auth later
 
@@ -254,15 +286,55 @@ CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g.
       console.warn('[Claude Provider] Supabase fetch failed, continuing without history.');
     }
 
-    // 3. FETCH USER'S REAL LISTENING HISTORY FROM LOCAL EVENTSTORE
-    let userListeningHistory: any[] = [];
+    // 3. MERGE REAL LISTENING HISTORY: LIVE CLIENT TELEMETRY + EVENTSTORE
+    const historyMap = new Map<string, any>();
+
+    // Priority 1: Current active track from live phone session
+    if (context.current_track?.title && context.current_track.title !== 'Active Session' && context.current_track.title !== 'Standing By') {
+      const curKey = `${context.current_track.title.toLowerCase()} - ${context.current_track.artist.toLowerCase()}`;
+      historyMap.set(curKey, {
+        title: context.current_track.title,
+        artist: context.current_track.artist,
+        source: context.current_track.source_player || 'com.spotify.music',
+        playCount: 3
+      });
+    }
+
+    // Priority 2: Rolling history from live client WebSocket context
+    if (Array.isArray(context.rolling_history)) {
+      for (const t of context.rolling_history) {
+        if (t.title && t.title !== 'Active Session' && t.title !== 'Standing By') {
+          const key = `${t.title.toLowerCase()} - ${t.artist.toLowerCase()}`;
+          if (!historyMap.has(key)) {
+            historyMap.set(key, {
+              title: t.title,
+              artist: t.artist,
+              source: (t as any).source_player || 'com.spotify.music',
+              playCount: 2
+            });
+          }
+        }
+      }
+    }
+
+    // Priority 3: Durably stored listening events from local EventStore
     try {
       const eventStore = new EventStore();
-      userListeningHistory = eventStore.getRecentObservedTracks(25);
-      console.log(`[Claude Provider] 🎧 Injected ${userListeningHistory.length} real listener tracks into Taste Genome.`);
+      const storedTracks = eventStore.getRecentObservedTracks(25);
+      for (const t of storedTracks) {
+        if (t.title) {
+          const key = `${t.title.toLowerCase()} - ${t.artist.toLowerCase()}`;
+          if (!historyMap.has(key)) {
+            historyMap.set(key, t);
+          }
+        }
+      }
     } catch (e) {
       console.warn('[Claude Provider] Could not load EventStore history:', e);
     }
+
+    const userListeningHistory = Array.from(historyMap.values()).slice(0, 30);
+    console.log(`[Claude Provider] 🎧 Injected ${userListeningHistory.length} real listener tracks into Taste Genome.`);
 
     // 4. Inject history into the payload for Claude
     const claudePayload = {
@@ -363,16 +435,57 @@ CRITICAL: For 'search_query', provide an exact, real track and artist name (e.g.
           parsed.reply ??
           "I've updated your acoustic balance."
         ),
-        os_execution_command: {
-          intent: (parsed.os_execution_command?.intent || (parsed.target_search_query ? 'OS_MEDIA_NEXT_AND_DEEP_LINK' : 'NONE')) as any,
-          target_player: parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music',
-          search_query: parsed.os_execution_command?.search_query || parsed.target_search_query || '',
-          suggested_bpm_target: Number(parsed.os_execution_command?.suggested_bpm_target || (Array.isArray(parsed.target_bpm_range) ? parsed.target_bpm_range[0] : 120))
-        },
+        os_execution_command: (() => {
+          const rawSearch = parsed.os_execution_command?.search_query || parsed.target_search_query || '';
+          let trackTitle = parsed.os_execution_command?.track_title || parsed.track_title || '';
+          let trackArtist = parsed.os_execution_command?.track_artist || parsed.track_artist || '';
+          const spotifyUri = parsed.os_execution_command?.spotify_uri || parsed.spotify_uri || '';
+
+          if (!trackTitle && rawSearch) {
+            if (rawSearch.includes(' - ')) {
+              const parts = rawSearch.split(' - ');
+              trackTitle = parts[0]?.trim();
+              trackArtist = parts[1]?.trim();
+            } else if (rawSearch.toLowerCase().includes(' by ')) {
+              const parts = rawSearch.split(/\s+by\s+/i);
+              trackTitle = parts[0]?.trim();
+              trackArtist = parts[1]?.trim();
+            } else {
+              trackTitle = rawSearch;
+            }
+          }
+
+          const targetPlayer = parsed.os_execution_command?.target_player || context.current_track?.source_player || 'com.spotify.music';
+
+          return {
+            intent: (parsed.os_execution_command?.intent || (rawSearch ? 'OS_MEDIA_NEXT_AND_DEEP_LINK' : 'NONE')) as any,
+            target_player: targetPlayer,
+            search_query: rawSearch,
+            track_title: trackTitle,
+            track_artist: trackArtist,
+            spotify_uri: spotifyUri,
+            suggested_bpm_target: Number(parsed.os_execution_command?.suggested_bpm_target || (Array.isArray(parsed.target_bpm_range) ? parsed.target_bpm_range[0] : 105))
+          };
+        })(),
         database_tags: Array.isArray(parsed.database_tags)
           ? parsed.database_tags
           : ['claude-haiku-5-5', context.circadian_daypart?.toLowerCase() || 'midday']
       };
+
+      // If targeting Spotify and we don't have a direct URI yet, attempt lookup via Spotify Web API
+      if (aiResponse.os_execution_command.target_player.includes('spotify') && aiResponse.os_execution_command.search_query) {
+        try {
+          const spotifyMatch = await this.lookupSpotifyTrack(
+            aiResponse.os_execution_command.track_title || aiResponse.os_execution_command.search_query,
+            aiResponse.os_execution_command.track_artist
+          );
+          if (spotifyMatch) {
+            aiResponse.os_execution_command.spotify_uri = spotifyMatch.uri;
+            if (spotifyMatch.title) aiResponse.os_execution_command.track_title = spotifyMatch.title;
+            if (spotifyMatch.artist) aiResponse.os_execution_command.track_artist = spotifyMatch.artist;
+          }
+        } catch (_lookupErr) {}
+      }
     } catch (error: any) {
       console.error('[Claude Provider] API Call failed:', error);
       const msg = String(error?.message || error);

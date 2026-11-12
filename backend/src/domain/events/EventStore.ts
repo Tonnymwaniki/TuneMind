@@ -50,10 +50,29 @@ export class EventStore {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          EventStore.events = parsed;
-          EventStore.eventIdSet = new Set(parsed.map(e => e.event_id));
-          console.log(`[EventStore] Restored ${parsed.length} persistent events from ${DATA_FILE}`);
-          return;
+          // Cleanse any legacy synthetic synthwave tracks from older builds
+          const cleansed = parsed.filter((e: StoredEvent) => {
+            const p = e.payload_json || '';
+            return !p.includes('The Neon Hearts') &&
+                   !p.includes('Solar Pulse') &&
+                   !p.includes('Vektor Drift') &&
+                   !p.includes('Luna Rivers') &&
+                   !p.includes('Komorebi');
+          });
+
+          if (cleansed.length !== parsed.length) {
+            console.log(`[EventStore] 🧹 Purged ${parsed.length - cleansed.length} legacy synthetic synthwave events from persistent storage.`);
+          }
+
+          if (cleansed.length > 0) {
+            EventStore.events = cleansed;
+            EventStore.eventIdSet = new Set(cleansed.map(e => e.event_id));
+            console.log(`[EventStore] Restored ${cleansed.length} persistent events from ${DATA_FILE}`);
+            if (cleansed.length !== parsed.length) {
+              this.persistToDisk();
+            }
+            return;
+          }
         }
       }
     } catch (err) {
@@ -78,14 +97,18 @@ export class EventStore {
   }
 
   private seedInitialEvents(): void {
-    // Seed initial realistic listening observations so analytics & timeline work immediately
+    // Seed initial realistic listening observations across authentic genres (Bongo Flava, Afrobeats, Afro-Pop)
     const baseTime = Date.now() - 7 * 24 * 3600 * 1000;
     const sampleTracks = [
-      { id: 'trk-1', title: 'Stay With Me', artist: 'The Neon Hearts', album: 'Retro Wave', source: 'com.spotify.music', genre: 'Synth Pop', bpm: 128 },
-      { id: 'trk-2', title: 'Hyperion Drive', artist: 'Solar Pulse', album: 'Neon Sun', source: 'com.spotify.music', genre: 'Cyber Electro', bpm: 132 },
-      { id: 'np-001', title: 'Midnight Thoughts', artist: 'Luna Rivers', album: 'Night Chill', source: 'com.google.android.apps.youtube.music', genre: 'Lo-Fi', bpm: 84 },
-      { id: 'cand-1', title: 'Neon Horizon', artist: 'Vektor Drift', album: 'Outrun', source: 'com.spotify.music', genre: 'Synthwave', bpm: 128 },
-      { id: 'cand-2', title: 'Ghost in the Machine', artist: 'Komorebi', album: 'Driftwood', source: 'com.apple.android.music', genre: 'Lo-Fi Beats', bpm: 82 }
+      { id: 'trk-1', title: 'Huwezi Jua', artist: 'Mbosso', album: 'Definition of Love', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 102 },
+      { id: 'trk-2', title: 'Komasava', artist: 'Diamond Platnumz', album: 'First Of All', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 112 },
+      { id: 'np-001', title: 'Enjoy', artist: 'Jux & Diamond Platnumz', album: 'King of Hearts', source: 'com.spotify.music', genre: 'Afro-Bongo', bpm: 108 },
+      { id: 'cand-1', title: 'Sikomi', artist: 'Diamond Platnumz', album: 'A Boy From Tandale', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 98 },
+      { id: 'cand-2', title: 'Amepotea', artist: 'Mbosso', album: 'Khan', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 104 },
+      { id: 'cand-3', title: 'Mi Amor', artist: 'Marioo & Jovial', album: 'The Kid You Know', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 106 },
+      { id: 'cand-4', title: 'Single Again', artist: 'Harmonize', album: 'Made For Us', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 100 },
+      { id: 'cand-5', title: 'Calm Down', artist: 'Rema', album: 'Rave & Climax', source: 'com.spotify.music', genre: 'Afrobeats', bpm: 105 },
+      { id: 'cand-6', title: 'Sawa', artist: 'Otile Brown', album: 'Just In Love', source: 'com.spotify.music', genre: 'Afro-Pop', bpm: 95 }
     ];
 
     const users = ['tunemind-dev', 'tonny@tunemind.neuro'];
@@ -250,6 +273,11 @@ export class EventStore {
         const payload = JSON.parse(evt.payload_json);
         const trk = payload.track || payload.current_track || payload.nowPlaying;
         if (trk?.title && trk?.artist && trk.title !== 'Active Session' && trk.title !== 'Standing By') {
+          // Guard against legacy synthetic tracks
+          const art = trk.artist.toLowerCase();
+          if (art.includes('neon hearts') || art.includes('solar pulse') || art.includes('vektor drift') || art.includes('luna rivers') || art.includes('komorebi')) {
+            continue;
+          }
           const key = `${trk.title.trim().toLowerCase()} - ${trk.artist.trim().toLowerCase()}`;
           const existing = tracksMap.get(key);
           if (existing) {

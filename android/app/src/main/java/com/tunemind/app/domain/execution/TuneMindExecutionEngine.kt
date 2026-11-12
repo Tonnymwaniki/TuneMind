@@ -15,7 +15,10 @@ data class OsExecutionCommand(
     val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_MEDIA_PAUSE", "NONE"
     val target_player: String, // e.g., "com.spotify.music"
     val search_query: String,
-    val suggested_bpm_target: Int?
+    val suggested_bpm_target: Int?,
+    val track_title: String? = null,
+    val track_artist: String? = null,
+    val spotify_uri: String? = null
 )
 
 data class ReasoningResponse(
@@ -59,7 +62,10 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             if (response.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
                 launchTargetPlayer(
                     targetPackage = response.os_execution_command.target_player,
-                    searchQuery = response.os_execution_command.search_query
+                    searchQuery = response.os_execution_command.search_query,
+                    trackTitle = response.os_execution_command.track_title,
+                    trackArtist = response.os_execution_command.track_artist,
+                    spotifyUri = response.os_execution_command.spotify_uri
                 )
             }
         }
@@ -161,28 +167,51 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         Log.d(TAG, "Broadcasted Global Pause Command")
     }
 
-    private fun launchTargetPlayer(targetPackage: String, searchQuery: String) {
+    private fun launchTargetPlayer(
+        targetPackage: String,
+        searchQuery: String,
+        trackTitle: String? = null,
+        trackArtist: String? = null,
+        spotifyUri: String? = null
+    ) {
         try {
-            Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery'")
+            Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri'")
 
-            // Parse track title and artist from searchQuery (e.g. "Song Title Artist Name")
             val cleanQuery = searchQuery.trim()
-            val fakeTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
-                id = cleanQuery,
-                title = cleanQuery,
-                artist = "",
+            val resolvedTitle = trackTitle?.trim()?.ifBlank { null } ?: run {
+                if (cleanQuery.contains(" - ")) cleanQuery.substringBefore(" - ").trim()
+                else if (cleanQuery.contains(" by ", ignoreCase = true)) cleanQuery.substringBefore(" by ", ignoreCase = true).trim()
+                else cleanQuery
+            }
+            val resolvedArtist = trackArtist?.trim()?.ifBlank { null } ?: run {
+                if (cleanQuery.contains(" - ")) cleanQuery.substringAfter(" - ").trim()
+                else if (cleanQuery.contains(" by ", ignoreCase = true)) cleanQuery.substringAfter(" by ", ignoreCase = true).trim()
+                else ""
+            }
+
+            val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
+                id = spotifyUri ?: cleanQuery,
+                title = resolvedTitle,
+                artist = resolvedArtist,
                 reason = "Autonomous neuro-acoustic flow match",
                 confidence = 0.98f
             )
+
+            // Direct track deep link if available, otherwise search deep link
+            val directDeepLink = if (!spotifyUri.isNullOrBlank()) {
+                spotifyUri
+            } else if (targetPackage.contains("spotify")) {
+                "spotify:search:${Uri.encode(cleanQuery)}"
+            } else null
 
             com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
                 context = context,
                 providerId = if (targetPackage.contains("spotify")) "spotify" else targetPackage,
                 displayName = if (targetPackage.contains("spotify")) "Spotify" else "Target Player",
                 packageName = targetPackage,
-                track = fakeTrack,
+                track = targetTrack,
                 query = cleanQuery,
-                deepLinkUri = if (targetPackage.contains("spotify")) "spotify:search:${Uri.encode(cleanQuery)}" else null
+                deepLinkUri = directDeepLink
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch player", e)

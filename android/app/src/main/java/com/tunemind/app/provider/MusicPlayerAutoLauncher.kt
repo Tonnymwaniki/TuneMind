@@ -50,15 +50,44 @@ object MusicPlayerAutoLauncher {
             Log.d(TAG, "Audio pause interruption note: ${e.message}")
         }
 
-        // 1. PRIMARY: INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH with autostart
-        var launched = false
+        // 1. TOP PRIORITY: Direct Track Deep Link (e.g. spotify:track:<id> or web track URL)
+        // This directly loads and starts playback of the exact synced track without searching.
+        if (!deepLinkUri.isNullOrBlank() && (deepLinkUri.startsWith("spotify:track:") || deepLinkUri.startsWith("https://open.spotify.com/track/"))) {
+            try {
+                val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUri)).apply {
+                    if (targetPkg != null) setPackage(targetPkg)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                context.startActivity(uriIntent)
+                Log.i(TAG, "Launched direct track URI in $targetPkg: $deepLinkUri")
+                return PlaybackLaunchResult.DirectPlaybackLaunched(
+                    providerId = providerId,
+                    providerDisplayName = displayName,
+                    trackTitle = track.title,
+                    destinationUri = deepLinkUri,
+                    message = "Playing '${track.title}' directly in $displayName."
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct track URI launch failed, falling back: ${e.message}")
+            }
+        }
+
+        // 2. PRIMARY SEARCH PLAY: INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH with autostart
+        val fullSearchQuery = if (track.artist.isNotBlank() && !track.title.contains(track.artist, ignoreCase = true)) {
+            "${track.title} ${track.artist}".trim()
+        } else {
+            track.title.trim()
+        }
+
         if (targetPkg != null) {
             try {
                 val mediaPlayIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-                    putExtra(SearchManager.QUERY, "${track.artist} ${track.title}".trim())
+                    putExtra(SearchManager.QUERY, fullSearchQuery)
                     putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio")
                     putExtra(MediaStore.EXTRA_MEDIA_TITLE, track.title)
-                    putExtra(MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
+                    if (track.artist.isNotBlank()) {
+                        putExtra(MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
+                    }
                     putExtra("autostart", true)
                     putExtra("android.intent.extra.focus", "vnd.android.cursor.item/audio")
                     putExtra("android.intent.extra.START_PLAYBACK", true)
@@ -66,7 +95,6 @@ object MusicPlayerAutoLauncher {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 context.startActivity(mediaPlayIntent)
-                launched = true
                 scheduleAutoPlayKicker(context, targetPkg, track)
                 return PlaybackLaunchResult.DirectPlaybackLaunched(
                     providerId = providerId,
@@ -80,7 +108,7 @@ object MusicPlayerAutoLauncher {
             }
         }
 
-        // 2. DEEP LINK WITH AUTO-PLAY KICKER
+        // 3. DEEP LINK WITH SEARCH QUERY
         if (!deepLinkUri.isNullOrBlank()) {
             try {
                 val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUri)).apply {
@@ -88,7 +116,6 @@ object MusicPlayerAutoLauncher {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 context.startActivity(uriIntent)
-                launched = true
                 scheduleAutoPlayKicker(context, targetPkg, track)
                 return PlaybackLaunchResult.SearchHandoffLaunched(
                     providerId = providerId,
@@ -108,50 +135,38 @@ object MusicPlayerAutoLauncher {
     }
 
     /**
-     * Schedules multi-stage background signals (400ms, 1000ms, 1800ms, 2600ms) to ensure
-     * that once the target music player gains foreground focus, playback starts immediately.
+     * Dispatches targeted playFromSearch commands to the active MediaSession so that the target
+     * player searches and begins playing the NEW requested song.
+     *
+     * IMPORTANT: We NEVER dispatch blind KEYCODE_MEDIA_PLAY or togglePlayback() here because
+     * if the player still holds the previous paused track in its queue, KEYCODE_MEDIA_PLAY
+     * unpauses that stale song instead of playing the newly synced track!
      */
     fun scheduleAutoPlayKicker(context: Context, targetPackage: String?, track: RecommendedTrack) {
-        val query = "${track.artist} ${track.title}".trim()
-        val delays = listOf(400L, 1000L, 1800L, 2600L)
+        val query = if (track.artist.isNotBlank() && !track.title.contains(track.artist, ignoreCase = true)) {
+            "${track.title} ${track.artist}".trim()
+        } else {
+            track.title.trim()
+        }
+        val delays = listOf(500L, 1200L, 2000L)
         for (delay in delays) {
             mainHandler.postDelayed({
                 try {
-                    // 1. Try via NotificationListener active media controller with audio focus bundle
                     val listener = TuneMindListenerService.instance
                     if (listener != null) {
                         val extras = android.os.Bundle().apply {
                             putString(android.provider.MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio")
                             putString(android.app.SearchManager.QUERY, query)
                             putString(android.provider.MediaStore.EXTRA_MEDIA_TITLE, track.title)
-                            putString(android.provider.MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
+                            if (track.artist.isNotBlank()) {
+                                putString(android.provider.MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
+                            }
                             putBoolean("android.intent.extra.START_PLAYBACK", true)
                             putBoolean("autostart", true)
                         }
                         listener.playFromSearch(targetPackage, query, extras)
-                        if (!listener.isPlaying()) {
-                            listener.togglePlayback()
-                        }
+                        Log.d(TAG, "Dispatched playFromSearch kicker for '$query' to $targetPackage")
                     }
-
-                    // 2. Targeted Media Button broadcast directly to package (e.g. Spotify background receiver)
-                    if (targetPackage != null) {
-                        val mediaBtnDown = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                            setPackage(targetPackage)
-                            putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-                        }
-                        context.sendOrderedBroadcast(mediaBtnDown, null)
-                        val mediaBtnUp = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-                            setPackage(targetPackage)
-                            putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
-                        }
-                        context.sendOrderedBroadcast(mediaBtnUp, null)
-                    }
-
-                    // 3. Hardware media play signal
-                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                    audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-                    audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
                 } catch (t: Throwable) {
                     Log.d(TAG, "Auto-play kicker pulse notice: ${t.message}")
                 }

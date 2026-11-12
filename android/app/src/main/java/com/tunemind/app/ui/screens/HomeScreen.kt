@@ -27,7 +27,13 @@ fun HomeScreen(
     val context = LocalContext.current
     val homeState by vm.homeState.collectAsState()
 
-    val agentVoiceManager = remember { AgentVoiceManager(context) }
+    val agentVoiceManager = remember {
+        AgentVoiceManager(
+            context = context,
+            getNowPlaying = { vm.homeState.value.nowPlaying },
+            getRecentTracks = { vm.homeState.value.recentTracks }
+        )
+    }
     val agentState by agentVoiceManager.agentState.collectAsState()
     var liveTranscript by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()

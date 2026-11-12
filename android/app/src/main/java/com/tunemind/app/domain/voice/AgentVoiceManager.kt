@@ -38,7 +38,11 @@ enum class AgentState {
     IDLE, LISTENING, THINKING, SPEAKING, ERROR
 }
 
-class AgentVoiceManager(private val context: Context) : RecognitionListener {
+class AgentVoiceManager(
+    private val context: Context,
+    private val getNowPlaying: (() -> com.tunemind.app.ui.NowPlayingObservation?)? = null,
+    private val getRecentTracks: (() -> List<com.tunemind.app.ui.RecentTrackItem>)? = null
+) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -216,6 +220,37 @@ class AgentVoiceManager(private val context: Context) : RecognitionListener {
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "🟢 WebSocket OPENED successfully. HTTP Status: ${response.code}")
+
+                // Send initial client playback context to backend
+                try {
+                    val np = getNowPlaying?.invoke()
+                    val recents = getRecentTracks?.invoke() ?: emptyList()
+
+                    val metaJson = JSONObject().apply {
+                        put("type", "client_context")
+                        val currentObj = JSONObject().apply {
+                            put("title", np?.title ?: "Standing By")
+                            put("artist", np?.artist ?: "")
+                            put("source_player", np?.sourcePackage ?: "com.spotify.music")
+                        }
+                        put("current_track", currentObj)
+
+                        val historyArr = org.json.JSONArray()
+                        for (r in recents.take(15)) {
+                            historyArr.put(JSONObject().apply {
+                                put("title", r.title)
+                                put("artist", r.artist)
+                                put("source", r.sourceApp)
+                                put("playCount", r.distinctAppearanceCount)
+                            })
+                        }
+                        put("recent_tracks", historyArr)
+                    }
+                    webSocket.send(metaJson.toString())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to send initial client context over WS: ${e.message}")
+                }
+
                 startRecordingAndStreaming(webSocket)
             }
 
