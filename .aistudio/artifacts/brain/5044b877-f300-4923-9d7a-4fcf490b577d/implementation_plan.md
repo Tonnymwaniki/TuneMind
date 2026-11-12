@@ -1,108 +1,69 @@
-# TuneMind — 3-Screen Personal Music & Dopamine Intelligence UI Plan
+# TuneMind Autonomous Agent & Dopamine Intelligence Architecture Plan
 
-## 1. Design Philosophy & Confirmed Architecture
-
-TuneMind is an **Autonomous Personal Voice & Music Intelligence Agent**, not a cluttered dashboard. Every screen prioritizes **visual dopamine signals, tactile one-tap playback, and zero unnecessary reading**.
-
-### Confirmed User Decisions
-1. **Navigation Pattern**: **Centered Floating Glass Pill Dock + Horizontal Swipe (`HorizontalPager`)**
-   - The app opens directly onto the **Center Screen (`page = 1`: `AGENT`)**, keeping the Voice Orb immediately ready.
-   - Swiping left reveals **`DOPAMINE` (`page = 0`)**; swiping right reveals **`RHYTHM` (`page = 2`)**.
-   - A compact, floating translucent obsidian pill dock anchored near the bottom thumb zone (`DOPAMINE` • `AGENT` • `RHYTHM`) highlights the active screen and supports 1-tap switching.
-2. **Screen 1 (Left, `page = 0`) — `DOPAMINE` (Dopamine Vault: Fresh vs. Overplayed)**:
-   - Visually separates your real listening history into **Peak Dopamine / Fresh Reloads** (high reward, low ear fatigue) and **Cooling Down / Overplayed** (high satiety tracks resting until they feel fresh again).
-3. **Screen 2 (Center Default, `page = 1`) — `AGENT` (The Living Voice Orb)**:
-   - **100% dedicated to the breathing Chrono-Orb** for natural voice dialogue. No clutter, no multi-card feeds, no settings forms—only the top "Now Syncing" glass pill, the 300dp reactive Voice Orb + Satiety Arc, and the live conversational transcript pill above the floating dock.
-4. **Screen 3 (Right, `page = 2`) — `RHYTHM` (Personal Sonic DNA & Circadian Flow)**:
-   - A visual **24-Hour Circadian Sonic Ring** (*Morning Focus*, *Midday Drive*, *Evening Unwind*, *Late-Night Flow*) paired with your top power artists/songs for the active time window, active audio output & safe dB headroom gauge, and a clean 1-tap default player selector.
-5. **Interactive 1-Tap Song Cards**:
-   - Tapping any song card on **`DOPAMINE`** or **`RHYTHM`** immediately triggers playback (or lets you tap the mic icon on the card to ask the Voice Agent about that track and switch straight to the Orb).
+## 1. Executive Summary & Core Vision
+Transform TuneMind's voice agent from a rigid single-track recommender into a **true autonomous psychoacoustic companion and app-wide controller**. By removing the hardcoded post-processing overrides in `ClaudeMusicReasoningProvider.ts`, streaming the user's complete neural/hearing telemetry from Android, and introducing an **End-to-End Agent Tool-Calling Protocol**, the agent will be able to:
+1. **Converse & Advise Openly**: Discuss your music listening journey, hidden skip/replay micro-patterns, ear fatigue & decibel health, and circadian mood cycles without forcing a scripted song pitch when you just want insight or conversation.
+2. **Execute Real App & OS Tools**: Reliably stop/pause, resume, skip next/previous, adjust safe volume levels, lock/restore tracks in the Cooldown Vault, switch between the 3 screens (`DOPAMINE`, `AGENT`, `RHYTHM`), and shift the live Adaptive Atmosphere theme.
+3. **Smart Direct-Play vs. Consultative Recommendation**:
+   - **Direct Request (`PLAY_TRACK_NOW`)**: When you explicitly name a song or artist (e.g., *"Play Wakadinali"* or *"Play Anaweza Yote"*), or confirm a pending proposal (*"Yes, play it"*), the agent plays it immediately.
+   - **Consultative Suggestion (`PROPOSE_TRACK`)**: When you ask for advice, a mood boost, or a recommendation, the agent explains *why* a track fits your current dopamine/circadian profile and waits for your approval before playing.
+4. **Proactive Dopamine Capsule Engine**: Automatically compiles a circadian **Dopamine Capsule** (3 compacted tracks combining newly recovered Cooldown Vault gems + peak-dopamine fresh cuts) and surfaces a glowing interactive **Capsule Pill** on the Studio Mascot Agent screen that briefs you and launches your session when tapped or asked by voice.
 
 ---
 
-## 2. Spatial Layout & Thumb-Zone Architecture
+## 2. Backend Intelligence Upgrade (`backend/src/domain/reasoning/ClaudeMusicReasoningProvider.ts` & `streamingGateway.ts`)
 
-```
-+---------------------------------------------------+  +---------------------------------------------------+  +---------------------------------------------------+
-| [0] DOPAMINE VAULT                                |  | [1] AGENT ORB (DEFAULT HOME)                      |  | [2] RHYTHM DNA                                    |
-|                                                   |  |                                                   |  |                                                   |
-|  DOPAMINE VAULT                     [84% Fresh]   |  |      (•) NOW SYNCING • Essense — Wizkid           |  |  RHYTHM DNA                         [MIDDAY FLOW] |
-|                                                   |  |                                                   |  |                                                   |
-|  ╭─────────────────────────────────────────────╮  |  |                                                   |  |          ╭───────────────────────────╮            |
-|  │  (  18%  )   OVERPLAYED • COOLING DOWN      │  |  |               ╭─────────────────╮                 |  |        ╱   24H CIRCADIAN SONIC RING   ╲           |
-|  │   Satiety    2 tracks resting for peak hit  │  |  |             ╱   ░░░░░░░░░░░░░   ╲                 |  |       │    Morning • Midday • Night    │          |
-|  ╰─────────────────────────────────────────────╯  |  |            │  ░░  CHRONO-ORB  ░░ │                |  |        ╲       [ 106 BPM • 68 dB ]    ╱           |
-|                                                   |  |            │  ░░  (TAP / TALK) ░░ │                |  |          ╰───────────────────────────╯            |
-|  ⚡ PEAK DOPAMINE • READY TO PLAY                 |  |             ╲   ░░░░░░░░░░░░░   ╱                 |  |                                                   |
-|  ╭─────────────────────────────────────────────╮  |  |               ╰─────────────────╯                 |  |  🔥 YOUR POWER ROTATION (THIS HOUR)               |
-|  │ [▶]  Anaweza Yote              [98% Fresh]  │  |  |                 TAP ORB TO TALK                   |  |  ╭─────────────────────────────────────────────╮  |
-|  │      The Adventist Police...        [Ask 🎙]│  |  |                                                   |  |  │ [▶]  1. Essence — Wizkid, Tems      [Play]  │  |
-|  ╰─────────────────────────────────────────────╯  |  |  ╭─────────────────────────────────────────────╮  |  |  │ [▶]  2. Anaweza Yote — Adventist..  [Play]  │  |
-|  ╭─────────────────────────────────────────────╮  |  |  │ "Putting on Essence by Wizkid—want me to    │  |  |  ╰─────────────────────────────────────────────╯  |
-|  │ [▶]  Essence                   [94% Fresh]  │  |  |  │  spin it now?"                              │  |  |                                                   |
-|  │      Wizkid, Tems                   [Ask 🎙]│  |  |  ╰─────────────────────────────────────────────╯  |  |  🎧 OUTPUT & TARGET PLAYER                        |
-|  ╰─────────────────────────────────────────────╯  |  |                                                   |  |  [ Spotify • Active ]  [ YouTube Music ]  [68 dB] |
-|                                                   |  |                                                   |  |                                                   |
-|       ╭───────────────────────────────────╮       |  |       ╭───────────────────────────────────╮       |  |       ╭───────────────────────────────────╮       |
-|       │  [ DOPAMINE ]  ( AGENT )  RHYTHM  │       |  |       │   DOPAMINE  [ ( AGENT ) ]  RHYTHM │       |  |       │   DOPAMINE   ( AGENT ) [ RHYTHM ] │       |
-|       ╰───────────────────────────────────╯       |  |       ╰───────────────────────────────────╯       |  |       ╰───────────────────────────────────╯       |
-+---------------------------------------------------+  +---------------------------------------------------+  +---------------------------------------------------+
-                  ◄── SWIPE LEFT                                        CENTER HOME                                        SWIPE RIGHT ──►
-```
+### A. Remove Hardcoded Template Overrides
+- Remove the forced post-processing block in `ClaudeMusicReasoningProvider.ts` (lines 527–557) that previously overwrote conversational responses lacking a `?` with `"How about [Song] from your library? Should I play it for you?"`.
+- Maintain a multi-turn rolling conversation memory per session (`conversationHistory: Array<{ role: 'user' | 'assistant', content: string }>`) so the agent remembers what you just discussed across turns.
 
----
+### B. Deep Telemetry Context Injection
+Expand `StreamingAudioSessionContext` in `streamingGateway.ts` and `ClaudeMusicReasoningProvider.ts` to receive and reason over:
+- **Hearing & Ear Fatigue Telemetry**: `averageDb`, `safeHeadroomDb`, `dailyExposureMinutes`, `fatigueWarning`, and `outputDeviceLabel` (e.g., Bluetooth earbuds vs. phone speaker).
+- **Cooldown Vault Telemetry**: `vaultTracks` (songs currently quarantined, days locked, and recovery percentage) plus `readyToRestoreCount`.
+- **Micro-Pattern & Rhythm DNA Telemetry**: Skip velocity, repeat velocity, peak musical moments (`confirmedMomentsCount`), and current `circadianDaypart` (*Morning Ignition*, *Afternoon Flow*, *Evening Decompression*, *Midnight Drift*).
+- **Pre-Compacted Dopamine Capsule**: The top 3 curated tracks for the user's current circadian slot and why they were compacted.
 
-## 3. Visual & Color Token System (Chrono-Canvas Dark)
+### C. Structured Agent Tool-Calling Protocol (`agent_tool_calls`)
+Upgrade Claude's structured JSON schema (while maintaining backward compatibility with `os_execution_command`) so every response returns natural spoken `tts_response_text`, a UI reasoning badge (`reasoning_mode`: `JOURNEY_ADVISOR` | `HEARING_GUARDIAN` | `DOPAMINE_CAPSULE` | `DIRECT_EXECUTION` | `SONIC_CURATOR`), and an executable `tool_call` payload:
 
-| Semantic Token | Hex Value | Role in TuneMind |
+| Tool Action (`action`) | When Triggered | Parameters |
 | :--- | :--- | :--- |
-| **Obsidian Void** | `#050508` | Deep OLED background canvas across all 3 pager screens |
-| **Smoked Glass Surface** | `#12141F` (`78%` alpha) | Floating cards, top status pill, and bottom glass navigation dock |
-| **Glacier Cyan (Peak Dopamine)** | `#00E5FF` | Fresh/unplayed high-dopamine tracks, active listening state, safe dB |
-| **Neural Violet (Rhythm DNA)** | `#7000FF` | Thinking state, circadian rhythm ring, and personal taste affinity |
-| **Liquid Amber (Warm Satiety)** | `#FFB000` | Tracks approaching ear fatigue (50%–75% satiety) |
-| **Crimson Pulse (Overplayed Vault)** | `#FF2A55` | Overplayed tracks locked in cooldown (>75% satiety) |
-| **Pure Titanium / Muted Zinc** | `#F8FAFC` / `#94A3B8` | Crisp song titles and low-word-count visual badges |
+| `PLAY_TRACK_NOW` | User explicitly names a song/artist to play OR approves a proposed track | `track_id`, `track_title`, `track_artist`, `deep_link_uri` |
+| `PROPOSE_TRACK` | Agent suggests a song or capsule track and asks for user confirmation first | `track_id`, `track_title`, `track_artist`, `deep_link_uri` |
+| `PAUSE_PLAYBACK` | User says *"stop"*, *"pause"*, *"hold on"*, *"quiet"*, *"stop the music"* | none |
+| `RESUME_PLAYBACK` | User says *"resume"*, *"continue playing"*, *"unpause"* | none |
+| `SKIP_NEXT` / `SKIP_PREVIOUS` | User asks for next song or previous song | none |
+| `SET_VOLUME_PERCENT` | User asks to lower/raise volume or asks for safe hearing dB protection | `volume_percent` (10–100) |
+| `QUARANTINE_TO_VAULT` | User asks to rest/quarantine an overplayed song (or the current track) into the Cooldown Vault | `track_id`, `track_title` |
+| `RESTORE_FROM_VAULT` | User asks to unlock/restore a rested song from the Cooldown Vault | `track_id`, `track_title` |
+| `SHIFT_ATMOSPHERE` | User asks to change the studio vibe/theme | `palette_id` (`GLACIER_DAWN`, `EMERALD_VELOCITY`, `SOLAR_EMBER`, `SYNAPTIC_VIOLET`, or `AUTO`) |
+| `NAVIGATE_SCREEN` | User asks to open the Dopamine Vault, Rhythm DNA, or Agent screen | `screen` (`DOPAMINE`, `AGENT`, `RHYTHM`) |
+| `LAUNCH_DOPAMINE_CAPSULE` | User taps the glowing Capsule card or asks *"What do you have stored for me today?"* | `capsule_tracks` (3-track array), briefs user and queues/proposes the lead capsule track |
+| `ADVISE_ONLY` | Pure conversational advice on listening habits, ear fatigue, or music journey | none (speaks response with zero unwanted playback interruption) |
 
 ---
 
-## 4. Screen-by-Screen Implementation Plan
+## 3. Android Execution & Media Control Fixes
 
-### A. Shared Navigation Shell (`MainActivity.kt` + `FloatingGlassDock.kt`)
-- Wrap the root Compose layout in a `HorizontalPager(pageCount = 3, initialPage = 1)` so the app always launches directly onto the **Center Voice Orb (`page = 1`)**.
-- Render a **Centered Floating Glass Pill Dock** (`height = 56.dp`, `width = 280.dp`, `RoundedCornerShape(32.dp)`) suspended `24.dp` above the bottom inset:
-  - **Left Tab (`DOPAMINE`)**: Bolt/Spark icon + subtle cyan indicator dot when fresh tracks are ready.
-  - **Center Tab (`AGENT`)**: Breathing mini-orb icon + glowing border when the voice agent is active (`LISTENING`, `THINKING`, or `SPEAKING`).
-  - **Right Tab (`RHYTHM`)**: Sonic wave / DNA icon.
+### A. Rock-Solid OS Media Stop / Pause / Resume / Skip (`TuneMindListenerService.kt` & `TuneMindExecutionEngine.kt`)
+- Fix `TuneMindExecutionEngine.pauseCurrentMedia()` so it executes a 3-layer media command:
+  1. Calls `TuneMindListenerService.instance?.pause()` (which invokes `activeMediaController?.transportControls?.pause()` directly on the active Spotify / Apple Music / system media session).
+  2. Dispatches both `KeyEvent.ACTION_DOWN` and `KeyEvent.ACTION_UP` for `KeyEvent.KEYCODE_MEDIA_PAUSE` via Android `AudioManager.dispatchMediaKeyEvent(...)` as a universal OS fallback.
+  3. Immediately updates `TuneMindViewModel.nowPlaying.isPlaying = false` so the UI and Studio Mascot transition smoothly from dancing equalizer bars to calm listening/idle state.
+- Add `resumeCurrentMedia()`, `skipToNextMedia()`, `skipToPreviousMedia()`, and `setSystemMediaVolume(percent: Int)` in `TuneMindExecutionEngine.kt` using `TuneMindListenerService` and `AudioManager.STREAM_MUSIC`.
 
-### B. Screen 1 (`page = 0`): `DopamineVaultScreen.kt`
-- **Visual Satiety Header Ring**: Single compact radial ring gauge showing overall **Freshness vs. Ear Fatigue** alongside a 1-line summary (e.g., *"92% Dopamine Readiness"*).
-- **Filter Toggle Pills**: Quick toggle between **`⚡ Peak Dopamine (Fresh)`** and **`⏳ Cooling Down (Overplayed)`**.
-- **Interactive Song Cards (Low-Text, High-Signal)**:
-  - Populated from real phone listening history (`homeState.recentObservations`, `historyState`, and `musicalMomentsState`).
-  - Each card displays:
-    - **Left**: Play trigger badge (`48x48dp` touch target) with circular freshness ring (`#00E5FF` for fresh, `#FFB000`/`#FF2A55` for overplayed).
-    - **Center**: Track Title + Artist Name (truncated cleanly to 1 line each) + micro visual tag (`96% Fresh` or `Cooling • 4 Plays`).
-    - **Right**: **`Ask 🎙`** button (`44x44dp` touch target) that scrolls smoothly to the Center Orb and prompts the agent with that track, while tapping the card body plays the song immediately via `MusicPlayerAutoLauncher`.
-
-### C. Screen 2 (`page = 1`, Default): `PulseAgentScreen.kt`
-- **Strictly 100% Orb-Centric**:
-  - **Top**: Floating "Now Syncing" status pill (shows active playing track or live sync pulse).
-  - **Center**: Full 300dp multi-layered **Chrono-Orb + 260° Satiety Arc**, interactive on tap (starts listening, interrupts TTS, or wakes the agent).
-  - **Bottom (Above Dock)**: Clean glass transcript pill showing live recognized speech or the agent's spoken proposal during the 2-step approval dialogue.
-  - Remove any secondary settings buttons or clutter from the Orb screen (target player & cloud settings move cleanly to `RHYTHM`).
-
-### D. Screen 3 (`page = 2`): `RhythmDnaScreen.kt`
-- **24-Hour Circadian Sonic Canvas**:
-  - Custom Compose `Canvas` ring divided into 4 living arcs: **Morning Focus (06–12)**, **Midday Drive (12–17)**, **Evening Unwind (17–22)**, and **Late-Night Flow (22–06)**, highlighting the current active time window and target BPM.
-- **Current Window Power Rotation**:
-  - Top 3–5 tracks & artists you actually play during this time of day—tapping any row launches playback immediately.
-- **Compact Output & Player Strip**:
-  - Shows active audio route (e.g., Bluetooth / Speaker + safe dB headroom gauge from `hearingInsightsState`) and a 1-tap pill selector for your default music player (**Spotify**, **YouTube Music**, **Apple Music**, **System Default**) plus a subtle gear icon for the Cloud Brain URL dialog.
+### B. Full Telemetry & Tool Dispatcher in `AgentVoiceManager.kt` & `TuneMindViewModel.kt`
+- Update `AgentVoiceManager.kt` WebSocket `onOpen` payload to serialize the user's real `hearingInsightsState`, `vaultState`, `musicalMomentsState`, and pre-compacted `dopamineCapsuleTracks` alongside `current_track` and `recent_tracks`.
+- Add a centralized `executeAgentToolCall(...)` handler in `TuneMindViewModel.kt` that connects the WebSocket response directly to:
+  - Media playback (`playLibraryTrack`, `pause`, `resume`, `next`, `previous`, `setVolume`)
+  - Cooldown Vault mutations (`quarantineTrackToVault`, `restoreTrackFromVault`)
+  - Adaptive Atmosphere theme overrides (`setManualMoodOverride`)
+  - Pager screen navigation (`requestScreenNavigation` flow observed by `MainActivity.kt`)
 
 ---
 
-## 5. Verification & Delivery Workflow
-1. Implement `DopamineVaultScreen.kt`, `RhythmDnaScreen.kt`, `FloatingGlassDock.kt`, update `PulseAgentScreen.kt` (making room for the floating dock and removing extra chrome), and wire the 3-page `HorizontalPager` + 1-tap playback actions in `MainActivity.kt`.
-2. Sync the Web Preview mirror (`src/App.tsx`) to showcase the exact same 3-screen `DOPAMINE` • `AGENT` • `RHYTHM` architecture and floating glass pill dock.
-3. Verify compilation (`compile_applet` & `lint_applet`) and push the new Android commit to `https://github.com/Tonnymwaniki/TuneMind.git` (`main`) so you can pull and install immediately.
+## 4. Proactive Dopamine Capsule Card on the Studio Mascot Screen (`PulseAgentScreen.kt`)
+- Build a **Dopamine Capsule Compiler** in `TuneMindViewModel.kt` that automatically compacts 3 high-impact songs for the current time of day (prioritizing recovered Cooldown Vault tracks + high-dopamine fresh tracks with low satiety).
+- Render a sleek, non-intrusive glowing **Morning / Session Dopamine Capsule Pill** on `PulseAgentScreen.kt` (above the bottom dialogue console).
+- When tapped, it triggers the agent to deliver a personalized spoken & visual briefing on the 3 compacted tracks and proposes/plays the lead track from the capsule.

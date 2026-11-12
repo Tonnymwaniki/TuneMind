@@ -11,8 +11,20 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 
+data class AgentToolCallPayload(
+    val action: String = "ADVISE_ONLY",
+    val track_title: String? = null,
+    val track_artist: String? = null,
+    val spotify_uri: String? = null,
+    val target_player: String? = null,
+    val volume_percent: Int? = null,
+    val palette_id: String? = null,
+    val target_screen: String? = null,
+    val expect_follow_up: Boolean = false
+)
+
 data class OsExecutionCommand(
-    val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_MEDIA_PAUSE", "NONE"
+    val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_MEDIA_PAUSE", "OS_MEDIA_RESUME", "OS_MEDIA_NEXT", "OS_MEDIA_PREV", "NONE"
     val target_player: String, // e.g., "com.spotify.music"
     val search_query: String,
     val suggested_bpm_target: Int?,
@@ -26,12 +38,15 @@ data class ReasoningResponse(
     val flow_state_analysis: String,
     val voice_agent_tts: String,
     val os_execution_command: OsExecutionCommand,
+    val reasoning_mode: String = "SONIC_CURATOR",
+    val agent_tool_call: AgentToolCallPayload? = null,
     val database_tags: List<String> = emptyList(),
     val voice_agent_audio_base64: String? = null
 )
 
 class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnInitListener {
     private val TAG = "TuneMindExecution"
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
     private var mediaPlayer: MediaPlayer? = null
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
@@ -45,7 +60,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
-            tts?.setSpeechRate(1.08f)
+            tts?.setSpeechRate(1.06f)
             tts?.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
@@ -87,10 +102,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         onBeforeLaunch: (() -> Unit)? = null,
         onFinished: (() -> Unit)? = null
     ) {
-        Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent} with query: ${response.os_execution_command.search_query}")
+        Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent} | Tool: ${response.agent_tool_call?.action} | Query: ${response.os_execution_command.search_query}")
 
         // 1. Immediately pause whatever background music was playing so the voice response is crystal clear
         pauseCurrentMedia()
+
+        // If the tool call is SET_VOLUME_PERCENT, adjust system volume right away
+        response.agent_tool_call?.volume_percent?.let { targetVol ->
+            setSystemMediaVolume(targetVol)
+        }
 
         val textToSpeak = response.voice_agent_tts.ifBlank {
             if (response.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
@@ -104,7 +124,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         val onSpeechFinished = {
             if (!hasExecutedPostSpeech) {
                 hasExecutedPostSpeech = true
-                // 2. Release assistant AudioFocus BEFORE launching Spotify so Spotify can claim AudioFocus and auto-play!
+                // 2. Release assistant AudioFocus BEFORE launching player or resuming so target app can claim AudioFocus
                 onBeforeLaunch?.invoke()
 
                 when (response.os_execution_command.intent) {
@@ -120,6 +140,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     }
                     "OS_MEDIA_PAUSE" -> {
                         pauseCurrentMedia()
+                        onFinished?.invoke()
+                    }
+                    "OS_MEDIA_RESUME" -> {
+                        resumeCurrentMedia()
+                        onFinished?.invoke()
+                    }
+                    "OS_MEDIA_NEXT" -> {
+                        skipToNextMedia()
+                        onFinished?.invoke()
+                    }
+                    "OS_MEDIA_PREV" -> {
+                        skipToPreviousMedia()
                         onFinished?.invoke()
                     }
                     else -> {
@@ -151,7 +183,6 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         if (!isTtsInitialized) {
             Log.d(TAG, "TTS still initializing on first attempt; queuing utterance: $text")
             pendingSpeech = Pair(text, onCompletion)
-            // Safety fallback in case device TTS service hangs
             mainHandler.postDelayed({
                 val stillPending = pendingSpeech
                 if (stillPending != null) {
@@ -197,7 +228,6 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     private fun playBase64Audio(base64Str: String, onCompletion: () -> Unit) {
         try {
             val audioBytes = Base64.decode(base64Str, Base64.DEFAULT)
-            // Write to a temporary file
             val tempFile = File.createTempFile("elevenlabs_response_", ".mp3", context.cacheDir)
             FileOutputStream(tempFile).use { fos ->
                 fos.write(audioBytes)
@@ -231,14 +261,88 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         }
     }
 
-    private fun pauseCurrentMedia() {
-        // Sends a global media button pause command to the OS
-        val pauseIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
-            val keyEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
-            putExtra(Intent.EXTRA_KEY_EVENT, keyEvent)
+    fun pauseCurrentMedia() {
+        try {
+            // 1. Direct MediaController transportControls.pause() via TuneMindListenerService
+            com.tunemind.app.service.TuneMindListenerService.instance?.pause()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController pause notice: ${e.message}")
         }
-        context.sendOrderedBroadcast(pauseIntent, null)
-        Log.d(TAG, "Broadcasted Global Pause Command")
+        try {
+            // 2. OS AudioManager dispatchMediaKeyEvent (DOWN + UP) for universal Android 11-14 support
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager pause dispatch notice: ${e.message}")
+        }
+        Log.d(TAG, "Executed 2-Layer OS Media Pause")
+    }
+
+    fun resumeCurrentMedia() {
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController play notice: ${e.message}")
+        }
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
+        }
+        Log.d(TAG, "Executed 2-Layer OS Media Resume")
+    }
+
+    fun skipToNextMedia() {
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController skipNext notice: ${e.message}")
+        }
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
+        }
+    }
+
+    fun skipToPreviousMedia() {
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
+        }
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
+        }
+    }
+
+    fun setSystemMediaVolume(percent: Int) {
+        try {
+            val clamped = percent.coerceIn(10, 100)
+            val maxVol = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val targetIndex = ((maxVol * clamped) / 100f).toInt().coerceIn(1, maxVol)
+            audioManager.setStreamVolume(
+                android.media.AudioManager.STREAM_MUSIC,
+                targetIndex,
+                android.media.AudioManager.FLAG_SHOW_UI
+            )
+            Log.d(TAG, "Set system STREAM_MUSIC volume to $clamped% ($targetIndex/$maxVol)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to adjust system volume: ${e.message}")
+        }
     }
 
     private fun launchTargetPlayer(

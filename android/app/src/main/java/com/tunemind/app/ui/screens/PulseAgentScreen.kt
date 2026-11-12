@@ -49,7 +49,9 @@ fun PulseAgentScreen(
     liveTranscript: String = "",
     flowAnalysis: String = "",
     recentTracks: List<TrackMemoryEntry> = emptyList(),
+    dopamineCapsule: com.tunemind.app.ui.DopamineCapsuleState? = null,
     onOrbTapped: () -> Unit,
+    onLaunchDopamineCapsule: () -> Unit = {},
     onCycleAtmospherePalette: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
@@ -250,13 +252,13 @@ fun PulseAgentScreen(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(296.dp)
+                            .size(274.dp)
                             .bouncyClickable { onOrbTapped() }
                     ) {
                         // Ambient Studio Glow Behind Mascot
                         Box(
                             modifier = Modifier
-                                .size(220.dp * breatheScale)
+                                .size(210.dp * breatheScale)
                                 .blur(58.dp)
                                 .background(animatedOrbColor.copy(alpha = 0.32f), CircleShape)
                         )
@@ -313,22 +315,18 @@ fun PulseAgentScreen(
                                 val angleRad = (i * (360f / petalCount)) * (PI / 180f)
                                 val dynamicAmp = when (agentState) {
                                     AgentState.SPEAKING -> {
-                                        // Expressive vocal modulation petals when talking to you
                                         val v1 = sin(wavePhase * 2.2f + i * 0.55f).toFloat()
                                         val v2 = cos(wavePhase * 1.4f - i * 0.35f).toFloat()
                                         0.35f + 0.65f * ((v1 * v2 + 1f) / 2f)
                                     }
                                     AgentState.LISTENING -> {
-                                        // Attentive sonar capture wave
                                         0.25f + 0.45f * ((sin(wavePhase * 1.8f + i * 0.4f).toFloat() + 1f) / 2f)
                                     }
                                     AgentState.THINKING -> {
-                                        // Synaptic neural spikes
                                         0.20f + 0.55f * ((sin(wavePhase * 3.0f + i * 0.9f).toFloat() + 1f) / 2f)
                                     }
                                     else -> {
                                         if (isMusicPlaying) {
-                                            // Mood-specific music equalizer bounce
                                             val speedMul = when (theme.musicMood) {
                                                 MusicalMood.ENERGETIC, MusicalMood.INTENSE -> 2.4f
                                                 MusicalMood.UPLIFTING -> 1.8f
@@ -336,7 +334,6 @@ fun PulseAgentScreen(
                                             }
                                             0.22f + 0.58f * ((sin(wavePhase * speedMul + i * 0.65f).toFloat() + 1f) / 2f)
                                         } else {
-                                            // Calm breathing studio crown
                                             0.12f + 0.14f * ((sin(wavePhase + i * 0.3f).toFloat() + 1f) / 2f)
                                         }
                                     }
@@ -405,7 +402,6 @@ fun PulseAgentScreen(
                                 else -> 11.dp.toPx()
                             }
 
-                            // Left & Right Glowing Mascot Eyes
                             listOf(-1f, 1f).forEach { dir ->
                                 val ex = center.x + dir * eyeOffsetX
                                 drawRoundRect(
@@ -426,7 +422,6 @@ fun PulseAgentScreen(
                             val mouthWidth = visorWidth * 0.52f
                             when (agentState) {
                                 AgentState.SPEAKING -> {
-                                    // Animated Talking Vocal Wave Mouth (opens and ripples as it speaks!)
                                     val path = Path()
                                     val segments = 20
                                     val startX = center.x - mouthWidth / 2f
@@ -443,7 +438,6 @@ fun PulseAgentScreen(
                                         color = Color(0xFFFFB000),
                                         style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
                                     )
-                                    // Secondary harmonic lip wave
                                     val path2 = Path()
                                     path2.moveTo(startX, mouthY)
                                     for (s in 0..segments) {
@@ -460,7 +454,6 @@ fun PulseAgentScreen(
                                     )
                                 }
                                 AgentState.LISTENING -> {
-                                    // Attentive Sonar Pulse Mouth
                                     val openR = (4.dp.toPx() + 4.dp.toPx() * ((sin(wavePhase * 2f).toFloat() + 1f) / 2f))
                                     drawRoundRect(
                                         color = Color(0xFF00E5FF),
@@ -472,7 +465,6 @@ fun PulseAgentScreen(
                                 }
                                 else -> {
                                     if (isMusicPlaying) {
-                                        // 5-Bar Mini Equalizer Smile when Music is Playing
                                         val bars = 5
                                         val bWidth = 3.dp.toPx()
                                         val bGap = 4.dp.toPx()
@@ -488,7 +480,6 @@ fun PulseAgentScreen(
                                             )
                                         }
                                     } else {
-                                        // Gentle Studio Smile Curve in Standby
                                         drawArc(
                                             color = animatedOrbColor.copy(alpha = 0.9f),
                                             startAngle = 20f,
@@ -504,7 +495,7 @@ fun PulseAgentScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     // Dynamic Studio Mode Pill Caption underneath Mascot
                     val modeBadgeText = when (agentState) {
@@ -524,7 +515,7 @@ fun PulseAgentScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(animatedOrbColor.copy(alpha = 0.14f))
                             .border(1.dp, animatedOrbColor.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                            .padding(horizontal = 14.dp, vertical = 5.dp)
                     ) {
                         Text(
                             text = modeBadgeText,
@@ -537,17 +528,122 @@ fun PulseAgentScreen(
                 }
             }
 
-            // 3. BOTTOM (ABOVE FLOATING DOCK — GUARANTEED ZERO COLLISION):
-            //    STUDIO DIALOGUE & AI REASONING CONSOLE
-            StudioDialogueAndReasoningConsole(
-                agentState = agentState,
-                liveTranscript = liveTranscript,
-                flowAnalysis = flowAnalysis,
-                moodLabel = theme.musicMood.label,
-                freshnessPercent = (100 - satietyPercentage).coerceIn(12, 98),
-                primaryColor = animatedOrbColor,
-                secondaryColor = secondaryGlowColor,
-                cardSurface = theme.cardSurface
+            // 3. BOTTOM STACK (ABOVE FLOATING DOCK — GUARANTEED ZERO COLLISION):
+            //    PROACTIVE DOPAMINE CAPSULE PILL + STUDIO DIALOGUE & AI REASONING CONSOLE
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (dopamineCapsule != null && dopamineCapsule.tracks.isNotEmpty()) {
+                    DopamineCapsuleBriefingPill(
+                        capsule = dopamineCapsule,
+                        primaryColor = animatedOrbColor,
+                        secondaryColor = secondaryGlowColor,
+                        cardSurface = theme.cardSurface,
+                        onLaunchCapsule = onLaunchDopamineCapsule
+                    )
+                }
+
+                StudioDialogueAndReasoningConsole(
+                    agentState = agentState,
+                    liveTranscript = liveTranscript,
+                    flowAnalysis = flowAnalysis,
+                    moodLabel = theme.musicMood.label,
+                    freshnessPercent = (100 - satietyPercentage).coerceIn(12, 98),
+                    primaryColor = animatedOrbColor,
+                    secondaryColor = secondaryGlowColor,
+                    cardSurface = theme.cardSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DopamineCapsuleBriefingPill(
+    capsule: com.tunemind.app.ui.DopamineCapsuleState,
+    primaryColor: Color,
+    secondaryColor: Color,
+    cardSurface: Color,
+    onLaunchCapsule: () -> Unit
+) {
+    val lead = capsule.tracks.firstOrNull() ?: return
+    val pillShape = RoundedCornerShape(18.dp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(pillShape)
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        primaryColor.copy(alpha = 0.18f),
+                        cardSurface.copy(alpha = 0.88f),
+                        secondaryColor.copy(alpha = 0.16f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        primaryColor.copy(alpha = 0.65f),
+                        secondaryColor.copy(alpha = 0.45f)
+                    )
+                ),
+                shape = pillShape
+            )
+            .bouncyClickable { onLaunchCapsule() }
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(primaryColor.copy(alpha = 0.22f))
+                .border(1.dp, primaryColor.copy(alpha = 0.6f), CircleShape)
+        ) {
+            Text(
+                text = "⚡",
+                fontSize = 14.sp
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "✦ ${capsule.slotLabel} CAPSULE STORED (${capsule.tracks.size} TRACKS)",
+                color = primaryColor,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.1.sp,
+                maxLines = 1
+            )
+            Text(
+                text = "Lead: ${lead.title} • ${lead.freshnessPercent}% Freshness",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(primaryColor.copy(alpha = 0.22f))
+                .border(1.dp, primaryColor.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Text(
+                text = "BRIEF ME",
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.9.sp
             )
         }
     }

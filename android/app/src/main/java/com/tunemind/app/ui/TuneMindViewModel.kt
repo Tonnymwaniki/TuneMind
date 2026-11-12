@@ -426,6 +426,31 @@ class TuneMindViewModel : ViewModel() {
         updateThemePreferences(updated)
     }
 
+    fun setAtmospherePaletteById(paletteId: String) {
+        val clean = paletteId.lowercase().trim()
+        if (clean == "auto" || clean == "time") {
+            val updated = _themePreferences.value.copy(
+                behavior = com.tunemind.app.ui.theme.ThemeBehavior.AUTO_TIME_OF_DAY,
+                enableMoodAdaptation = true
+            )
+            updateThemePreferences(updated)
+            return
+        }
+        val targetId = when {
+            clean.contains("morning") || clean.contains("glacier") || clean.contains("cyan") -> "morning"
+            clean.contains("afternoon") || clean.contains("emerald") || clean.contains("green") -> "afternoon"
+            clean.contains("evening") || clean.contains("solar") || clean.contains("amber") || clean.contains("gold") -> "evening"
+            clean.contains("night") || clean.contains("violet") || clean.contains("purple") -> "night"
+            else -> "night"
+        }
+        val updated = _themePreferences.value.copy(
+            behavior = com.tunemind.app.ui.theme.ThemeBehavior.FIXED,
+            fixedPaletteId = targetId,
+            enableMoodAdaptation = true
+        )
+        updateThemePreferences(updated)
+    }
+
     fun syncAtmosphereToTrack(title: String, artist: String) {
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(title, artist)
         val targetPaletteId = when (mood) {
@@ -469,6 +494,92 @@ class TuneMindViewModel : ViewModel() {
         manualActiveTrackOverride = nowObs
         _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
         syncAtmosphereToTrack(title, artist)
+    }
+
+    fun setAgentPlaybackPaused() {
+        val current = _homeState.value.nowPlaying
+        val pausedObs = (current ?: NowPlayingObservation(title = "Studio Standby", artist = "Paused")).copy(
+            isPlaying = false,
+            playbackStateCode = 2,
+            updatedAtMs = System.currentTimeMillis()
+        )
+        manualActiveTrackOverride = pausedObs
+        _homeState.value = _homeState.value.copy(nowPlaying = pausedObs)
+        recomputeAdaptiveTheme()
+    }
+
+    fun setAgentPlaybackResumed() {
+        val current = _homeState.value.nowPlaying
+        if (current != null) {
+            val resumedObs = current.copy(
+                isPlaying = true,
+                playbackStateCode = 3,
+                updatedAtMs = System.currentTimeMillis()
+            )
+            manualActiveTrackOverride = resumedObs
+            _homeState.value = _homeState.value.copy(nowPlaying = resumedObs)
+            recomputeAdaptiveTheme()
+        }
+    }
+
+    fun restoreTrackFromVaultByTitle(titleQuery: String) {
+        val clean = titleQuery.trim().lowercase()
+        val match = _vaultState.value.firstOrNull {
+            it.title.lowercase().contains(clean) || clean.contains(it.title.lowercase())
+        } ?: _vaultState.value.firstOrNull()
+        if (match != null) {
+            restoreFromVault(match.id)
+        }
+    }
+
+    fun compileDopamineCapsule(): DopamineCapsuleState {
+        val slot = currentTimeSlot
+        val recents = _historyState.value.tracks.ifEmpty { _homeState.value.recentTracks }
+        val vault = _vaultState.value
+        val curTitle = _homeState.value.nowPlaying?.title?.lowercase()?.trim()
+
+        val capsuleTracks = mutableListOf<DopamineCapsuleTrack>()
+
+        // 1. Include any Cooldown Vault track that has recovered >= 50%
+        vault.filter { it.recoveryProgress >= 0.50f }.take(1).forEach { vt ->
+            capsuleTracks.add(
+                DopamineCapsuleTrack(
+                    title = vt.title,
+                    artist = vt.artist,
+                    spotifyUri = null,
+                    freshnessPercent = (vt.recoveryProgress * 100).toInt().coerceIn(70, 98),
+                    reason = "Rested in Cooldown Vault • Ready for high-dopamine comeback"
+                )
+            )
+        }
+
+        // 2. Fill up to 3 tracks with highest-freshness (lowest play count) real library tracks
+        val freshPool = recents
+            .filter { !it.title.isNullOrBlank() && it.title.lowercase().trim() != curTitle }
+            .sortedBy { it.distinctAppearanceCount }
+
+        for (entry in freshPool) {
+            if (capsuleTracks.size >= 3) break
+            val tTitle = entry.title?.trim() ?: continue
+            if (capsuleTracks.any { it.title.equals(tTitle, ignoreCase = true) }) continue
+            val plays = maxOf(1, entry.distinctAppearanceCount)
+            val freshness = (100 - minOf(88, plays * 16)).coerceIn(72, 96)
+            capsuleTracks.add(
+                DopamineCapsuleTrack(
+                    title = tTitle,
+                    artist = entry.artist?.trim()?.ifBlank { "Your Library" } ?: "Your Library",
+                    spotifyUri = entry.providerTrackId?.takeIf { it.startsWith("spotify:track:") },
+                    freshnessPercent = freshness,
+                    reason = "Low receptor habituation ($plays plays) • Calibrated for ${slot.label}"
+                )
+            )
+        }
+
+        return DopamineCapsuleState(
+            slotLabel = slot.label.uppercase(),
+            headline = "${slot.label} Dopamine Capsule",
+            tracks = capsuleTracks
+        )
     }
 
     val currentTimeSlot: TimeSlot get() = TimeSlot.currentSlot()
@@ -1416,6 +1527,20 @@ data class VaultTrack(
     val cooldownDaysRemaining: Float = 5f,
     val recoveryProgress: Float = 0f,
     val satietyScore: Int = 85,
+)
+
+data class DopamineCapsuleTrack(
+    val title: String,
+    val artist: String,
+    val spotifyUri: String? = null,
+    val freshnessPercent: Int = 90,
+    val reason: String = "Peak dopamine readiness"
+)
+
+data class DopamineCapsuleState(
+    val slotLabel: String = "MORNING FOCUS",
+    val headline: String = "Morning Dopamine Capsule",
+    val tracks: List<DopamineCapsuleTrack> = emptyList()
 )
 
 object AppHolder {

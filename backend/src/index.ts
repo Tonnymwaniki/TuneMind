@@ -109,9 +109,37 @@ wss.on('connection', async (ws: WebSocket) => {
   };
 
   let clientContext: {
-    current_track?: { title: string; artist: string; trackId?: string; source_player?: string };
+    current_track?: { title: string; artist: string; trackId?: string; source_player?: string; is_playing?: boolean };
     recent_tracks?: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>;
     recently_played_by_agent?: string[];
+    hearing_telemetry?: {
+      estimated_db: number;
+      safe_headroom_db: number;
+      daily_exposure_minutes: number;
+      output_device: string;
+      safety_guidance: string;
+    };
+    vault_tracks?: Array<{
+      id: string;
+      title: string;
+      artist: string;
+      cooldown_days_remaining: number;
+      recovery_percent: number;
+      satiety_score: number;
+    }>;
+    dopamine_capsule?: Array<{
+      title: string;
+      artist: string;
+      trackId?: string;
+      freshness_percent: number;
+      reason: string;
+    }>;
+    pending_proposed_track?: {
+      title: string;
+      artist: string;
+      trackId?: string;
+      source?: string;
+    } | null;
   } | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
@@ -143,6 +171,10 @@ wss.on('connection', async (ws: WebSocket) => {
       const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
       const provider = new ClaudeMusicReasoningProvider();
 
+      if (clientContext?.pending_proposed_track && clientContext.pending_proposed_track.title) {
+        ClaudeMusicReasoningProvider.setPendingProposedTrack(clientContext.pending_proposed_track);
+      }
+
       const eventStore = new EventStore();
       const storedTracks = eventStore.getRecentObservedTracks(50);
 
@@ -153,7 +185,8 @@ wss.on('connection', async (ws: WebSocket) => {
         ? {
             title: liveCurrent.title,
             artist: liveCurrent.artist || '',
-            source_player: liveCurrent.source_player || 'com.spotify.music'
+            source_player: liveCurrent.source_player || 'com.spotify.music',
+            is_playing: liveCurrent.is_playing
           }
         : (storedTracks[0] || {
             title: 'Active Session',
@@ -189,12 +222,16 @@ wss.on('connection', async (ws: WebSocket) => {
         current_track: {
           title: effectiveCurrentTrack.title,
           artist: effectiveCurrentTrack.artist,
-          source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music'
+          source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music',
+          is_playing: (effectiveCurrentTrack as any).is_playing
         },
         user_command: finalText,
         rolling_history: effectiveHistory,
         recently_played_by_agent: clientContext?.recently_played_by_agent || [],
-        current_satiety_percentage: 50
+        current_satiety_percentage: 50,
+        hearing_telemetry: clientContext?.hearing_telemetry,
+        vault_tracks: clientContext?.vault_tracks,
+        dopamine_capsule: clientContext?.dopamine_capsule
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);

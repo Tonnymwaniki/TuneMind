@@ -38,11 +38,22 @@ enum class AgentState {
     IDLE, LISTENING, THINKING, SPEAKING, ERROR
 }
 
+data class PendingProposedTrack(
+    val title: String,
+    val artist: String,
+    val trackId: String? = null,
+    val source: String = "com.spotify.music"
+)
+
 class AgentVoiceManager(
     private val context: Context,
     private val getNowPlaying: (() -> com.tunemind.app.ui.NowPlayingObservation?)? = null,
     private val getRecentTracks: (() -> List<com.tunemind.app.domain.model.TrackMemoryEntry>)? = null,
-    private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null
+    private val getHearingInsights: (() -> com.tunemind.app.ui.HearingInsightsState)? = null,
+    private val getVaultTracks: (() -> List<com.tunemind.app.ui.VaultTrack>)? = null,
+    private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState)? = null,
+    private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
+    private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -56,6 +67,9 @@ class AgentVoiceManager(
 
     private val _agentSatietyFlow = MutableStateFlow(22)
     val agentSatietyFlow: StateFlow<Int> = _agentSatietyFlow
+
+    @Volatile
+    private var clientPendingProposedTrack: PendingProposedTrack? = null
 
     // Eagerly initialize TTS so the very first voice response is ready with zero initialization delay
     private val executionEngine = com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
@@ -210,10 +224,8 @@ class AgentVoiceManager(
 
     // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
-        // Do not restart/kill the active WebSocket if already LISTENING
         if (_agentState.value == AgentState.LISTENING) return
 
-        // Allow interrupting SPEAKING or THINKING or retrying from ERROR!
         if (_agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
             Log.d(TAG, "Interrupting active agent speech/thinking to start new voice turn...")
             executionEngine.stopSpeaking()
@@ -236,22 +248,18 @@ class AgentVoiceManager(
 
         // Pause any playing background music immediately so speaker audio never bleeds into the microphone
         try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.pause()
+            executionEngine.pauseCurrentMedia()
         } catch (e: Exception) {
             Log.w(TAG, "Could not pause media session before listening: ${e.message}")
         }
 
         _agentState.value = AgentState.LISTENING
-
-        // 1. Acquire exclusive transient audio focus while listening and speaking
         requestAudioDucking()
-
-        // 2. Open microphone stream (WebSocket with AssemblyAI v3)
         startMicrophoneStream()
     }
 
     /**
-     * Triggered when the user taps a song card on the Dopamine Vault or Rhythm DNA screen.
+     * Triggered when the user taps the circular ▶ button on any song card.
      * Speaks a brief confirmation and immediately launches playback on the target player.
      */
     fun playTrackImmediatelyWithVoice(
@@ -264,6 +272,7 @@ class AgentVoiceManager(
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
         executionEngine.stopSpeaking()
+        clientPendingProposedTrack = null
 
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
@@ -318,8 +327,8 @@ class AgentVoiceManager(
 
     /**
      * Triggered when the user selects Neural Voice Breakdown & Dialogue on any song card.
-     * Speaks a tailored dopamine & mood insight about the track, then automatically opens
-     * the microphone after 650ms to listen for the user's approval or follow-up dialogue.
+     * Speaks a tailored dopamine & mood insight about the track, stores it as pending proposal,
+     * and opens the microphone after 650ms to listen for approval or follow-up dialogue.
      */
     fun askAgentAboutTrack(
         title: String,
@@ -336,6 +345,13 @@ class AgentVoiceManager(
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(cleanTitle, cleanArtist)
+
+        clientPendingProposedTrack = PendingProposedTrack(
+            title = cleanTitle,
+            artist = cleanArtist,
+            trackId = spotifyUri,
+            source = targetPlayer
+        )
 
         val spokenProposal = if (freshnessPercent >= 65) {
             if (cleanArtist.isNotEmpty()) {
@@ -388,6 +404,79 @@ class AgentVoiceManager(
         )
     }
 
+    /**
+     * Triggered when the user taps the glowing Dopamine Capsule card on the Studio Mascot screen.
+     * Briefs the user on the 3 compacted tracks prepared for their current circadian slot and
+     * waits for voice approval to launch the lead capsule track.
+     */
+    fun launchDopamineCapsuleBriefing(
+        capsule: com.tunemind.app.ui.DopamineCapsuleState,
+        targetPlayer: String = "com.spotify.music"
+    ) {
+        errorResetJob?.cancel()
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+        executionEngine.stopSpeaking()
+
+        val tracks = capsule.tracks
+        val lead = tracks.firstOrNull()
+        if (lead == null) {
+            simulateWakeWordDetected()
+            return
+        }
+
+        clientPendingProposedTrack = PendingProposedTrack(
+            title = lead.title,
+            artist = lead.artist,
+            trackId = lead.spotifyUri,
+            source = targetPlayer
+        )
+
+        val secondPart = tracks.getOrNull(1)?.let { ", alongside ${it.title}" } ?: ""
+        val thirdPart = tracks.getOrNull(2)?.let { " and ${it.title}" } ?: ""
+        val artistPart = if (lead.artist.isNotBlank() && !lead.artist.equals("Unknown Artist", ignoreCase = true)) {
+            " by ${lead.artist}"
+        } else ""
+
+        val spokenBriefing = "For your ${capsule.slotLabel.lowercase()}, I compacted ${tracks.size} peak-dopamine tracks led by ${lead.title}$artistPart at ${lead.freshnessPercent} percent freshness$secondPart$thirdPart. Want me to kick off your capsule with ${lead.title} right now?"
+
+        _agentState.value = AgentState.SPEAKING
+        _flowAnalysisFlow.value = "Dopamine Capsule Ready: ${tracks.joinToString(" • ") { it.title }}"
+        _agentSatietyFlow.value = (100 - lead.freshnessPercent).coerceIn(10, 45)
+        scope.launch {
+            _transcriptionFlow.emit(spokenBriefing)
+        }
+
+        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
+            calculated_satiety_percentage = (100 - lead.freshnessPercent).coerceIn(10, 45),
+            flow_state_analysis = "Dopamine Capsule Ready: ${tracks.joinToString(" • ") { it.title }}",
+            voice_agent_tts = spokenBriefing,
+            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                intent = "NONE",
+                target_player = targetPlayer,
+                search_query = "${lead.title} ${lead.artist}".trim(),
+                suggested_bpm_target = 108,
+                track_title = lead.title,
+                track_artist = lead.artist,
+                spotify_uri = lead.spotifyUri
+            )
+        )
+
+        executionEngine.executeBackendCommand(
+            response = responseObj,
+            onFinished = {
+                mainHandler.post {
+                    _agentState.value = AgentState.IDLE
+                    mainHandler.postDelayed({
+                        if (_agentState.value == AgentState.IDLE) {
+                            simulateWakeWordDetected()
+                        }
+                    }, 650L)
+                }
+            }
+        )
+    }
+
     private fun requestAudioDucking() {
         audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
             .setAudioAttributes(
@@ -416,7 +505,6 @@ class AgentVoiceManager(
             return
         }
 
-        // Start capturing microphone audio immediately into memory so 0ms of initial speech is lost during WebSocket handshake!
         startLocalAudioCapture()
 
         val candidates = com.tunemind.app.domain.network.BackendEndpointManager.getCandidateWebSocketUrls(context)
@@ -441,10 +529,14 @@ class AgentVoiceManager(
                 hasOpened = true
                 Log.d(TAG, "🟢 WebSocket OPENED successfully on $targetUrl. HTTP Status: ${response.code}")
 
-                // Send initial client playback context & full user track memory to backend
+                // Send complete client playback, hearing, vault, and dopamine capsule telemetry to backend
                 try {
                     val np = getNowPlaying?.invoke()
                     val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
+                    val hearing = getHearingInsights?.invoke()
+                    val vaultList = getVaultTracks?.invoke() ?: emptyList()
+                    val capsule = getDopamineCapsule?.invoke()
+                    val pendingProp = clientPendingProposedTrack
 
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
@@ -456,6 +548,7 @@ class AgentVoiceManager(
                             put("artist", np?.artist ?: "")
                             put("source_player", np?.sourcePackage ?: "com.spotify.music")
                             put("trackId", currentTrackId)
+                            put("is_playing", np?.isPlaying == true)
                         }
                         put("current_track", currentObj)
 
@@ -471,6 +564,53 @@ class AgentVoiceManager(
                         }
                         put("recent_tracks", historyArr)
                         put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
+
+                        if (hearing != null) {
+                            put("hearing_telemetry", JSONObject().apply {
+                                put("estimated_db", hearing.estimatedAverageDb.toDouble())
+                                put("safe_headroom_db", hearing.currentHeadroomDb.toDouble())
+                                put("daily_exposure_minutes", hearing.dailyExposureMinutes)
+                                put("output_device", hearing.activeSnapshot?.routeLabel ?: "Phone / Wireless Audio")
+                                put("safety_guidance", hearing.safetyGuidance)
+                            })
+                        }
+
+                        val vaultArr = org.json.JSONArray()
+                        for (vt in vaultList) {
+                            vaultArr.put(JSONObject().apply {
+                                put("id", vt.id)
+                                put("title", vt.title)
+                                put("artist", vt.artist)
+                                put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble())
+                                put("recovery_percent", (vt.recoveryProgress * 100).toInt())
+                                put("satiety_score", vt.satietyScore)
+                            })
+                        }
+                        put("vault_tracks", vaultArr)
+
+                        if (capsule != null && capsule.tracks.isNotEmpty()) {
+                            val capArr = org.json.JSONArray()
+                            for (ct in capsule.tracks) {
+                                capArr.put(JSONObject().apply {
+                                    put("title", ct.title)
+                                    put("artist", ct.artist)
+                                    put("trackId", ct.spotifyUri ?: "")
+                                    put("freshness_percent", ct.freshnessPercent)
+                                    put("reason", ct.reason)
+                                })
+                            }
+                            put("dopamine_capsule", capArr)
+                        }
+
+                        if (pendingProp != null) {
+                            put("pending_proposed_track", JSONObject().apply {
+                                put("title", pendingProp.title)
+                                put("artist", pendingProp.artist)
+                                put("trackId", pendingProp.trackId ?: "")
+                                put("source", pendingProp.source)
+                            })
+                            clientPendingProposedTrack = null
+                        }
                     }
                     ws.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -511,21 +651,25 @@ class AgentVoiceManager(
                         hasCompletedReasoning = true
                         val payload = json.optString("payload", "")
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
-                        stopMicrophoneStream() // Fully close socket now that server responded
+                        stopMicrophoneStream()
                         setSpeakingState()
 
                         val dataObj = json.optJSONObject("data")
                         val cmdObj = dataObj?.optJSONObject("os_execution_command")
+                        val toolObj = dataObj?.optJSONObject("agent_tool_call")
+
                         val rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+                            ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
                         val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+                            ?: toolObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
                         val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
                         var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                            ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
 
                         if (!rawTrackTitle.isNullOrBlank()) {
                             recordAgentSuggestedTrack(rawTrackTitle)
                         }
 
-                        // Look up exact Spotify URI from local phone TrackMemoryEntry if not already populated
                         if (resolvedSpotifyUri.isNullOrBlank()) {
                             val recents = getRecentTracks?.invoke() ?: emptyList()
                             val matchedLocal = recents.firstOrNull { r ->
@@ -541,10 +685,25 @@ class AgentVoiceManager(
                             }
                         }
 
+                        val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
+                            action = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY",
+                            track_title = rawTrackTitle,
+                            track_artist = rawTrackArtist,
+                            spotify_uri = resolvedSpotifyUri,
+                            target_player = toolObj?.optString("target_player", "com.spotify.music"),
+                            volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
+                            palette_id = toolObj?.optString("palette_id", null)?.takeIf { it.isNotBlank() },
+                            target_screen = toolObj?.optString("target_screen", null)?.takeIf { it.isNotBlank() },
+                            expect_follow_up = toolObj?.optBoolean("expect_follow_up", false)
+                                ?: (cmdObj?.optString("intent", "NONE") == "NONE" && !rawTrackTitle.isNullOrBlank())
+                        )
+
                         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
                             calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 30) ?: 30,
                             flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
                             voice_agent_tts = payload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
+                            reasoning_mode = dataObj?.optString("reasoning_mode", "SONIC_CURATOR") ?: "SONIC_CURATOR",
+                            agent_tool_call = toolPayload,
                             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                                 intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
                                 target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
@@ -556,6 +715,11 @@ class AgentVoiceManager(
                             ),
                             voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
                         )
+
+                        // Execute app-level tool mutations immediately (Vault, Theme, Screen Navigation, Pause/Resume state)
+                        mainHandler.post {
+                            onToolActionExecuted?.invoke(toolPayload)
+                        }
 
                         if (responseObj.voice_agent_tts.isNotBlank()) {
                             scope.launch {
@@ -571,7 +735,6 @@ class AgentVoiceManager(
                         executionEngine.executeBackendCommand(
                             response = responseObj,
                             onBeforeLaunch = {
-                                // Abandon assistant audio focus right before Spotify opens so Spotify is allowed to auto-play!
                                 mainHandler.post {
                                     abandonAssistantAudioFocusOnly()
                                     if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
@@ -587,9 +750,9 @@ class AgentVoiceManager(
                             },
                             onFinished = {
                                 mainHandler.post {
-                                    if (responseObj.os_execution_command.intent == "NONE") {
-                                        // Conversational proposal turn: wait 650ms for speaker tail to clear, then open mic to wait for user's approval!
-                                        Log.d(TAG, "Waiting for user approval on proposed track; re-opening mic in 650ms...")
+                                    if (toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
+                                        // Conversational proposal or follow-up question: wait 650ms for speaker tail to clear, then open mic!
+                                        Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
                                         _agentState.value = AgentState.IDLE
                                         mainHandler.postDelayed({
                                             if (_agentState.value == AgentState.IDLE) {

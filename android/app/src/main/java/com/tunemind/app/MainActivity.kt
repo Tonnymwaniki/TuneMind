@@ -119,7 +119,10 @@ open class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Voice Agent and Orchestrator
+                    val coroutineScope = rememberCoroutineScope()
+                    var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
+
+                    // Voice Agent and Orchestrator with Full Telemetry + Multi-Tool Execution Bridge
                     val agentVoiceManager = remember {
                         AgentVoiceManager(
                             context = context,
@@ -127,8 +130,48 @@ open class MainActivity : ComponentActivity() {
                             getRecentTracks = {
                                 vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks }
                             },
+                            getHearingInsights = { vm.hearingInsightsState.value },
+                            getVaultTracks = { vm.vaultState.value },
+                            getDopamineCapsule = { vm.compileDopamineCapsule() },
                             onTrackDispatched = { dispatchedTitle, dispatchedArtist, dispatchedPkg ->
                                 vm.setAgentActiveTrack(dispatchedTitle, dispatchedArtist, dispatchedPkg)
+                            },
+                            onToolActionExecuted = { tool ->
+                                when (tool.action) {
+                                    "PAUSE_PLAYBACK" -> {
+                                        vm.setAgentPlaybackPaused()
+                                    }
+                                    "RESUME_PLAYBACK" -> {
+                                        vm.setAgentPlaybackResumed()
+                                    }
+                                    "QUARANTINE_TO_VAULT" -> {
+                                        val qTitle = tool.track_title ?: vm.homeState.value.nowPlaying?.title
+                                        val qArtist = tool.track_artist ?: vm.homeState.value.nowPlaying?.artist ?: ""
+                                        if (!qTitle.isNullOrBlank()) {
+                                            vm.quarantineTrack(qTitle, qArtist)
+                                        }
+                                    }
+                                    "RESTORE_FROM_VAULT" -> {
+                                        val rTitle = tool.track_title ?: ""
+                                        vm.restoreTrackFromVaultByTitle(rTitle)
+                                    }
+                                    "SHIFT_ATMOSPHERE" -> {
+                                        val pid = tool.palette_id
+                                        if (!pid.isNullOrBlank()) {
+                                            vm.setAtmospherePaletteById(pid)
+                                        } else {
+                                            vm.cycleAtmospherePalette()
+                                        }
+                                    }
+                                    "NAVIGATE_SCREEN" -> {
+                                        val screen = tool.target_screen?.uppercase() ?: ""
+                                        requestedScreenPage = when {
+                                            screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
+                                            screen.contains("RHYTHM") || screen.contains("DNA") -> 2
+                                            else -> 1
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
@@ -136,7 +179,6 @@ open class MainActivity : ComponentActivity() {
                     val flowAnalysis by agentVoiceManager.flowAnalysisFlow.collectAsState()
                     val agentSatiety by agentVoiceManager.agentSatietyFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
-                    val coroutineScope = rememberCoroutineScope()
 
                     val orchestrator = remember(agentVoiceManager) {
                         AgentOrchestrator(
@@ -174,6 +216,10 @@ open class MainActivity : ComponentActivity() {
                         historyState.tracks.ifEmpty { homeState.recentTracks }
                     }
 
+                    val dopamineCapsule = remember(combinedRecentTracks, vaultState, nowPlaying?.title) {
+                        vm.compileDopamineCapsule()
+                    }
+
                     TuneMindTheme(adaptiveState = adaptiveState) {
                         if (!hasAllPermissions) {
                             OnboardingScreen(
@@ -187,6 +233,14 @@ open class MainActivity : ComponentActivity() {
                                 initialPage = 1,
                                 pageCount = { 3 }
                             )
+
+                            LaunchedEffect(requestedScreenPage) {
+                                val target = requestedScreenPage
+                                if (target != null && target in 0..2) {
+                                    pagerState.animateScrollToPage(target)
+                                    requestedScreenPage = null
+                                }
+                            }
 
                             Box(
                                 modifier = Modifier
@@ -250,8 +304,15 @@ open class MainActivity : ComponentActivity() {
                                                 liveTranscript = liveTranscript,
                                                 flowAnalysis = flowAnalysis,
                                                 recentTracks = combinedRecentTracks,
+                                                dopamineCapsule = dopamineCapsule,
                                                 onOrbTapped = {
                                                     agentVoiceManager.simulateWakeWordDetected()
+                                                },
+                                                onLaunchDopamineCapsule = {
+                                                    agentVoiceManager.launchDopamineCapsuleBriefing(
+                                                        capsule = dopamineCapsule,
+                                                        targetPlayer = selectedTargetPlayer
+                                                    )
                                                 },
                                                 onCycleAtmospherePalette = {
                                                     vm.cycleAtmospherePalette()
