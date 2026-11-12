@@ -320,7 +320,9 @@ fun RhythmDnaScreen(
             val title = track.title?.trim() ?: "Unknown Track"
             val artist = track.artist?.trim() ?: "Unknown Artist"
             val uri = track.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
-            val pkg = selectedTargetPlayer.ifBlank { track.sourcePackage.ifBlank { "com.spotify.music" } }
+            val pkg = selectedTargetPlayer.ifBlank {
+                track.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
+            }
 
             Row(
                 modifier = Modifier

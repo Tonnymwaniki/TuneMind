@@ -72,7 +72,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = freshness,
                     playCount = plays,
                     spotifyUri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") },
-                    sourcePackage = t.sourcePackage.ifBlank { "com.spotify.music" },
+                    sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
                     isCoolingDown = cooling
                 )
             )
