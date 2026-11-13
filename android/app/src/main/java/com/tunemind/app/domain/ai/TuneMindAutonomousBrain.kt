@@ -544,7 +544,36 @@ Respond ONLY with valid JSON:
             }
         }
 
-        // 6. DEFAULT NON-REPEATING RANDOM CHOICE
+        // 5.5 CONVERSATIONAL / NON-MUSIC TURN ("how are you", greetings, open questions)
+        val isExplicitPlayOrRecommend = Regex(
+            "\\b(play|spin|put on|queue|recommend|suggest|song|track|music|tune|vibe|listen|bongo|afrobeat|amapiano|another|different|next)\\b"
+        ).containsMatchIn(q)
+        if (!isExplicitPlayOrRecommend) {
+            val activeTitle = nowPlaying?.title?.takeIf { it.isNotBlank() && it != "Standing By" }
+            val activeArtist = nowPlaying?.artist?.takeIf { it.isNotBlank() && it != "Unknown Artist" }
+            val sessionContext = if (activeTitle != null) {
+                " while '$activeTitle'${if (activeArtist != null) " by $activeArtist" else ""} is in your session"
+            } else {
+                ""
+            }
+            val spokenReply = when {
+                Regex("\\b(how are you|how're you|how are u|how is it going|how's it going|habari|mambo|niaje|sasa)\\b").containsMatchIn(q) ->
+                    "I'm doing great, thanks for asking! My neural audio engine is dialed in$sessionContext. How are you feeling today, and what kind of vibe are you in the mood for?"
+                Regex("\\b(hi|hello|hey|yo|good morning|good afternoon|good evening)\\b").containsMatchIn(q) ->
+                    "Hey there! Good to hear your voice. How's your day going so far?"
+                Regex("\\b(tired|exhausted|stressed|sad|down|anxious|overwhelmed|bored)\\b").containsMatchIn(q) ->
+                    "I hear you—some days really take it out of you. Want to just unwind and chat, or would you like me to put on something calm when you're ready?"
+                else ->
+                    "I'm right here with you. Tell me more about what's on your mind, or let me know if you'd like me to play or adjust anything."
+            }
+            return BrainResponse(
+                spokenText = spokenReply,
+                action = AgentActionType.SPEAK_ONLY,
+                resolvedTrack = null
+            )
+        }
+
+        // 6. DEFAULT NON-REPEATING RANDOM CHOICE (only for explicit music requests)
         val unplayed = tracks.filter { !it.title.isNullOrBlank() && it.title != nowPlaying?.title && it.title !in recentSuggestions }
         val pick = unplayed.randomOrNull() ?: tracks.randomOrNull()
         val pair = if (pick != null) Pair(pick.title!!, pick.artist ?: "Artist") else BONGO_ROSTER.random()

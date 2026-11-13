@@ -177,8 +177,26 @@ class AgentVoiceManager(
         if (clean.length < 2) return true
         if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
         return Regex(
-            "\\b(most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history)\\b"
+            "\\b(most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history|how are you|how is it going|what is up|who are you)\\b"
         ).containsMatchIn(clean)
+    }
+
+    private fun isExplicitMusicPlayOrRecommendRequest(text: String): Boolean {
+        val clean = text.lowercase().trim()
+        if (clean.isEmpty()) return false
+        if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
+        return Regex(
+            "\\b(play|spin|put on|queue|recommend|suggest|find me a song|give me a song|play something|play music|another song|different song|next song|bongo|afrobeat|amapiano|r&b|hip hop|chill music|workout music|focus music|study music|capsule|dopamine capsule)\\b"
+        ).containsMatchIn(clean)
+    }
+
+    private fun hasLegacyStaticFallbackTag(dataObj: JSONObject?): Boolean {
+        val tags = dataObj?.optJSONArray("database_tags") ?: return false
+        for (i in 0 until tags.length()) {
+            val tag = tags.optString(i, "")
+            if (tag == "smart-history-proposal") return true
+        }
+        return false
     }
 
     private fun startCloudKeepAlivePing() {
@@ -731,6 +749,7 @@ class AgentVoiceManager(
                         put("supabase_anon_key", identity.supabaseAnonKey)
                         put("dialogue_history", getDialogueHistoryJsonArray())
                         put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                        put("gemini_api_key", com.tunemind.app.domain.ai.GeminiReasoningEngine.getApiKey(context))
                     }
                     ws.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -765,7 +784,16 @@ class AgentVoiceManager(
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
                         stopMicrophoneStream()
                         val dataObj = json.optJSONObject("data")
-                        dispatchReasoningResult(dataObj, payload)
+                        if (hasLegacyStaticFallbackTag(dataObj)) {
+                            Log.d(TAG, "Detected legacy static fallback tag from server; upgrading via autonomous LLM reasoning...")
+                            scope.launch {
+                                val upgraded = tryDirectAutonomousLlmReasoningBlocking(lastUserTranscript)
+                                    ?: buildLocalOnDeviceFallbackJson(lastUserTranscript)
+                                dispatchReasoningResult(upgraded, upgraded.optString("voice_agent_tts", ""))
+                            }
+                        } else {
+                            dispatchReasoningResult(dataObj, payload)
+                        }
                         return
                     }
 
@@ -841,6 +869,8 @@ class AgentVoiceManager(
 
         val cmdObj = dataObj?.optJSONObject("os_execution_command")
         val toolObj = dataObj?.optJSONObject("agent_tool_call")
+        val rawAction = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY"
+        val rawIntent = cmdObj?.optString("intent", "NONE") ?: "NONE"
 
         val pendingBeforeTurn = clientPendingProposedTrack
         val userTranscriptLower = lastUserTranscript.lowercase().trim()
@@ -875,8 +905,16 @@ class AgentVoiceManager(
         val wantsMostPlayed = !isApprovingPending && !isSyntheticPrompt && isMostPlayedSongRequest(userTranscriptLower)
         val wantsNewOrRecommend = !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && (
             isNewOrRecommendSongRequest(userTranscriptLower) ||
-            (!rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
+            (isExplicitMusicPlayOrRecommendRequest(userTranscriptLower) && !rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
         )
+
+        // When the AI chooses ADVISE_ONLY on a conversational turn, never attach a track or trigger a song proposal
+        if (rawAction == "ADVISE_ONLY" && !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && !wantsNewOrRecommend) {
+            rawTrackTitle = null
+            rawTrackArtist = null
+            resolvedSpotifyUri = null
+            rawSearchQuery = ""
+        }
 
         val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
         var customProposalSpeechOverride: String? = null
@@ -936,8 +974,6 @@ class AgentVoiceManager(
             }
         }
 
-        val rawAction = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY"
-        val rawIntent = cmdObj?.optString("intent", "NONE") ?: "NONE"
         val targetPlayerPkg = toolObj?.optString("target_player", "com.spotify.music")
             ?.takeIf { it.isNotBlank() }
             ?: cmdObj?.optString("target_player", "com.spotify.music")
@@ -1109,7 +1145,7 @@ class AgentVoiceManager(
 
     /**
      * Evaluates a finalized transcript via the Cloud HTTP `/api/v1/reasoning/evaluate-satiety` endpoint
-     * with full client telemetry, or falls back to local on-device reasoning if offline.
+     * with full client telemetry, or falls back to autonomous LLM / local on-device reasoning if offline.
      */
     fun processFinalTranscriptWithFallback(transcript: String) {
         val cleaned = transcript.trim()
@@ -1216,6 +1252,7 @@ class AgentVoiceManager(
                     put("supabase_anon_key", identity.supabaseAnonKey)
                     put("dialogue_history", getDialogueHistoryJsonArray())
                     put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                    put("gemini_api_key", com.tunemind.app.domain.ai.GeminiReasoningEngine.getApiKey(context))
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
@@ -1231,16 +1268,149 @@ class AgentVoiceManager(
 
                 if (resp.isSuccessful && !respStr.isNullOrBlank()) {
                     val respJson = JSONObject(respStr)
-                    dispatchReasoningResult(respJson, respJson.optString("voice_agent_tts", ""))
-                    return@launch
+                    if (!hasLegacyStaticFallbackTag(respJson)) {
+                        dispatchReasoningResult(respJson, respJson.optString("voice_agent_tts", ""))
+                        return@launch
+                    } else {
+                        Log.d(TAG, "Backend returned legacy smart-history-proposal; upgrading via autonomous cloud LLM...")
+                    }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "HTTP reasoning fallback notice, using on-device smart agent: ${e.message}")
+                Log.w(TAG, "HTTP reasoning fallback notice, trying direct autonomous cloud LLM: ${e.message}")
+            }
+
+            // Try Direct Autonomous Cloud LLM reasoning before offline fallback
+            val directLlmJson = tryDirectAutonomousLlmReasoningBlocking(cleaned)
+            if (directLlmJson != null) {
+                dispatchReasoningResult(directLlmJson, directLlmJson.optString("voice_agent_tts", ""))
+                return@launch
             }
 
             // Local On-Device Smart Agent Fallback (works 100% offline)
             val localJson = buildLocalOnDeviceFallbackJson(cleaned)
             dispatchReasoningResult(localJson, localJson.optString("voice_agent_tts", ""))
+        }
+    }
+
+    /**
+     * Direct autonomous LLM reasoning failover (calls Open Cloud LLM https://text.pollinations.ai/openai)
+     * with the user's live Spotify tracks, current playback, hearing telemetry, and dialogue history.
+     * Ensures the agent reasons naturally on its own even if the backend is sleeping or redeploying.
+     */
+    private fun tryDirectAutonomousLlmReasoningBlocking(transcript: String): JSONObject? {
+        return try {
+            val np = getNowPlaying?.invoke()
+            val recents = getRecentTracks?.invoke() ?: emptyList()
+            val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+            val hearing = getHearingInsights?.invoke()
+            val pending = clientPendingProposedTrack
+            val targetPlayer = np?.sourcePackage?.takeIf { it.isNotBlank() } ?: "com.spotify.music"
+
+            val topTracksSummary = unifiedTracks.take(15).mapIndexed { idx, t ->
+                "${idx + 1}. \"${t.trackTitle}\" by ${t.artistName} (playCount=${t.playCount}, uri=${t.spotifyUri})"
+            }.joinToString("\n").ifBlank { "No Spotify tracks loaded yet." }
+
+            val historyArr = getDialogueHistoryJsonArray()
+            val dialogueLines = mutableListOf<String>()
+            for (i in 0 until historyArr.length()) {
+                val item = historyArr.optJSONObject(i) ?: continue
+                dialogueLines.add("${item.optString("role", "user").uppercase()}: ${item.optString("text", "")}")
+            }
+            val dialogueSummary = dialogueLines.takeLast(6).joinToString("\n").ifBlank { "Start of conversation." }
+
+            val pendingSummary = if (pending != null) {
+                "\"${pending.title}\" by ${pending.artist} (uri=${pending.trackId ?: ""}) — awaiting user approval"
+            } else {
+                "None"
+            }
+
+            val systemPrompt = """
+                You are TuneMind, an intelligent, conversational, and self-reasoning AI music companion on Android (like ChatGPT Voice with full Spotify & OS execution capabilities).
+                Reason naturally about what the user actually said before choosing an action:
+                1. CONVERSATION FIRST: If the user greets you ("how are you", "hello", "hey"), asks a question, talks about their day/feelings, or chats without asking to play or recommend a song, respond warmly and naturally like a smart friend. Use action="ADVISE_ONLY", intent="NONE", track_title=null, track_artist=null, expect_follow_up=true. DO NOT propose or suggest a specific song on a greeting or "how are you"!
+                2. SONG PROPOSALS (2-Step Approval): Only when the user asks to play a song, wants a recommendation, or asks for their most-played song, pick the best track from their Spotify list below and use action="PROPOSE_TRACK", intent="NONE", expect_follow_up=true, asking if they want you to play it.
+                3. APPROVAL OF PENDING TRACK: If PENDING_PROPOSED_TRACK is not None and the user approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), use action="PLAY_TRACK_NOW" and intent="OS_MEDIA_NEXT_AND_DEEP_LINK".
+                4. DEVICE CONTROLS: If the user asks to pause ("PAUSE_PLAYBACK" / "OS_MEDIA_PAUSE"), resume ("RESUME_PLAYBACK" / "OS_MEDIA_RESUME"), skip ("SKIP_NEXT" / "OS_MEDIA_NEXT"), or change volume ("SET_VOLUME_PERCENT"), execute that action.
+                Return ONLY a valid JSON object with keys:
+                {
+                  "calculated_satiety_percentage": 22,
+                  "reasoning_mode": "JOURNEY_ADVISOR",
+                  "flow_state_analysis": "Short UI subtitle",
+                  "voice_agent_tts": "Your natural spoken reply (1-3 sentences)",
+                  "agent_tool_call": {
+                    "action": "ADVISE_ONLY | PROPOSE_TRACK | PLAY_TRACK_NOW | PAUSE_PLAYBACK | RESUME_PLAYBACK | SKIP_NEXT | SKIP_PREVIOUS | SET_VOLUME_PERCENT",
+                    "track_title": null,
+                    "track_artist": null,
+                    "spotify_uri": null,
+                    "target_player": "$targetPlayer",
+                    "expect_follow_up": true
+                  },
+                  "os_execution_command": {
+                    "intent": "NONE | OS_MEDIA_NEXT_AND_DEEP_LINK | OS_MEDIA_PAUSE | OS_MEDIA_RESUME | OS_MEDIA_NEXT | OS_MEDIA_PREV",
+                    "target_player": "$targetPlayer",
+                    "search_query": "",
+                    "track_title": null,
+                    "track_artist": null,
+                    "spotify_uri": null
+                  }
+                }
+            """.trimIndent()
+
+            val userPrompt = """
+                CURRENT_PLAYING: "${np?.title ?: "Standing By"}" by "${np?.artist ?: ""}" (isPlaying=${np?.isPlaying == true})
+                PENDING_PROPOSED_TRACK: $pendingSummary
+                HEARING_TELEMETRY: ${hearing?.estimatedAverageDb?.toInt() ?: 68}dB, ${hearing?.currentHeadroomDb?.toInt() ?: 17}dB safe headroom
+                RECENT_DIALOGUE:
+                $dialogueSummary
+                USER_SPOTIFY_TOP_AND_RECENT_TRACKS:
+                $topTracksSummary
+                USER_SAID: "$transcript"
+            """.trimIndent()
+
+            val reqBody = JSONObject().apply {
+                put("model", "openai")
+                put("temperature", 0.5)
+                put("messages", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", userPrompt)
+                    })
+                })
+            }
+
+            val req = Request.Builder()
+                .url("https://text.pollinations.ai/openai")
+                .header("Content-Type", "application/json")
+                .post(reqBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            val resp = reasoningHttpClient.newCall(req).execute()
+            val bodyStr = resp.body?.string()
+            resp.close()
+            if (!resp.isSuccessful || bodyStr.isNullOrBlank()) return null
+
+            val root = JSONObject(bodyStr)
+            val content = root.optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content", "")
+                ?.trim()
+                ?: return null
+
+            val firstBrace = content.indexOf('{')
+            val lastBrace = content.lastIndexOf('}')
+            if (firstBrace < 0 || lastBrace <= firstBrace) return null
+            val parsed = JSONObject(content.substring(firstBrace, lastBrace + 1))
+            if (parsed.optString("voice_agent_tts", "").isBlank()) return null
+            Log.d(TAG, "✨ Direct Autonomous LLM decision succeeded: ${parsed.optString("voice_agent_tts")}")
+            parsed
+        } catch (e: Exception) {
+            Log.w(TAG, "Direct autonomous LLM failover notice: ${e.message}")
+            null
         }
     }
 
@@ -1586,7 +1756,67 @@ class AgentVoiceManager(
             }
         }
 
-        // 12. Pick freshest unplayed track from capsule or unified Spotify history, propose it, and wait for user approval
+        // 11.5 Conversational / Open Dialogue Turn ("how are you", greetings, questions, feelings, chat)
+        // NEVER propose a song unless the user explicitly asked to play or recommend music!
+        if (!isExplicitMusicPlayOrRecommendRequest(lower)) {
+            val activeTitle = np?.title?.takeIf { it.isNotBlank() && it != "Standing By" }
+            val activeArtist = np?.artist?.takeIf { it.isNotBlank() && it != "Unknown Artist" }
+            val playingNote = if (activeTitle != null) {
+                " while ${activeTitle}${if (activeArtist != null) " by $activeArtist" else ""} is in your session"
+            } else {
+                ""
+            }
+
+            val conversationalReply = when {
+                Regex("\\b(how are you|how're you|how are u|how is it going|how's it going|how you doing|habari|mambo|niaje|sasa)\\b").containsMatchIn(lower) ->
+                    "I'm doing great, thanks for asking! My neural audio engine is dialed in$playingNote. How are you feeling today, and what kind of vibe are you in the mood for?"
+
+                Regex("\\b(hi|hello|hey|yo|good morning|good afternoon|good evening|greetings)\\b").containsMatchIn(lower) ->
+                    "Hey there! Good to hear your voice. How's your day going so far?"
+
+                Regex("\\b(who are you|what are you|what can you do|help|capabilities)\\b").containsMatchIn(lower) ->
+                    "I'm TuneMind, your autonomous music companion. We can just chat about your day, check your hearing headroom and taste DNA, or whenever you're ready I can find and play music on Spotify. What's on your mind?"
+
+                Regex("\\b(what is playing|what's playing|what song is this|current song|currently playing)\\b").containsMatchIn(lower) -> {
+                    if (activeTitle != null) {
+                        "Right now you have $activeTitle${if (activeArtist != null) " by $activeArtist" else ""} loaded up. How is it hitting for you?"
+                    } else {
+                        "Nothing is actively spinning right now. Let me know if you want to chat or if you'd like me to put something on."
+                    }
+                }
+
+                Regex("\\b(tired|exhausted|stressed|sad|down|anxious|overwhelmed|bored|sleepy)\\b").containsMatchIn(lower) ->
+                    "I hear you—some days really take it out of you. Do you want to just unwind and talk for a bit, or would you like me to put on something calm and restorative when you're ready?"
+
+                Regex("\\b(good|great|awesome|fine|okay|doing well|happy|excited|chill|relaxed|fantastic|amazing)\\b").containsMatchIn(lower) ->
+                    "Love to hear that! Are you just chilling right now, working on something, or in the mood to explore some music together?"
+
+                Regex("\\b(thank|thanks|appreciate|asante|shukran)\\b").containsMatchIn(lower) ->
+                    "Anytime! I'm right here whenever you want to talk or switch up the vibe."
+
+                else ->
+                    "I'm right here with you. Tell me more about what's on your mind, or let me know if you'd like me to do anything with your music."
+            }
+
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", _agentSatietyFlow.value)
+                put("reasoning_mode", "JOURNEY_ADVISOR")
+                put("flow_state_analysis", "Conversational Neural Dialogue • Listening & reasoning with you.")
+                put("voice_agent_tts", conversationalReply)
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "ADVISE_ONLY")
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", true)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 12. Explicit music request fallback: Pick freshest unplayed track from capsule or unified Spotify history, propose it, and wait for user approval
         val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
         val discoveryFallback = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
             context = context,

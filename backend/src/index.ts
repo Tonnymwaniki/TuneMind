@@ -232,6 +232,7 @@ wss.on('connection', async (ws: WebSocket) => {
     user_email?: string;
     supabase_url?: string;
     supabase_anon_key?: string;
+    gemini_api_key?: string;
   } | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
@@ -330,7 +331,8 @@ wss.on('connection', async (ws: WebSocket) => {
         user_id: clientContext?.user_id,
         user_email: clientContext?.user_email,
         supabase_url: clientContext?.supabase_url,
-        supabase_anon_key: clientContext?.supabase_anon_key
+        supabase_anon_key: clientContext?.supabase_anon_key,
+        gemini_api_key: clientContext?.gemini_api_key
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
