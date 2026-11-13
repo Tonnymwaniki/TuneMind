@@ -40,7 +40,8 @@ import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.voice.AgentState
 import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.ui.DopamineCapsuleState
-import com.tunemind.app.ui.theme.LocalAdaptiveColors
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
+import com.tunemind.app.ui.theme.TuneMindPalettes
 import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
 import kotlin.math.cos
@@ -77,7 +78,7 @@ fun PulseAgentScreen(
     onLaunchDopamineCapsule: () -> Unit = {},
     onCycleAtmospherePalette: () -> Unit = {}
 ) {
-    val colors = LocalAdaptiveColors.current
+    val colors = LocalAdaptiveTheme.current
     val scrollState = rememberScrollState()
     val hasPendingApproval = pendingProposedTrack != null
 
@@ -158,8 +159,8 @@ fun PulseAgentScreen(
                             .background(activeAccent)
                     )
                     Text(
-                        text = "OBSIDIAN NEURAL CORE • ${colors.paletteTitle.uppercase()}",
-                        style = TuneMindTypography.TechnicalLabel,
+                        text = "OBSIDIAN NEURAL CORE • ${colors.activePalette.name.uppercase()}",
+                        style = TuneMindTypography.labelSmall,
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp
                     )
@@ -351,7 +352,7 @@ private fun ProposedTrackApprovalCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = proposedTrack.title,
-                        style = TuneMindTypography.TrackTitle,
+                        style = TuneMindTypography.headlineSmall,
                         fontSize = 16.sp,
                         color = Color.White,
                         maxLines = 1,
@@ -362,7 +363,7 @@ private fun ProposedTrackApprovalCard(
                     } ?: "Spotify Studio Selection"
                     Text(
                         text = cleanArtist,
-                        style = TuneMindTypography.ArtistSubtitle,
+                        style = TuneMindTypography.bodySmall,
                         fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.65f),
                         maxLines = 1,
@@ -944,7 +945,7 @@ private fun DopamineCapsuleBanner(
                         Column {
                             Text(
                                 text = track.title,
-                                style = TuneMindTypography.TrackTitle,
+                                style = TuneMindTypography.labelLarge,
                                 fontSize = 11.sp,
                                 color = Color.White,
                                 maxLines = 1,
@@ -1038,7 +1039,7 @@ private fun MascotDialogueConsole(
             }
             Text(
                 text = displayLine,
-                style = TuneMindTypography.BodyRegular,
+                style = TuneMindTypography.bodyMedium,
                 fontSize = 13.sp,
                 color = if (liveTranscript.isNotBlank()) Color.White else Color.White.copy(alpha = 0.65f),
                 textAlign = TextAlign.Center,
@@ -1114,7 +1115,7 @@ private fun NowPlayingMiniBar(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = trackTitle ?: "Studio Standing By",
-                        style = TuneMindTypography.TrackTitle,
+                        style = TuneMindTypography.labelLarge,
                         fontSize = 13.sp,
                         color = Color.White,
                         maxLines = 1,
@@ -1122,7 +1123,7 @@ private fun NowPlayingMiniBar(
                     )
                     Text(
                         text = artistName ?: "Tap the mascot or say 'Suggest a song'",
-                        style = TuneMindTypography.ArtistSubtitle,
+                        style = TuneMindTypography.bodySmall,
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.55f),
                         maxLines = 1,
@@ -1134,11 +1135,12 @@ private fun NowPlayingMiniBar(
             Spacer(modifier = Modifier.width(8.dp))
 
             // Mood DNA Badge
+            val moodAccent = TuneMindPalettes.MoodProfiles[mood]?.moodAccent ?: accentColor
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(mood.accentHex).copy(alpha = 0.14f))
-                    .border(1.dp, Color(mood.accentHex).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .background(moodAccent.copy(alpha = 0.14f))
+                    .border(1.dp, moodAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Text(
@@ -1146,7 +1148,7 @@ private fun NowPlayingMiniBar(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 9.sp,
-                    color = Color(mood.accentHex)
+                    color = moodAccent
                 )
             }
         }
