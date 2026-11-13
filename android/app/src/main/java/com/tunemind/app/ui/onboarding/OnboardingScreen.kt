@@ -114,7 +114,7 @@ fun OnboardingScreen(
             OnboardingStep.WELCOME -> {
                 StartSplashWelcomeStep(
                     isReturningUser = session.isLoggedIn || session.isSpotifyConnected || session.hasCompletedStartFlow,
-                    userDisplayName = session.displayName ?: session.spotifyDisplayName ?: session.email?.substringBefore("@"),
+                    userDisplayName = session.displayName.ifBlank { session.email.substringBefore("@") },
                     onSplashFinished = { viewModel.onSplashFinishedAutoRoute() }
                 )
             }
