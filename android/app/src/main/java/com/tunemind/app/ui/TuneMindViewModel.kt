@@ -812,6 +812,24 @@ class TuneMindViewModel : ViewModel() {
                     }
                 }
 
+                // Merge Local-First Spotify Web API Listening History from Room (spotify_listening_history table)
+                val spotifyIngested = runCatching {
+                    db?.spotifyListeningHistoryDao()?.getAggregatedTracksSnapshot(60).orEmpty()
+                }.getOrDefault(emptyList())
+                for (agg in spotifyIngested) {
+                    val key = "${agg.trackTitle.trim().lowercase()}|${agg.artistName.trim().lowercase()}"
+                    val existing = combinedTrackMap[key]
+                    if (existing == null) {
+                        combinedTrackMap[key] = com.tunemind.app.data.ingestion.run { agg.toTrackMemoryEntry() }
+                    } else if (existing.providerTrackId.isNullOrBlank() && agg.spotifyUri.isNotBlank()) {
+                        combinedTrackMap[key] = existing.copy(
+                            providerTrackId = agg.spotifyUri,
+                            distinctAppearanceCount = maxOf(existing.distinctAppearanceCount, agg.playCount),
+                            lastObservedAppearanceAtMs = maxOf(existing.lastObservedAppearanceAtMs ?: 0L, agg.lastPlayedEpochMs)
+                        )
+                    }
+                }
+
                 val recent = combinedTrackMap.values
                     .sortedByDescending { it.lastObservedAppearanceAtMs ?: 0L }
                     .take(60)

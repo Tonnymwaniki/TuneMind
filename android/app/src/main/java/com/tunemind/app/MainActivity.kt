@@ -58,6 +58,14 @@ open class MainActivity : ComponentActivity() {
         // Safe rebind attempt without touching component enabled settings
         forceRebindListener(this)
 
+        // Handle Spotify OAuth 2.0 Authorization Code + PKCE callback if launched via tunemind://spotify-callback
+        intent?.let { incoming ->
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(applicationContext)
+                    .handleAuthRedirectIntent(incoming)
+            }
+        }
+
         enableEdgeToEdge()
         try {
             setContent {
@@ -403,6 +411,15 @@ open class MainActivity : ComponentActivity() {
                     }
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(applicationContext)
+                .handleAuthRedirectIntent(intent)
         }
     }
 

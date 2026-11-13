@@ -17,6 +17,8 @@ import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.provider.MusicProviderDao
 import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
+import com.tunemind.app.data.ingestion.SpotifyListeningHistoryDao
+import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
 import com.tunemind.app.domain.study.StudyEntity
 
 /**
@@ -31,6 +33,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   6 — Persistent AI Recommendation Crate (chrono-receptive auto-evolving music discovery).
  *   7 — Index and column constraint alignment for AI Recommendation Crate.
  *   8 — Unique title-artist index, subTier, and reinforcement learning telemetry tracking fields.
+ *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
  */
 @Database(
     entities = [
@@ -42,9 +45,10 @@ import com.tunemind.app.domain.study.StudyEntity
         AudioDeviceSessionEntity::class,
         VolumeObservationEntity::class,
         MusicProviderEntity::class,
-        com.tunemind.app.domain.recommendation.AiRecommendationEntity::class
+        com.tunemind.app.domain.recommendation.AiRecommendationEntity::class,
+        SpotifyListeningHistoryEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -56,6 +60,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun audioDeviceDao(): AudioDeviceDao
     abstract fun musicProviderDao(): MusicProviderDao
     abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
+    abstract fun spotifyListeningHistoryDao(): SpotifyListeningHistoryDao
 
     companion object {
         private const val DATABASE_NAME = "tunemind.db"
@@ -70,7 +75,17 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         context.applicationContext,
                         TuneMindDatabase::class.java,
                         DATABASE_NAME,
-                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_5_7, MIGRATION_7_8)
+                    ).addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_5_7,
+                        MIGRATION_7_8,
+                        MIGRATION_8_9
+                    )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
                 } catch (e: Throwable) {
@@ -273,6 +288,35 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_recommendedAtMs ON ai_recommendation_crate(recommendedAtMs)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isSaved ON ai_recommendation_crate(isSaved)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_isDismissed ON ai_recommendation_crate(isDismissed)")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_listening_history (
+                        history_id TEXT PRIMARY KEY NOT NULL,
+                        track_id TEXT NOT NULL,
+                        spotify_uri TEXT NOT NULL,
+                        track_title TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        artist_ids_csv TEXT NOT NULL DEFAULT '',
+                        album_name TEXT NOT NULL DEFAULT '',
+                        album_art_url TEXT,
+                        duration_ms INTEGER NOT NULL DEFAULT 0,
+                        popularity INTEGER NOT NULL DEFAULT 0,
+                        played_at_iso TEXT NOT NULL,
+                        played_at_epoch_ms INTEGER NOT NULL,
+                        ingestion_source TEXT NOT NULL DEFAULT 'RECENTLY_PLAYED',
+                        context_uri TEXT,
+                        synced_at_epoch_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_played_at_epoch_ms ON spotify_listening_history(played_at_epoch_ms DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_track_id ON spotify_listening_history(track_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_track_title_artist_name ON spotify_listening_history(track_title, artist_name)")
             }
         }
     }

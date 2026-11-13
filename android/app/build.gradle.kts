@@ -26,6 +26,16 @@ val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
     ?: System.getenv("TUNEMIND_BASE_URL")
     ?: "https://tunemind-backend-iudp.onrender.com"
 
+val spotifyClientId: String = localProps.getProperty("SPOTIFY_CLIENT_ID")
+    ?: (project.findProperty("SPOTIFY_CLIENT_ID") as? String)
+    ?: System.getenv("SPOTIFY_CLIENT_ID")
+    ?: ""
+
+val spotifyRedirectUri: String = localProps.getProperty("SPOTIFY_REDIRECT_URI")
+    ?: (project.findProperty("SPOTIFY_REDIRECT_URI") as? String)
+    ?: System.getenv("SPOTIFY_REDIRECT_URI")
+    ?: "tunemind://spotify-callback"
+
 android {
     namespace = "com.tunemind.app"
     compileSdk = 36
@@ -42,6 +52,8 @@ android {
 
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
+        buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"$spotifyRedirectUri\"")
     }
 
     buildTypes {
@@ -98,6 +110,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.gson)
     implementation(libs.androidx.media)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")

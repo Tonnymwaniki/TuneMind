@@ -17,6 +17,7 @@ import { requestLogger } from './middleware/requestLogger';
 import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
+import spotifyAuthRouter from './api/v1/spotifyAuth';
 import { EventStore } from './domain/events/EventStore';
 
 const app = express();
@@ -31,6 +32,7 @@ app.use(requestLogger);
 app.use('/api/v1/events', eventsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/reasoning', reasoningRouter);
+app.use('/api/v1/spotify', spotifyAuthRouter);
 
 app.get('/', (_req, res) => {
   res.json({
