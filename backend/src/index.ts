@@ -162,6 +162,8 @@ wss.on('connection', async (ws: WebSocket) => {
       trackId?: string;
       source?: string;
     } | null;
+    spotify_access_token?: string;
+    dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
   } | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
@@ -189,7 +191,7 @@ wss.on('connection', async (ws: WebSocket) => {
     }
 
     try {
-      console.log('[VoiceStream] ⚡ Triggering Fast Claude Pipeline...');
+      console.log('[VoiceStream] ⚡ Triggering Autonomous Tool-Calling Claude Pipeline...');
       const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
       const provider = new ClaudeMusicReasoningProvider();
 
@@ -217,7 +219,7 @@ wss.on('connection', async (ws: WebSocket) => {
           });
 
       const effectiveHistory = liveRecents.length > 0
-        ? liveRecents.slice(0, 50).map(t => ({
+        ? liveRecents.slice(0, 60).map(t => ({
             title: t.title,
             artist: t.artist,
             trackId: t.trackId,
@@ -253,7 +255,10 @@ wss.on('connection', async (ws: WebSocket) => {
         current_satiety_percentage: 50,
         hearing_telemetry: clientContext?.hearing_telemetry,
         vault_tracks: clientContext?.vault_tracks,
-        dopamine_capsule: clientContext?.dopamine_capsule
+        dopamine_capsule: clientContext?.dopamine_capsule,
+        pending_proposed_track: clientContext?.pending_proposed_track,
+        spotify_access_token: clientContext?.spotify_access_token,
+        dialogue_history: clientContext?.dialogue_history
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);

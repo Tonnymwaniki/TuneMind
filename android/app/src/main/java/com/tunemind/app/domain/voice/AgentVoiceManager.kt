@@ -101,6 +101,11 @@ class AgentVoiceManager(
         .connectTimeout(15000, java.util.concurrent.TimeUnit.MILLISECONDS)
         .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
+    private val reasoningHttpClient = OkHttpClient.Builder()
+        .connectTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .readTimeout(25000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .writeTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
     private var isRecording = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -290,6 +295,59 @@ class AgentVoiceManager(
         val existing = getRecentlyPlayedByAgent().filterNot { it.equals(clean, ignoreCase = true) }
         val updated = (listOf(clean) + existing).take(25)
         prefs.edit().putString("recent_agent_tracks", updated.joinToString("|||")).apply()
+    }
+
+    private fun getDialogueHistoryJsonArray(): org.json.JSONArray {
+        val raw = prefs.getString("agent_dialogue_history_json", null)
+        if (raw.isNullOrBlank()) return org.json.JSONArray()
+        return try {
+            org.json.JSONArray(raw)
+        } catch (_: Exception) {
+            org.json.JSONArray()
+        }
+    }
+
+    private fun recordDialogueTurn(userText: String?, assistantText: String?) {
+        val cleanUser = userText?.trim() ?: ""
+        val cleanAssistant = assistantText?.trim() ?: ""
+        if (cleanUser.isEmpty() && cleanAssistant.isEmpty()) return
+        try {
+            val currentArr = getDialogueHistoryJsonArray()
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until currentArr.length()) {
+                currentArr.optJSONObject(i)?.let { list.add(it) }
+            }
+            if (cleanUser.isNotEmpty()) {
+                list.add(JSONObject().apply {
+                    put("role", "user")
+                    put("text", cleanUser.take(360))
+                })
+            }
+            if (cleanAssistant.isNotEmpty()) {
+                list.add(JSONObject().apply {
+                    put("role", "assistant")
+                    put("text", cleanAssistant.take(360))
+                })
+            }
+            val trimmed = list.takeLast(12)
+            val newArr = org.json.JSONArray()
+            for (item in trimmed) {
+                newArr.put(item)
+            }
+            prefs.edit().putString("agent_dialogue_history_json", newArr.toString()).apply()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist dialogue turn: ${e.message}")
+        }
+    }
+
+    private fun getCurrentSpotifyAccessTokenBlocking(): String {
+        return try {
+            runBlocking(Dispatchers.IO) {
+                com.tunemind.app.data.ingestion.SpotifyAuthManager(context).getValidAccessToken()
+            } ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     // Wake Word / Manual Orb tap handler
@@ -644,6 +702,8 @@ class AgentVoiceManager(
                                 put("source", pendingProp.source)
                             })
                         }
+                        put("dialogue_history", getDialogueHistoryJsonArray())
+                        put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
                     }
                     ws.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -784,15 +844,16 @@ class AgentVoiceManager(
             rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
         }
 
-        // Intercept "most played / listened to the most" and "recommend / play a new song" or any bogus conversational phrase
+        // Guard against any conversational non-title phrase leaking into rawTrackTitle when offline/fallback
         val wantsMostPlayed = !isApprovingPending && !isSyntheticPrompt && isMostPlayedSongRequest(userTranscriptLower)
         val wantsNewOrRecommend = !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && (
             isNewOrRecommendSongRequest(userTranscriptLower) ||
             (!rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
         )
 
+        val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
         var customProposalSpeechOverride: String? = null
-        if (wantsMostPlayed) {
+        if (wantsMostPlayed && !backendGaveValidTrack) {
             val recents = getRecentTracks?.invoke() ?: emptyList()
             val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
             if (topTrack != null) {
@@ -804,25 +865,21 @@ class AgentVoiceManager(
                 val countNote = if (topTrack.playCount > 1) " with ${topTrack.playCount} plays in your Spotify history" else " from the top of your Spotify rotation"
                 customProposalSpeechOverride = "Your most-listened song is ${topTrack.trackTitle}$artistPart$countNote. Would you like me to play it right now?"
             }
-        } else if (wantsNewOrRecommend) {
-            // If backend returned a valid real track (not a conversational sentence), keep it and ensure URI; otherwise fetch a fresh discovery track
-            val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
-            if (!backendGaveValidTrack) {
-                val recents = getRecentTracks?.invoke() ?: emptyList()
-                val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(getNowPlaying?.invoke()?.title)).toSet()
-                val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                    context = context,
-                    fallbackMemoryTracks = recents,
-                    excludedTitles = excluded
-                )
-                if (discovery != null) {
-                    rawTrackTitle = discovery.trackTitle
-                    rawTrackArtist = discovery.artistName
-                    resolvedSpotifyUri = discovery.spotifyUri
-                    rawSearchQuery = "${discovery.trackTitle} ${discovery.artistName}".trim()
-                    val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
-                    customProposalSpeechOverride = "Based on your Spotify listening taste, I recommend ${discovery.trackTitle}$artistPart. Would you like me to play it right now?"
-                }
+        } else if (wantsNewOrRecommend && !backendGaveValidTrack) {
+            val recents = getRecentTracks?.invoke() ?: emptyList()
+            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(getNowPlaying?.invoke()?.title)).toSet()
+            val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                context = context,
+                fallbackMemoryTracks = recents,
+                excludedTitles = excluded
+            )
+            if (discovery != null) {
+                rawTrackTitle = discovery.trackTitle
+                rawTrackArtist = discovery.artistName
+                resolvedSpotifyUri = discovery.spotifyUri
+                rawSearchQuery = "${discovery.trackTitle} ${discovery.artistName}".trim()
+                val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
+                customProposalSpeechOverride = "Based on your Spotify listening taste, I recommend ${discovery.trackTitle}$artistPart. Would you like me to play it right now?"
             }
         }
 
@@ -881,7 +938,8 @@ class AgentVoiceManager(
             effectiveExpectFollowUp = false
             updatePendingProposedTrack(null)
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
-            spokenTts = "Awesome, playing ${rawTrackTitle}$artistPart on Spotify right now."
+            spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
+                ?: "Awesome, playing ${rawTrackTitle}$artistPart on Spotify right now."
         } else if (isTrackProposalOrPlayAttempt) {
             // Always propose the song first and wait for the user's approval before executing!
             effectiveAction = if (rawAction == "LAUNCH_DOPAMINE_CAPSULE") "LAUNCH_DOPAMINE_CAPSULE" else "PROPOSE_TRACK"
@@ -910,7 +968,7 @@ class AgentVoiceManager(
         } else {
             effectiveAction = rawAction
             effectiveIntent = rawIntent
-            effectiveExpectFollowUp = toolObj?.optBoolean("expect_follow_up", false) ?: false
+            effectiveExpectFollowUp = toolObj?.optBoolean("expect_follow_up", true) ?: true
             if (effectiveAction == "PAUSE_PLAYBACK") {
                 updatePendingProposedTrack(null)
             }
@@ -957,6 +1015,9 @@ class AgentVoiceManager(
                 dataObj?.optString("voice_agent_audio_base64", "")?.takeIf { it.isNotBlank() && it != "null" }
             }
         )
+
+        // Persist user + assistant turn in rolling multi-turn conversation memory
+        recordDialogueTurn(lastUserTranscript, responseObj.voice_agent_tts)
 
         mainHandler.post {
             onToolActionExecuted?.invoke(toolPayload)
@@ -1110,6 +1171,8 @@ class AgentVoiceManager(
                             put("source", pendingProp.source)
                         })
                     }
+                    put("dialogue_history", getDialogueHistoryJsonArray())
+                    put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
@@ -1119,7 +1182,7 @@ class AgentVoiceManager(
                     .post(bodyJson.toString().toRequestBody(mediaType))
                     .build()
 
-                val resp = client.newCall(req).execute()
+                val resp = reasoningHttpClient.newCall(req).execute()
                 val respStr = resp.body?.string()
                 resp.close()
 
