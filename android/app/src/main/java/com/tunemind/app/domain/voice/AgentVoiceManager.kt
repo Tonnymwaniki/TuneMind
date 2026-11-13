@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
@@ -942,10 +944,10 @@ class AgentVoiceManager(
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
-                val mediaType = okhttp3.MediaType.Companion.toMediaType("application/json; charset=utf-8")
+                val mediaType = "application/json; charset=utf-8".toMediaType()
                 val req = Request.Builder()
                     .url("$baseUrl/api/v1/reasoning/evaluate-satiety")
-                    .post(okhttp3.RequestBody.Companion.toRequestBody(bodyJson.toString(), mediaType))
+                    .post(bodyJson.toString().toRequestBody(mediaType))
                     .build()
 
                 val resp = client.newCall(req).execute()
