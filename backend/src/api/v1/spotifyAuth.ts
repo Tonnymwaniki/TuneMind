@@ -14,9 +14,9 @@ router.post('/token', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing authorization code' });
     }
 
-    const effectiveClientId = (client_id || process.env.SPOTIFY_CLIENT_ID || '').trim();
-    const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '').trim();
-    const effectiveRedirectUri = (redirect_uri || process.env.SPOTIFY_REDIRECT_URI || 'tunemind://spotify-callback').trim();
+    const effectiveClientId = (client_id || process.env.SPOTIFY_CLIENT_ID || 'dcfad6acbd594477b0705ecc1e6ace3a').trim();
+    const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '134028eff64c4e2cafa4b1f617463650').trim();
+    const effectiveRedirectUri = (redirect_uri || process.env.SPOTIFY_REDIRECT_URI || 'tunemind://spotify-auth-callback').trim();
 
     if (!effectiveClientId) {
       return res.status(400).json({ error: 'SPOTIFY_CLIENT_ID is not configured' });
@@ -71,8 +71,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing refresh_token' });
     }
 
-    const effectiveClientId = (client_id || process.env.SPOTIFY_CLIENT_ID || '').trim();
-    const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '').trim();
+    const effectiveClientId = (client_id || process.env.SPOTIFY_CLIENT_ID || 'dcfad6acbd594477b0705ecc1e6ace3a').trim();
+    const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '134028eff64c4e2cafa4b1f617463650').trim();
 
     if (!effectiveClientId) {
       return res.status(400).json({ error: 'SPOTIFY_CLIENT_ID is not configured' });

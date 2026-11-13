@@ -74,12 +74,12 @@ class SpotifyTokenManager(context: Context) {
     }
 
     /**
-     * Resolves the Spotify Client ID from encrypted preferences, BuildConfig, or backend config.
+     * Resolves the Spotify Client ID from encrypted preferences, BuildConfig, or default constant.
      */
     fun getClientId(): String {
         val custom = encryptedPrefs.getString(KEY_CUSTOM_CLIENT_ID, null)?.trim()
         if (!custom.isNullOrEmpty()) return custom
-        return BuildConfig.SPOTIFY_CLIENT_ID.trim()
+        return BuildConfig.SPOTIFY_CLIENT_ID.trim().ifBlank { SpotifyAuthManager.CLIENT_ID }
     }
 
     fun setCustomClientId(clientId: String) {
@@ -183,6 +183,23 @@ class SpotifyTokenManager(context: Context) {
             return@withLock null
         }
 
+        // 1. Primary: Direct Basic Auth (CLIENT_ID:CLIENT_SECRET) refresh via https://accounts.spotify.com/api/token
+        try {
+            val basicResp = authService.refreshAccessTokenWithSecret(
+                basicAuthHeader = SpotifyAuthManager.buildBasicAuthHeader(),
+                grantType = "refresh_token",
+                refreshToken = refreshToken
+            )
+            if (basicResp.isSuccessful && basicResp.body() != null) {
+                val body = basicResp.body()!!
+                saveTokens(body)
+                return@withLock body.accessToken
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Direct Basic Auth refresh notice: ${e.message}")
+        }
+
+        // 2. Secondary: PKCE client_id refresh
         val clientId = getClientId()
         if (clientId.isNotBlank()) {
             try {
@@ -202,7 +219,7 @@ class SpotifyTokenManager(context: Context) {
             }
         }
 
-        // Fallback: Refresh via TuneMind Cloud Backend confidential client (/api/v1/spotify/refresh)
+        // 3. Fallback: Refresh via TuneMind Cloud Backend confidential client (/api/v1/spotify/refresh)
         return@withLock refreshViaBackendProxy(refreshToken)
     }
 
@@ -254,7 +271,7 @@ class SpotifyTokenManager(context: Context) {
         private const val TAG = "SpotifyTokenManager"
         private const val PREFS_FILE_NAME = "tunemind_spotify_secure_vault"
         private const val EXPIRY_SAFETY_BUFFER_MS = 60_000L // Refresh 60s before actual expiry
-        const val DEFAULT_REDIRECT_URI = "tunemind://spotify-callback"
+        const val DEFAULT_REDIRECT_URI = "tunemind://spotify-auth-callback"
 
         private const val KEY_ACCESS_TOKEN = "spotify_access_token"
         private const val KEY_REFRESH_TOKEN = "spotify_refresh_token"

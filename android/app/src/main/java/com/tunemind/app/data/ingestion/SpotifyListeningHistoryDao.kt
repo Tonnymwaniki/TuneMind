@@ -16,6 +16,18 @@ import kotlinx.coroutines.flow.Flow
 interface SpotifyListeningHistoryDao {
 
     /**
+     * Inserts newly fetched [TrackHistoryTelemetryItem] records while ignoring duplicates (`OnConflictStrategy.IGNORE`).
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTelemetryItemsIgnoreDuplicates(items: List<TrackHistoryTelemetryItem>): List<Long>
+
+    /**
+     * Inserts newly fetched [SpotifyListeningHistoryEntity] records while ignoring duplicates (`OnConflictStrategy.IGNORE`).
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertHistoryIgnoreDuplicates(items: List<SpotifyListeningHistoryEntity>): List<Long>
+
+    /**
      * Upserts a batch of recently played or currently playing tracks fetched from the Spotify Web API.
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -23,6 +35,9 @@ interface SpotifyListeningHistoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSingle(item: SpotifyListeningHistoryEntity): Long
+
+    @Query("SELECT * FROM track_history_telemetry ORDER BY played_at_epoch_ms DESC LIMIT :limit")
+    fun observeTelemetryItems(limit: Int = 100): Flow<List<TrackHistoryTelemetryItem>>
 
     /**
      * Reactive stream of raw chronologically ordered play history for the UI.

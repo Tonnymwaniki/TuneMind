@@ -72,7 +72,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Spotify OAuth 2.0 Authorization Code + PKCE Redirect Callback -->
+            <!-- Spotify OAuth 2.0 Authorization Code Redirect Callback -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -80,6 +80,22 @@
                 <data
                     android:scheme="tunemind"
                     android:host="spotify-callback" />
+            </intent-filter>
+        </activity>
+
+        <!-- Dedicated Spotify OAuth Callback Activity intercepting tunemind://spotify-auth-callback -->
+        <activity
+            android:name=".data.ingestion.AuthCallbackActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.TuneMind">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="tunemind"
+                    android:host="spotify-auth-callback" />
             </intent-filter>
         </activity>
 

@@ -29,12 +29,17 @@ val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
 val spotifyClientId: String = localProps.getProperty("SPOTIFY_CLIENT_ID")
     ?: (project.findProperty("SPOTIFY_CLIENT_ID") as? String)
     ?: System.getenv("SPOTIFY_CLIENT_ID")
-    ?: ""
+    ?: "dcfad6acbd594477b0705ecc1e6ace3a"
+
+val spotifyClientSecret: String = localProps.getProperty("SPOTIFY_CLIENT_SECRET")
+    ?: (project.findProperty("SPOTIFY_CLIENT_SECRET") as? String)
+    ?: System.getenv("SPOTIFY_CLIENT_SECRET")
+    ?: "134028eff64c4e2cafa4b1f617463650"
 
 val spotifyRedirectUri: String = localProps.getProperty("SPOTIFY_REDIRECT_URI")
     ?: (project.findProperty("SPOTIFY_REDIRECT_URI") as? String)
     ?: System.getenv("SPOTIFY_REDIRECT_URI")
-    ?: "tunemind://spotify-callback"
+    ?: "tunemind://spotify-auth-callback"
 
 android {
     namespace = "com.tunemind.app"
@@ -53,6 +58,7 @@ android {
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifyClientSecret\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"$spotifyRedirectUri\"")
     }
 

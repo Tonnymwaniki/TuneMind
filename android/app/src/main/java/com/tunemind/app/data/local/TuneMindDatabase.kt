@@ -19,6 +19,7 @@ import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryDao
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
+import com.tunemind.app.data.ingestion.TrackHistoryTelemetryItem
 import com.tunemind.app.domain.study.StudyEntity
 
 /**
@@ -34,6 +35,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   7 — Index and column constraint alignment for AI Recommendation Crate.
  *   8 — Unique title-artist index, subTier, and reinforcement learning telemetry tracking fields.
  *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
+ *   10 — Spotify TrackHistoryTelemetryItem table (track_history_telemetry).
  */
 @Database(
     entities = [
@@ -46,9 +48,10 @@ import com.tunemind.app.domain.study.StudyEntity
         VolumeObservationEntity::class,
         MusicProviderEntity::class,
         com.tunemind.app.domain.recommendation.AiRecommendationEntity::class,
-        SpotifyListeningHistoryEntity::class
+        SpotifyListeningHistoryEntity::class,
+        TrackHistoryTelemetryItem::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -84,7 +87,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_5_7,
                         MIGRATION_7_8,
-                        MIGRATION_8_9
+                        MIGRATION_8_9,
+                        MIGRATION_9_10
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -317,6 +321,31 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_played_at_epoch_ms ON spotify_listening_history(played_at_epoch_ms DESC)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_track_id ON spotify_listening_history(track_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_listening_history_track_title_artist_name ON spotify_listening_history(track_title, artist_name)")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS track_history_telemetry (
+                        telemetry_id TEXT PRIMARY KEY NOT NULL,
+                        track_id TEXT NOT NULL,
+                        spotify_uri TEXT NOT NULL,
+                        track_title TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        album_name TEXT NOT NULL DEFAULT '',
+                        album_art_url TEXT,
+                        duration_ms INTEGER NOT NULL DEFAULT 0,
+                        played_at_iso TEXT NOT NULL,
+                        played_at_epoch_ms INTEGER NOT NULL,
+                        context_uri TEXT,
+                        ingested_at_epoch_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_track_history_telemetry_played_at_epoch_ms ON track_history_telemetry(played_at_epoch_ms DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_track_history_telemetry_track_id ON track_history_telemetry(track_id)")
             }
         }
     }

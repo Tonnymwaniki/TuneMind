@@ -2,7 +2,6 @@ package com.tunemind.app.data.ingestion
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
 import android.os.Handler
@@ -19,13 +18,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.tunemind.app.data.local.TuneMindDatabase
 import java.util.concurrent.TimeUnit
 
 /**
- * WorkManager [CoroutineWorker] that synchronizes `https://api.spotify.com/v1/me/player/recently-played`
- * into the Local-First Room Database (`spotify_listening_history` table):
- * 1. Every 15 minutes via a periodic background job (`schedulePeriodic15MinSync`).
- * 2. Immediately upon OS audio-focus / playback state transitions (`enqueueImmediateOnAudioFocusChange`).
+ * WorkManager [CoroutineWorker] that runs every 15 minutes (and upon OS audio-focus changes)
+ * to fetch `GET https://api.spotify.com/v1/me/player/recently-played` via Retrofit,
+ * map the tracks to [TrackHistoryTelemetryItem] (and [SpotifyListeningHistoryEntity]),
+ * and insert them into [TuneMindDatabase] while ignoring duplicates (`OnConflictStrategy.IGNORE`).
  */
 class SpotifyRecentlyPlayedSyncWorker(
     appContext: Context,
@@ -36,12 +36,57 @@ class SpotifyRecentlyPlayedSyncWorker(
         val triggerReason = inputData.getString(KEY_TRIGGER_REASON) ?: "PERIODIC_15_MIN"
         Log.i(TAG, "SpotifyRecentlyPlayedSyncWorker started (trigger=$triggerReason)")
 
-        val repo = SpotifyOAuthRepository.getInstance(applicationContext)
-        if (!repo.tokenManager.isAuthenticated()) {
+        val authManager = SpotifyAuthManager(applicationContext)
+        if (!authManager.isAuthenticated()) {
             Log.d(TAG, "Skipping Spotify Web API sync: user has not authenticated Spotify OAuth yet.")
             return Result.success()
         }
 
+        // 1. Obtain a valid (or silently refreshed) Access Token from EncryptedSharedPreferences
+        val validAccessToken = authManager.getValidAccessToken()
+        if (validAccessToken.isNullOrBlank()) {
+            Log.w(TAG, "Spotify Access Token expired and could not be refreshed.")
+            return Result.retry()
+        }
+
+        // 2. Fetch GET https://api.spotify.com/v1/me/player/recently-played with Authorization: Bearer {token}
+        val database = TuneMindDatabase.getInstance(applicationContext)
+        val historyDao = database.spotifyListeningHistoryDao()
+        val nowMs = System.currentTimeMillis()
+
+        try {
+            val response = SpotifyApiFactory.directWebApiService.getRecentlyPlayed(
+                authHeader = "Bearer $validAccessToken",
+                limit = 50
+            )
+
+            if (response.isSuccessful) {
+                val items = response.body()?.items.orEmpty()
+
+                // 3. Map fetched items to TrackHistoryTelemetryItem and SpotifyListeningHistoryEntity
+                val telemetryItems: List<TrackHistoryTelemetryItem> = items.map { dto ->
+                    dto.toTrackHistoryTelemetryItem(nowMs)
+                }
+                val historyEntities: List<SpotifyListeningHistoryEntity> = items.map { dto ->
+                    dto.toHistoryEntity(nowMs)
+                }
+
+                // 4. Insert into TuneMindDatabase while ignoring duplicates (OnConflictStrategy.IGNORE)
+                if (telemetryItems.isNotEmpty()) {
+                    historyDao.insertTelemetryItemsIgnoreDuplicates(telemetryItems)
+                    historyDao.insertHistoryIgnoreDuplicates(historyEntities)
+                }
+            } else if (response.code() in 500..599 || response.code() == 429) {
+                Log.w(TAG, "Spotify Web API returned HTTP ${response.code()} — scheduling WorkManager retry.")
+                return Result.retry()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Network exception fetching recently-played tracks: ${e.message}")
+            return Result.retry()
+        }
+
+        // 5. Run full repository sync (currently-playing + EventQueue mirror + Satiety evaluation)
+        val repo = SpotifyOAuthRepository.getInstance(applicationContext)
         return when (val syncResult = repo.syncRecentlyPlayedToLocalRoom()) {
             is SpotifyIngestionSyncResult.Success -> {
                 Log.i(

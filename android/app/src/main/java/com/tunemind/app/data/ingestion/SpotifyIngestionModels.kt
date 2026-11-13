@@ -196,6 +196,81 @@ fun parseSpotifyIsoTimestampMs(isoString: String?): Long {
     }
 }
 
+/**
+ * Local-First Room Entity representing a single Spotify listening telemetry record (`track_history_telemetry`).
+ * Uses a deterministic primary key (`telemetryId = "{trackId}_{playedAtEpochMs}"`) so inserting via
+ * `OnConflictStrategy.IGNORE` automatically deduplicates repeated 15-minute sync runs.
+ */
+@Entity(
+    tableName = "track_history_telemetry",
+    indices = [
+        Index(value = ["played_at_epoch_ms"], orders = [Index.Order.DESC]),
+        Index(value = ["track_id"])
+    ]
+)
+data class TrackHistoryTelemetryItem(
+    @PrimaryKey
+    @ColumnInfo(name = "telemetry_id")
+    val telemetryId: String,
+
+    @ColumnInfo(name = "track_id")
+    val trackId: String,
+
+    @ColumnInfo(name = "spotify_uri")
+    val spotifyUri: String,
+
+    @ColumnInfo(name = "track_title")
+    val trackTitle: String,
+
+    @ColumnInfo(name = "artist_name")
+    val artistName: String,
+
+    @ColumnInfo(name = "album_name")
+    val albumName: String = "",
+
+    @ColumnInfo(name = "album_art_url")
+    val albumArtUrl: String? = null,
+
+    @ColumnInfo(name = "duration_ms")
+    val durationMs: Long = 0L,
+
+    @ColumnInfo(name = "played_at_iso")
+    val playedAtIso: String,
+
+    @ColumnInfo(name = "played_at_epoch_ms")
+    val playedAtEpochMs: Long,
+
+    @ColumnInfo(name = "context_uri")
+    val contextUri: String? = null,
+
+    @ColumnInfo(name = "ingested_at_epoch_ms")
+    val ingestedAtEpochMs: Long = System.currentTimeMillis()
+)
+
+fun SpotifyPlayHistoryItemDto.toTrackHistoryTelemetryItem(
+    nowMs: Long = System.currentTimeMillis()
+): TrackHistoryTelemetryItem {
+    val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
+    val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
+    val cleanId = track.id.ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
+    val cleanUri = track.uri.ifBlank { "spotify:track:$cleanId" }
+
+    return TrackHistoryTelemetryItem(
+        telemetryId = "${cleanId}_$playedMs",
+        trackId = cleanId,
+        spotifyUri = cleanUri,
+        trackTitle = track.name.trim(),
+        artistName = primaryArtist.trim(),
+        albumName = track.album?.name?.trim() ?: "",
+        albumArtUrl = track.album?.images?.firstOrNull()?.url,
+        durationMs = track.durationMs,
+        playedAtIso = playedAtIso,
+        playedAtEpochMs = playedMs,
+        contextUri = context?.uri,
+        ingestedAtEpochMs = nowMs
+    )
+}
+
 fun SpotifyPlayHistoryItemDto.toHistoryEntity(nowMs: Long = System.currentTimeMillis()): SpotifyListeningHistoryEntity {
     val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
     val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"

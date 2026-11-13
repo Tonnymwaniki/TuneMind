@@ -73,60 +73,29 @@ class SpotifyOAuthRepository(context: Context) {
     // 1. CHROME CUSTOM TABS OAUTH 2.0 AUTHORIZATION CODE + PKCE INTENT FLOW
     // ========================================================================
 
+    private val authManager = SpotifyAuthManager(appContext)
+
     /**
-     * Launches the Spotify OAuth 2.0 Authorization Code + PKCE flow inside Chrome Custom Tabs.
-     * Requests scopes: `user-read-recently-played`, `user-read-currently-playing`, `user-top-read`.
+     * Launches the Spotify OAuth 2.0 Authorization Code flow inside a Custom Chrome Tab.
+     * Requests scopes: `user-read-recently-played user-read-currently-playing user-top-read user-modify-playback-state`.
      */
     fun launchAuthorizationFlow(activityOrContext: Context, overrideClientId: String? = null) {
         if (!overrideClientId.isNullOrBlank()) {
             tokenManager.setCustomClientId(overrideClientId.trim())
         }
-        val clientId = tokenManager.getClientId()
-        val redirectUri = tokenManager.getRedirectUri()
-
-        val codeVerifier = generatePkceCodeVerifier()
-        val codeChallenge = derivePkceCodeChallengeS256(codeVerifier)
-        val csrfState = UUID.randomUUID().toString().replace("-", "")
-
-        tokenManager.savePendingPkceSession(codeVerifier = codeVerifier, state = csrfState)
-
-        val authUri = Uri.parse(SPOTIFY_AUTHORIZE_ENDPOINT).buildUpon()
-            .appendQueryParameter("client_id", clientId)
-            .appendQueryParameter("response_type", "code")
-            .appendQueryParameter("redirect_uri", redirectUri)
-            .appendQueryParameter("code_challenge_method", "S256")
-            .appendQueryParameter("code_challenge", codeChallenge)
-            .appendQueryParameter("state", csrfState)
-            .appendQueryParameter("scope", REQUIRED_SPOTIFY_SCOPES)
-            .appendQueryParameter("show_dialog", "false")
-            .build()
-
-        Log.i(TAG, "Launching Spotify OAuth PKCE flow via Chrome Custom Tabs: scopes=[$REQUIRED_SPOTIFY_SCOPES]")
-
-        try {
-            val customTabsIntent = CustomTabsIntent.Builder()
-                .setShowTitle(true)
-                .setUrlBarHidingEnabled(true)
-                .build()
-            customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            customTabsIntent.launchUrl(activityOrContext, authUri)
-        } catch (e: Exception) {
-            Log.w(TAG, "Chrome Custom Tabs unavailable, falling back to standard ACTION_VIEW browser intent: ${e.message}")
-            val browserIntent = Intent(Intent.ACTION_VIEW, authUri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            activityOrContext.startActivity(browserIntent)
-        }
+        authManager.launchSpotifyAuth(activityOrContext)
     }
 
     /**
-     * Inspects an incoming Activity Intent for `tunemind://spotify-callback?code=...&state=...`,
-     * exchanges the Authorization Code for an Access Token + Refresh Token, stores them in
-     * [EncryptedSharedPreferences], and kicks off an immediate Room sync.
+     * Inspects an incoming Activity Intent for `tunemind://spotify-auth-callback?code=...`
+     * (or `tunemind://spotify-callback?code=...`), exchanges the Authorization Code for an
+     * Access Token + Refresh Token, stores them in [EncryptedSharedPreferences], and kicks off an immediate Room sync.
      */
     suspend fun handleAuthRedirectIntent(intent: Intent?): Boolean = withContext(Dispatchers.IO) {
         val data: Uri = intent?.data ?: return@withContext false
-        if (data.scheme != "tunemind" || data.host != "spotify-callback") {
+        if (data.scheme != "tunemind" ||
+            (data.host != "spotify-auth-callback" && data.host != "spotify-callback")
+        ) {
             return@withContext false
         }
 
@@ -138,16 +107,8 @@ class SpotifyOAuthRepository(context: Context) {
         }
 
         val authorizationCode = data.getQueryParameter("code")
-        val returnedState = data.getQueryParameter("state")
         if (authorizationCode.isNullOrBlank()) {
             Log.w(TAG, "Spotify callback URI did not contain an authorization code.")
-            return@withContext false
-        }
-
-        val expectedState = tokenManager.getPendingOAuthState()
-        if (!expectedState.isNullOrBlank() && !returnedState.isNullOrBlank() && expectedState != returnedState) {
-            Log.e(TAG, "Spotify OAuth CSRF state mismatch! Expected=$expectedState, got=$returnedState")
-            tokenManager.clearPendingPkceSession()
             return@withContext false
         }
 
@@ -165,6 +126,11 @@ class SpotifyOAuthRepository(context: Context) {
     }
 
     private suspend fun exchangeCodeForTokens(code: String, codeVerifier: String): Boolean {
+        // 1. Primary: Direct Basic Auth (CLIENT_ID:CLIENT_SECRET) exchange via https://accounts.spotify.com/api/token
+        if (authManager.exchangeCodeForTokens(code)) {
+            return true
+        }
+
         val clientId = tokenManager.getClientId()
         val redirectUri = tokenManager.getRedirectUri()
 
@@ -235,7 +201,8 @@ class SpotifyOAuthRepository(context: Context) {
 
     /**
      * Fetches the user's recently played tracks and currently playing track from the Spotify Web API
-     * and persists them directly into the local Android Room Database (`spotify_listening_history` + `event_queue`).
+     * and persists them directly into the local Android Room Database (`track_history_telemetry`,
+     * `spotify_listening_history`, and `event_queue`) while ignoring duplicates (`OnConflictStrategy.IGNORE`).
      */
     suspend fun syncRecentlyPlayedToLocalRoom(): SpotifyIngestionSyncResult = withContext(Dispatchers.IO) {
         if (!tokenManager.isAuthenticated()) {
@@ -243,19 +210,23 @@ class SpotifyOAuthRepository(context: Context) {
             return@withContext SpotifyIngestionSyncResult.Unauthenticated("Spotify OAuth not yet connected.")
         }
 
-        val validToken = tokenManager.getValidAccessToken(authService)
+        val validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
         if (validToken.isNullOrBlank()) {
             return@withContext SpotifyIngestionSyncResult.Unauthenticated("Access token expired and could not be refreshed.")
         }
+        _isConnectedFlow.value = true
 
+        val bearerHeader = "Bearer $validToken"
         val nowMs = System.currentTimeMillis()
-        val entitiesToUpsert = mutableListOf<SpotifyListeningHistoryEntity>()
+        val telemetryItemsToInsert = mutableListOf<TrackHistoryTelemetryItem>()
+        val entitiesToInsert = mutableListOf<SpotifyListeningHistoryEntity>()
         var currentlyPlayingEntity: SpotifyListeningHistoryEntity? = null
 
-        // A. Fetch /v1/me/player/recently-played (up to 50 most recent tracks)
+        // A. Fetch GET https://api.spotify.com/v1/me/player/recently-played (up to 50 most recent tracks)
         try {
             val latestCursorMs = historyDao.getLatestPlayedEpochMs()
             val response = webApiService.getRecentlyPlayed(
+                authHeader = bearerHeader,
                 limit = 50,
                 afterEpochMs = latestCursorMs
             )
@@ -263,7 +234,8 @@ class SpotifyOAuthRepository(context: Context) {
             if (response.isSuccessful) {
                 val items = response.body()?.items.orEmpty()
                 for (dto in items) {
-                    entitiesToUpsert.add(dto.toHistoryEntity(nowMs))
+                    telemetryItemsToInsert.add(dto.toTrackHistoryTelemetryItem(nowMs))
+                    entitiesToInsert.add(dto.toHistoryEntity(nowMs))
                 }
                 Log.i(TAG, "Fetched ${items.size} recently-played tracks from Spotify Web API (after=$latestCursorMs)")
             } else if (response.code() in 500..599 || response.code() == 429) {
@@ -282,7 +254,7 @@ class SpotifyOAuthRepository(context: Context) {
 
         // B. Fetch /v1/me/player/currently-playing
         try {
-            val currentResp = webApiService.getCurrentlyPlaying()
+            val currentResp = webApiService.getCurrentlyPlaying(authHeader = bearerHeader)
             if (currentResp.isSuccessful && currentResp.code() == 200) {
                 val body = currentResp.body()
                 val trackDto = body?.item
@@ -294,7 +266,7 @@ class SpotifyOAuthRepository(context: Context) {
                         contextUri = body.context?.uri
                     )
                     currentlyPlayingEntity = entity
-                    entitiesToUpsert.add(entity)
+                    entitiesToInsert.add(entity)
                 }
             }
         } catch (e: Exception) {
@@ -304,13 +276,13 @@ class SpotifyOAuthRepository(context: Context) {
         // C. If local Room cache is still sparse (< 10 tracks), seed from /v1/me/top/tracks
         try {
             val existingSnapshot = historyDao.getRecentHistorySnapshot(limit = 10)
-            if (existingSnapshot.size + entitiesToUpsert.size < 10) {
-                val topResp = webApiService.getTopTracks(timeRange = "short_term", limit = 25)
+            if (existingSnapshot.size + entitiesToInsert.size < 10) {
+                val topResp = webApiService.getTopTracks(authHeader = bearerHeader, timeRange = "short_term", limit = 25)
                 if (topResp.isSuccessful) {
                     val topItems = topResp.body()?.items.orEmpty()
                     topItems.forEachIndexed { idx, trackDto ->
                         val syntheticTimestamp = nowMs - ((idx + 1) * 3_600_000L)
-                        entitiesToUpsert.add(
+                        entitiesToInsert.add(
                             trackDto.toHistoryEntity(
                                 playedAtMs = syntheticTimestamp,
                                 ingestionSource = "TOP_TRACKS"
@@ -323,10 +295,13 @@ class SpotifyOAuthRepository(context: Context) {
             Log.d(TAG, "Top-tracks bootstrap note: ${e.message}")
         }
 
-        // D. Persist into Local-First Room Database & mirror into EventBufferRepository
-        if (entitiesToUpsert.isNotEmpty()) {
-            historyDao.upsertPlayHistory(entitiesToUpsert)
-            mirrorIntoEventQueueForUnifiedIntelligence(entitiesToUpsert)
+        // D. Insert into Local-First Room Database while ignoring duplicates (OnConflictStrategy.IGNORE)
+        if (telemetryItemsToInsert.isNotEmpty()) {
+            historyDao.insertTelemetryItemsIgnoreDuplicates(telemetryItemsToInsert)
+        }
+        if (entitiesToInsert.isNotEmpty()) {
+            historyDao.insertHistoryIgnoreDuplicates(entitiesToInsert)
+            mirrorIntoEventQueueForUnifiedIntelligence(entitiesToInsert)
         }
 
         // Keep local history lean (prune records older than 90 days)
@@ -335,7 +310,7 @@ class SpotifyOAuthRepository(context: Context) {
 
         val totalCached = historyDao.getAggregatedTracksSnapshot(limit = 60).size
         return@withContext SpotifyIngestionSyncResult.Success(
-            ingestedRecentlyPlayedCount = entitiesToUpsert.size,
+            ingestedRecentlyPlayedCount = entitiesToInsert.size,
             currentlyPlayingTrack = currentlyPlayingEntity,
             totalCachedTracks = totalCached
         )
@@ -399,10 +374,9 @@ class SpotifyOAuthRepository(context: Context) {
         private const val SPOTIFY_AUTHORIZE_ENDPOINT = "https://accounts.spotify.com/authorize"
 
         /**
-         * Required Spotify OAuth 2.0 scopes for TuneMind's Data Ingestion Branch.
+         * Required Spotify OAuth 2.0 scopes for TuneMind's Data Ingestion & Execution Branch.
          */
-        const val REQUIRED_SPOTIFY_SCOPES =
-            "user-read-recently-played user-read-currently-playing user-top-read"
+        const val REQUIRED_SPOTIFY_SCOPES = SpotifyAuthManager.SCOPES
 
         @Volatile
         private var INSTANCE: SpotifyOAuthRepository? = null
