@@ -36,6 +36,7 @@ import com.tunemind.app.ui.components.bouncyClickable
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.ThemeBehavior
 import com.tunemind.app.ui.theme.ThemePreferences
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 private data class CircadianPhase(
@@ -120,6 +121,35 @@ fun RhythmDnaScreen(
     val audioRouteLabel = hearingInsights.activeAudioDevice?.deviceName?.takeIf { it.isNotBlank() }
         ?: "Phone / Wireless Audio"
 
+    val spotifyRepo = remember {
+        com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context)
+    }
+    val isSpotifyConnected by spotifyRepo.isConnectedFlow.collectAsState()
+    val syncedRecentHistory by spotifyRepo.observeLocalRecentlyPlayed(100).collectAsState(initial = emptyList())
+    val syncedAllTimeTracks by spotifyRepo.observeLocalAggregatedTracks(100).collectAsState(initial = emptyList())
+    val spotifyAuthManager = remember {
+        com.tunemind.app.data.ingestion.SpotifyAuthManager(context)
+    }
+    val authSessionManager = remember {
+        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
+    }
+    val authSession by authSessionManager.sessionFlow.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // 0 = Circadian DNA, 1 = Spotify Sync Archive (15m & All-Time)
+    var activeRhythmSubDeck by remember { mutableStateOf(0) }
+    // 0 = 15-Min Recent Sync Feed, 1 = All-Time Aggregated Archive
+    var archiveTimeFilter by remember { mutableStateOf(0) }
+    var isSyncingNow by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isSpotifyConnected, authSession.isSpotifyConnected) {
+        if ((isSpotifyConnected || authSession.isSpotifyConnected) && syncedRecentHistory.isEmpty()) {
+            isSyncingNow = true
+            spotifyRepo.syncRecentlyPlayedToLocalRoom()
+            isSyncingNow = false
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -160,15 +190,15 @@ fun RhythmDnaScreen(
                 ) {
                     Column {
                         Text(
-                            text = "RHYTHM DNA",
-                            color = theme.primaryAccent,
+                            text = if (activeRhythmSubDeck == 0) "RHYTHM DNA" else "SPOTIFY WEB API VAULT",
+                            color = if (activeRhythmSubDeck == 0) theme.primaryAccent else Color(0xFF1DB954),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 2.sp
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Circadian Sonic Flow",
+                            text = if (activeRhythmSubDeck == 0) "Circadian Sonic Flow" else "Synced Listening History",
                             color = theme.primaryText,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold
@@ -197,20 +227,438 @@ fun RhythmDnaScreen(
                 }
             }
 
+            // Dual-Deck Segmented Switcher inside Rhythm DNA (No 4th Bottom Tab Needed!)
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (activeRhythmSubDeck == 0) theme.primaryAccent.copy(alpha = 0.22f)
+                                else Color.Transparent
+                            )
+                            .border(
+                                1.dp,
+                                if (activeRhythmSubDeck == 0) theme.primaryAccent.copy(alpha = 0.65f)
+                                else Color.Transparent,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .bouncyClickable { activeRhythmSubDeck = 0 }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "🧬 CIRCADIAN DNA",
+                            color = if (activeRhythmSubDeck == 0) theme.primaryAccent else Color.White.copy(alpha = 0.65f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (activeRhythmSubDeck == 1) Color(0xFF1DB954).copy(alpha = 0.22f)
+                                else Color.Transparent
+                            )
+                            .border(
+                                1.dp,
+                                if (activeRhythmSubDeck == 1) Color(0xFF1DB954).copy(alpha = 0.75f)
+                                else Color.Transparent,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .bouncyClickable { activeRhythmSubDeck = 1 }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "♫ SPOTIFY HISTORY (${syncedRecentHistory.size})",
+                            color = if (activeRhythmSubDeck == 1) Color(0xFF1DB954) else Color.White.copy(alpha = 0.65f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+                }
+            }
+
+            if (activeRhythmSubDeck == 1) {
+                // =========================================================================
+                // SUB-DECK 1: DEDICATED SPOTIFY SYNCED LISTENING HISTORY SCREEN (15m & ALL-TIME)
+                // =========================================================================
+                item {
+                    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "LOCAL-FIRST ROOM SQLITE ARCHIVE",
+                                        color = Color(0xFF1DB954),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 1.4.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = if (isSyncingNow) {
+                                            "Pulling /v1/me/player/recently-played..."
+                                        } else {
+                                            "${syncedRecentHistory.size} 15-min play events • ${syncedAllTimeTracks.size} unique tracks"
+                                        },
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF1DB954))
+                                        .bouncyClickable {
+                                            if (isSpotifyConnected || authSession.isSpotifyConnected) {
+                                                coroutineScope.launch {
+                                                    isSyncingNow = true
+                                                    spotifyRepo.syncRecentlyPlayedToLocalRoom()
+                                                    isSyncingNow = false
+                                                }
+                                            } else {
+                                                spotifyAuthManager.launchSpotifyAuth(context)
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSyncingNow) "SYNCING..." else if (isSpotifyConnected || authSession.isSpotifyConnected) "↻ SYNC NOW" else "LINK SPOTIFY",
+                                        color = Color.Black,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+
+                            // 2-Mode Filter Toggle: [⏱️ 15-MIN SYNC FEED] vs [♾️ ALL-TIME ARCHIVE]
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.04f))
+                                    .padding(3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (archiveTimeFilter == 0) Color(0xFF1DB954).copy(alpha = 0.25f)
+                                            else Color.Transparent
+                                        )
+                                        .bouncyClickable { archiveTimeFilter = 0 }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "⏱️ 15-MIN SYNC (${syncedRecentHistory.size})",
+                                        color = if (archiveTimeFilter == 0) Color(0xFF1DB954) else Color.White.copy(alpha = 0.65f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (archiveTimeFilter == 1) Color(0xFF00E5FF).copy(alpha = 0.22f)
+                                            else Color.Transparent
+                                        )
+                                        .bouncyClickable { archiveTimeFilter = 1 }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "♾️ ALL-TIME (${syncedAllTimeTracks.size})",
+                                        color = if (archiveTimeFilter == 1) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.65f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (archiveTimeFilter == 0) {
+                    if (syncedRecentHistory.isEmpty()) {
+                        item {
+                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSpotifyConnected || authSession.isSpotifyConnected) {
+                                            "No 15-minute sync records yet — tap ↻ SYNC NOW above to pull your last 50 Spotify tracks."
+                                        } else {
+                                            "Connect your Spotify account to start pulling your recently played tracks every 15 minutes."
+                                        },
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        itemsIndexed(
+                            items = syncedRecentHistory,
+                            key = { _, item -> item.historyId }
+                        ) { idx, historyItem ->
+                            val minsAgo = ((System.currentTimeMillis() - historyItem.playedAtEpochMs).coerceAtLeast(0L) / 60_000L)
+                            val relativeLabel = when {
+                                minsAgo < 1L -> "Just now"
+                                minsAgo < 60L -> "${minsAgo}m ago"
+                                minsAgo < 1440L -> "${minsAgo / 60L}h ago"
+                                else -> "${minsAgo / 1440L}d ago"
+                            }
+                            val durationSec = (historyItem.durationMs / 1000L).coerceAtLeast(0L)
+                            val durationFormatted = String.format("%d:%02d", durationSec / 60L, durationSec % 60L)
+
+                            SoftGlassCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .bouncyClickable {
+                                        onPlayTrack(
+                                            historyItem.trackTitle,
+                                            historyItem.artistName,
+                                            historyItem.spotifyUri,
+                                            "com.spotify.music"
+                                        )
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0xFF1DB954).copy(alpha = 0.18f))
+                                                .border(1.dp, Color(0xFF1DB954).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "${idx + 1}",
+                                                color = Color(0xFF1DB954),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        }
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = historyItem.trackTitle,
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = buildString {
+                                                    append(historyItem.artistName)
+                                                    if (historyItem.albumName.isNotBlank()) {
+                                                        append(" • ${historyItem.albumName}")
+                                                    }
+                                                },
+                                                color = Color.White.copy(alpha = 0.68f),
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "⏱️ $relativeLabel • $durationFormatted • ${historyItem.ingestionSource}",
+                                                color = Color(0xFF1DB954).copy(alpha = 0.9f),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xFF1DB954))
+                                            .bouncyClickable {
+                                                onPlayTrack(
+                                                    historyItem.trackTitle,
+                                                    historyItem.artistName,
+                                                    historyItem.spotifyUri,
+                                                    "com.spotify.music"
+                                                )
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        Text(
+                                            text = "▶ PLAY",
+                                            color = Color.Black,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // ALL-TIME AGGREGATED SPOTIFY ARCHIVE
+                    val allTimeItems = if (syncedAllTimeTracks.isNotEmpty()) {
+                        syncedAllTimeTracks
+                    } else {
+                        recentTracks.mapIndexed { idx, entry ->
+                            com.tunemind.app.data.ingestion.SpotifyTrackAggregate(
+                                trackId = entry.entryId,
+                                spotifyUri = entry.providerTrackId ?: "",
+                                trackTitle = entry.title ?: "Unknown Track",
+                                artistName = entry.artist ?: "Unknown Artist",
+                                albumName = entry.album ?: "",
+                                albumArtUrl = null,
+                                durationMs = 195_000L,
+                                playCount = entry.distinctAppearanceCount.coerceAtLeast(1),
+                                firstPlayedEpochMs = entry.firstObservedAppearanceAtMs ?: System.currentTimeMillis(),
+                                lastPlayedEpochMs = entry.lastObservedAppearanceAtMs ?: System.currentTimeMillis()
+                            )
+                        }
+                    }
+
+                    itemsIndexed(
+                        items = allTimeItems,
+                        key = { _, agg -> "alltime_${agg.trackId}" }
+                    ) { idx, agg ->
+                        val totalMinutes = ((agg.durationMs * agg.playCount) / 60_000L).coerceAtLeast(1L)
+                        SoftGlassCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .bouncyClickable {
+                                    onPlayTrack(
+                                        agg.trackTitle,
+                                        agg.artistName,
+                                        agg.spotifyUri.ifBlank { null },
+                                        "com.spotify.music"
+                                    )
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xFF00E5FF).copy(alpha = 0.16f))
+                                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "#${idx + 1}",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = agg.trackTitle,
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = agg.artistName,
+                                            color = Color.White.copy(alpha = 0.68f),
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "♾️ ${agg.playCount}x plays • ~${totalMinutes}m total listening",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF00E5FF))
+                                        .bouncyClickable {
+                                            onPlayTrack(
+                                                agg.trackTitle,
+                                                agg.artistName,
+                                                agg.spotifyUri.ifBlank { null },
+                                                "com.spotify.music"
+                                            )
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        text = "▶ PLAY",
+                                        color = Color.Black,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Spotify Web API OAuth, Account Identity & 15-Minute Local-First Room Sync Card
             item {
-                val spotifyRepo = remember {
-                    com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context)
-                }
-                val isSpotifyConnected by spotifyRepo.isConnectedFlow.collectAsState()
-                val spotifyAuthManager = remember {
-                    com.tunemind.app.data.ingestion.SpotifyAuthManager(context)
-                }
-                val authSessionManager = remember {
-                    com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
-                }
-                val authSession by authSessionManager.sessionFlow.collectAsState()
-
                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
@@ -229,7 +677,7 @@ fun RhythmDnaScreen(
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = if (isSpotifyConnected || authSession.isSpotifyConnected) {
-                                        "Spotify Connected • 15m WorkManager + Room Sync"
+                                        "Spotify Connected • ${syncedRecentHistory.size} Tracks Synced in Room"
                                     } else {
                                         "Bypass Scrobbling • Direct OAuth 2.0 Web API Sync"
                                     },
@@ -263,12 +711,12 @@ fun RhythmDnaScreen(
                                         )
                                         .bouncyClickable {
                                             if (isSpotifyConnected || authSession.isSpotifyConnected) {
-                                                com.tunemind.app.data.ingestion.SpotifyRecentlyPlayedSyncWorker
-                                                    .enqueueImmediateOnAudioFocusChange(
-                                                        context = context,
-                                                        reason = "MANUAL_UI_SYNC",
-                                                        bypassDebounce = true
-                                                    )
+                                                coroutineScope.launch {
+                                                    isSyncingNow = true
+                                                    spotifyRepo.syncRecentlyPlayedToLocalRoom()
+                                                    isSyncingNow = false
+                                                }
+                                                activeRhythmSubDeck = 1
                                             } else {
                                                 spotifyAuthManager.launchSpotifyAuth(context)
                                             }
@@ -276,7 +724,7 @@ fun RhythmDnaScreen(
                                         .padding(horizontal = 12.dp, vertical = 8.dp)
                                 ) {
                                     Text(
-                                        text = if (isSpotifyConnected || authSession.isSpotifyConnected) "SYNC NOW" else "LOGIN SPOTIFY",
+                                        text = if (isSpotifyConnected || authSession.isSpotifyConnected) "VIEW HISTORY" else "LOGIN SPOTIFY",
                                         color = if (isSpotifyConnected || authSession.isSpotifyConnected) Color(0xFF1DB954) else Color.Black,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,

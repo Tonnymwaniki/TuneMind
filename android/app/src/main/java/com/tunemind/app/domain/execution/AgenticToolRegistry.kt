@@ -257,30 +257,6 @@ object SpotifyPlaybackTool {
         query: String,
         rationale: String?
     ) {
-        val listener = TuneMindListenerService.instance
-        val extras = android.os.Bundle().apply {
-            putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Media.ENTRY_CONTENT_TYPE)
-            putBoolean("android.intent.extra.START_PLAYBACK", true)
-            putBoolean("autostart", true)
-            putBoolean("play", true)
-        }
-
-        // 1. Zero-UI Background Injection via active MediaSession if Spotify session is active
-        if (listener != null) {
-            val injected = if (!uri.isNullOrBlank() && uri.startsWith("spotify:")) {
-                listener.playFromUri(SPOTIFY_PACKAGE, Uri.parse(uri), extras) ||
-                    listener.playFromSearch(SPOTIFY_PACKAGE, query, extras)
-            } else {
-                listener.playFromSearch(SPOTIFY_PACKAGE, query, extras)
-            }
-            if (injected) {
-                listener.play(SPOTIFY_PACKAGE)
-                Log.i(TAG, "Injected '$query' ($uri) directly into active Spotify MediaSession in background.")
-                return
-            }
-        }
-
-        // 2. Fallback to MusicPlayerAutoLauncher (INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH + multi-wave play kicker)
         val recommendedTrack = RecommendedTrack(
             id = uri ?: "satiety_shift_${System.currentTimeMillis()}",
             title = query,

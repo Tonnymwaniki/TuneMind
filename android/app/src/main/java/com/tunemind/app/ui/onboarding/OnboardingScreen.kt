@@ -356,13 +356,33 @@ private fun AuthLoginStep(
     var authError by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
 
-    var showGoogleQuickSheet by remember { mutableStateOf(false) }
-    var googleEmailInput by remember { mutableStateOf(session.email.ifBlank { "" }) }
-    var googleNameInput by remember { mutableStateOf(session.displayName) }
+    var showGoogleConfirmSheet by remember { mutableStateOf(false) }
+    var selectedGoogleEmail by remember { mutableStateOf(session.email.ifBlank { "" }) }
+    var selectedGoogleName by remember { mutableStateOf(session.displayName) }
 
     var showSupabaseConfigDialog by remember { mutableStateOf(false) }
     var supabaseUrlInput by remember { mutableStateOf(authManager.getSupabaseUrl()) }
     var supabaseAnonKeyInput by remember { mutableStateOf(authManager.getSupabaseAnonKey()) }
+
+    // Native Android System Google Account Picker (shows the user's real @gmail.com accounts on the phone)
+    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val pickedEmail = result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.trim()
+        if (!pickedEmail.isNullOrBlank()) {
+            selectedGoogleEmail = pickedEmail
+            val derivedName = pickedEmail.substringBefore("@")
+                .replace(".", " ")
+                .replace("_", " ")
+                .split(" ")
+                .filter { it.isNotBlank() }
+                .joinToString(" ") { part ->
+                    part.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                }
+            selectedGoogleName = derivedName.ifBlank { "TuneMind Listener" }
+            showGoogleConfirmSheet = true
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -425,7 +445,7 @@ private fun AuthLoginStep(
                 textAlign = TextAlign.Center
             )
             Text(
-                text = "Connect your Spotify account for automated 15-minute Web API history ingestion and sign in with Google or Email.",
+                text = "Connect your Spotify account for automated 15-minute Web API history ingestion and sign in with your Google account.",
                 color = Color.White.copy(alpha = 0.68f),
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
@@ -434,7 +454,47 @@ private fun AuthLoginStep(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 1. ONE-TAP LOGIN WITH SPOTIFY BUTTON
+            // 1. ONE-TAP LOGIN WITH GOOGLE BUTTON (Launches Native System Google Account Picker)
+            Button(
+                onClick = {
+                    authError = null
+                    try {
+                        @Suppress("DEPRECATION")
+                        val chooseIntent = android.accounts.AccountManager.newChooseAccountIntent(
+                            null,
+                            null,
+                            arrayOf("com.google"),
+                            null,
+                            null,
+                            null,
+                            null
+                        )
+                        googleAccountPickerLauncher.launch(chooseIntent)
+                    } catch (e: Exception) {
+                        showGoogleConfirmSheet = true
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color(0xFF111827)
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = if (session.isGoogleConnected) {
+                        "✓ Google Connected (${session.email.ifBlank { session.displayName }})"
+                    } else {
+                        "G   Continue with Google"
+                    },
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            // 2. ONE-TAP LOGIN WITH SPOTIFY BUTTON
             Button(
                 onClick = {
                     authError = null
@@ -463,35 +523,6 @@ private fun AuthLoginStep(
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
-            }
-
-            // 2. ONE-TAP CONTINUE WITH GOOGLE BUTTON
-            Button(
-                onClick = {
-                    authError = null
-                    val launchedBrowser = authManager.launchGoogleLogin(context)
-                    if (!launchedBrowser) {
-                        showGoogleQuickSheet = true
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color(0xFF111827)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = if (session.isGoogleConnected) {
-                        "✓ Signed in with Google (${session.email.ifBlank { session.displayName }})"
-                    } else {
-                        "G   Continue with Google"
-                    },
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
             }
 
             // 3. EMAIL / PASSWORD SIGN IN TOGGLE
@@ -697,59 +728,128 @@ private fun AuthLoginStep(
         }
     }
 
-    // On-Device Google Account Quick Sign-In Dialog (when Supabase URL isn't configured yet)
-    if (showGoogleQuickSheet) {
+    // Google Account Selected Confirmation Modal ("Show me my email then I click Login")
+    if (showGoogleConfirmSheet) {
         AlertDialog(
-            onDismissRequest = { showGoogleQuickSheet = false },
+            onDismissRequest = { showGoogleConfirmSheet = false },
             containerColor = Color(0xFF12101E),
             title = {
-                Text("Sign in with Google", color = Color.White, fontWeight = FontWeight.Bold)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("G", color = Color(0xFF111827), fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    }
+                    Text("Sign in with Google", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Enter your Google Account to bind your TuneMind profile (or configure your Supabase Project URL in ⚙️ SUPABASE SETUP for browser OAuth):",
+                        text = "Continue to TuneMind with your selected Google account:",
                         color = Color.White.copy(alpha = 0.72f),
-                        fontSize = 12.sp
+                        fontSize = 13.sp
                     )
-                    OutlinedTextField(
-                        value = googleNameInput,
-                        onValueChange = { googleNameInput = it },
-                        label = { Text("Your Name") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
+
+                    // Highlighted Selected Google Account Card
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF00E5FF).copy(alpha = 0.12f))
+                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E5FF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = (selectedGoogleEmail.firstOrNull()?.uppercase() ?: "G"),
+                                color = Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 16.sp
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = selectedGoogleName.ifBlank { selectedGoogleEmail.substringBefore("@") },
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = selectedGoogleEmail.ifBlank { "Tap below to enter email" },
+                                color = Color(0xFF00E5FF),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    if (selectedGoogleEmail.isBlank()) {
+                        OutlinedTextField(
+                            value = selectedGoogleEmail,
+                            onValueChange = { selectedGoogleEmail = it },
+                            label = { Text("Google Email") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
                         )
-                    )
-                    OutlinedTextField(
-                        value = googleEmailInput,
-                        onValueChange = { googleEmailInput = it },
-                        label = { Text("Google Email (e.g. you@gmail.com)") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val finalEmail = googleEmailInput.trim().ifBlank { "listener@gmail.com" }
-                        val finalName = googleNameInput.trim().ifBlank { finalEmail.substringBefore("@") }
+                        val finalEmail = selectedGoogleEmail.trim().ifBlank { "listener@gmail.com" }
+                        val finalName = selectedGoogleName.trim().ifBlank { finalEmail.substringBefore("@") }
                         authManager.completeOnDeviceGoogleSignIn(finalEmail, finalName)
-                        showGoogleQuickSheet = false
+                        showGoogleConfirmSheet = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00E5FF),
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Continue with Google", fontWeight = FontWeight.Bold)
+                    Text("Login", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showGoogleQuickSheet = false }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                TextButton(
+                    onClick = {
+                        showGoogleConfirmSheet = false
+                        try {
+                            @Suppress("DEPRECATION")
+                            val chooseIntent = android.accounts.AccountManager.newChooseAccountIntent(
+                                null,
+                                null,
+                                arrayOf("com.google"),
+                                null,
+                                null,
+                                null,
+                                null
+                            )
+                            googleAccountPickerLauncher.launch(chooseIntent)
+                        } catch (_: Exception) {}
+                    }
+                ) {
+                    Text("Switch Account", color = Color.White.copy(alpha = 0.75f))
                 }
             }
         )
