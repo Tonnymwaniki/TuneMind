@@ -103,6 +103,11 @@ open class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    val authSessionManager = remember {
+                        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
+                    }
+                    val authSession by authSessionManager.sessionFlow.collectAsState()
+
                     // Check onboarding permissions
                     var hasAllPermissions by remember {
                         mutableStateOf(
@@ -116,6 +121,7 @@ open class MainActivity : ComponentActivity() {
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                authSessionManager.refreshSessionState()
                                 hasAllPermissions = PermissionUtils.hasMicrophonePermission(context) &&
                                                    PermissionUtils.hasNotificationListenerPermission(context) &&
                                                    PermissionUtils.isIgnoringBatteryOptimizations(context)
@@ -229,9 +235,10 @@ open class MainActivity : ComponentActivity() {
                     }
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
-                        if (!hasAllPermissions) {
+                        if (!authSession.hasCompletedStartFlow || !hasAllPermissions) {
                             OnboardingScreen(
                                 onComplete = {
+                                    authSessionManager.markStartFlowCompleted()
                                     hasAllPermissions = true
                                 }
                             )

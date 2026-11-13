@@ -7,15 +7,18 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.tunemind.app.MainActivity
+import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import kotlinx.coroutines.launch
 
 /**
- * Dedicated OAuth Callback Activity registered in `AndroidManifest.xml` to intercept
- * the `tunemind://spotify-auth-callback` deep link from the Chrome Custom Tab.
+ * Dedicated OAuth Callback Activity registered in `AndroidManifest.xml` to intercept:
+ * 1. `tunemind://spotify-auth-callback` (Direct Spotify OAuth 2.0 Authorization Code flow)
+ * 2. `tunemind://supabase-auth-callback` (Supabase Google / Spotify OAuth redirect flow)
  *
- * Immediately exchanges the intercepted `code` for an Access Token and Refresh Token via
- * `https://accounts.spotify.com/api/token`, schedules the 15-minute `SpotifyRecentlyPlayedSyncWorker`,
- * triggers an immediate first sync into `TuneMindDatabase`, and returns the user to `MainActivity`.
+ * Exchanges the intercepted `code` for an Access Token and Refresh Token via
+ * `https://accounts.spotify.com/api/token`, updates [TuneMindAuthSessionManager],
+ * schedules the 15-minute `SpotifyRecentlyPlayedSyncWorker`, triggers an immediate first
+ * sync into `TuneMindDatabase`, and returns the user to `MainActivity`.
  */
 class AuthCallbackActivity : ComponentActivity() {
 
@@ -32,9 +35,23 @@ class AuthCallbackActivity : ComponentActivity() {
 
     private fun handleIncomingCallbackIntent(callbackIntent: Intent?) {
         val uri: Uri? = callbackIntent?.data
-        if (uri == null || uri.scheme != "tunemind" ||
-            (uri.host != "spotify-auth-callback" && uri.host != "spotify-callback")
-        ) {
+        if (uri == null || uri.scheme != "tunemind") {
+            navigateBackToMain()
+            return
+        }
+
+        val sessionManager = TuneMindAuthSessionManager.getInstance(applicationContext)
+
+        // Handle Supabase Google / Spotify OAuth callback (tunemind://supabase-auth-callback)
+        if (uri.host == "supabase-auth-callback") {
+            lifecycleScope.launch {
+                sessionManager.handleSupabaseRedirectUri(uri)
+                navigateBackToMain()
+            }
+            return
+        }
+
+        if (uri.host != "spotify-auth-callback" && uri.host != "spotify-callback") {
             navigateBackToMain()
             return
         }
@@ -57,7 +74,8 @@ class AuthCallbackActivity : ComponentActivity() {
         lifecycleScope.launch {
             val exchanged = authManager.exchangeCodeForTokens(code)
             if (exchanged) {
-                Log.i(TAG, "Spotify OAuth connected! Scheduling 15-min worker and running immediate sync.")
+                Log.i(TAG, "Spotify OAuth connected! Updating session and scheduling 15-min worker.")
+                sessionManager.onSpotifyOAuthSucceeded()
                 SpotifyRecentlyPlayedSyncWorker.schedulePeriodic15MinSync(applicationContext)
                 SpotifyRecentlyPlayedSyncWorker.enqueueImmediateOnAudioFocusChange(
                     context = applicationContext,

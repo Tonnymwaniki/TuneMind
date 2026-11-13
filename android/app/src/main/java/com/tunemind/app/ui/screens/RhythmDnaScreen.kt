@@ -197,7 +197,7 @@ fun RhythmDnaScreen(
                 }
             }
 
-            // Spotify Web API OAuth & 15-Minute Local-First Room Sync Card
+            // Spotify Web API OAuth, Account Identity & 15-Minute Local-First Room Sync Card
             item {
                 val spotifyRepo = remember {
                     com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context)
@@ -206,69 +206,106 @@ fun RhythmDnaScreen(
                 val spotifyAuthManager = remember {
                     com.tunemind.app.data.ingestion.SpotifyAuthManager(context)
                 }
+                val authSessionManager = remember {
+                    com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
+                }
+                val authSession by authSessionManager.sessionFlow.collectAsState()
 
                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "SPOTIFY WEB API INGESTION",
-                                color = Color(0xFF1DB954),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.4.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (isSpotifyConnected) {
-                                    "Connected • 15m WorkManager + Room Sync Active"
-                                } else {
-                                    "Bypass Scrobbling • Direct OAuth 2.0 Web API Sync"
-                                },
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (isSpotifyConnected) Color(0xFF1DB954).copy(alpha = 0.22f)
-                                    else Color(0xFF1DB954)
-                                )
-                                .border(
-                                    1.dp,
-                                    Color(0xFF1DB954).copy(alpha = 0.7f),
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .bouncyClickable {
-                                    if (isSpotifyConnected) {
-                                        com.tunemind.app.data.ingestion.SpotifyRecentlyPlayedSyncWorker
-                                            .enqueueImmediateOnAudioFocusChange(
-                                                context = context,
-                                                reason = "MANUAL_UI_SYNC",
-                                                bypassDebounce = true
-                                            )
-                                    } else {
-                                        spotifyAuthManager.launchSpotifyAuth(context)
-                                    }
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (isSpotifyConnected) "SYNC NOW" else "CONNECT OAUTH",
-                                color = if (isSpotifyConnected) Color(0xFF1DB954) else Color.Black,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "SPOTIFY WEB API & ACCOUNT",
+                                    color = Color(0xFF1DB954),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.4.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isSpotifyConnected || authSession.isSpotifyConnected) {
+                                        "Spotify Connected • 15m WorkManager + Room Sync"
+                                    } else {
+                                        "Bypass Scrobbling • Direct OAuth 2.0 Web API Sync"
+                                    },
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (authSession.email.isNotBlank() || authSession.displayName.isNotBlank()) {
+                                    Text(
+                                        text = "${authSession.displayName}${if (authSession.email.isNotBlank()) " • ${authSession.email}" else ""}",
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (isSpotifyConnected || authSession.isSpotifyConnected) Color(0xFF1DB954).copy(alpha = 0.22f)
+                                            else Color(0xFF1DB954)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            Color(0xFF1DB954).copy(alpha = 0.7f),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .bouncyClickable {
+                                            if (isSpotifyConnected || authSession.isSpotifyConnected) {
+                                                com.tunemind.app.data.ingestion.SpotifyRecentlyPlayedSyncWorker
+                                                    .enqueueImmediateOnAudioFocusChange(
+                                                        context = context,
+                                                        reason = "MANUAL_UI_SYNC",
+                                                        bypassDebounce = true
+                                                    )
+                                            } else {
+                                                spotifyAuthManager.launchSpotifyAuth(context)
+                                            }
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSpotifyConnected || authSession.isSpotifyConnected) "SYNC NOW" else "LOGIN SPOTIFY",
+                                        color = if (isSpotifyConnected || authSession.isSpotifyConnected) Color(0xFF1DB954) else Color.Black,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(
+                                            1.dp,
+                                            Color.White.copy(alpha = 0.2f),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .bouncyClickable {
+                                            authSessionManager.signOut()
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "SIGN OUT",
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }

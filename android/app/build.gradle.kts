@@ -41,6 +41,16 @@ val spotifyRedirectUri: String = localProps.getProperty("SPOTIFY_REDIRECT_URI")
     ?: System.getenv("SPOTIFY_REDIRECT_URI")
     ?: "tunemind://spotify-auth-callback"
 
+val supabaseUrl: String = localProps.getProperty("SUPABASE_URL")
+    ?: (project.findProperty("SUPABASE_URL") as? String)
+    ?: System.getenv("SUPABASE_URL")
+    ?: ""
+
+val supabaseAnonKey: String = localProps.getProperty("SUPABASE_ANON_KEY")
+    ?: (project.findProperty("SUPABASE_ANON_KEY") as? String)
+    ?: System.getenv("SUPABASE_ANON_KEY")
+    ?: ""
+
 android {
     namespace = "com.tunemind.app"
     compileSdk = 36
@@ -60,6 +70,8 @@ android {
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
         buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifyClientSecret\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"$spotifyRedirectUri\"")
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
     buildTypes {

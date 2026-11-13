@@ -83,7 +83,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Dedicated Spotify OAuth Callback Activity intercepting tunemind://spotify-auth-callback -->
+        <!-- Dedicated Spotify & Supabase OAuth Callback Activity -->
         <activity
             android:name=".data.ingestion.AuthCallbackActivity"
             android:exported="true"
@@ -96,6 +96,9 @@
                 <data
                     android:scheme="tunemind"
                     android:host="spotify-auth-callback" />
+                <data
+                    android:scheme="tunemind"
+                    android:host="supabase-auth-callback" />
             </intent-filter>
         </activity>
 
