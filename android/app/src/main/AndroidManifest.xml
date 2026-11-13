@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <package android:name="com.spotify.music" />
@@ -98,6 +101,21 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Reasoning & Execution Branch: Autonomous Satiety Foreground Service & BroadcastReceiver -->
+        <service
+            android:name=".domain.execution.SatietyExecutionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <receiver
+            android:name=".domain.execution.SatietyDecisionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tunemind.app.ACTION_SATIETY_DECISION" />
+                <action android:name="com.tunemind.app.ACTION_EVALUATE_ROOM_HISTORY" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

@@ -234,6 +234,46 @@ router.post('/tag-tracks', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/v1/reasoning/satiety-decision
+ * Accepts a JSON payload of the user's last 50 tracks from the Android Room DB
+ * (with timestamps and skip durations) and runs the Claude 3.5 Haiku / Sonnet
+ * Satiety Reasoning Tree with Agentic Tool Calling (SpotifyPlaybackTool & NotificationTool).
+ */
+router.post('/satiety-decision', async (req: Request, res: Response) => {
+  try {
+    const payload = req.body || {};
+    const { SatietyExecutionEngine } = await import('../../domain/reasoning/SatietyExecutionEngine');
+    const engine = new SatietyExecutionEngine();
+    const decision = await engine.evaluateLast50Tracks({
+      user_id: payload.user_id,
+      circadian_daypart: payload.circadian_daypart,
+      current_track: payload.current_track,
+      tracks: Array.isArray(payload.tracks) ? payload.tracks : []
+    });
+
+    res.status(200).json(decision);
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /satiety-decision:', error);
+    res.status(500).json({
+      status: 'error',
+      message: (error as Error).message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/reasoning/tool-schema
+ * Returns the formal JSON schema registry for the Agentic Tools (SpotifyPlaybackTool, NotificationTool).
+ */
+router.get('/tool-schema', async (_req: Request, res: Response) => {
+  const { AGENTIC_TOOL_DEFINITIONS } = await import('../../domain/reasoning/SatietyExecutionEngine');
+  res.status(200).json({
+    status: 'ok',
+    tools: AGENTIC_TOOL_DEFINITIONS
+  });
+});
+
+/**
  * GET /api/v1/reasoning/status
  * Returns the operational health and configuration state of the telemetry reasoning poller.
  */

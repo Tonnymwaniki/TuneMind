@@ -49,6 +49,11 @@ class SpotifyRecentlyPlayedSyncWorker(
                     "Spotify Web API sync succeeded: ingested=${syncResult.ingestedRecentlyPlayedCount}, " +
                         "totalCached=${syncResult.totalCachedTracks}"
                 )
+                if (syncResult.totalCachedTracks > 0) {
+                    com.tunemind.app.domain.execution.SatietyExecutionForegroundService.triggerSatietyEvaluation(
+                        applicationContext
+                    )
+                }
                 Result.success(
                     workDataOf(
                         "ingested_count" to syncResult.ingestedRecentlyPlayedCount,
