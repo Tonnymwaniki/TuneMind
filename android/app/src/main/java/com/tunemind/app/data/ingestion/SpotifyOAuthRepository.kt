@@ -308,6 +308,9 @@ class SpotifyOAuthRepository(context: Context) {
         val ninetyDaysAgoMs = nowMs - (90L * 24L * 3600L * 1000L)
         historyDao.pruneHistoryOlderThan(ninetyDaysAgoMs)
 
+        // E. Push synced Spotify tracks to Live Supabase Taste Genome for long-term intelligence growth
+        com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.syncSpotifyHistoryToSupabase(appContext)
+
         val totalCached = historyDao.getAggregatedTracksSnapshot(limit = 60).size
         return@withContext SpotifyIngestionSyncResult.Success(
             ingestedRecentlyPlayedCount = entitiesToInsert.size,

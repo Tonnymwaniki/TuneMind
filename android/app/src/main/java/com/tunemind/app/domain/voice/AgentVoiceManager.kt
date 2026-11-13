@@ -456,11 +456,22 @@ class AgentVoiceManager(
 
     /**
      * Triggered when the user approves a proposed song (either by tapping Approve on PulseAgentScreen
-     * or via voice confirmation). Executes playback immediately on Spotify.
+     * or via voice confirmation). Executes playback immediately on Spotify and logs approval to Supabase.
      */
     fun approvePendingProposedTrack() {
         val pending = clientPendingProposedTrack ?: return
         updatePendingProposedTrack(null)
+        com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.recordVoiceOrTrackDecisionAsync(
+            context = context,
+            triggerTranscript = "User approved proposed song: ${pending.title}",
+            agentTtsResponse = "Playing ${pending.title} by ${pending.artist} now.",
+            action = "APPROVED_TRACK",
+            osIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
+            trackTitle = pending.title,
+            trackArtist = pending.artist,
+            spotifyUri = pending.trackId,
+            satietyPercent = 18
+        )
         playTrackImmediatelyWithVoice(
             title = pending.title,
             artist = pending.artist,
@@ -477,6 +488,17 @@ class AgentVoiceManager(
         updatePendingProposedTrack(null)
         if (rejected != null) {
             recordAgentSuggestedTrack(rejected.title)
+            com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.recordVoiceOrTrackDecisionAsync(
+                context = context,
+                triggerTranscript = "User passed/rejected proposed song: ${rejected.title}",
+                agentTtsResponse = "Finding a different song that fits your vibe better.",
+                action = "REJECTED_TRACK",
+                osIntent = "NONE",
+                trackTitle = rejected.title,
+                trackArtist = rejected.artist,
+                spotifyUri = rejected.trackId,
+                satietyPercent = _agentSatietyFlow.value
+            )
         }
         errorResetJob?.cancel()
         stopMicrophoneStream()
@@ -702,6 +724,11 @@ class AgentVoiceManager(
                                 put("source", pendingProp.source)
                             })
                         }
+                        val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
+                        put("user_id", identity.userId)
+                        put("user_email", identity.email)
+                        put("supabase_url", identity.supabaseUrl)
+                        put("supabase_anon_key", identity.supabaseAnonKey)
                         put("dialogue_history", getDialogueHistoryJsonArray())
                         put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
                     }
@@ -1016,8 +1043,19 @@ class AgentVoiceManager(
             }
         )
 
-        // Persist user + assistant turn in rolling multi-turn conversation memory
+        // Persist user + assistant turn in rolling multi-turn conversation memory & live Supabase
         recordDialogueTurn(lastUserTranscript, responseObj.voice_agent_tts)
+        com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.recordVoiceOrTrackDecisionAsync(
+            context = context,
+            triggerTranscript = lastUserTranscript.ifBlank { "voice_turn" },
+            agentTtsResponse = responseObj.voice_agent_tts,
+            action = effectiveAction,
+            osIntent = effectiveIntent,
+            trackTitle = rawTrackTitle,
+            trackArtist = rawTrackArtist,
+            spotifyUri = resolvedSpotifyUri,
+            satietyPercent = responseObj.calculated_satiety_percentage
+        )
 
         mainHandler.post {
             onToolActionExecuted?.invoke(toolPayload)
@@ -1171,6 +1209,11 @@ class AgentVoiceManager(
                             put("source", pendingProp.source)
                         })
                     }
+                    val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
+                    put("user_id", identity.userId)
+                    put("user_email", identity.email)
+                    put("supabase_url", identity.supabaseUrl)
+                    put("supabase_anon_key", identity.supabaseAnonKey)
                     put("dialogue_history", getDialogueHistoryJsonArray())
                     put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
                 }

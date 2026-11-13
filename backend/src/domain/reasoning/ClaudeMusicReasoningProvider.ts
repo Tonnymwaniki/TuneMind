@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
+import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 import {
   MusicReasoningProvider,
   UserMusicContext,
@@ -87,6 +88,10 @@ export interface TuneMindTelemetryContext {
   } | null;
   spotify_access_token?: string;
   dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+  user_id?: string;
+  user_email?: string;
+  supabase_url?: string;
+  supabase_anon_key?: string;
 }
 
 export interface TuneMindReasoningResponse {
@@ -381,6 +386,27 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         }
       },
       {
+        name: 'query_supabase_taste_genome',
+        description:
+          'Queries the live Supabase Taste Genome database for the user\'s long-term intelligence growth over time: songs they approved in past sessions, songs they rejected, all-time top artists, circadian patterns, and historical voice turns.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            focus: {
+              type: 'string',
+              enum: [
+                'approved_and_rejected_tracks',
+                'top_artists_and_tracks_over_time',
+                'recent_voice_interventions',
+                'full_intelligence_profile'
+              ],
+              description: 'Which aspect of the user\'s long-term Supabase intelligence profile to inspect.'
+            }
+          },
+          required: ['focus']
+        }
+      },
+      {
         name: 'submit_agent_turn',
         description:
           'Submits your final spoken response and app/playback action to the user after you have finished reasoning and calling any necessary Spotify/history tools.',
@@ -632,13 +658,37 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     const eventStore = new EventStore();
     const userCommandRaw = (context.user_command || '').trim();
     const targetPlayerDefault = context.current_track?.source_player || 'com.spotify.music';
+    const userId = SupabaseIntelligenceStore.normalizeUserId(context.user_id, context.user_email);
+    const supabaseOverride = {
+      supabaseUrl: context.supabase_url,
+      supabaseKey: context.supabase_anon_key
+    };
 
     if (context.pending_proposed_track && context.pending_proposed_track.title) {
       ClaudeMusicReasoningProvider.pendingProposedTrack = context.pending_proposed_track;
     }
     const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
 
-    // ─── 1. MERGE REAL LISTENING HISTORY: LIVE CLIENT TELEMETRY + EVENTSTORE ──
+    // ─── 0. SYNC LIVE TELEMETRY & FETCH LONG-TERM SUPABASE TASTE GENOME ───────
+    await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(
+      userId,
+      (context.rolling_history || []).map(t => ({
+        title: t.title,
+        artist: t.artist,
+        trackId: t.trackId,
+        playCount: t.playCount,
+        source: t.source_player
+      })),
+      {
+        hearingTelemetry: context.hearing_telemetry,
+        vaultTracks: context.vault_tracks,
+        override: supabaseOverride
+      }
+    );
+
+    const supabaseMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
+
+    // ─── 1. MERGE REAL LISTENING HISTORY: LIVE CLIENT + SUPABASE + EVENTSTORE ─
     const historyMap = new Map<string, { title: string; artist: string; trackId?: string; source: string; playCount: number }>();
 
     if (Array.isArray(context.rolling_history)) {
@@ -659,6 +709,26 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
             existing.playCount = Math.max(existing.playCount, count);
             if (!existing.trackId && t.trackId) existing.trackId = t.trackId;
           }
+        }
+      }
+    }
+
+    // Merge historical tracks stored in Supabase Taste Genome across sessions
+    for (const supaTrk of supabaseMemory.topTracksOverTime) {
+      if (supaTrk.title) {
+        const key = `${supaTrk.title.toLowerCase().trim()} - ${(supaTrk.artist || '').toLowerCase().trim()}`;
+        const existing = historyMap.get(key);
+        if (!existing) {
+          historyMap.set(key, {
+            title: supaTrk.title,
+            artist: supaTrk.artist || 'Unknown Artist',
+            trackId: supaTrk.spotifyUri,
+            source: supaTrk.source || 'com.spotify.music',
+            playCount: supaTrk.playCount || 1
+          });
+        } else {
+          existing.playCount = Math.max(existing.playCount, supaTrk.playCount || 1);
+          if (!existing.trackId && supaTrk.spotifyUri) existing.trackId = supaTrk.spotifyUri;
         }
       }
     }
@@ -700,6 +770,10 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       for (const t of context.recently_played_by_agent) {
         if (t) excludedSet.add(String(t).toLowerCase().trim());
       }
+    }
+    // Also exclude tracks the user explicitly rejected in past sessions (stored in Supabase)
+    for (const rej of supabaseMemory.rejectedTracks) {
+      if (rej.title) excludedSet.add(rej.title.toLowerCase().trim());
     }
 
     let freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()) && (t.playCount || 1) <= 4);
@@ -744,14 +818,22 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
             : `Harmonic cadence match from your personal rotation`
         }));
 
-    // Merge multi-turn dialogue history from client + server memory
+    // Merge multi-turn dialogue history from client + server memory + Supabase recent interventions
     const mergedDialogue = (Array.isArray(context.dialogue_history) && context.dialogue_history.length > 0)
       ? context.dialogue_history.slice(-12)
-      : ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-12);
+      : ClaudeMusicReasoningProvider.recentDialogueTurns.length > 0
+      ? ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-12)
+      : supabaseMemory.recentInterventions
+          .slice(0, 5)
+          .reverse()
+          .flatMap(r => [
+            { role: 'user' as const, text: r.userSaid },
+            { role: 'assistant' as const, text: r.agentReplied }
+          ]);
 
     const available = await this.isAvailable();
     if (!available) {
-      return await this.buildSmartHistoryFallbackResponse(
+      const fb = await this.buildSmartHistoryFallbackResponse(
         context,
         freshTracks,
         allUserTracks,
@@ -761,16 +843,36 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         null,
         eventStore
       );
+      await SupabaseIntelligenceStore.recordAgentIntervention(
+        {
+          user_id: userId,
+          trigger_transcript: userCommandRaw || 'voice_turn',
+          computed_satiety: fb.calculated_satiety_percentage,
+          agent_tts_response: fb.voice_agent_tts,
+          os_intent: fb.os_execution_command?.intent || 'NONE',
+          target_search_query: fb.os_execution_command?.search_query || '',
+          action: fb.agent_tool_call?.action,
+          track_title: fb.agent_tool_call?.track_title,
+          track_artist: fb.agent_tool_call?.track_artist,
+          spotify_uri: fb.agent_tool_call?.spotify_uri,
+          circadian_daypart: context.circadian_daypart
+        },
+        supabaseOverride
+      );
+      return fb;
     }
 
     // ─── 3. RUN AUTONOMOUS MULTI-STEP ANTHROPIC TOOL-CALLING LOOP ─────────────
-    console.log(`[Claude Agent] 🧠 Starting Autonomous Tool-Calling Loop for user turn: "${userCommandRaw}"`);
+    console.log(
+      `[Claude Agent] 🧠 Starting Autonomous Tool-Calling Loop for user="${userId}" (Supabase maturity=${supabaseMemory.intelligenceMaturityLevel}): "${userCommandRaw}"`
+    );
 
     try {
       const systemPrompt = this.getAutonomousSystemPrompt();
       const tools = this.getAutonomousAgentTools();
 
       const initialContextPayload = {
+        user_id: userId,
         user_spoken_message: userCommandRaw,
         circadian_daypart: context.circadian_daypart,
         current_track: context.current_track,
@@ -788,6 +890,14 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
           output_device: 'Phone / Wireless Audio',
           safety_guidance: 'Listening exposure within safe acoustic threshold (<80 dB).'
         },
+        supabase_taste_genome_long_term_memory: {
+          intelligence_maturity_level: supabaseMemory.intelligenceMaturityLevel,
+          total_historical_interventions: supabaseMemory.totalHistoricalInterventions,
+          total_tracks_learned: supabaseMemory.totalTracksLearned,
+          previously_approved_tracks: supabaseMemory.approvedTracks.slice(-8),
+          previously_rejected_tracks_to_avoid: supabaseMemory.rejectedTracks.slice(-8),
+          circadian_pattern_notes: supabaseMemory.circadianPatternNotes
+        },
         recently_suggested_or_played_titles_to_avoid_repeating: Array.from(excludedSet).slice(0, 15),
         recent_conversation_history: mergedDialogue
       };
@@ -795,7 +905,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       const messages: any[] = [
         {
           role: 'user',
-          content: `Here is the live studio telemetry, conversation history, and the user's latest spoken message. Reason naturally, call any Spotify or listening-history tools you need, and finish by calling 'submit_agent_turn':\n\n${JSON.stringify(initialContextPayload, null, 2)}`
+          content: `Here is the live studio telemetry, Supabase long-term Taste Genome memory, conversation history, and the user's latest spoken message. Reason naturally, call any Spotify, listening-history, or Supabase Taste Genome tools you need, and finish by calling 'submit_agent_turn':\n\n${JSON.stringify(initialContextPayload, null, 2)}`
         }
       ];
 
@@ -875,7 +985,26 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
             break;
           }
 
-          if (toolName === 'query_user_listening_history') {
+          if (toolName === 'query_supabase_taste_genome') {
+            const refreshedMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolCall.id,
+              content: JSON.stringify({
+                user_id: refreshedMemory.userId,
+                live_supabase_connected: refreshedMemory.isLiveSupabaseConnected,
+                intelligence_maturity_level: refreshedMemory.intelligenceMaturityLevel,
+                total_historical_interventions: refreshedMemory.totalHistoricalInterventions,
+                total_tracks_learned: refreshedMemory.totalTracksLearned,
+                approved_tracks: refreshedMemory.approvedTracks,
+                rejected_tracks: refreshedMemory.rejectedTracks,
+                top_artists_over_time: refreshedMemory.topArtistsOverTime,
+                top_tracks_over_time: refreshedMemory.topTracksOverTime.slice(0, 12),
+                recent_interventions: refreshedMemory.recentInterventions.slice(0, 8),
+                circadian_pattern_notes: refreshedMemory.circadianPatternNotes
+              })
+            });
+          } else if (toolName === 'query_user_listening_history') {
             const sortBy = String(input.sort_by || 'most_played');
             const filterKeyword = String(input.artist_or_keyword || '').toLowerCase().trim();
             const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
@@ -1209,6 +1338,30 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
 
       this.rememberTurn(userCommandRaw, ttsText);
 
+      const finalSatiety = Number(
+        submittedTurnDecision.calculated_satiety_percentage ??
+        context.current_satiety_percentage ??
+        28
+      );
+
+      // Persist turn & intelligence growth into live Supabase Taste Genome
+      await SupabaseIntelligenceStore.recordAgentIntervention(
+        {
+          user_id: userId,
+          trigger_transcript: userCommandRaw || 'voice_turn',
+          computed_satiety: finalSatiety,
+          agent_tts_response: ttsText,
+          os_intent: resolvedIntent,
+          target_search_query: cleanSearchQuery,
+          action,
+          track_title: (cleanTitleForSearch || trackTitle) || undefined,
+          track_artist: (cleanArtistForSearch || trackArtist) || undefined,
+          spotify_uri: spotifyUri || undefined,
+          circadian_daypart: context.circadian_daypart
+        },
+        supabaseOverride
+      );
+
       const finalToolCall: AgentToolCall = {
         action,
         track_title: (cleanTitleForSearch || trackTitle) || undefined,
@@ -1222,11 +1375,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       };
 
       return {
-        calculated_satiety_percentage: Number(
-          submittedTurnDecision.calculated_satiety_percentage ??
-          context.current_satiety_percentage ??
-          28
-        ),
+        calculated_satiety_percentage: finalSatiety,
         reasoning_mode: action === 'ADVISE_ONLY' ? 'JOURNEY_ADVISOR' : 'SONIC_CURATOR',
         flow_state_analysis: String(
           submittedTurnDecision.flow_state_analysis ||
@@ -1245,7 +1394,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
           spotify_uri: spotifyUri,
           suggested_bpm_target: 108
         },
-        database_tags: ['autonomous-tool-agent', action.toLowerCase()]
+        database_tags: ['autonomous-tool-agent', 'supabase-taste-genome', action.toLowerCase()]
       };
     } catch (error: any) {
       console.error('[Claude Provider] Tool-calling loop failed, using smart Spotify-backed fallback:', error?.message || error);
@@ -1253,7 +1402,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       if (msg.includes('401') || msg.includes('auth') || msg.includes('api_key')) {
         this.hasInvalidKey = true;
       }
-      return await this.buildSmartHistoryFallbackResponse(
+      const fb = await this.buildSmartHistoryFallbackResponse(
         context,
         freshTracks,
         allUserTracks,
@@ -1263,6 +1412,23 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         null,
         eventStore
       );
+      await SupabaseIntelligenceStore.recordAgentIntervention(
+        {
+          user_id: userId,
+          trigger_transcript: userCommandRaw || 'voice_turn',
+          computed_satiety: fb.calculated_satiety_percentage,
+          agent_tts_response: fb.voice_agent_tts,
+          os_intent: fb.os_execution_command?.intent || 'NONE',
+          target_search_query: fb.os_execution_command?.search_query || '',
+          action: fb.agent_tool_call?.action,
+          track_title: fb.agent_tool_call?.track_title,
+          track_artist: fb.agent_tool_call?.track_artist,
+          spotify_uri: fb.agent_tool_call?.spotify_uri,
+          circadian_daypart: context.circadian_daypart
+        },
+        supabaseOverride
+      );
+      return fb;
     }
   }
 

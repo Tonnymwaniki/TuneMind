@@ -19,6 +19,7 @@ import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
 import spotifyAuthRouter from './api/v1/spotifyAuth';
 import { EventStore } from './domain/events/EventStore';
+import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -33,6 +34,69 @@ app.use('/api/v1/events', eventsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/reasoning', reasoningRouter);
 app.use('/api/v1/spotify', spotifyAuthRouter);
+
+// Live Supabase Intelligence Sync & Long-Term Growth Endpoints
+app.post('/api/v1/intelligence/sync', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = SupabaseIntelligenceStore.normalizeUserId(body.user_id, body.user_email);
+    const override = {
+      supabaseUrl: body.supabase_url,
+      supabaseKey: body.supabase_anon_key
+    };
+
+    const tracks = Array.isArray(body.tracks) ? body.tracks : [];
+    const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(userId, tracks, {
+      hearingTelemetry: body.hearing_telemetry,
+      vaultTracks: body.vault_tracks,
+      override
+    });
+
+    if (body.intervention && typeof body.intervention === 'object') {
+      await SupabaseIntelligenceStore.recordAgentIntervention(
+        {
+          user_id: userId,
+          trigger_transcript: body.intervention.trigger_transcript || 'app_event',
+          computed_satiety: Number(body.intervention.computed_satiety ?? 24),
+          agent_tts_response: body.intervention.agent_tts_response || '',
+          os_intent: body.intervention.os_intent || body.intervention.action || 'NONE',
+          target_search_query: body.intervention.target_search_query || '',
+          action: body.intervention.action,
+          track_title: body.intervention.track_title,
+          track_artist: body.intervention.track_artist,
+          spotify_uri: body.intervention.spotify_uri,
+          circadian_daypart: body.intervention.circadian_daypart
+        },
+        override
+      );
+    }
+
+    const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, override);
+    res.json({
+      status: 'synced',
+      user_id: userId,
+      synced_tracks_count: syncRes.syncedTracksCount,
+      live_supabase_stored: syncRes.liveSupabaseStored,
+      intelligence_summary: summary
+    });
+  } catch (err: any) {
+    console.error('[IntelligenceSync] Error:', err);
+    res.status(500).json({ error: err?.message || 'Intelligence sync failed' });
+  }
+});
+
+app.get('/api/v1/intelligence/growth', async (req, res) => {
+  try {
+    const userId = SupabaseIntelligenceStore.normalizeUserId(
+      String(req.query.user_id || ''),
+      String(req.query.user_email || '')
+    );
+    const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId);
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to load intelligence growth summary' });
+  }
+});
 
 app.get('/', (_req, res) => {
   res.json({
@@ -164,6 +228,10 @@ wss.on('connection', async (ws: WebSocket) => {
     } | null;
     spotify_access_token?: string;
     dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+    user_id?: string;
+    user_email?: string;
+    supabase_url?: string;
+    supabase_anon_key?: string;
   } | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
@@ -258,7 +326,11 @@ wss.on('connection', async (ws: WebSocket) => {
         dopamine_capsule: clientContext?.dopamine_capsule,
         pending_proposed_track: clientContext?.pending_proposed_track,
         spotify_access_token: clientContext?.spotify_access_token,
-        dialogue_history: clientContext?.dialogue_history
+        dialogue_history: clientContext?.dialogue_history,
+        user_id: clientContext?.user_id,
+        user_email: clientContext?.user_email,
+        supabase_url: clientContext?.supabase_url,
+        supabase_anon_key: clientContext?.supabase_anon_key
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
@@ -376,6 +448,15 @@ wss.on('connection', async (ws: WebSocket) => {
             try {
               const store = new EventStore();
               store.syncClientTracks(recentsList);
+              const uid = SupabaseIntelligenceStore.normalizeUserId(json.user_id, json.user_email);
+              SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(uid, recentsList, {
+                hearingTelemetry: json.hearing_telemetry,
+                vaultTracks: json.vault_tracks,
+                override: {
+                  supabaseUrl: json.supabase_url,
+                  supabaseKey: json.supabase_anon_key
+                }
+              }).catch(() => {});
             } catch (_err) {}
           }
           return;
