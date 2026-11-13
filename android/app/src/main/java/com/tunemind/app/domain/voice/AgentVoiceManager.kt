@@ -570,7 +570,7 @@ class AgentVoiceManager(
                                 put("estimated_db", hearing.estimatedAverageDb.toDouble())
                                 put("safe_headroom_db", hearing.currentHeadroomDb.toDouble())
                                 put("daily_exposure_minutes", hearing.dailyExposureMinutes)
-                                put("output_device", hearing.activeSnapshot?.routeLabel ?: "Phone / Wireless Audio")
+                                put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
                                 put("safety_guidance", hearing.safetyGuidance)
                             })
                         }

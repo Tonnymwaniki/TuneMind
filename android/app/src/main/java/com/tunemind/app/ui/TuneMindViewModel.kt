@@ -430,7 +430,7 @@ class TuneMindViewModel : ViewModel() {
         val clean = paletteId.lowercase().trim()
         if (clean == "auto" || clean == "time") {
             val updated = _themePreferences.value.copy(
-                behavior = com.tunemind.app.ui.theme.ThemeBehavior.AUTO_TIME_OF_DAY,
+                behavior = com.tunemind.app.ui.theme.ThemeBehavior.ADAPTIVE,
                 enableMoodAdaptation = true
             )
             updateThemePreferences(updated)
