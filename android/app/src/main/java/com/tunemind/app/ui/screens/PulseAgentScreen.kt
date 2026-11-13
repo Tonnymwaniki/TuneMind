@@ -65,7 +65,7 @@ fun PulseAgentScreen(
     satietyPercentage: Int,
     currentTrackName: String?,
     artistName: String?,
-    isMusicPlaying: Boolean,
+    isMusicPlaying: Boolean = false,
     energy: Float,
     liveTranscript: String,
     flowAnalysis: String = "",
@@ -840,7 +840,7 @@ private fun StudioNeuralMascot(
                 val smileHeight = if (hasPendingApproval || isMusicPlaying) baseRadius * 0.22f else baseRadius * 0.14f
                 val path = Path().apply {
                     moveTo(center.x - smileWidth / 2f, mouthCenterY - smileHeight * 0.2f)
-                    quadraticBezierTo(
+                    quadraticTo(
                         center.x,
                         mouthCenterY + smileHeight,
                         center.x + smileWidth / 2f,

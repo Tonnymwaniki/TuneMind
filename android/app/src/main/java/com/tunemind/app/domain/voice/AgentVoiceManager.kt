@@ -811,8 +811,8 @@ class AgentVoiceManager(
             spotify_uri = resolvedSpotifyUri,
             target_player = targetPlayerPkg,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
-            palette_id = toolObj?.optString("palette_id", null)?.takeIf { it.isNotBlank() },
-            target_screen = toolObj?.optString("target_screen", null)?.takeIf { it.isNotBlank() },
+            palette_id = toolObj?.optString("palette_id", "")?.takeIf { it.isNotBlank() },
+            target_screen = toolObj?.optString("target_screen", "")?.takeIf { it.isNotBlank() },
             expect_follow_up = effectiveExpectFollowUp
         )
 
@@ -842,7 +842,7 @@ class AgentVoiceManager(
                 // Force Android TTS to speak our rewritten approval question if cloud audio said "Spinning..."
                 null
             } else {
-                dataObj?.optString("voice_agent_audio_base64", null)?.takeIf { it.isNotBlank() && it != "null" }
+                dataObj?.optString("voice_agent_audio_base64", "")?.takeIf { it.isNotBlank() && it != "null" }
             }
         )
 

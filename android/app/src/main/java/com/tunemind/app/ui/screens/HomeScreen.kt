@@ -77,6 +77,7 @@ fun HomeScreen(
         satietyPercentage = calculatedSatiety,
         currentTrackName = trackTitle,
         artistName = artistName,
+        isMusicPlaying = nowPlaying?.isPlaying == true,
         energy = energy,
         liveTranscript = liveTranscript,
         onOrbTapped = {
