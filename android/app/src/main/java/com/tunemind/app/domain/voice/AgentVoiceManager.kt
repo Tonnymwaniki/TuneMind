@@ -115,6 +115,9 @@ class AgentVoiceManager(
     private var speechService: SpeechService? = null
     private var isVoskListening = false
 
+    @Volatile
+    private var isAppInForeground = false
+
     // Native Speech Recognizer Fallback
     private var nativeRecognizer: AndroidSpeechRecognizer? = null
     private var errorResetJob: Job? = null
@@ -124,19 +127,70 @@ class AgentVoiceManager(
         startCloudKeepAlivePing()
     }
 
+    /**
+     * Controls whether the TuneMind app is actively visible on screen (past the Splash/Login screen
+     * and in the foreground). When false, immediately stops any TTS speech, microphone capture,
+     * and Vosk wake-word listening so the app NEVER talks or listens in the background.
+     */
+    fun setForegroundActive(active: Boolean) {
+        isAppInForeground = active
+        if (!active) {
+            errorResetJob?.cancel()
+            mainHandler.removeCallbacksAndMessages(null)
+            executionEngine.stopSpeaking()
+            stopMicrophoneStream()
+            stopNativeSpeechRecognizer()
+            if (isVoskListening || speechService != null) {
+                try {
+                    speechService?.stop()
+                } catch (_: Exception) {}
+                isVoskListening = false
+            }
+            releaseAudioDucking()
+            Log.d(TAG, "App left active foreground — paused Vosk wake-word listener and stopped TTS.")
+        } else {
+            resumeWakeWordListening()
+        }
+    }
+
+    private fun isMostPlayedSongRequest(text: String): Boolean {
+        val clean = text.lowercase()
+        return Regex(
+            "\\b(most\\s+(played|listened|heard)|listened\\s+(to\\s+)?(the\\s+)?most|listen\\s+(to\\s+)?(the\\s+)?most|played\\s+(the\\s+)?most|play\\s+(the\\s+)?most|heard\\s+(the\\s+)?most|favorite\\s+(song|track|music)|favourite\\s+(song|track|music)|top\\s+(song|track)|number\\s+one\\s+(song|track)|highest\\s+play|song\\s+(that\\s+)?i\\s+(have\\s+)?(listened|played|heard))\\b"
+        ).containsMatchIn(clean)
+    }
+
+    private fun isNewOrRecommendSongRequest(text: String): Boolean {
+        val clean = text.lowercase()
+        return Regex(
+            "\\b(new\\s+(song|track|music|tune|vibe)|fresh\\s+(song|track|music|tune)|something\\s+(new|fresh|different|good)|never\\s+heard|haven'?t\\s+heard|discover|recommend|recommendation|suggest|suggestion|pick\\s+(a|me)|choose\\s+(a|me)|find\\s+me\\s+a\\s+song|give\\s+me\\s+a\\s+(new\\s+)?(song|track)|play\\s+(for\\s+me\\s+|me\\s+)?(a\\s+|some\\s+|any\\s+|another\\s+)?(new\\s+|fresh\\s+|good\\s+|nice\\s+)?(song|track|music|tune|something))\\b"
+        ).containsMatchIn(clean)
+    }
+
+    private fun isConversationalNonTitlePhrase(candidate: String?): Boolean {
+        val clean = candidate?.lowercase()?.replace(Regex("[^a-z0-9\\s']"), " ")?.replace(Regex("\\s+"), " ")?.trim() ?: return true
+        if (clean.length < 2) return true
+        if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
+        return Regex(
+            "\\b(most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history)\\b"
+        ).containsMatchIn(clean)
+    }
+
     private fun startCloudKeepAlivePing() {
         scope.launch {
             while (isActive) {
                 try {
-                    val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
-                    val healthUrl = "${baseUrl.trimEnd('/')}/health"
-                    val req = Request.Builder().url(healthUrl).get().build()
-                    client.newCall(req).execute().close()
-                    Log.d(TAG, "☁️ Cloud Brain keep-alive ping succeeded: $healthUrl")
+                    if (isAppInForeground) {
+                        val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
+                        val healthUrl = "${baseUrl.trimEnd('/')}/health"
+                        val req = Request.Builder().url(healthUrl).get().build()
+                        client.newCall(req).execute().close()
+                        Log.d(TAG, "☁️ Cloud Brain keep-alive ping succeeded: $healthUrl")
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "☁️ Cloud Brain keep-alive ping notice: ${e.message}")
                 }
-                delay(8 * 60 * 1000L) // Ping every 8 minutes so Render free tier never spins down while app is open
+                delay(8 * 60 * 1000L)
             }
         }
     }
@@ -147,7 +201,9 @@ class AgentVoiceManager(
                 { model ->
                     this.voskModel = model
                     Log.d(TAG, "Vosk Model loaded successfully.")
-                    startWakeWordListener()
+                    if (isAppInForeground) {
+                        startWakeWordListener()
+                    }
                 },
                 { exception ->
                     Log.e(TAG, "Failed to unpack the Vosk model: ${exception?.message}")
@@ -159,6 +215,7 @@ class AgentVoiceManager(
     }
 
     private fun startWakeWordListener() {
+        if (!isAppInForeground) return
         if (voskModel == null) return
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "Cannot start Vosk SpeechService: RECORD_AUDIO permission not granted.")
@@ -174,7 +231,7 @@ class AgentVoiceManager(
             speechService = SpeechService(rec, 16000.0f)
             speechService?.startListening(this)
             isVoskListening = true
-            Log.d(TAG, "Vosk is now listening for the wake word in the background...")
+            Log.d(TAG, "Vosk is now listening for the wake word while app is in foreground...")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start Vosk SpeechService: ${e.message}")
         }
@@ -200,7 +257,7 @@ class AgentVoiceManager(
     }
 
     private fun checkWakeWord(jsonStr: String?) {
-        if (jsonStr == null || _agentState.value != AgentState.IDLE) return
+        if (!isAppInForeground || jsonStr == null || _agentState.value != AgentState.IDLE) return
 
         val text = jsonStr.lowercase()
         if (text.contains("tune mind") || text.contains("hi tune") || text.contains("hey tune")) {
@@ -237,6 +294,7 @@ class AgentVoiceManager(
 
     // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
+        isAppInForeground = true
         if (_agentState.value == AgentState.LISTENING) return
 
         if (_agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
@@ -507,6 +565,7 @@ class AgentVoiceManager(
                 try {
                     val np = getNowPlaying?.invoke()
                     val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
+                    val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
                     val hearing = getHearingInsights?.invoke()
                     val vaultList = getVaultTracks?.invoke() ?: emptyList()
                     val capsule = getDopamineCapsule?.invoke()
@@ -515,7 +574,8 @@ class AgentVoiceManager(
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
                         val currentTrackId = np?.let { cur ->
-                            recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }?.providerTrackId
+                            unifiedTracks.firstOrNull { t -> t.trackTitle.equals(cur.title, ignoreCase = true) }?.spotifyUri
+                                ?: recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }?.providerTrackId
                         } ?: ""
                         val currentObj = JSONObject().apply {
                             put("title", np?.title ?: "Standing By")
@@ -527,13 +587,13 @@ class AgentVoiceManager(
                         put("current_track", currentObj)
 
                         val historyArr = org.json.JSONArray()
-                        for (r in recents.take(50)) {
+                        for (u in unifiedTracks.take(60)) {
                             historyArr.put(JSONObject().apply {
-                                put("title", r.title ?: "")
-                                put("artist", r.artist ?: "")
-                                put("source", r.sourcePackage ?: "com.spotify.music")
-                                put("playCount", r.distinctAppearanceCount)
-                                put("trackId", r.providerTrackId ?: "")
+                                put("title", u.trackTitle)
+                                put("artist", u.artistName)
+                                put("source", "com.spotify.music")
+                                put("playCount", u.playCount)
+                                put("trackId", u.spotifyUri)
                             })
                         }
                         put("recent_tracks", historyArr)
@@ -724,22 +784,71 @@ class AgentVoiceManager(
             rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
         }
 
+        // Intercept "most played / listened to the most" and "recommend / play a new song" or any bogus conversational phrase
+        val wantsMostPlayed = !isApprovingPending && !isSyntheticPrompt && isMostPlayedSongRequest(userTranscriptLower)
+        val wantsNewOrRecommend = !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && (
+            isNewOrRecommendSongRequest(userTranscriptLower) ||
+            (!rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
+        )
+
+        var customProposalSpeechOverride: String? = null
+        if (wantsMostPlayed) {
+            val recents = getRecentTracks?.invoke() ?: emptyList()
+            val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
+            if (topTrack != null) {
+                rawTrackTitle = topTrack.trackTitle
+                rawTrackArtist = topTrack.artistName
+                resolvedSpotifyUri = topTrack.spotifyUri
+                rawSearchQuery = "${topTrack.trackTitle} ${topTrack.artistName}".trim()
+                val artistPart = if (topTrack.artistName.isNotBlank() && topTrack.artistName != "Unknown Artist") " by ${topTrack.artistName}" else ""
+                val countNote = if (topTrack.playCount > 1) " with ${topTrack.playCount} plays in your Spotify history" else " from the top of your Spotify rotation"
+                customProposalSpeechOverride = "Your most-listened song is ${topTrack.trackTitle}$artistPart$countNote. Would you like me to play it right now?"
+            }
+        } else if (wantsNewOrRecommend) {
+            // If backend returned a valid real track (not a conversational sentence), keep it and ensure URI; otherwise fetch a fresh discovery track
+            val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
+            if (!backendGaveValidTrack) {
+                val recents = getRecentTracks?.invoke() ?: emptyList()
+                val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(getNowPlaying?.invoke()?.title)).toSet()
+                val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                    context = context,
+                    fallbackMemoryTracks = recents,
+                    excludedTitles = excluded
+                )
+                if (discovery != null) {
+                    rawTrackTitle = discovery.trackTitle
+                    rawTrackArtist = discovery.artistName
+                    resolvedSpotifyUri = discovery.spotifyUri
+                    rawSearchQuery = "${discovery.trackTitle} ${discovery.artistName}".trim()
+                    val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
+                    customProposalSpeechOverride = "Based on your Spotify listening taste, I recommend ${discovery.trackTitle}$artistPart. Would you like me to play it right now?"
+                }
+            }
+        }
+
         if (!rawTrackTitle.isNullOrBlank()) {
             recordAgentSuggestedTrack(rawTrackTitle)
         }
 
-        if (resolvedSpotifyUri.isNullOrBlank()) {
+        if (resolvedSpotifyUri.isNullOrBlank() && !rawTrackTitle.isNullOrBlank()) {
             val recents = getRecentTracks?.invoke() ?: emptyList()
             val matchedLocal = recents.firstOrNull { r ->
                 val rTitle = r.title?.trim() ?: ""
                 rTitle.isNotEmpty() && (
-                    (rawTrackTitle != null && rTitle.equals(rawTrackTitle.trim(), ignoreCase = true)) ||
+                    rTitle.equals(rawTrackTitle!!.trim(), ignoreCase = true) ||
                     rawSearchQuery.lowercase().contains(rTitle.lowercase())
                 )
             }
             if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
                 resolvedSpotifyUri = matchedLocal.providerTrackId
                 Log.d(TAG, "Bound exact Spotify URI from local memory: $resolvedSpotifyUri")
+            } else {
+                resolvedSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                    context = context,
+                    cleanTitle = rawTrackTitle!!,
+                    cleanArtist = rawTrackArtist ?: "",
+                    fullQuery = rawSearchQuery.ifBlank { "${rawTrackTitle} ${rawTrackArtist ?: ""}".trim() }
+                )
             }
         }
 
@@ -752,6 +861,8 @@ class AgentVoiceManager(
 
         // Determine whether this turn is proposing a song (must wait for user approval) vs executing an approved song
         val isTrackProposalOrPlayAttempt = !rawTrackTitle.isNullOrBlank() && (
+            wantsMostPlayed ||
+            wantsNewOrRecommend ||
             rawAction == "PROPOSE_TRACK" ||
             rawAction == "LAUNCH_DOPAMINE_CAPSULE" ||
             rawAction == "PLAY_TRACK_NOW" ||
@@ -761,7 +872,8 @@ class AgentVoiceManager(
         val effectiveAction: String
         val effectiveIntent: String
         val effectiveExpectFollowUp: Boolean
-        var spokenTts = explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" }.trim()
+        var spokenTts = customProposalSpeechOverride
+            ?: explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" }.trim()
 
         if (isApprovingPending && pendingBeforeTurn != null) {
             effectiveAction = "PLAY_TRACK_NOW"
@@ -879,11 +991,11 @@ class AgentVoiceManager(
             },
             onFinished = {
                 mainHandler.post {
-                    if (toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
+                    if (isAppInForeground && toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
                         Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
                         _agentState.value = AgentState.IDLE
                         mainHandler.postDelayed({
-                            if (_agentState.value == AgentState.IDLE) {
+                            if (isAppInForeground && _agentState.value == AgentState.IDLE) {
                                 simulateWakeWordDetected()
                             }
                         }, 650L)
@@ -914,6 +1026,7 @@ class AgentVoiceManager(
             try {
                 val np = getNowPlaying?.invoke()
                 val recents = getRecentTracks?.invoke() ?: emptyList()
+                val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
                 val hearing = getHearingInsights?.invoke()
                 val vaultList = getVaultTracks?.invoke() ?: emptyList()
                 val capsule = getDopamineCapsule?.invoke()
@@ -940,13 +1053,13 @@ class AgentVoiceManager(
                     })
 
                     val historyArr = org.json.JSONArray()
-                    for (r in recents.take(50)) {
+                    for (u in unifiedTracks.take(60)) {
                         historyArr.put(JSONObject().apply {
-                            put("title", r.title ?: "")
-                            put("artist", r.artist ?: "")
-                            put("source_player", r.sourcePackage ?: "com.spotify.music")
-                            put("playCount", r.distinctAppearanceCount)
-                            put("trackId", r.providerTrackId ?: "")
+                            put("title", u.trackTitle)
+                            put("artist", u.artistName)
+                            put("source_player", "com.spotify.music")
+                            put("playCount", u.playCount)
+                            put("trackId", u.spotifyUri)
                         })
                     }
                     put("rolling_history", historyArr)
@@ -1250,27 +1363,98 @@ class AgentVoiceManager(
             }
         }
 
-        // 9. Song Suggestion / Recommendation (Always propose first and wait for user approval)
-        val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
-        val genericPlayRegex = Regex("^\\s*(please\\s+)?(play|spin|put on|give me|suggest|recommend|find)(\\s+me)?(\\s+(a|some|any|another|different|fresh|good|nice|new|best|my))?\\s*(music|song|songs|track|tracks|vibe|vibes|tune|tunes|something|anything|bongo|bongo flava|afrobeats|hip hop|gospel|capsule|dopamine capsule)?(\\s+(for me|please|right now|now|today))?\\s*$")
-        val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
-        val rawNamedTarget = if (!genericPlayRegex.matches(cleanNoPunct) && explicitMatch != null) {
-            explicitMatch.groupValues[3]
-                .replace(Regex("^(me\\s+)"), "")
-                .replace(Regex("\\b(right now|now|for me|please|on spotify)\\b"), "")
-                .trim()
-        } else null
-
-        if (!rawNamedTarget.isNullOrBlank() && rawNamedTarget.length >= 2 && !Regex("^(a song|some music|something|anything|music|song|songs|it|that)$").matches(rawNamedTarget)) {
-            val matchedLocal = recents.firstOrNull { r ->
-                val rt = r.title?.lowercase()?.trim() ?: ""
-                val ra = r.artist?.lowercase()?.trim() ?: ""
-                (rt.isNotEmpty() && (rt.contains(rawNamedTarget) || rawNamedTarget.contains(rt))) ||
-                (ra.isNotEmpty() && ra != "unknown artist" && rawNamedTarget.contains(ra))
+        // 9. Most-Played Song Request ("play the song that I have listened the most", "favorite song", "top song")
+        if (isMostPlayedSongRequest(lower)) {
+            val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
+            if (topTrack != null) {
+                val artistPart = if (topTrack.artistName.isNotBlank() && topTrack.artistName != "Unknown Artist") " by ${topTrack.artistName}" else ""
+                val countText = if (topTrack.playCount > 1) " with ${topTrack.playCount} plays in your Spotify history" else " at the top of your Spotify rotation"
+                return JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "PLAYBACK_SUGGESTION")
+                    put("flow_state_analysis", "Top Track: \"${topTrack.trackTitle}\"$artistPart (${topTrack.playCount}x plays) — awaiting approval.")
+                    put("voice_agent_tts", "Your most-listened song is ${topTrack.trackTitle}$artistPart$countText. Would you like me to play it right now?")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "PROPOSE_TRACK")
+                        put("track_title", topTrack.trackTitle)
+                        put("track_artist", topTrack.artistName)
+                        put("spotify_uri", topTrack.spotifyUri)
+                        put("target_player", targetPlayer)
+                        put("expect_follow_up", true)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "${topTrack.trackTitle} ${topTrack.artistName}".trim())
+                        put("track_title", topTrack.trackTitle)
+                        put("track_artist", topTrack.artistName)
+                        put("spotify_uri", topTrack.spotifyUri)
+                    })
+                }
             }
-            val finalTitle = matchedLocal?.title ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
-            val finalArtist = matchedLocal?.artist ?: ""
-            val finalUri = matchedLocal?.providerTrackId ?: ""
+        }
+
+        // 10. New Song / Discovery / Recommendation Request ("play for me a new song", "recommend a song")
+        if (isNewOrRecommendSongRequest(lower)) {
+            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
+            val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                context = context,
+                fallbackMemoryTracks = recents,
+                excludedTitles = excluded
+            )
+            if (discovery != null) {
+                val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
+                val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(discovery.trackTitle, discovery.artistName)
+                return JSONObject().apply {
+                    put("calculated_satiety_percentage", 18)
+                    put("reasoning_mode", "PLAYBACK_SUGGESTION")
+                    put("flow_state_analysis", "Spotify Discovery: \"${discovery.trackTitle}\"$artistPart • ${mood.label} Mood DNA.")
+                    put("voice_agent_tts", "Based on your Spotify listening profile, I picked a fresh song for you: ${discovery.trackTitle}$artistPart. Would you like me to play it right now?")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "PROPOSE_TRACK")
+                        put("track_title", discovery.trackTitle)
+                        put("track_artist", discovery.artistName)
+                        put("spotify_uri", discovery.spotifyUri)
+                        put("target_player", targetPlayer)
+                        put("expect_follow_up", true)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "${discovery.trackTitle} ${discovery.artistName}".trim())
+                        put("track_title", discovery.trackTitle)
+                        put("track_artist", discovery.artistName)
+                        put("spotify_uri", discovery.spotifyUri)
+                    })
+                }
+            }
+        }
+
+        // 11. Explicit Song Title / Artist Request (Only if NOT a conversational phrase!)
+        val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
+        val rawNamedTarget = explicitMatch?.groupValues?.getOrNull(3)
+            ?.replace(Regex("^(me\\s+|for me\\s+)"), "")
+            ?.replace(Regex("\\b(right now|now|for me|please|on spotify)\\b"), "")
+            ?.trim()
+
+        if (!rawNamedTarget.isNullOrBlank() && rawNamedTarget.length >= 2 && !isConversationalNonTitlePhrase(rawNamedTarget)) {
+            val unified = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+            val matchedLocal = unified.firstOrNull { u ->
+                val ut = u.trackTitle.lowercase().trim()
+                val ua = u.artistName.lowercase().trim()
+                (ut.isNotEmpty() && (ut.contains(rawNamedTarget) || rawNamedTarget.contains(ut))) ||
+                (ua.isNotEmpty() && ua != "unknown artist" && rawNamedTarget.contains(ua))
+            }
+            val finalTitle = matchedLocal?.trackTitle ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
+            val finalArtist = matchedLocal?.artistName ?: ""
+            val finalUri = matchedLocal?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
+                ?: com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                    context = context,
+                    cleanTitle = finalTitle,
+                    cleanArtist = finalArtist,
+                    fullQuery = "$finalTitle $finalArtist".trim()
+                ) ?: ""
             val artistPart = if (finalArtist.isNotBlank() && finalArtist != "Unknown Artist") " by $finalArtist" else ""
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 20)
@@ -1296,22 +1480,27 @@ class AgentVoiceManager(
             }
         }
 
-        // 10. Pick freshest unplayed track from capsule or history, propose it, and wait for user approval
+        // 12. Pick freshest unplayed track from capsule or unified Spotify history, propose it, and wait for user approval
+        val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
+        val discoveryFallback = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+            context = context,
+            fallbackMemoryTracks = recents,
+            excludedTitles = excluded
+        )
         val recentSuggested = getRecentlyPlayedByAgent().map { it.lowercase() }.toSet()
-        val freshHistoryPick = recents.firstOrNull { r ->
-            !r.title.isNullOrBlank() && !recentSuggested.contains(r.title.lowercase().trim())
-        } ?: recents.firstOrNull()
         val freshPick = capsule?.tracks?.firstOrNull { ct ->
             !recentSuggested.contains(ct.title.lowercase().trim())
         } ?: capsule?.tracks?.firstOrNull()
 
         val chosenTitle = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeTrackTitleForPlay(
-            freshPick?.title ?: freshHistoryPick?.title ?: "Midnight City"
+            discoveryFallback?.trackTitle ?: freshPick?.title ?: "Midnight City"
         )
         val chosenArtist = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeArtistForPlay(
-            freshPick?.artist ?: freshHistoryPick?.artist ?: "M83"
+            discoveryFallback?.artistName ?: freshPick?.artist ?: "M83"
         )
-        val chosenUri = freshPick?.spotifyUri ?: freshHistoryPick?.providerTrackId ?: ""
+        val chosenUri = discoveryFallback?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
+            ?: freshPick?.spotifyUri
+            ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(chosenTitle, chosenArtist)
         val artistPart = if (chosenArtist.isNotBlank()) " by $chosenArtist" else ""
 
@@ -1621,7 +1810,7 @@ class AgentVoiceManager(
     }
 
     fun resumeWakeWordListening() {
-        if (!isVoskListening && _agentState.value == AgentState.IDLE) {
+        if (isAppInForeground && !isVoskListening && _agentState.value == AgentState.IDLE) {
             startWakeWordListener()
         }
     }

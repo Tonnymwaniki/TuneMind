@@ -10,6 +10,7 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 data class AgentToolCallPayload(
     val action: String = "ADVISE_ONLY",
@@ -352,48 +353,58 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         trackArtist: String? = null,
         spotifyUri: String? = null
     ) {
-        try {
-            Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri'")
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri'")
 
-            val cleanQuery = searchQuery.trim()
-            val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
-            val resolvedTitle = trackTitle?.trim()?.ifBlank { null } ?: run {
-                if (cleanQuery.contains(" - ")) cleanQuery.substringBefore(" - ").trim()
-                else if (byParts.size == 2) byParts[0].trim()
-                else cleanQuery
+                val cleanQuery = searchQuery.trim()
+                val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
+                val resolvedTitle = trackTitle?.trim()?.ifBlank { null } ?: run {
+                    if (cleanQuery.contains(" - ")) cleanQuery.substringBefore(" - ").trim()
+                    else if (byParts.size == 2) byParts[0].trim()
+                    else cleanQuery
+                }
+                val resolvedArtist = trackArtist?.trim()?.ifBlank { null } ?: run {
+                    if (cleanQuery.contains(" - ")) cleanQuery.substringAfter(" - ").trim()
+                    else if (byParts.size == 2) byParts[1].trim()
+                    else ""
+                }
+
+                // Resolve exact spotify:track:<22-char-id> URI on IO thread so we NEVER fall back to a static search screen
+                var canonicalSpotifyUri = spotifyUri?.trim()?.takeIf {
+                    it.startsWith("spotify:track:") || it.startsWith("https://open.spotify.com/track/")
+                }
+                if (canonicalSpotifyUri.isNullOrBlank() && targetPackage.contains("spotify", ignoreCase = true)) {
+                    canonicalSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                        context = context,
+                        cleanTitle = resolvedTitle,
+                        cleanArtist = resolvedArtist,
+                        fullQuery = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() }
+                    )
+                }
+
+                val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
+                    id = canonicalSpotifyUri ?: cleanQuery,
+                    title = resolvedTitle,
+                    artist = resolvedArtist,
+                    reason = "Autonomous neuro-acoustic flow match",
+                    confidence = 0.98f
+                )
+
+                mainHandler.post {
+                    com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
+                        context = context,
+                        providerId = if (targetPackage.contains("spotify", ignoreCase = true)) "spotify" else targetPackage,
+                        displayName = if (targetPackage.contains("spotify", ignoreCase = true)) "Spotify" else "Target Player",
+                        packageName = targetPackage,
+                        track = targetTrack,
+                        query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
+                        deepLinkUri = canonicalSpotifyUri
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch player", e)
             }
-            val resolvedArtist = trackArtist?.trim()?.ifBlank { null } ?: run {
-                if (cleanQuery.contains(" - ")) cleanQuery.substringAfter(" - ").trim()
-                else if (byParts.size == 2) byParts[1].trim()
-                else ""
-            }
-
-            val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
-                id = spotifyUri ?: cleanQuery,
-                title = resolvedTitle,
-                artist = resolvedArtist,
-                reason = "Autonomous neuro-acoustic flow match",
-                confidence = 0.98f
-            )
-
-            // Direct track deep link if available, otherwise search deep link
-            val directDeepLink = if (!spotifyUri.isNullOrBlank()) {
-                spotifyUri
-            } else if (targetPackage.contains("spotify")) {
-                "spotify:search:${Uri.encode(cleanQuery)}"
-            } else null
-
-            com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
-                context = context,
-                providerId = if (targetPackage.contains("spotify")) "spotify" else targetPackage,
-                displayName = if (targetPackage.contains("spotify")) "Spotify" else "Target Player",
-                packageName = targetPackage,
-                track = targetTrack,
-                query = cleanQuery,
-                deepLinkUri = directDeepLink
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch player", e)
         }
     }
 

@@ -655,12 +655,11 @@ fun RhythmDnaScreen(
                         }
                     }
                 }
-            }
-
-            // Spotify Web API OAuth, Account Identity & 15-Minute Local-First Room Sync Card
-            item {
-                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            } else {
+                // Spotify Web API OAuth, Account Identity & 15-Minute Local-First Room Sync Card
+                item {
+                    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1171,6 +1170,7 @@ fun RhythmDnaScreen(
                         )
                     }
                 }
+            }
             }
         }
     }

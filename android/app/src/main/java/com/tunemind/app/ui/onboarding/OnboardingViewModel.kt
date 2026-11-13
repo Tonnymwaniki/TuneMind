@@ -21,7 +21,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     private val authSessionManager = TuneMindAuthSessionManager.getInstance(application)
 
-    // Always start at the Welcome / Splash screen on every app launch
+    // Always start with the clean branded Splash Screen (WELCOME) on cold app launch
     private val _currentStep = MutableStateFlow(OnboardingStep.WELCOME)
     val currentStep: StateFlow<OnboardingStep> = _currentStep.asStateFlow()
 
@@ -37,8 +37,31 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Called automatically after the 1.6-second branded Splash Screen finishes:
+     * - If the user has already logged in before (Google, Email, or Spotify) or completed onboarding,
+     *   auto-login and route straight into the main app (or any remaining permission if not yet completed).
+     * - If this is a first-time user who has never logged in, route to AUTH_LOGIN.
+     */
+    fun onSplashFinishedAutoRoute() {
+        authSessionManager.refreshSessionState()
+        val session = authSessionManager.sessionFlow.value
+        val app = getApplication<Application>()
+        val isReturningUser = session.isLoggedIn || session.isSpotifyConnected || session.hasCompletedStartFlow
+
+        if (isReturningUser) {
+            if (session.hasCompletedStartFlow && PermissionUtils.hasMicrophonePermission(app)) {
+                _currentStep.value = OnboardingStep.COMPLETE
+            } else {
+                _currentStep.value = evaluateRemainingPermissionStep(app)
+            }
+        } else {
+            _currentStep.value = OnboardingStep.AUTH_LOGIN
+        }
+    }
+
     fun proceedFromWelcomeToAuth() {
-        _currentStep.value = OnboardingStep.AUTH_LOGIN
+        onSplashFinishedAutoRoute()
     }
 
     fun proceedFromAuthToPermissions() {
@@ -49,7 +72,6 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     fun checkPermissions() {
         val current = _currentStep.value
-        // Do not auto-skip the Welcome or Auth Login screens before the user interacts with them
         if (current == OnboardingStep.WELCOME || current == OnboardingStep.AUTH_LOGIN) {
             authSessionManager.refreshSessionState()
             return

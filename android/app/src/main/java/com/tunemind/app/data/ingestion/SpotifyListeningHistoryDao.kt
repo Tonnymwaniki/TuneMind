@@ -39,6 +39,9 @@ interface SpotifyListeningHistoryDao {
     @Query("SELECT * FROM track_history_telemetry ORDER BY played_at_epoch_ms DESC LIMIT :limit")
     fun observeTelemetryItems(limit: Int = 100): Flow<List<TrackHistoryTelemetryItem>>
 
+    @Query("SELECT * FROM track_history_telemetry ORDER BY played_at_epoch_ms DESC LIMIT :limit")
+    suspend fun getTelemetryItemsSnapshot(limit: Int = 100): List<TrackHistoryTelemetryItem>
+
     /**
      * Reactive stream of raw chronologically ordered play history for the UI.
      */

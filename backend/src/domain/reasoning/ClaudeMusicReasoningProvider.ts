@@ -612,26 +612,35 @@ Respond ONLY with raw valid JSON matching this schema:
             : `Harmonic cadence match from your personal rotation`
         }));
 
-    // Check if the user explicitly named a specific song or artist to play right now!
-    // e.g., "play Utaniinua", "play Wakadinali", "play Mbosso", vs generic "play me a song.", "play something"
+    // Check if the user asked for their most-played / most-listened song
     const cleanCommandNoPunct = userCommandRaw.replace(/[.!?,;:'"]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const isMostPlayedRequest = /\b(most\s+(played|listened|heard)|listened\s+(to\s+)?(the\s+)?most|listen\s+(to\s+)?(the\s+)?most|played\s+(the\s+)?most|play\s+(the\s+)?most|heard\s+(the\s+)?most|favorite\s+(song|track|music)|favourite\s+(song|track|music)|top\s+(song|track)|number\s+one\s+(song|track)|highest\s+play|song\s+(that\s+)?i\s+(have\s+)?(listened|played|heard))\b/i.test(cleanCommandNoPunct);
+    const isNewOrRecommendRequest = !isMostPlayedRequest && /\b(new\s+(song|track|music|tune|vibe)|fresh\s+(song|track|music|tune)|something\s+(new|fresh|different|good)|never\s+heard|haven'?t\s+heard|discover|recommend|recommendation|suggest|suggestion|pick\s+(a|me)|choose\s+(a|me)|find\s+me\s+a\s+song|give\s+me\s+a\s+(new\s+)?(song|track)|play\s+(for\s+me\s+|me\s+)?(a\s+|some\s+|any\s+|another\s+)?(new\s+|fresh\s+|good\s+|nice\s+)?(song|track|music|tune|something))\b/i.test(cleanCommandNoPunct);
+
+    const mostPlayedUserTrack = [...allUserTracks].sort((a, b) => (b.playCount || 1) - (a.playCount || 1))[0] || null;
+
+    // Check if the user explicitly named a specific song or artist to play right now!
+    // e.g., "play Utaniinua", "play Wakadinali", "play Mbosso", vs generic "play me a song.", "play the song that I have listened the most"
     const genericPlayPattern = /^\s*(please\s+)?(play|spin|put on|give me|suggest|recommend|find)(\s+me)?(\s+(a|some|any|another|different|fresh|good|nice|new|best|my))?\s*(music|song|songs|track|tracks|vibe|vibes|tune|tunes|something|anything|bongo|bongo flava|afrobeats|hip hop|gospel|capsule|dopamine capsule)?(\s+(for me|please|right now|now|today))?\s*$/i;
     const startsWithPlayVerb = /^\s*(please\s+)?(play|spin|put on)\s+(.+)$/i.exec(cleanCommandNoPunct);
-    const candidateNamedQuery = (!genericPlayPattern.test(cleanCommandNoPunct) && startsWithPlayVerb)
+    const candidateNamedQuery = (!isMostPlayedRequest && !isNewOrRecommendRequest && !genericPlayPattern.test(cleanCommandNoPunct) && startsWithPlayVerb)
       ? startsWithPlayVerb[3]
-          .replace(/^(me\s+)/i, '')
+          .replace(/^(me\s+|for\s+me\s+)/i, '')
           .replace(/\b(right now|now|for me|please|on spotify)\b/gi, '')
           .trim()
       : null;
     const isStillGenericTarget = candidateNamedQuery
-      ? /^(a\s+song|some\s+music|something|anything|another\s+song|another\s+one|a\s+track|music|song|songs|next|next\s+song|it|that|this)$/i.test(candidateNamedQuery)
+      ? /^(a\s+song|some\s+music|something|anything|another\s+song|another\s+one|a\s+track|music|song|songs|next|next\s+song|it|that|this)$/i.test(candidateNamedQuery) ||
+        /\b(most|listened|played|heard|recommend|recommended|suggest|suggested|new\s+song|fresh\s+song|a\s+song|the\s+song|my\s+song|some\s+music|for\s+me|to\s+me|something|anything|another\s+song|different\s+song|favorite|favourite|that\s+i|what\s+i|which\s+i|have\s+listened|i\s+listen|my\s+top|my\s+history)\b/i.test(candidateNamedQuery)
       : true;
     const explicitlyNamedQuery = (!isStillGenericTarget && candidateNamedQuery && candidateNamedQuery.length >= 2)
       ? candidateNamedQuery
       : null;
 
     // Also check if userCommand mentions an exact track title from their library alongside "play"
-    const matchedExplicitLibraryTrack = explicitlyNamedQuery
+    const matchedExplicitLibraryTrack = isMostPlayedRequest
+      ? mostPlayedUserTrack
+      : explicitlyNamedQuery
       ? allUserTracks.find(t =>
           t.title.toLowerCase() === explicitlyNamedQuery.toLowerCase() ||
           explicitlyNamedQuery.toLowerCase().includes(t.title.toLowerCase()) ||
@@ -642,12 +651,15 @@ Respond ONLY with raw valid JSON matching this schema:
 
     // Detect if the user explicitly named a specific song title/artist ("play [name]") vs asking the agent to pick/suggest a song
     const isConsultativeQuestion = /\b(suggest|recommend|what should|which song|advice|advise|analyze|tell me about|capsule|stored for me|what do you have)\b/i.test(cleanCommandNoPunct);
-    const isDirectPlayCommand = !isConsultativeQuestion && Boolean(explicitlyNamedQuery);
+    const isDirectPlayCommand: boolean = false; // Always propose first and wait for user approval!
 
     const claudePayload = {
       circadian_daypart: context.circadian_daypart,
       current_track: context.current_track,
       user_command: userCommandRaw,
+      is_most_played_song_request: isMostPlayedRequest,
+      most_played_user_track: mostPlayedUserTrack,
+      is_new_or_recommend_request: isNewOrRecommendRequest,
       is_direct_play_command: isDirectPlayCommand,
       explicit_named_play_request: explicitlyNamedQuery || null,
       matched_library_track_for_explicit_request: matchedExplicitLibraryTrack || null,
@@ -708,24 +720,18 @@ Respond ONLY with raw valid JSON matching this schema:
       ).trim();
 
       const toolCallRaw = parsed.agent_tool_call || {};
-      let action: AgentToolCall['action'] = toolCallRaw.action || 'ADVISE_ONLY';
+      let action = (toolCallRaw.action || 'ADVISE_ONLY') as AgentToolCall['action'];
 
-      // CRITICAL: Whenever the agent suggests/picks a song (user did not explicitly name a specific track to play immediately),
-      // ALWAYS propose the track first and wait for the user's approval before executing!
-      if (!explicitlyNamedQuery && action === 'PLAY_TRACK_NOW') {
-        action = 'PROPOSE_TRACK';
+      // CRITICAL: Whenever the agent suggests/picks a song, ALWAYS propose the track first and wait for the user's approval before executing!
+      if ((action === 'PLAY_TRACK_NOW' && !isDirectPlayCommand) || isMostPlayedRequest || isNewOrRecommendRequest) {
+        action = 'PROPOSE_TRACK' as AgentToolCall['action'];
         if (ttsText && !ttsText.includes('?')) {
           ttsText = `${ttsText.replace(/[.!]+$/, '')}. Would you like me to play it right now?`;
         }
-      } else if (isDirectPlayCommand && action === 'PROPOSE_TRACK') {
-        action = 'PLAY_TRACK_NOW';
-        ttsText = ttsText
-          .replace(/\s*(want me to|should i|shall i|would you like me to)\s+(play|spin|put on|start|queue)\s+(it|that|this).*$/i, '')
-          .trim();
       }
 
       // Guard against any residual "How about X?" opening
-      ttsText = ttsText.replace(/^how about\s+/i, 'Spinning ');
+      ttsText = ttsText.replace(/^how about\s+/i, 'I picked ');
 
       const rawSearch = parsed.os_execution_command?.search_query || toolCallRaw.track_title || explicitlyNamedQuery || '';
       let trackTitle = toolCallRaw.track_title || parsed.os_execution_command?.track_title || parsed.track_title || '';
@@ -736,7 +742,14 @@ Respond ONLY with raw valid JSON matching this schema:
         spotifyUri = '';
       }
 
-      if (explicitlyNamedQuery && matchedExplicitLibraryTrack && !trackTitle) {
+      // If the user asked for their most-played track, bind mostPlayedUserTrack directly!
+      if (isMostPlayedRequest && mostPlayedUserTrack) {
+        trackTitle = mostPlayedUserTrack.title;
+        trackArtist = mostPlayedUserTrack.artist;
+        spotifyUri = mostPlayedUserTrack.trackId || '';
+        const artistPart = trackArtist && trackArtist !== 'Unknown Artist' ? ` by ${trackArtist}` : '';
+        ttsText = `Your most-listened song is "${trackTitle}"${artistPart} with ${mostPlayedUserTrack.playCount || 1} plays in your Spotify history. Would you like me to play it right now?`;
+      } else if (explicitlyNamedQuery && matchedExplicitLibraryTrack && !trackTitle) {
         trackTitle = matchedExplicitLibraryTrack.title;
         trackArtist = matchedExplicitLibraryTrack.artist;
         spotifyUri = matchedExplicitLibraryTrack.trackId || '';
@@ -744,9 +757,12 @@ Respond ONLY with raw valid JSON matching this schema:
         trackTitle = explicitlyNamedQuery;
       }
 
-      // If playing, proposing, or launching capsule and Claude didn't populate trackTitle, bind from capsule/freshTracks
-      if ((action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE') && !trackTitle) {
-        const chosen = action === 'LAUNCH_DOPAMINE_CAPSULE' && compactedCapsule[0]
+      // If playing, proposing, or launching capsule and Claude didn't populate a valid trackTitle, bind from capsule/freshTracks
+      const isBogusConversationalTitle = !trackTitle || /\b(most|listened|played|heard|recommend|suggest|new\s+song|fresh\s+song|for\s+me|something|that\s+i|what\s+i)\b/i.test(trackTitle);
+      if ((action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE') && isBogusConversationalTitle) {
+        const chosen = isMostPlayedRequest && mostPlayedUserTrack
+          ? mostPlayedUserTrack
+          : action === 'LAUNCH_DOPAMINE_CAPSULE' && compactedCapsule[0]
           ? compactedCapsule[0]
           : (freshTracks[0] || allUserTracks[0]);
         if (chosen) {

@@ -845,6 +845,43 @@ class TuneMindViewModel : ViewModel() {
                     }
                 }
 
+                // Also merge 15-minute WorkManager track_history_telemetry rows from Room
+                val telemetryIngested = runCatching {
+                    db?.spotifyListeningHistoryDao()?.getTelemetryItemsSnapshot(100).orEmpty()
+                }.getOrDefault(emptyList())
+                for ((key, rowsGroup) in telemetryIngested.groupBy { "${it.trackTitle.trim().lowercase()}|${it.artistName.trim().lowercase()}" }) {
+                    val sample = rowsGroup.firstOrNull() ?: continue
+                    if (sample.trackTitle.isBlank()) continue
+                    val count = rowsGroup.size
+                    val firstMs = rowsGroup.minOfOrNull { it.playedAtEpochMs } ?: sample.playedAtEpochMs
+                    val lastMs = rowsGroup.maxOfOrNull { it.playedAtEpochMs } ?: sample.playedAtEpochMs
+                    val existing = combinedTrackMap[key]
+                    if (existing == null) {
+                        combinedTrackMap[key] = TrackMemoryEntry(
+                            entryId = "spotify_tel:${sample.trackId}",
+                            sourcePackage = "com.spotify.music",
+                            providerTrackId = sample.spotifyUri.ifBlank { "spotify:track:${sample.trackId}" },
+                            title = sample.trackTitle,
+                            artist = sample.artistName,
+                            album = sample.albumName.ifBlank { null },
+                            distinctAppearanceCount = count.coerceAtLeast(1),
+                            firstObservedAppearanceAtMs = firstMs,
+                            lastObservedAppearanceAtMs = lastMs,
+                            supportingObservationIds = listOf("spotify_telemetry:${sample.trackId}"),
+                            identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
+                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
+                            historyMayBeIncomplete = false,
+                            appearances = emptyList()
+                        )
+                    } else {
+                        combinedTrackMap[key] = existing.copy(
+                            providerTrackId = existing.providerTrackId?.takeIf { it.isNotBlank() } ?: sample.spotifyUri,
+                            distinctAppearanceCount = maxOf(existing.distinctAppearanceCount, count),
+                            lastObservedAppearanceAtMs = maxOf(existing.lastObservedAppearanceAtMs ?: 0L, lastMs)
+                        )
+                    }
+                }
+
                 val recent = combinedTrackMap.values
                     .sortedByDescending { it.lastObservedAppearanceAtMs ?: 0L }
                     .take(60)

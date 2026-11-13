@@ -113,7 +113,9 @@ fun OnboardingScreen(
         when (currentStep) {
             OnboardingStep.WELCOME -> {
                 StartSplashWelcomeStep(
-                    onGetStarted = { viewModel.proceedFromWelcomeToAuth() }
+                    isReturningUser = session.isLoggedIn || session.isSpotifyConnected || session.hasCompletedStartFlow,
+                    userDisplayName = session.displayName ?: session.spotifyDisplayName ?: session.email?.substringBefore("@"),
+                    onSplashFinished = { viewModel.onSplashFinishedAutoRoute() }
                 )
             }
             OnboardingStep.AUTH_LOGIN -> {
@@ -168,61 +170,206 @@ fun OnboardingScreen(
 
 @Composable
 private fun StartSplashWelcomeStep(
-    onGetStarted: () -> Unit
+    isReturningUser: Boolean,
+    userDisplayName: String?,
+    onSplashFinished: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "start_orb")
-    val orbScale by infiniteTransition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "orb_scale"
+    var progressTarget by remember { mutableFloatStateOf(0.08f) }
+    val animatedProgress by animateFloatAsState(
+        targetValue = progressTarget,
+        animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+        label = "splash_progress"
     )
 
-    Column(
+    val infiniteTransition = rememberInfiniteTransition(label = "splash_pulse")
+    val ringScale by infiniteTransition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "ring_scale"
+    )
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow_alpha"
+    )
+
+    LaunchedEffect(Unit) {
+        progressTarget = 1.0f
+        kotlinx.coroutines.delay(1650L)
+        onSplashFinished()
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF030207),
+                        Color(0xFF070510),
+                        Color(0xFF020205)
+                    )
+                )
+            )
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 28.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 32.dp, vertical = 36.dp)
     ) {
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Center Living Orb + Brand Identity
+        // Center Branded Emblem & Wordmark
         Column(
+            modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(170.dp)
+                modifier = Modifier.size(164.dp)
             ) {
+                // Outer pulse ring
                 Box(
                     modifier = Modifier
-                        .size(150.dp)
-                        .scale(orbScale)
-                        .blur(36.dp)
+                        .size(156.dp)
+                        .scale(ringScale)
+                        .border(
+                            width = 1.2.dp,
+                            brush = Brush.sweepGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF).copy(alpha = glowAlpha),
+                                    Color(0xFF7000FF).copy(alpha = 0.3f),
+                                    Color(0xFF1DB954).copy(alpha = glowAlpha),
+                                    Color(0xFF00E5FF).copy(alpha = glowAlpha)
+                                )
+                            ),
+                            shape = CircleShape
+                        )
+                )
+                // Soft ambient radial glow
+                Box(
+                    modifier = Modifier
+                        .size(132.dp)
+                        .scale(ringScale)
+                        .blur(32.dp)
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF00E5FF).copy(alpha = 0.55f),
-                                    Color(0xFF7000FF).copy(alpha = 0.35f),
+                                    Color(0xFF00E5FF).copy(alpha = 0.45f),
+                                    Color(0xFF7000FF).copy(alpha = 0.28f),
                                     Color.Transparent
                                 )
                             ),
                             CircleShape
                         )
                 )
+                // Core Obsidian Emblem Badge
                 Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(104.dp)
-                        .scale(orbScale)
-                        .clip(CircleShape)
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(28.dp))
                         .background(
                             Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF111526),
+                                    Color(0xFF080A14)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.5.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF),
+                                    Color(0xFF7000FF),
+                                    Color(0xFF1DB954)
+                                )
+                            ),
+                            shape = RoundedCornerShape(28.dp)
+                        )
+                ) {
+                    // Acoustic Waveform Bars inside Emblem
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val barHeights = listOf(18.dp, 32.dp, 44.dp, 26.dp, 36.dp)
+                        val barColors = listOf(
+                            Color(0xFF00E5FF),
+                            Color(0xFF38BDF8),
+                            Color(0xFF1DB954),
+                            Color(0xFFA855F7),
+                            Color(0xFF00E5FF)
+                        )
+                        barHeights.forEachIndexed { idx, h ->
+                            Box(
+                                modifier = Modifier
+                                    .width(5.dp)
+                                    .height(h)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(barColors[idx])
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Text(
+                text = "TUNEMIND",
+                color = Color.White,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 7.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "NEURO-ACOUSTIC AUDIO INTELLIGENCE",
+                color = Color(0xFF00E5FF).copy(alpha = 0.82f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.8.sp
+            )
+        }
+
+        // Bottom Minimalist Progress Bar & Auto-Login Status
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(0.68f),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = if (isReturningUser) {
+                    if (!userDisplayName.isNullOrBlank()) "Welcome back, $userDisplayName" else "Signing you in automatically..."
+                } else {
+                    "Initializing Studio Core..."
+                },
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.10f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedProgress.coerceIn(0.05f, 1f))
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            Brush.horizontalGradient(
                                 colors = listOf(
                                     Color(0xFF00E5FF),
                                     Color(0xFF7000FF),
@@ -230,76 +377,6 @@ private fun StartSplashWelcomeStep(
                                 )
                             )
                         )
-                        .border(1.5.dp, Color.White.copy(alpha = 0.45f), CircleShape)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "TUNEMIND",
-                color = Color(0xFF00E5FF),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 6.sp
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "Autonomous Audio\nIntelligence Agent",
-                color = Color.White,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center,
-                lineHeight = 36.sp
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Direct Spotify Web API ingestion, real-time dopamine satiety detection, and OS-level voice execution powered by Claude.",
-                color = Color.White.copy(alpha = 0.68f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 20.sp
-            )
-        }
-
-        // Feature Pillars + CTA
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            FeatureHighlightRow(
-                dotColor = Color(0xFF1DB954),
-                title = "Direct Spotify OAuth 2.0 Sync",
-                subtitle = "Pulls recently-played history every 15m into local Room SQLite"
-            )
-            FeatureHighlightRow(
-                dotColor = Color(0xFF00E5FF),
-                title = "Satiety Reasoning Engine",
-                subtitle = "Detects listener fatigue across your last 50 tracks automatically"
-            )
-            FeatureHighlightRow(
-                dotColor = Color(0xFFA855F7),
-                title = "Hands-Free OS Execution",
-                subtitle = "Auto-plays tracks, skips overplayed loops & speaks live insights"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Button(
-                onClick = onGetStarted,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF00E5FF),
-                    contentColor = Color(0xFF05050A)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = "Get Started →",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold
                 )
             }
         }

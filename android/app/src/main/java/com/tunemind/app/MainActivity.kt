@@ -205,6 +205,34 @@ open class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    val isMainAppActive = hasCompletedLaunchStartFlow && authSession.hasCompletedStartFlow && hasAllPermissions
+
+                    LaunchedEffect(isMainAppActive) {
+                        agentVoiceManager.setForegroundActive(isMainAppActive)
+                    }
+
+                    DisposableEffect(lifecycleOwner, agentVoiceManager, isMainAppActive) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                            when (event) {
+                                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                                    if (isMainAppActive) {
+                                        agentVoiceManager.setForegroundActive(true)
+                                    }
+                                }
+                                androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                                    agentVoiceManager.setForegroundActive(false)
+                                }
+                                else -> {}
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                            agentVoiceManager.setForegroundActive(false)
+                        }
+                    }
+
                     DisposableEffect(orchestrator, hasAllPermissions) {
                         if (hasAllPermissions) {
                             orchestrator.start()
@@ -237,7 +265,7 @@ open class MainActivity : ComponentActivity() {
                     }
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
-                        if (!hasCompletedLaunchStartFlow || !authSession.hasCompletedStartFlow || !hasAllPermissions) {
+                        if (!isMainAppActive) {
                             OnboardingScreen(
                                 onComplete = {
                                     hasCompletedLaunchStartFlow = true
