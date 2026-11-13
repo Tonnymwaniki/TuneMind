@@ -92,7 +92,6 @@ export interface TuneMindTelemetryContext {
   user_email?: string;
   supabase_url?: string;
   supabase_anon_key?: string;
-  gemini_api_key?: string;
 }
 
 export interface TuneMindReasoningResponse {
@@ -119,13 +118,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private anthropic: Anthropic;
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
   private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
   private static cachedWorkingModel: string | null = null;
+  private static discoveredAnthropicModels: string[] | null = null;
+  private static lastModelDiscoveryAt: number = 0;
   private static lastStaticErrorDetails: { status?: number | string; message?: string; provider?: string } | null = null;
-  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private static pendingProposedTrack: {
     title: string;
     artist: string;
@@ -146,13 +147,12 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
 
   getLastDiagnostics() {
     const rawKey = process.env.ANTHROPIC_API_KEY;
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY;
     return {
       hasAiClient: Boolean(this.anthropic),
       keyPresent: Boolean(rawKey && rawKey !== 'your_key_here'),
       keyLength: rawKey?.length || 0,
-      geminiKeyPresent: Boolean(geminiKey && geminiKey !== 'your_key_here'),
       hasInvalidKey: this.hasInvalidKey,
+      discoveredClaudeModels: ClaudeMusicReasoningProvider.discoveredAnthropicModels,
       lastErrorDetails: this.lastErrorDetails || ClaudeMusicReasoningProvider.lastStaticErrorDetails,
       activeModelUsed: ClaudeMusicReasoningProvider.lastActiveModelUsed || this.activeModelUsed
     };
@@ -188,21 +188,96 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       .trim();
   }
 
-  private getCandidateClaudeModels(): string[] {
-    const envModel = process.env.ANTHROPIC_MODEL?.trim();
+  /**
+   * Queries Anthropic's official GET /v1/models endpoint using the user's paid ANTHROPIC_API_KEY
+   * so we always use active, non-retired Claude models enabled on their account (prioritizing Sonnet).
+   */
+  private async discoverLiveAnthropicModels(forceRefresh: boolean = false): Promise<string[]> {
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      ClaudeMusicReasoningProvider.discoveredAnthropicModels &&
+      ClaudeMusicReasoningProvider.discoveredAnthropicModels.length > 0 &&
+      now - ClaudeMusicReasoningProvider.lastModelDiscoveryAt < 30 * 60 * 1000
+    ) {
+      return ClaudeMusicReasoningProvider.discoveredAnthropicModels;
+    }
+
+    const apiKey = this.cleanKey(process.env.ANTHROPIC_API_KEY);
+    if (!apiKey) return [];
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch('https://api.anthropic.com/v1/models?limit=50', {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const body = (await res.json()) as any;
+        const items: any[] = Array.isArray(body?.data) ? body.data : [];
+        const rawIds = items
+          .map(item => String(item?.id || '').trim())
+          .filter(id => id.startsWith('claude-'));
+
+        if (rawIds.length > 0) {
+          // Prioritize Sonnet first for deepest conversational + tool reasoning, then Haiku/Opus/others
+          const sonnets = rawIds.filter(id => id.includes('sonnet'));
+          const haikus = rawIds.filter(id => id.includes('haiku') && !id.includes('sonnet'));
+          const others = rawIds.filter(id => !id.includes('sonnet') && !id.includes('haiku'));
+          const ranked = [...sonnets, ...haikus, ...others];
+
+          ClaudeMusicReasoningProvider.discoveredAnthropicModels = ranked;
+          ClaudeMusicReasoningProvider.lastModelDiscoveryAt = now;
+          console.log(`[Claude Provider] ✅ Discovered live Anthropic models on account: ${ranked.slice(0, 6).join(', ')}`);
+          return ranked;
+        }
+      } else {
+        const errBody = await res.text().catch(() => '');
+        console.warn(`[Claude Provider] /v1/models HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+      }
+    } catch (e: any) {
+      console.warn('[Claude Provider] /v1/models discovery notice:', e?.message || e);
+    }
+
+    return ClaudeMusicReasoningProvider.discoveredAnthropicModels || [];
+  }
+
+  private async getCandidateClaudeModels(forceRefreshDiscovery: boolean = false): Promise<string[]> {
     const candidateModels: string[] = [];
-    if (ClaudeMusicReasoningProvider.cachedWorkingModel) {
+    if (!forceRefreshDiscovery && ClaudeMusicReasoningProvider.cachedWorkingModel) {
       candidateModels.push(ClaudeMusicReasoningProvider.cachedWorkingModel);
     }
-    if (envModel && envModel !== 'claude-haiku-5-5' && !candidateModels.includes(envModel)) {
+
+    const liveDiscovered = await this.discoverLiveAnthropicModels(forceRefreshDiscovery);
+    for (const m of liveDiscovered) {
+      if (!candidateModels.includes(m)) {
+        candidateModels.push(m);
+      }
+    }
+
+    const envModel = process.env.ANTHROPIC_MODEL?.trim();
+    if (envModel && !candidateModels.includes(envModel)) {
       candidateModels.push(envModel);
     }
+
     for (const m of [
-      'claude-sonnet-4-20250514',
-      'claude-3-7-sonnet-20250219',
-      'claude-3-5-sonnet-20241022',
-      'claude-3-5-haiku-20241022',
-      'claude-3-haiku-20240307'
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-opus-5-5',
+      'claude-fable-5-2',
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5',
+      'claude-sonnet-4-5-20250929',
+      'claude-haiku-4-5',
+      'claude-haiku-4-5-20251001',
+      'claude-sonnet-4-20250514'
     ]) {
       if (!candidateModels.includes(m)) {
         candidateModels.push(m);
@@ -216,7 +291,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     userContent: string,
     maxTokens: number = 1400
   ): Promise<any> {
-    const candidateModels = this.getCandidateClaudeModels();
+    const candidateModels = await this.getCandidateClaudeModels();
     let lastErr: any = null;
     for (const modelId of candidateModels) {
       try {
@@ -229,6 +304,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         this.activeModelUsed = modelId;
         ClaudeMusicReasoningProvider.lastActiveModelUsed = modelId;
         ClaudeMusicReasoningProvider.cachedWorkingModel = modelId;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
         return res;
       } catch (err: any) {
         lastErr = err;
@@ -238,7 +315,6 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         if (ClaudeMusicReasoningProvider.cachedWorkingModel === modelId) {
           ClaudeMusicReasoningProvider.cachedWorkingModel = null;
         }
-        // Only abort early if the API key itself is invalid or out of credits across all models
         if (msg.includes('authentication_error') || msg.includes('invalid x-api-key') || msg.includes('credit balance is too low')) {
           throw err;
         }
@@ -254,7 +330,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     tools: any[],
     maxTokens: number = 1400
   ): Promise<any> {
-    const candidateModels = this.getCandidateClaudeModels();
+    const candidateModels = await this.getCandidateClaudeModels();
     let lastErr: any = null;
     for (const modelId of candidateModels) {
       try {
@@ -268,6 +344,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         this.activeModelUsed = modelId;
         ClaudeMusicReasoningProvider.lastActiveModelUsed = modelId;
         ClaudeMusicReasoningProvider.cachedWorkingModel = modelId;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
         return res;
       } catch (err: any) {
         lastErr = err;
@@ -1136,7 +1214,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
           });
         }
       } catch (claudeError: any) {
-        console.warn('[Claude Provider] Anthropic tool loop error, failing over to secondary cloud LLM:', claudeError?.message || claudeError);
+        console.warn('[Claude Provider] Anthropic tool loop notice, attempting single-shot Claude JSON reasoning:', claudeError?.message || claudeError);
         const msg = String(claudeError?.message || claudeError);
         if (msg.includes('401') || msg.includes('invalid x-api-key')) {
           this.hasInvalidKey = true;
@@ -1144,9 +1222,9 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       }
     }
 
-    // ─── 3B. MULTI-PROVIDER CLOUD LLM FAILOVER (GEMINI -> OPEN CLOUD LLM) ─────
-    if (!submittedTurnDecision) {
-      const failoverResult = await this.tryCloudFailoverAutonomousDecision(
+    // ─── 3B. SINGLE-SHOT CLAUDE JSON PASS (SAME PAID ANTHROPIC KEY ONLY) ──────
+    if (!submittedTurnDecision && available && !this.hasInvalidKey) {
+      const singleShotClaude = await this.tryClaudeSingleShotJsonDecision(
         context,
         initialContextPayload,
         allUserTracks,
@@ -1154,20 +1232,20 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         topUserArtists,
         excludedSet
       );
-      if (failoverResult) {
-        submittedTurnDecision = failoverResult.decision;
-        if (failoverResult.fallbackTrack) {
-          lastDiscoveredOrSearchedTrack = failoverResult.fallbackTrack;
+      if (singleShotClaude) {
+        submittedTurnDecision = singleShotClaude.decision;
+        if (singleShotClaude.fallbackTrack) {
+          lastDiscoveredOrSearchedTrack = singleShotClaude.fallbackTrack;
         }
-        providerTag = failoverResult.providerTag;
+        providerTag = singleShotClaude.providerTag;
       }
     }
 
-    // ─── 3C. FINALIZE AUTONOMOUS LLM DECISION IF OBTAINED ─────────────────────
+    // ─── 3C. FINALIZE AUTONOMOUS CLAUDE DECISION IF OBTAINED ──────────────────
     if (submittedTurnDecision) {
       let action = (submittedTurnDecision.action || 'ADVISE_ONLY') as AgentToolCall['action'];
       let ttsText = String(submittedTurnDecision.voice_agent_tts || '').trim();
-      // IMPORTANT: Never attach a track if the LLM chose ADVISE_ONLY!
+      // IMPORTANT: Never attach a track if Claude chose ADVISE_ONLY!
       const isTrackBearingAction =
         action === 'PROPOSE_TRACK' ||
         action === 'PLAY_TRACK_NOW' ||
@@ -1454,11 +1532,10 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
   }
 
   /**
-   * Secondary Autonomous Cloud LLM Failover (Google Gemini -> Open Cloud LLM).
-   * Pre-fetches relevant Spotify tracks and runs full autonomous reasoning so the AI
-   * always converses naturally on its own even if Anthropic credits/keys are unavailable.
+   * Secondary Single-Shot Claude JSON Pass using ONLY the user's paid ANTHROPIC_API_KEY
+   * (used if a newly discovered Claude model ever skips native tool_use blocks).
    */
-  private async tryCloudFailoverAutonomousDecision(
+  private async tryClaudeSingleShotJsonDecision(
     context: TuneMindTelemetryContext,
     initialContextPayload: any,
     allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
@@ -1473,7 +1550,6 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     let liveSpotifyDiscovery: any[] = [];
     let liveSpotifySearchHits: any[] = [];
 
-    // Pre-fetch Spotify discovery or search results ONLY when the user's message involves music discovery/play/reject
     const wantsMostPlayed = /\b(most\s+(played|listened|heard)|listened\s+(to\s+)?(the\s+)?most|listen\s+(to\s+)?(the\s+)?most|played\s+(the\s+)?most|favorite\s+(song|track)|favourite\s+(song|track)|top\s+(song|track)|number\s+one\s+(song|track))\b/i.test(lowerMsg);
     const wantsDiscoveryOrNew = /\b(new\s+(song|track|music|tune|vibe)|fresh\s+(song|track|music|tune)|something\s+(new|fresh|different|good)|recommend|recommendation|suggest|suggestion|discover|another\s+(song|one|track)|different\s+(song|track)|play\s+(for\s+me\s+|me\s+)?(a\s+|some\s+)?(new\s+|fresh\s+|good\s+)?(song|track|music|tune|bongo|gospel|afrobeats|gikuyu|mugithi|r&b|hip\s*hop|pop|chill|upbeat))\b/i.test(lowerMsg);
     const explicitPlayMatch = lowerMsg.match(/^\s*(?:please\s+|hey\s+|hi\s+)?(?:play|spin|put on)\s+(.+)$/i);
@@ -1524,7 +1600,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       pre_fetched_spotify_catalog_search_results: liveSpotifySearchHits.slice(0, 4)
     };
 
-    const jsonSystemPrompt = `You are TuneMind, an intelligent, conversational, self-reasoning AI music companion on Android (like ChatGPT Voice with real-time Spotify & OS execution capabilities).
+    const jsonSystemPrompt = `You are TuneMind, an intelligent, conversational, self-reasoning AI music companion on Android powered by Anthropic Claude.
 Reason naturally about what the user actually said before choosing an action:
 1. CONVERSATION FIRST: When the user says "how are you", "hello", "hey", talks about their day/feelings, asks a general question, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly and naturally to what they actually said! NEVER jump into proposing a song when the user is just greeting you or chatting!
 2. 2-STEP SONG APPROVAL: Only when the user asks to play music, wants a song recommendation, or asks for their most-played song, pick the best matching track from their Spotify data and set "action": "PROPOSE_TRACK", "expect_follow_up": true, and ask if they'd like you to play it.
@@ -1548,86 +1624,18 @@ Respond ONLY with a single valid JSON object:
 
     const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, conversation history, and Spotify data, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
 
-    // 1. Try Google Gemini API if GEMINI_API_KEY is available
-    const geminiKey = this.cleanKey(
-      context.gemini_api_key ||
-      process.env.GEMINI_API_KEY ||
-      process.env.GOOGLE_API_KEY ||
-      process.env.API_KEY
-    );
-    if (geminiKey) {
-      for (const geminiModel of ['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.0-flash']) {
-        try {
-          const gemRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(geminiKey)}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                systemInstruction: { parts: [{ text: jsonSystemPrompt }] },
-                contents: [{ role: 'user', parts: [{ text: userPromptContent }] }],
-                generationConfig: {
-                  temperature: 0.45,
-                  responseMimeType: 'application/json'
-                }
-              })
-            }
-          );
-          if (gemRes.ok) {
-            const gemData = (await gemRes.json()) as any;
-            const rawText = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[0]);
-              if (parsed && typeof parsed.voice_agent_tts === 'string' && parsed.voice_agent_tts.trim()) {
-                this.activeModelUsed = geminiModel;
-                ClaudeMusicReasoningProvider.lastActiveModelUsed = geminiModel;
-                console.log(`[Gemini Autonomous Agent] ✅ Reasoned with ${geminiModel}: action=${parsed.action}`);
-                return { decision: parsed, fallbackTrack, providerTag: 'gemini-autonomous-agent' };
-              }
-            }
-          }
-        } catch (gemErr: any) {
-          console.warn(`[Gemini Autonomous Agent] ${geminiModel} notice:`, gemErr?.message || gemErr);
-        }
-      }
-    }
-
-    // 2. Try Open Cloud LLM (OpenAI-compatible endpoint) so reasoning works even without paid keys
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-      const openRes = await fetch('https://text.pollinations.ai/openai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: 'openai',
-          messages: [
-            { role: 'system', content: jsonSystemPrompt },
-            { role: 'user', content: userPromptContent }
-          ]
-        })
-      });
-      clearTimeout(timeoutId);
-
-      if (openRes.ok) {
-        const openData = (await openRes.json()) as any;
-        const contentStr = String(openData?.choices?.[0]?.message?.content || '').trim();
-        const jsonMatch = contentStr.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed && typeof parsed.voice_agent_tts === 'string' && parsed.voice_agent_tts.trim()) {
-            const modelName = String(openData?.model || 'openai-autonomous-cloud');
-            this.activeModelUsed = modelName;
-            ClaudeMusicReasoningProvider.lastActiveModelUsed = modelName;
-            console.log(`[Open Cloud Autonomous Agent] ✅ Reasoned with ${modelName}: action=${parsed.action}`);
-            return { decision: parsed, fallbackTrack, providerTag: 'autonomous-cloud-llm' };
-          }
+      const claudeRes = await this.callClaudeWithSonnetPriority(jsonSystemPrompt, userPromptContent, 900);
+      const rawText = this.extractRawText(claudeRes?.content);
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && typeof parsed.voice_agent_tts === 'string' && parsed.voice_agent_tts.trim()) {
+          return { decision: parsed, fallbackTrack, providerTag: 'claude-autonomous-agent' };
         }
       }
-    } catch (openErr: any) {
-      console.warn('[Open Cloud Autonomous Agent] Notice:', openErr?.message || openErr);
+    } catch (err: any) {
+      console.warn('[Claude Single-Shot JSON] Notice:', err?.message || err);
     }
 
     return null;
