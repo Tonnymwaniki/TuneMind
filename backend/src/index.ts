@@ -80,7 +80,27 @@ wss.on('connection', async (ws: WebSocket) => {
 
   let isAssemblyReady = false;
   let chunkCount = 0;
-  const pendingAudioBuffer: Buffer[] = [];
+  let audioAccumulator: Buffer = Buffer.alloc(0);
+  const MIN_AAI_FRAME_BYTES = 3200; // 100ms at 16kHz 16-bit mono (AssemblyAI v3 requires 20ms..1000ms)
+  const MAX_AAI_FRAME_BYTES = 16000; // 500ms max per flushed chunk
+
+  const flushAccumulatorToAssembly = () => {
+    if (!isAssemblyReady || aaiSocket.readyState !== WebSocket.OPEN) return;
+    while (audioAccumulator.length >= MIN_AAI_FRAME_BYTES) {
+      const sliceLen = Math.min(audioAccumulator.length, MAX_AAI_FRAME_BYTES);
+      // Ensure even byte count (16-bit PCM alignment)
+      const alignedLen = sliceLen - (sliceLen % 2);
+      if (alignedLen < MIN_AAI_FRAME_BYTES) break;
+      const frame = audioAccumulator.subarray(0, alignedLen);
+      audioAccumulator = audioAccumulator.subarray(alignedLen);
+      try {
+        aaiSocket.send(frame);
+      } catch (e) {
+        console.error('[VoiceStream] Failed to push audio frame to AAI:', e);
+        break;
+      }
+    }
+  };
 
   const apiKey = (process.env.ASSEMBLYAI_API_KEY || '').trim();
   if (!apiKey) {
@@ -281,16 +301,9 @@ wss.on('connection', async (ws: WebSocket) => {
         console.log(`[STT] Session started: ${sessionId}`);
         isAssemblyReady = true;
 
-        if (pendingAudioBuffer.length > 0 && aaiSocket.readyState === WebSocket.OPEN) {
-          console.log(`[STT] ⚡ Flushing ${pendingAudioBuffer.length} buffered pre-session audio chunks to AssemblyAI...`);
-          while (pendingAudioBuffer.length > 0) {
-            const chunk = pendingAudioBuffer.shift();
-            if (chunk) {
-              try {
-                aaiSocket.send(chunk);
-              } catch (_e) {}
-            }
-          }
+        if (audioAccumulator.length >= MIN_AAI_FRAME_BYTES && aaiSocket.readyState === WebSocket.OPEN) {
+          console.log(`[STT] ⚡ Flushing ${audioAccumulator.length} buffered pre-session audio bytes to AssemblyAI...`);
+          flushAccumulatorToAssembly();
         }
       } else if (msg.type === 'Turn' || msg.message_type === 'FinalTranscript' || msg.message_type === 'PartialTranscript') {
         const text = (msg.transcript || msg.text || '').trim();
@@ -341,9 +354,9 @@ wss.on('connection', async (ws: WebSocket) => {
   });
 
   // Handle incoming messages from the Android client
-  ws.on('message', (message: RawData) => {
-    // If it's a string, it may be JSON client telemetry (now playing, recent tracks)
-    if (typeof message === 'string' || (Buffer.isBuffer(message) && message.length > 0 && message[0] === 123)) { // 123 is '{'
+  ws.on('message', (message: RawData, isBinary: boolean) => {
+    // Parse text frames (or JSON client_context) first
+    if (!isBinary || typeof message === 'string') {
       try {
         const textData = message.toString();
         const json = JSON.parse(textData);
@@ -361,27 +374,29 @@ wss.on('connection', async (ws: WebSocket) => {
           return;
         }
       } catch (_e) {
-        // Not a JSON text command; treat as PCM audio buffer below
+        // If a client sent binary data without setting the binary opcode, fall through below
       }
     }
 
-    if (Buffer.isBuffer(message)) {
+    const rawBuf = Buffer.isBuffer(message)
+      ? message
+      : Array.isArray(message)
+        ? Buffer.concat(message)
+        : Buffer.from(message as ArrayBuffer);
+
+    if (rawBuf.length > 0) {
       chunkCount++;
       if (chunkCount % 20 === 0) {
         console.log(`[VoiceStream] 🔵 Streaming audio chunk... (x${chunkCount})`);
       }
 
+      // Cap pre-session buffer at ~5 seconds (160,000 bytes)
+      if (audioAccumulator.length < 160000) {
+        audioAccumulator = Buffer.concat([audioAccumulator, rawBuf]);
+      }
+
       if (isAssemblyReady && aaiSocket.readyState === WebSocket.OPEN) {
-        try {
-          aaiSocket.send(message);
-        } catch (e) {
-          console.error('[VoiceStream] Failed to push audio to AAI:', e);
-        }
-      } else {
-        // Buffer audio chunks until AssemblyAI session starts so 0ms of user speech is lost!
-        if (pendingAudioBuffer.length < 150) {
-          pendingAudioBuffer.push(Buffer.from(message));
-        }
+        flushAccumulatorToAssembly();
       }
     }
   });

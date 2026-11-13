@@ -632,17 +632,9 @@ class AgentVoiceManager(
                     val json = JSONObject(text)
                     if (json.has("error")) {
                         if (hasCompletedReasoning || _agentState.value == AgentState.SPEAKING) return
-                        Log.w(TAG, "Server reported error: ${json.optString("error")}")
-                        stopMicrophoneStream()
-                        _agentState.value = AgentState.ERROR
-                        errorResetJob?.cancel()
-                        errorResetJob = scope.launch {
-                            delay(2500)
-                            withContext(Dispatchers.Main) {
-                                releaseAudioDucking()
-                                resumeWakeWordListening()
-                            }
-                        }
+                        val errMsg = json.optString("error") + ": " + json.optString("message")
+                        Log.w(TAG, "Server reported STT notice ($errMsg) — switching seamlessly to on-device SpeechRecognizer...")
+                        fallbackToNativeSpeechRecognizer(errMsg)
                         return
                     }
 
@@ -652,120 +644,8 @@ class AgentVoiceManager(
                         val payload = json.optString("payload", "")
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
                         stopMicrophoneStream()
-                        setSpeakingState()
-
                         val dataObj = json.optJSONObject("data")
-                        val cmdObj = dataObj?.optJSONObject("os_execution_command")
-                        val toolObj = dataObj?.optJSONObject("agent_tool_call")
-
-                        val rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
-                            ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
-                        val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
-                            ?: toolObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
-                        val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
-                        var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
-                            ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
-
-                        if (!rawTrackTitle.isNullOrBlank()) {
-                            recordAgentSuggestedTrack(rawTrackTitle)
-                        }
-
-                        if (resolvedSpotifyUri.isNullOrBlank()) {
-                            val recents = getRecentTracks?.invoke() ?: emptyList()
-                            val matchedLocal = recents.firstOrNull { r ->
-                                val rTitle = r.title?.trim() ?: ""
-                                rTitle.isNotEmpty() && (
-                                    (rawTrackTitle != null && rTitle.equals(rawTrackTitle.trim(), ignoreCase = true)) ||
-                                    rawSearchQuery.lowercase().contains(rTitle.lowercase())
-                                )
-                            }
-                            if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
-                                resolvedSpotifyUri = matchedLocal.providerTrackId
-                                Log.d(TAG, "Bound exact Spotify URI from local memory: $resolvedSpotifyUri")
-                            }
-                        }
-
-                        val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
-                            action = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY",
-                            track_title = rawTrackTitle,
-                            track_artist = rawTrackArtist,
-                            spotify_uri = resolvedSpotifyUri,
-                            target_player = toolObj?.optString("target_player", "com.spotify.music"),
-                            volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
-                            palette_id = toolObj?.optString("palette_id", null)?.takeIf { it.isNotBlank() },
-                            target_screen = toolObj?.optString("target_screen", null)?.takeIf { it.isNotBlank() },
-                            expect_follow_up = toolObj?.optBoolean("expect_follow_up", false)
-                                ?: (cmdObj?.optString("intent", "NONE") == "NONE" && !rawTrackTitle.isNullOrBlank())
-                        )
-
-                        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
-                            calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 30) ?: 30,
-                            flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
-                            voice_agent_tts = payload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
-                            reasoning_mode = dataObj?.optString("reasoning_mode", "SONIC_CURATOR") ?: "SONIC_CURATOR",
-                            agent_tool_call = toolPayload,
-                            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
-                                intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
-                                target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
-                                search_query = rawSearchQuery,
-                                suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
-                                track_title = rawTrackTitle,
-                                track_artist = rawTrackArtist,
-                                spotify_uri = resolvedSpotifyUri
-                            ),
-                            voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)
-                        )
-
-                        // Execute app-level tool mutations immediately (Vault, Theme, Screen Navigation, Pause/Resume state)
-                        mainHandler.post {
-                            onToolActionExecuted?.invoke(toolPayload)
-                        }
-
-                        if (responseObj.voice_agent_tts.isNotBlank()) {
-                            scope.launch {
-                                _transcriptionFlow.emit(responseObj.voice_agent_tts)
-                            }
-                        }
-                        if (responseObj.flow_state_analysis.isNotBlank()) {
-                            _flowAnalysisFlow.value = responseObj.flow_state_analysis
-                        }
-                        _agentSatietyFlow.value = responseObj.calculated_satiety_percentage
-
-                        errorResetJob?.cancel()
-                        executionEngine.executeBackendCommand(
-                            response = responseObj,
-                            onBeforeLaunch = {
-                                mainHandler.post {
-                                    abandonAssistantAudioFocusOnly()
-                                    if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
-                                        val dispatchedTitle = rawTrackTitle ?: rawSearchQuery.ifBlank { "Fresh Selection" }
-                                        val dispatchedArtist = rawTrackArtist ?: "Autonomous Studio Flow"
-                                        onTrackDispatched?.invoke(
-                                            dispatchedTitle,
-                                            dispatchedArtist,
-                                            responseObj.os_execution_command.target_player
-                                        )
-                                    }
-                                }
-                            },
-                            onFinished = {
-                                mainHandler.post {
-                                    if (toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
-                                        // Conversational proposal or follow-up question: wait 650ms for speaker tail to clear, then open mic!
-                                        Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
-                                        _agentState.value = AgentState.IDLE
-                                        mainHandler.postDelayed({
-                                            if (_agentState.value == AgentState.IDLE) {
-                                                simulateWakeWordDetected()
-                                            }
-                                        }, 650L)
-                                    } else {
-                                        releaseAudioDucking()
-                                        resumeWakeWordListening()
-                                    }
-                                }
-                            }
-                        )
+                        dispatchReasoningResult(dataObj, payload)
                         return
                     }
 
@@ -819,27 +699,580 @@ class AgentVoiceManager(
                     Log.e(TAG, "❌ WebSocket FAILURE HTTP Code: ${response.code}, Body: $body")
                 }
 
-                stopMicrophoneStream()
-                _agentState.value = AgentState.ERROR
-                errorResetJob?.cancel()
-                errorResetJob = scope.launch {
-                    delay(2500)
-                    withContext(Dispatchers.Main) {
-                        releaseAudioDucking()
-                        resumeWakeWordListening()
-                    }
-                }
+                Log.w(TAG, "WebSocket stream unavailable — switching seamlessly to on-device SpeechRecognizer...")
+                fallbackToNativeSpeechRecognizer(t.message ?: "WebSocket failure")
             }
         }
 
         webSocket = client.newWebSocket(request, listener)
     }
 
+    private fun fallbackToNativeSpeechRecognizer(reason: String?) {
+        Log.d(TAG, "Activating on-device SpeechRecognizer fallback (reason: $reason)")
+        stopMicrophoneStream()
+        _agentState.value = AgentState.LISTENING
+        startNativeSpeechRecognizer()
+    }
+
+    fun dispatchReasoningResult(dataObj: JSONObject?, explicitTtsPayload: String = "") {
+        setSpeakingState()
+
+        val cmdObj = dataObj?.optJSONObject("os_execution_command")
+        val toolObj = dataObj?.optJSONObject("agent_tool_call")
+
+        val rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+        val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+        val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
+        var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+
+        if (!rawTrackTitle.isNullOrBlank()) {
+            recordAgentSuggestedTrack(rawTrackTitle)
+        }
+
+        if (resolvedSpotifyUri.isNullOrBlank()) {
+            val recents = getRecentTracks?.invoke() ?: emptyList()
+            val matchedLocal = recents.firstOrNull { r ->
+                val rTitle = r.title?.trim() ?: ""
+                rTitle.isNotEmpty() && (
+                    (rawTrackTitle != null && rTitle.equals(rawTrackTitle.trim(), ignoreCase = true)) ||
+                    rawSearchQuery.lowercase().contains(rTitle.lowercase())
+                )
+            }
+            if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
+                resolvedSpotifyUri = matchedLocal.providerTrackId
+                Log.d(TAG, "Bound exact Spotify URI from local memory: $resolvedSpotifyUri")
+            }
+        }
+
+        val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
+            action = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY",
+            track_title = rawTrackTitle,
+            track_artist = rawTrackArtist,
+            spotify_uri = resolvedSpotifyUri,
+            target_player = toolObj?.optString("target_player", "com.spotify.music"),
+            volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
+            palette_id = toolObj?.optString("palette_id", null)?.takeIf { it.isNotBlank() },
+            target_screen = toolObj?.optString("target_screen", null)?.takeIf { it.isNotBlank() },
+            expect_follow_up = toolObj?.optBoolean("expect_follow_up", false)
+                ?: (cmdObj?.optString("intent", "NONE") == "NONE" && !rawTrackTitle.isNullOrBlank())
+        )
+
+        if ((toolPayload.action == "PROPOSE_TRACK" || toolPayload.action == "LAUNCH_DOPAMINE_CAPSULE") && !rawTrackTitle.isNullOrBlank()) {
+            clientPendingProposedTrack = PendingProposedTrack(
+                title = rawTrackTitle,
+                artist = rawTrackArtist ?: "",
+                trackId = resolvedSpotifyUri,
+                source = toolPayload.target_player ?: "com.spotify.music"
+            )
+        } else if (toolPayload.action == "PLAY_TRACK_NOW") {
+            clientPendingProposedTrack = null
+        }
+
+        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
+            calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 30) ?: 30,
+            flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
+            voice_agent_tts = explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
+            reasoning_mode = dataObj?.optString("reasoning_mode", "SONIC_CURATOR") ?: "SONIC_CURATOR",
+            agent_tool_call = toolPayload,
+            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
+                target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
+                search_query = rawSearchQuery,
+                suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
+                track_title = rawTrackTitle,
+                track_artist = rawTrackArtist,
+                spotify_uri = resolvedSpotifyUri
+            ),
+            voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)?.takeIf { it.isNotBlank() && it != "null" }
+        )
+
+        mainHandler.post {
+            onToolActionExecuted?.invoke(toolPayload)
+        }
+
+        if (responseObj.voice_agent_tts.isNotBlank()) {
+            scope.launch {
+                _transcriptionFlow.emit(responseObj.voice_agent_tts)
+            }
+        }
+        if (responseObj.flow_state_analysis.isNotBlank()) {
+            _flowAnalysisFlow.value = responseObj.flow_state_analysis
+        }
+        _agentSatietyFlow.value = responseObj.calculated_satiety_percentage
+
+        errorResetJob?.cancel()
+        executionEngine.executeBackendCommand(
+            response = responseObj,
+            onBeforeLaunch = {
+                mainHandler.post {
+                    abandonAssistantAudioFocusOnly()
+                    if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
+                        val dispatchedTitle = rawTrackTitle ?: rawSearchQuery.ifBlank { "Fresh Selection" }
+                        val dispatchedArtist = rawTrackArtist ?: "Autonomous Studio Flow"
+                        onTrackDispatched?.invoke(
+                            dispatchedTitle,
+                            dispatchedArtist,
+                            responseObj.os_execution_command.target_player
+                        )
+                    }
+                }
+            },
+            onFinished = {
+                mainHandler.post {
+                    if (toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
+                        Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
+                        _agentState.value = AgentState.IDLE
+                        mainHandler.postDelayed({
+                            if (_agentState.value == AgentState.IDLE) {
+                                simulateWakeWordDetected()
+                            }
+                        }, 650L)
+                    } else {
+                        releaseAudioDucking()
+                        resumeWakeWordListening()
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Evaluates a finalized transcript via the Cloud HTTP `/api/v1/reasoning/evaluate-satiety` endpoint
+     * with full client telemetry, or falls back to local on-device reasoning if offline.
+     */
+    fun processFinalTranscriptWithFallback(transcript: String) {
+        val cleaned = transcript.trim()
+        if (cleaned.isEmpty()) {
+            releaseAudioDucking()
+            resumeWakeWordListening()
+            return
+        }
+
+        setThinkingState()
+        scope.launch {
+            try {
+                val np = getNowPlaying?.invoke()
+                val recents = getRecentTracks?.invoke() ?: emptyList()
+                val hearing = getHearingInsights?.invoke()
+                val vaultList = getVaultTracks?.invoke() ?: emptyList()
+                val capsule = getDopamineCapsule?.invoke()
+                val pendingProp = clientPendingProposedTrack
+
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val daypart = when (hour) {
+                    in 6..11 -> "Morning"
+                    in 12..16 -> "Midday"
+                    in 17..21 -> "Evening"
+                    else -> "Late Night"
+                }
+
+                val bodyJson = JSONObject().apply {
+                    put("timestamp_utc", java.time.Instant.now().toString())
+                    put("circadian_daypart", daypart)
+                    put("user_command", cleaned)
+                    put("current_satiety_percentage", _agentSatietyFlow.value)
+                    put("current_track", JSONObject().apply {
+                        put("title", np?.title ?: "Standing By")
+                        put("artist", np?.artist ?: "")
+                        put("source_player", np?.sourcePackage ?: "com.spotify.music")
+                        put("is_playing", np?.isPlaying == true)
+                    })
+
+                    val historyArr = org.json.JSONArray()
+                    for (r in recents.take(50)) {
+                        historyArr.put(JSONObject().apply {
+                            put("title", r.title ?: "")
+                            put("artist", r.artist ?: "")
+                            put("source_player", r.sourcePackage ?: "com.spotify.music")
+                            put("playCount", r.distinctAppearanceCount)
+                            put("trackId", r.providerTrackId ?: "")
+                        })
+                    }
+                    put("rolling_history", historyArr)
+                    put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
+
+                    if (hearing != null) {
+                        put("hearing_telemetry", JSONObject().apply {
+                            put("estimated_db", hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0)
+                            put("safe_headroom_db", hearing.currentHeadroomDb.toDouble().takeIf { !it.isNaN() } ?: 17.0)
+                            put("daily_exposure_minutes", hearing.dailyExposureMinutes)
+                            put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
+                            put("safety_guidance", hearing.safetyGuidance)
+                        })
+                    }
+
+                    val vaultArr = org.json.JSONArray()
+                    for (vt in vaultList) {
+                        vaultArr.put(JSONObject().apply {
+                            put("id", vt.id)
+                            put("title", vt.title)
+                            put("artist", vt.artist)
+                            put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble().takeIf { !it.isNaN() } ?: 3.0)
+                            put("recovery_percent", (vt.recoveryProgress * 100).toInt())
+                            put("satiety_score", vt.satietyScore)
+                        })
+                    }
+                    put("vault_tracks", vaultArr)
+
+                    if (capsule != null && capsule.tracks.isNotEmpty()) {
+                        val capArr = org.json.JSONArray()
+                        for (ct in capsule.tracks) {
+                            capArr.put(JSONObject().apply {
+                                put("title", ct.title)
+                                put("artist", ct.artist)
+                                put("trackId", ct.spotifyUri ?: "")
+                                put("freshness_percent", ct.freshnessPercent)
+                                put("reason", ct.reason)
+                            })
+                        }
+                        put("dopamine_capsule", capArr)
+                    }
+
+                    if (pendingProp != null) {
+                        put("pending_proposed_track", JSONObject().apply {
+                            put("title", pendingProp.title)
+                            put("artist", pendingProp.artist)
+                            put("trackId", pendingProp.trackId ?: "")
+                            put("source", pendingProp.source)
+                        })
+                    }
+                }
+
+                val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
+                val mediaType = okhttp3.MediaType.Companion.toMediaType("application/json; charset=utf-8")
+                val req = Request.Builder()
+                    .url("$baseUrl/api/v1/reasoning/evaluate-satiety")
+                    .post(okhttp3.RequestBody.Companion.toRequestBody(bodyJson.toString(), mediaType))
+                    .build()
+
+                val resp = client.newCall(req).execute()
+                val respStr = resp.body?.string()
+                resp.close()
+
+                if (resp.isSuccessful && !respStr.isNullOrBlank()) {
+                    val respJson = JSONObject(respStr)
+                    dispatchReasoningResult(respJson, respJson.optString("voice_agent_tts", ""))
+                    return@launch
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "HTTP reasoning fallback notice, using on-device smart agent: ${e.message}")
+            }
+
+            // Local On-Device Smart Agent Fallback (works 100% offline)
+            val localJson = buildLocalOnDeviceFallbackJson(cleaned)
+            dispatchReasoningResult(localJson, localJson.optString("voice_agent_tts", ""))
+        }
+    }
+
+    private fun buildLocalOnDeviceFallbackJson(transcript: String): JSONObject {
+        val lower = transcript.lowercase().trim()
+        val np = getNowPlaying?.invoke()
+        val recents = getRecentTracks?.invoke() ?: emptyList()
+        val hearing = getHearingInsights?.invoke()
+        val capsule = getDopamineCapsule?.invoke()
+        val pending = clientPendingProposedTrack
+        val targetPlayer = np?.sourcePackage?.takeIf { it.isNotBlank() } ?: "com.spotify.music"
+
+        // 1. Pause / Stop
+        if (Regex("\\b(pause|stop|quiet|mute|silence|hold on|simama|nyamaza)\\b").containsMatchIn(lower)) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 25)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Playback paused via on-device studio control.")
+                put("voice_agent_tts", "Paused your music. Let me know whenever you want to spin something else.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "PAUSE_PLAYBACK")
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_PAUSE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 2. Resume
+        if (Regex("\\b(resume|unpause|continue playing|keep playing)\\b").containsMatchIn(lower)) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 25)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Playback resumed via on-device studio control.")
+                put("voice_agent_tts", "Resuming your music right now.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "RESUME_PLAYBACK")
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_RESUME")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 3. Approval of pending proposed track
+        if (pending != null && Regex("\\b(yes|yeah|yep|sure|okay|ok|play it|go ahead|do it|sounds good|ndio|sawa|spin it)\\b").containsMatchIn(lower)) {
+            clientPendingProposedTrack = null
+            val artistPart = if (pending.artist.isNotBlank() && pending.artist != "Unknown Artist") " by ${pending.artist}" else ""
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 20)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Approved ${pending.title} — launching playback.")
+                put("voice_agent_tts", "Spinning ${pending.title}$artistPart for you right now.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "PLAY_TRACK_NOW")
+                    put("track_title", pending.title)
+                    put("track_artist", pending.artist)
+                    put("spotify_uri", pending.trackId ?: "")
+                    put("target_player", pending.source)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_NEXT_AND_DEEP_LINK")
+                    put("target_player", pending.source)
+                    put("search_query", "${pending.title} ${pending.artist}".trim())
+                    put("track_title", pending.title)
+                    put("track_artist", pending.artist)
+                    put("spotify_uri", pending.trackId ?: "")
+                })
+            }
+        }
+
+        // 4. Skip Next / Previous
+        if (Regex("\\b(skip|next song|next track)\\b").containsMatchIn(lower)) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 25)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Skipping to next track in queue.")
+                put("voice_agent_tts", "Skipping to your next track right now.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "SKIP_NEXT")
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_NEXT")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+        if (Regex("\\b(previous|go back|last song)\\b").containsMatchIn(lower)) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 25)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Returning to previous track.")
+                put("voice_agent_tts", "Going back to the previous track.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "SKIP_PREVIOUS")
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_PREV")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 5. Volume Adjustment
+        if (Regex("\\b(volume|louder|quieter|turn it down|turn it up|lower the volume|raise the volume)\\b").containsMatchIn(lower)) {
+            val numMatch = Regex("(\\d{1,3})").find(lower)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val targetVol = when {
+                numMatch != null -> numMatch.coerceIn(15, 100)
+                lower.contains("down") || lower.contains("quiet") || lower.contains("lower") -> 45
+                else -> 75
+            }
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 24)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Adjusted system media volume to $targetVol% for optimal acoustic headroom.")
+                put("voice_agent_tts", "Set your media volume to $targetVol percent to keep your hearing in the sweet spot.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "SET_VOLUME_PERCENT")
+                    put("volume_percent", targetVol)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 6. Theme / Atmosphere Shift
+        if (Regex("\\b(theme|atmosphere|color|palette|mood light)\\b").containsMatchIn(lower)) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 22)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Shifting Studio Adaptive Atmosphere palette.")
+                put("voice_agent_tts", "Shifted your studio atmosphere palette to match your current vibe.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "SHIFT_ATMOSPHERE")
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 7. Cooldown Vault Lock / Restore or Screen Navigation
+        if (Regex("\\b(quarantine|lock this|put in vault|cooldown vault)\\b").containsMatchIn(lower)) {
+            val curTitle = np?.title ?: recents.firstOrNull()?.title ?: "Current Track"
+            val curArtist = np?.artist ?: recents.firstOrNull()?.artist ?: ""
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 78)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Locked $curTitle in the Cooldown Vault to restore dopamine sensitivity.")
+                put("voice_agent_tts", "I've locked $curTitle into your Cooldown Vault so its dopamine hit can fully recover.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "QUARANTINE_TO_VAULT")
+                    put("track_title", curTitle)
+                    put("track_artist", curArtist)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+        if (Regex("\\b(open vault|show vault|go to vault|open rhythm|show dna|rhythm dna)\\b").containsMatchIn(lower)) {
+            val screen = if (lower.contains("rhythm") || lower.contains("dna")) "RHYTHM" else "DOPAMINE"
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 24)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Navigating studio view to $screen screen.")
+                put("voice_agent_tts", "Opening your ${if (screen == "RHYTHM") "Rhythm DNA and Hearing" else "Dopamine Vault"} screen right now.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "NAVIGATE_SCREEN")
+                    put("target_screen", screen)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 8. Hearing / Ears check
+        if (Regex("\\b(hearing|ears|decibel|db|loud|safe|exposure)\\b").containsMatchIn(lower)) {
+            val db = hearing?.estimatedAverageDb?.toInt() ?: 68
+            val headroom = hearing?.currentHeadroomDb?.toInt() ?: 17
+            val mins = hearing?.dailyExposureMinutes ?: 40
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 24)
+                put("reasoning_mode", "JOURNEY_ADVISOR")
+                put("flow_state_analysis", "Hearing Telemetry: ${db}dB • ${headroom}dB safe headroom • ${mins}m today")
+                put("voice_agent_tts", "Your hearing exposure is sitting around $db decibels with $headroom decibels of safe headroom after $mins minutes today. Want me to adjust the volume or pick a calmer track?")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "ADVISE_ONLY")
+                    put("expect_follow_up", true)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+
+        // 9. Explicit named song request ("play [Song Name]") vs generic recommendation
+        val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val genericPlayRegex = Regex("^\\s*(please\\s+)?(play|spin|put on|give me|suggest|recommend|find)(\\s+me)?(\\s+(a|some|any|another|different|fresh|good|nice|new|best|my))?\\s*(music|song|songs|track|tracks|vibe|vibes|tune|tunes|something|anything|bongo|bongo flava|afrobeats|hip hop|gospel|capsule|dopamine capsule)?(\\s+(for me|please|right now|now|today))?\\s*$")
+        val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
+        val rawNamedTarget = if (!genericPlayRegex.matches(cleanNoPunct) && explicitMatch != null) {
+            explicitMatch.groupValues[3]
+                .replace(Regex("^(me\\s+)"), "")
+                .replace(Regex("\\b(right now|now|for me|please|on spotify)\\b"), "")
+                .trim()
+        } else null
+
+        if (!rawNamedTarget.isNullOrBlank() && rawNamedTarget.length >= 2 && !Regex("^(a song|some music|something|anything|music|song|songs|it|that)$").matches(rawNamedTarget)) {
+            val matchedLocal = recents.firstOrNull { r ->
+                val rt = r.title?.lowercase()?.trim() ?: ""
+                val ra = r.artist?.lowercase()?.trim() ?: ""
+                (rt.isNotEmpty() && (rt.contains(rawNamedTarget) || rawNamedTarget.contains(rt))) ||
+                (ra.isNotEmpty() && ra != "unknown artist" && rawNamedTarget.contains(ra))
+            }
+            val finalTitle = matchedLocal?.title ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
+            val finalArtist = matchedLocal?.artist ?: ""
+            val finalUri = matchedLocal?.providerTrackId ?: ""
+            val artistPart = if (finalArtist.isNotBlank() && finalArtist != "Unknown Artist") " by $finalArtist" else ""
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 20)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Direct studio launch: spinning $finalTitle$artistPart.")
+                put("voice_agent_tts", "Spinning $finalTitle$artistPart on Spotify right now.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "PLAY_TRACK_NOW")
+                    put("track_title", finalTitle)
+                    put("track_artist", finalArtist)
+                    put("spotify_uri", finalUri)
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_NEXT_AND_DEEP_LINK")
+                    put("target_player", targetPlayer)
+                    put("search_query", "$finalTitle $finalArtist".trim())
+                    put("track_title", finalTitle)
+                    put("track_artist", finalArtist)
+                    put("spotify_uri", finalUri)
+                })
+            }
+        }
+
+        // 10. Default consultative recommendation from fresh tracks or capsule
+        val freshPick = capsule?.tracks?.firstOrNull()
+        val chosenTitle = freshPick?.title ?: recents.firstOrNull()?.title ?: "Midnight City"
+        val chosenArtist = freshPick?.artist ?: recents.firstOrNull()?.artist ?: "M83"
+        val chosenUri = freshPick?.spotifyUri ?: recents.firstOrNull()?.providerTrackId ?: ""
+
+        return JSONObject().apply {
+            put("calculated_satiety_percentage", 22)
+            put("reasoning_mode", "PLAYBACK_SUGGESTION")
+            put("flow_state_analysis", "Recommending $chosenTitle by $chosenArtist at peak dopamine freshness.")
+            put("voice_agent_tts", "From your rotation, $chosenTitle by $chosenArtist is sitting at peak dopamine freshness right now. Want me to spin it for you?")
+            put("agent_tool_call", JSONObject().apply {
+                put("action", "PROPOSE_TRACK")
+                put("track_title", chosenTitle)
+                put("track_artist", chosenArtist)
+                put("spotify_uri", chosenUri)
+                put("target_player", targetPlayer)
+                put("expect_follow_up", true)
+            })
+            put("os_execution_command", JSONObject().apply {
+                put("intent", "NONE")
+                put("target_player", targetPlayer)
+                put("search_query", "$chosenTitle $chosenArtist".trim())
+                put("track_title", chosenTitle)
+                put("track_artist", chosenArtist)
+                put("spotify_uri", chosenUri)
+            })
+        }
+    }
+
     private fun startNativeSpeechRecognizer() {
         mainHandler.post {
             try {
                 if (!AndroidSpeechRecognizer.isRecognitionAvailable(context)) {
-                    handleVoiceError("Native speech recognition not available on this device")
+                    releaseAudioDucking()
+                    resumeWakeWordListening()
                     return@post
                 }
 
@@ -866,12 +1299,12 @@ class AgentVoiceManager(
                         }
 
                         override fun onError(error: Int) {
-                            Log.w(TAG, "Native SpeechRecognizer error code: $error")
-                            // 7 = NO_MATCH (didn't catch anything), 6 = SPEECH_TIMEOUT
-                            if (error == AndroidSpeechRecognizer.ERROR_NO_MATCH || error == AndroidSpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                                handleVoiceError("No speech detected")
-                            } else {
-                                handleVoiceError("Speech error: $error")
+                            Log.w(TAG, "Native SpeechRecognizer finished with code: $error")
+                            stopNativeSpeechRecognizer()
+                            releaseAudioDucking()
+                            resumeWakeWordListening()
+                            scope.launch {
+                                _transcriptionFlow.emit("I'm right here whenever you're ready—tap the mascot and speak freely.")
                             }
                         }
 
@@ -886,7 +1319,8 @@ class AgentVoiceManager(
                                     _finalTranscriptFlow.emit(transcript)
                                 }
                             } else {
-                                handleVoiceError("No speech detected")
+                                releaseAudioDucking()
+                                resumeWakeWordListening()
                             }
                         }
 
@@ -915,7 +1349,8 @@ class AgentVoiceManager(
                 Log.d(TAG, "Native SpeechRecognizer listening started successfully")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start native speech recognizer", e)
-                handleVoiceError(e.message)
+                releaseAudioDucking()
+                resumeWakeWordListening()
             }
         }
     }
@@ -933,20 +1368,11 @@ class AgentVoiceManager(
     }
 
     private fun handleVoiceError(reason: String?) {
-        Log.e(TAG, "Voice Error: $reason")
+        Log.e(TAG, "Voice Error notice: $reason")
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
-        _agentState.value = AgentState.ERROR
-
-        // Auto-recover after 2.5 seconds back to IDLE so the user is never permanently stuck
-        errorResetJob?.cancel()
-        errorResetJob = scope.launch {
-            delay(2500)
-            withContext(Dispatchers.Main) {
-                releaseAudioDucking()
-                resumeWakeWordListening()
-            }
-        }
+        releaseAudioDucking()
+        resumeWakeWordListening()
     }
 
     private fun resolveWebSocketUrl(): String {
@@ -973,13 +1399,34 @@ class AgentVoiceManager(
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val bufferSize = maxOf(minBufferSize * 4, 16000)
 
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord?.release()
+                Thread.sleep(65)
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord creation notice: ${e.message}")
+        }
+
+        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            Log.w(TAG, "AudioRecord not initialized; falling back to native SpeechRecognizer.")
+            fallbackToNativeSpeechRecognizer("AudioRecord uninitialized")
+            return
+        }
 
         val sessionId = audioRecord?.audioSessionId ?: 0
         if (sessionId != 0) {
@@ -998,16 +1445,33 @@ class AgentVoiceManager(
             }
         }
 
-        audioRecord?.startRecording()
-        isRecording = true
+        try {
+            audioRecord?.startRecording()
+            isRecording = true
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord.startRecording failed: ${e.message}")
+            fallbackToNativeSpeechRecognizer("startRecording failed")
+            return
+        }
 
         scope.launch {
-            // Read 100ms frames (3200 bytes at 16kHz 16-bit mono) for optimal AssemblyAI v3 streaming
-            val frameBuffer = ByteArray(3200)
+            // Read exact 100ms frames (3200 bytes at 16kHz 16-bit mono) so AssemblyAI v3 never receives <20ms sub-frames
+            val targetFrameBytes = 3200
+            val frameBuffer = ByteArray(targetFrameBytes)
             while (isRecording && _agentState.value == AgentState.LISTENING) {
-                val read = audioRecord?.read(frameBuffer, 0, frameBuffer.size) ?: 0
-                if (read > 0) {
-                    val boostedBytes = boostPcm16VoiceClarity(frameBuffer, read)
+                var accumulated = 0
+                while (accumulated < targetFrameBytes && isRecording && _agentState.value == AgentState.LISTENING) {
+                    val read = audioRecord?.read(frameBuffer, accumulated, targetFrameBytes - accumulated) ?: -1
+                    if (read > 0) {
+                        accumulated += read
+                    } else {
+                        break
+                    }
+                }
+                // Only send frames of at least 1600 bytes (50ms, even byte count) to guarantee AssemblyAI v3 compliance
+                val validLen = accumulated - (accumulated % 2)
+                if (validLen >= 1600) {
+                    val boostedBytes = boostPcm16VoiceClarity(frameBuffer, validLen)
                     val byteStr = boostedBytes.toByteString()
                     val activeWs = webSocket
                     if (isWsOpenForAudio && activeWs != null) {
@@ -1017,7 +1481,7 @@ class AgentVoiceManager(
                         }
                         activeWs.send(byteStr)
                     } else {
-                        // Keep up to 4 seconds (40 frames) of pre-connection speech in memory while socket connects
+                        // Keep up to 4 seconds (40 frames of 100ms) of pre-connection speech in memory while socket connects
                         if (preConnectAudioBuffer.size < 40) {
                             preConnectAudioBuffer.offer(byteStr)
                         }

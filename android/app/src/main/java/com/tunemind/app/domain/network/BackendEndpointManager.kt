@@ -54,22 +54,23 @@ object BackendEndpointManager {
 
     /**
      * Ordered list of WebSocket endpoints to try:
-     * 1. Custom Online / Wi-Fi URL configured inside the app (if set)
-     * 2. Permanent Render Cloud URL (wss://tunemind-backend-iudp.onrender.com/ws/stt)
+     * 1. Permanent Render Cloud URL (wss://tunemind-backend-iudp.onrender.com/ws/stt)
+     * 2. Custom Online / Wi-Fi URL configured inside the app (if set)
      * 3. BuildConfig.TUNEMIND_BASE_URL
      * 4. USB ADB reverse tunnel fallback (ws://localhost:3000/ws/stt)
      */
     fun getCandidateWebSocketUrls(context: Context): List<String> {
         val candidates = mutableListOf<String>()
 
+        val renderWs = toWebSocketUrl(RENDER_PRODUCTION_URL)
+        candidates.add(renderWs)
+
         val custom = getCustomBaseUrl(context)
         if (custom.isNotBlank()) {
-            candidates.add(toWebSocketUrl(custom))
-        }
-
-        val renderWs = toWebSocketUrl(RENDER_PRODUCTION_URL)
-        if (!candidates.contains(renderWs)) {
-            candidates.add(renderWs)
+            val customWs = toWebSocketUrl(custom)
+            if (!candidates.contains(customWs)) {
+                candidates.add(customWs)
+            }
         }
 
         val buildConfigUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
@@ -90,8 +91,9 @@ object BackendEndpointManager {
 
     fun getActiveHttpBaseUrl(context: Context): String {
         val custom = getCustomBaseUrl(context)
-        if (custom.isNotBlank()) return custom
-
+        if (custom.isNotBlank() && custom.startsWith("https://") && !custom.contains(".loca.lt")) {
+            return custom
+        }
         return RENDER_PRODUCTION_URL
     }
 

@@ -514,11 +514,21 @@ Respond ONLY with raw valid JSON matching this schema:
         }));
 
     // Check if the user explicitly named a specific song or artist to play right now!
-    // e.g., "play Utaniinua", "play Wakadinali", "play Mbosso", vs generic "play me a song", "play something"
-    const genericPlayPattern = /^\s*(please\s+)?(play|spin|put on|give me|suggest|recommend|find)(\s+me)?\s+(a|some|any|another|different|fresh|good|nice|new)?\s*(music|song|songs|track|vibe|tune|something|anything|bongo|afrobeats|hip hop|gospel)?\s*(for me|please|right now|now)?\s*$/i;
-    const startsWithPlayVerb = /^\s*(please\s+)?(play|spin|put on)\s+(.+)$/i.exec(userCommandRaw);
-    const explicitlyNamedQuery = (!genericPlayPattern.test(userCommandRaw) && startsWithPlayVerb)
-      ? startsWithPlayVerb[3].replace(/\b(right now|now|for me|please|on spotify)\b/gi, '').trim()
+    // e.g., "play Utaniinua", "play Wakadinali", "play Mbosso", vs generic "play me a song.", "play something"
+    const cleanCommandNoPunct = userCommandRaw.replace(/[.!?,;:'"]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const genericPlayPattern = /^\s*(please\s+)?(play|spin|put on|give me|suggest|recommend|find)(\s+me)?(\s+(a|some|any|another|different|fresh|good|nice|new|best|my))?\s*(music|song|songs|track|tracks|vibe|vibes|tune|tunes|something|anything|bongo|bongo flava|afrobeats|hip hop|gospel|capsule|dopamine capsule)?(\s+(for me|please|right now|now|today))?\s*$/i;
+    const startsWithPlayVerb = /^\s*(please\s+)?(play|spin|put on)\s+(.+)$/i.exec(cleanCommandNoPunct);
+    const candidateNamedQuery = (!genericPlayPattern.test(cleanCommandNoPunct) && startsWithPlayVerb)
+      ? startsWithPlayVerb[3]
+          .replace(/^(me\s+)/i, '')
+          .replace(/\b(right now|now|for me|please|on spotify)\b/gi, '')
+          .trim()
+      : null;
+    const isStillGenericTarget = candidateNamedQuery
+      ? /^(a\s+song|some\s+music|something|anything|another\s+song|another\s+one|a\s+track|music|song|songs|next|next\s+song|it|that|this)$/i.test(candidateNamedQuery)
+      : true;
+    const explicitlyNamedQuery = (!isStillGenericTarget && candidateNamedQuery && candidateNamedQuery.length >= 2)
+      ? candidateNamedQuery
       : null;
 
     // Also check if userCommand mentions an exact track title from their library alongside "play"

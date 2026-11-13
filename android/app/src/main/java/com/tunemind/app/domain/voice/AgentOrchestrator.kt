@@ -23,9 +23,6 @@ class AgentOrchestrator(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 ) {
     private val TAG = "AgentLoop"
-    private val tuneMindExecutionEngine: TuneMindExecutionEngine by lazy {
-        TuneMindExecutionEngine(context)
-    }
     private var job: Job? = null
 
     fun start() {
@@ -33,48 +30,8 @@ class AgentOrchestrator(
 
         job = scope.launch {
             agentVoiceManager.finalTranscriptFlow.collect { transcript ->
-                Log.d(TAG, "Received final transcript: $transcript")
-
-                // Ensure agent UI is in THINKING state
-                agentVoiceManager.setThinkingState()
-
-                // 1. Send transcript to Claude Backend with actual playback observation metadata
-                val nowPlaying = getNowPlaying()
-                val currentTrackTitle = nowPlaying?.title?.takeIf { it.isNotBlank() } ?: "Unknown Track"
-                val currentTrackArtist = nowPlaying?.artist?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-                val sourcePlayer = nowPlaying?.sourcePackage?.takeIf { it.isNotBlank() } ?: "com.spotify.music"
-
-                Log.d(TAG, "Evaluating with track: '$currentTrackTitle' by '$currentTrackArtist' ($sourcePlayer)")
-
-                val activeBaseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
-                val reasoningApiClient = ReasoningApiClient(activeBaseUrl)
-                val aiResponse = reasoningApiClient.evaluateSatiety(
-                    transcript = transcript,
-                    currentTrackTitle = currentTrackTitle,
-                    currentTrackArtist = currentTrackArtist,
-                    sourcePlayer = sourcePlayer
-                )
-
-                if (aiResponse != null) {
-                    // 2. Set UI to SPEAKING
-                    agentVoiceManager.setSpeakingState()
-
-                    // 3. Execute OS Commands (Pause music -> Speak -> Release focus -> Launch new track)
-                    tuneMindExecutionEngine.executeBackendCommand(
-                        response = aiResponse,
-                        onBeforeLaunch = {
-                            agentVoiceManager.abandonAssistantAudioFocusOnly()
-                        },
-                        onFinished = {
-                            agentVoiceManager.releaseAudioDucking()
-                            agentVoiceManager.resumeWakeWordListening()
-                        }
-                    )
-                } else {
-                    Log.e(TAG, "AI Reasoning failed.")
-                    agentVoiceManager.releaseAudioDucking()
-                    agentVoiceManager.resumeWakeWordListening()
-                }
+                Log.d(TAG, "Received final transcript from on-device recognizer: $transcript")
+                agentVoiceManager.processFinalTranscriptWithFallback(transcript)
             }
         }
     }
@@ -82,6 +39,5 @@ class AgentOrchestrator(
     fun stop() {
         job?.cancel()
         job = null
-        tuneMindExecutionEngine.shutdown()
     }
 }
