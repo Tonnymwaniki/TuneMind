@@ -820,7 +820,22 @@ class TuneMindViewModel : ViewModel() {
                     val key = "${agg.trackTitle.trim().lowercase()}|${agg.artistName.trim().lowercase()}"
                     val existing = combinedTrackMap[key]
                     if (existing == null) {
-                        combinedTrackMap[key] = com.tunemind.app.data.ingestion.run { agg.toTrackMemoryEntry() }
+                        combinedTrackMap[key] = TrackMemoryEntry(
+                            entryId = "spotify:${agg.trackId}",
+                            sourcePackage = "com.spotify.music",
+                            providerTrackId = agg.spotifyUri.ifBlank { "spotify:track:${agg.trackId}" },
+                            title = agg.trackTitle,
+                            artist = agg.artistName,
+                            album = agg.albumName.ifBlank { null },
+                            distinctAppearanceCount = agg.playCount.coerceAtLeast(1),
+                            firstObservedAppearanceAtMs = agg.firstPlayedEpochMs,
+                            lastObservedAppearanceAtMs = agg.lastPlayedEpochMs,
+                            supportingObservationIds = listOf("spotify_api:${agg.trackId}"),
+                            identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
+                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
+                            historyMayBeIncomplete = false,
+                            appearances = emptyList()
+                        )
                     } else if (existing.providerTrackId.isNullOrBlank() && agg.spotifyUri.isNotBlank()) {
                         combinedTrackMap[key] = existing.copy(
                             providerTrackId = agg.spotifyUri,

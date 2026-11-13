@@ -6,7 +6,6 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.google.gson.annotations.SerializedName
 import com.tunemind.app.domain.model.MemoryEvidenceQuality
-import com.tunemind.app.domain.model.TrackAppearanceRecord
 import com.tunemind.app.domain.model.TrackIdentityBasis
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import java.time.Instant
@@ -340,17 +339,8 @@ fun SpotifyTrackAggregate.toTrackMemoryEntry(): TrackMemoryEntry {
         lastObservedAppearanceAtMs = lastPlayedEpochMs,
         supportingObservationIds = listOf("spotify_api:$trackId"),
         identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
-        evidenceQuality = MemoryEvidenceQuality.STRONG_IDENTITY,
+        evidenceQuality = MemoryEvidenceQuality.SUPPORTED_IDENTITY,
         historyMayBeIncomplete = false,
-        appearances = listOf(
-            TrackAppearanceRecord(
-                episodeId = "spotify_ep:$trackId:$lastPlayedEpochMs",
-                sourcePackage = "com.spotify.music",
-                startTimeMs = lastPlayedEpochMs,
-                endTimeMs = lastPlayedEpochMs + durationMs.coerceAtLeast(180_000L),
-                durationMs = durationMs.coerceAtLeast(180_000L),
-                eventCount = playCount.coerceAtLeast(1)
-            )
-        )
+        appearances = emptyList()
     )
 }

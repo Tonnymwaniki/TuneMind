@@ -324,10 +324,11 @@ class SpotifyOAuthRepository(context: Context) {
         entities: List<SpotifyListeningHistoryEntity>
     ) {
         for (entity in entities) {
-            runCatching {
+            try {
                 val obs = PlaybackObservation(
                     eventId = "spotify_api_${entity.historyId}",
-                    eventType = ObservationEventType.TRACK_CHANGED,
+                    observerSessionId = "spotify_web_api_ingestion",
+                    eventType = ObservationEventType.METADATA_CHANGED,
                     eventTimeMs = entity.playedAtEpochMs,
                     sourcePackage = "com.spotify.music",
                     trackId = entity.spotifyUri,
@@ -337,12 +338,10 @@ class SpotifyOAuthRepository(context: Context) {
                     durationMs = entity.durationMs,
                     positionMs = 0L,
                     playbackStateCode = if (entity.ingestionSource == "CURRENTLY_PLAYING") 3 else 2,
-                    playbackSpeed = 1.0f,
-                    isShuffling = null,
-                    repeatMode = null,
-                    observerSessionId = "spotify_web_api_ingestion"
+                    playbackSpeed = 1.0f
                 )
-                eventBufferRepo.saveObservation(obs)
+                eventBufferRepo.record(obs)
+            } catch (_: Exception) {
             }
         }
     }

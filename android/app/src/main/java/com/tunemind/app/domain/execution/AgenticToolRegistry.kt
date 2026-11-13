@@ -226,7 +226,7 @@ object SpotifyPlaybackTool {
             }
             "pause" -> {
                 val listener = TuneMindListenerService.instance
-                listener?.pause(SPOTIFY_PACKAGE)
+                listener?.pause()
                 dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PAUSE)
             }
             "resume" -> {
@@ -242,11 +242,13 @@ object SpotifyPlaybackTool {
 
     private fun executeHardwareOrSessionSkip(context: Context) {
         val listener = TuneMindListenerService.instance
-        val skippedViaSession = listener?.skipNext(SPOTIFY_PACKAGE) == true
-        if (!skippedViaSession) {
+        val hasSpotifySession = listener?.hasActiveSession(SPOTIFY_PACKAGE) == true
+        if (hasSpotifySession) {
+            listener?.skipNext(SPOTIFY_PACKAGE)
+        } else {
             dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_NEXT)
         }
-        Log.i(TAG, "Executed OS-level skip_track (session=$skippedViaSession)")
+        Log.i(TAG, "Executed OS-level skip_track (session=$hasSpotifySession)")
     }
 
     private fun launchPlaylistOrTrackInBackground(
