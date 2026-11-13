@@ -329,8 +329,8 @@ class AgentVoiceManager(
 
     /**
      * Triggered when the user selects Neural Voice Breakdown & Dialogue on any song card.
-     * Speaks a tailored dopamine & mood insight about the track, stores it as pending proposal,
-     * and opens the microphone after 650ms to listen for approval or follow-up dialogue.
+     * Routes through live Claude Sonnet reasoning so the agent generates a fresh, unscripted
+     * psychoacoustic breakdown of the track and opens the microphone for follow-up or approval.
      */
     fun askAgentAboutTrack(
         title: String,
@@ -355,61 +355,19 @@ class AgentVoiceManager(
             source = targetPlayer
         )
 
-        val spokenProposal = if (freshnessPercent >= 65) {
-            if (cleanArtist.isNotEmpty()) {
-                "$cleanTitle by $cleanArtist is at $freshnessPercent percent dopamine freshness with a ${mood.label.lowercase()} vibe. Want me to spin it for you right now?"
-            } else {
-                "$cleanTitle is sitting at $freshnessPercent percent dopamine freshness. Want me to spin it right now?"
-            }
-        } else {
-            if (cleanArtist.isNotEmpty()) {
-                "$cleanTitle by $cleanArtist has been in heavy rotation lately, sitting at $freshnessPercent percent freshness. Want me to spin it anyway, or find a fresh reset?"
-            } else {
-                "$cleanTitle is cooling down at $freshnessPercent percent freshness. Want me to play it anyway, or pick something fresh?"
-            }
-        }
+        val artistPart = if (cleanArtist.isNotEmpty()) " by $cleanArtist" else ""
+        val dynamicPrompt = "Give me a fresh psychoacoustic breakdown of \"$cleanTitle\"$artistPart (currently at $freshnessPercent% dopamine freshness, ${mood.label} mood) in my listening journey and ask if I want you to spin it right now."
 
-        _agentState.value = AgentState.SPEAKING
         _flowAnalysisFlow.value = "Mood DNA: ${mood.label} • $freshnessPercent% Dopamine Readiness"
         _agentSatietyFlow.value = (100 - freshnessPercent).coerceIn(10, 90)
-        scope.launch {
-            _transcriptionFlow.emit(spokenProposal)
-        }
-
-        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
-            calculated_satiety_percentage = (100 - freshnessPercent).coerceIn(10, 90),
-            flow_state_analysis = "Mood DNA: ${mood.label} • $freshnessPercent% Dopamine Readiness",
-            voice_agent_tts = spokenProposal,
-            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
-                intent = "NONE",
-                target_player = targetPlayer,
-                search_query = if (cleanArtist.isNotEmpty()) "$cleanTitle $cleanArtist" else cleanTitle,
-                suggested_bpm_target = 108,
-                track_title = cleanTitle,
-                track_artist = cleanArtist,
-                spotify_uri = spotifyUri
-            )
-        )
-
-        executionEngine.executeBackendCommand(
-            response = responseObj,
-            onFinished = {
-                mainHandler.post {
-                    _agentState.value = AgentState.IDLE
-                    mainHandler.postDelayed({
-                        if (_agentState.value == AgentState.IDLE) {
-                            simulateWakeWordDetected()
-                        }
-                    }, 650L)
-                }
-            }
-        )
+        setThinkingState()
+        processFinalTranscriptWithFallback(dynamicPrompt)
     }
 
     /**
      * Triggered when the user taps the glowing Dopamine Capsule card on the Studio Mascot screen.
-     * Briefs the user on the 3 compacted tracks prepared for their current circadian slot and
-     * waits for voice approval to launch the lead capsule track.
+     * Routes through live Claude Sonnet reasoning to brief the user on their compacted capsule
+     * and wait for voice approval to launch the lead capsule track.
      */
     fun launchDopamineCapsuleBriefing(
         capsule: com.tunemind.app.ui.DopamineCapsuleState,
@@ -434,49 +392,13 @@ class AgentVoiceManager(
             source = targetPlayer
         )
 
-        val secondPart = tracks.getOrNull(1)?.let { ", alongside ${it.title}" } ?: ""
-        val thirdPart = tracks.getOrNull(2)?.let { " and ${it.title}" } ?: ""
-        val artistPart = if (lead.artist.isNotBlank() && !lead.artist.equals("Unknown Artist", ignoreCase = true)) {
-            " by ${lead.artist}"
-        } else ""
+        val trackSummary = tracks.joinToString(", ") { "${it.title} by ${it.artist} (${it.freshnessPercent}% fresh)" }
+        val dynamicPrompt = "Brief me on my ${capsule.slotLabel} Dopamine Capsule that you compacted ($trackSummary) and ask if I want to kick off the capsule with \"${lead.title}\"."
 
-        val spokenBriefing = "For your ${capsule.slotLabel.lowercase()}, I compacted ${tracks.size} peak-dopamine tracks led by ${lead.title}$artistPart at ${lead.freshnessPercent} percent freshness$secondPart$thirdPart. Want me to kick off your capsule with ${lead.title} right now?"
-
-        _agentState.value = AgentState.SPEAKING
         _flowAnalysisFlow.value = "Dopamine Capsule Ready: ${tracks.joinToString(" • ") { it.title }}"
         _agentSatietyFlow.value = (100 - lead.freshnessPercent).coerceIn(10, 45)
-        scope.launch {
-            _transcriptionFlow.emit(spokenBriefing)
-        }
-
-        val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
-            calculated_satiety_percentage = (100 - lead.freshnessPercent).coerceIn(10, 45),
-            flow_state_analysis = "Dopamine Capsule Ready: ${tracks.joinToString(" • ") { it.title }}",
-            voice_agent_tts = spokenBriefing,
-            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
-                intent = "NONE",
-                target_player = targetPlayer,
-                search_query = "${lead.title} ${lead.artist}".trim(),
-                suggested_bpm_target = 108,
-                track_title = lead.title,
-                track_artist = lead.artist,
-                spotify_uri = lead.spotifyUri
-            )
-        )
-
-        executionEngine.executeBackendCommand(
-            response = responseObj,
-            onFinished = {
-                mainHandler.post {
-                    _agentState.value = AgentState.IDLE
-                    mainHandler.postDelayed({
-                        if (_agentState.value == AgentState.IDLE) {
-                            simulateWakeWordDetected()
-                        }
-                    }, 650L)
-                }
-            }
-        )
+        setThinkingState()
+        processFinalTranscriptWithFallback(dynamicPrompt)
     }
 
     private fun requestAudioDucking() {
@@ -1239,17 +1161,51 @@ class AgentVoiceManager(
             }
         }
 
-        // 10. Default consultative recommendation from fresh tracks or capsule
+        // 10. Direct Play Command ("play a song", "play me a song", "play something", "change the song") vs Consultative Question
         val freshPick = capsule?.tracks?.firstOrNull()
-        val chosenTitle = freshPick?.title ?: recents.firstOrNull()?.title ?: "Midnight City"
-        val chosenArtist = freshPick?.artist ?: recents.firstOrNull()?.artist ?: "M83"
+        val chosenTitle = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeTrackTitleForPlay(
+            freshPick?.title ?: recents.firstOrNull()?.title ?: "Midnight City"
+        )
+        val chosenArtist = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeArtistForPlay(
+            freshPick?.artist ?: recents.firstOrNull()?.artist ?: "M83"
+        )
         val chosenUri = freshPick?.spotifyUri ?: recents.firstOrNull()?.providerTrackId ?: ""
+        val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(chosenTitle, chosenArtist)
+        val artistPart = if (chosenArtist.isNotBlank()) " by $chosenArtist" else ""
+
+        val isDirectPlayCmd = Regex("^\\s*(please\\s+)?(play|spin|put on|change the song|switch the song|switch the track)\\b").containsMatchIn(cleanNoPunct) &&
+            !Regex("\\b(suggest|recommend|what should|advice|advise|capsule)\\b").containsMatchIn(cleanNoPunct)
+
+        if (isDirectPlayCmd) {
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 20)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Spinning $chosenTitle$artistPart • ${mood.label} Dopamine Anchor.")
+                put("voice_agent_tts", "Spinning $chosenTitle$artistPart right now—its ${mood.label.lowercase()} energy is at peak dopamine freshness for your session.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "PLAY_TRACK_NOW")
+                    put("track_title", chosenTitle)
+                    put("track_artist", chosenArtist)
+                    put("spotify_uri", chosenUri)
+                    put("target_player", targetPlayer)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "OS_MEDIA_NEXT_AND_DEEP_LINK")
+                    put("target_player", targetPlayer)
+                    put("search_query", "$chosenTitle $chosenArtist".trim())
+                    put("track_title", chosenTitle)
+                    put("track_artist", chosenArtist)
+                    put("spotify_uri", chosenUri)
+                })
+            }
+        }
 
         return JSONObject().apply {
             put("calculated_satiety_percentage", 22)
             put("reasoning_mode", "PLAYBACK_SUGGESTION")
-            put("flow_state_analysis", "Recommending $chosenTitle by $chosenArtist at peak dopamine freshness.")
-            put("voice_agent_tts", "From your rotation, $chosenTitle by $chosenArtist is sitting at peak dopamine freshness right now. Want me to spin it for you?")
+            put("flow_state_analysis", "Recommending $chosenTitle$artistPart • ${mood.label} Mood DNA.")
+            put("voice_agent_tts", "$chosenTitle$artistPart carries a ${mood.label.lowercase()} cadence with zero receptor fatigue in your recent rotation. Want me to spin it right now?")
             put("agent_tool_call", JSONObject().apply {
                 put("action", "PROPOSE_TRACK")
                 put("track_title", chosenTitle)

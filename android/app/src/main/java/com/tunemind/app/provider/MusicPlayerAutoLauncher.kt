@@ -27,6 +27,49 @@ object MusicPlayerAutoLauncher {
     private const val TAG = "MusicPlayerAutoLauncher"
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /**
+     * Strips noisy suffixes like ", Tenzi No 22.", "(Official Video)", "[Lyrics]", etc.
+     * that cause Spotify's search auto-player to show search results instead of auto-playing.
+     */
+    fun sanitizeTrackTitleForPlay(rawTitle: String): String {
+        return rawTitle
+            .replace(Regex("\\s*\\((official\\s*(music\\s*)?(video|audio|lyric\\s*video|visualizer)|lyrics?|audio|hd|4k|live.*?)\\)", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*\\[(official\\s*(music\\s*)?(video|audio|lyric\\s*video|visualizer)|lyrics?|audio|hd|4k|live.*?)\\]", RegexOption.IGNORE_CASE), "")
+            .replace(Regex(",\\s*tenzi\\s*no\\.?\\s*\\d+\\.?", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+-\\s+(official\\s*(music\\s*)?(video|audio)|lyrics?)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("[.\"'`]+$"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    fun sanitizeArtistForPlay(rawArtist: String): String {
+        val cleaned = rawArtist.trim()
+        if (cleaned.equals("Unknown Artist", ignoreCase = true) || cleaned.equals("Spotify", ignoreCase = true)) {
+            return ""
+        }
+        return cleaned
+            .split(Regex("[,&]|feat\\.?|ft\\.?", RegexOption.IGNORE_CASE))
+            .firstOrNull()
+            ?.replace(Regex("[.\"'`]+$"), "")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?: ""
+    }
+
+    private fun normalizeSpotifyTrackUri(rawUri: String?): String? {
+        if (rawUri.isNullOrBlank()) return null
+        val trimmed = rawUri.trim()
+        if (trimmed.startsWith("spotify:track:")) return trimmed
+        if (trimmed.startsWith("https://open.spotify.com/track/")) {
+            val id = trimmed.substringAfter("https://open.spotify.com/track/").substringBefore("?").substringBefore("/").trim()
+            if (id.isNotBlank()) return "spotify:track:$id"
+        }
+        if (Regex("^[A-Za-z0-9]{22}$").matches(trimmed)) {
+            return "spotify:track:$trimmed"
+        }
+        return null
+    }
+
     fun launchWithAutoPlay(
         context: Context,
         providerId: String,
@@ -51,19 +94,20 @@ object MusicPlayerAutoLauncher {
             Log.d(TAG, "Audio pause interruption note: ${e.message}")
         }
 
-        val primaryArtist = track.artist.split(",", "&", "feat.", "ft.").firstOrNull()?.trim() ?: track.artist.trim()
-        val fullSearchQuery = if (primaryArtist.isNotBlank() && !track.title.contains(primaryArtist, ignoreCase = true)) {
-            "${track.title} $primaryArtist".trim()
+        val cleanTitle = sanitizeTrackTitleForPlay(track.title.ifBlank { query })
+        val cleanArtist = sanitizeArtistForPlay(track.artist)
+        val fullSearchQuery = if (cleanArtist.isNotBlank() && !cleanTitle.contains(cleanArtist, ignoreCase = true)) {
+            "$cleanTitle $cleanArtist".trim()
         } else {
-            track.title.trim()
+            cleanTitle.ifBlank { sanitizeTrackTitleForPlay(query) }
         }
 
-        // Immediately launch direct track or search intent so Spotify loads the new track right away,
-        // and only return to TuneMind once playback of the new song is confirmed active!
         val launched = launchIntentAndReturnToTuneMind(
             context = context,
             targetPkg = targetPkg,
             track = track,
+            cleanTitle = cleanTitle,
+            cleanArtist = cleanArtist,
             fullSearchQuery = fullSearchQuery,
             deepLinkUri = deepLinkUri,
             previousTitle = previousTitle
@@ -73,9 +117,9 @@ object MusicPlayerAutoLauncher {
             PlaybackLaunchResult.DirectPlaybackLaunched(
                 providerId = providerId,
                 providerDisplayName = displayName,
-                trackTitle = track.title,
+                trackTitle = cleanTitle.ifBlank { track.title },
                 destinationUri = deepLinkUri ?: "intent:$targetPkg",
-                message = "Playing '${track.title}' in $displayName."
+                message = "Playing '${cleanTitle.ifBlank { track.title }}' in $displayName."
             )
         } else {
             PlaybackLaunchResult.LaunchFailed(
@@ -89,41 +133,44 @@ object MusicPlayerAutoLauncher {
         context: Context,
         targetPkg: String?,
         track: RecommendedTrack,
+        cleanTitle: String,
+        cleanArtist: String,
         fullSearchQuery: String,
         deepLinkUri: String?,
         previousTitle: String?
     ): Boolean {
-        // 1. Direct Track Deep Link (spotify:track:<id>)
-        if (!deepLinkUri.isNullOrBlank() && (deepLinkUri.startsWith("spotify:track:") || deepLinkUri.startsWith("https://open.spotify.com/track/"))) {
-            try {
-                val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUri)).apply {
-                    if (targetPkg != null) setPackage(targetPkg)
-                    putExtra("android.intent.extra.START_PLAYBACK", true)
-                    putExtra("autostart", true)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                }
-                context.startActivity(uriIntent)
-                scheduleDirectTrackKicker(context, targetPkg, deepLinkUri, track, previousTitle)
-                scheduleReturnToTuneMindWhenPlaying(context)
-                return true
-            } catch (e: Exception) {
-                Log.w(TAG, "Direct track URI launch failed, falling back: ${e.message}")
-            }
-        }
+        val normalizedSpotifyUri = normalizeSpotifyTrackUri(deepLinkUri)
 
-        // 2. Voice Search Play (INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
-        if (targetPkg != null) {
+        // 1. PRIMARY AUTO-PLAY ENGINE: Voice Assistant Media Play From Search with specific Audio Entry Focus.
+        // Unlike Intent.ACTION_VIEW on spotify:track:<id> (which in Spotify Android often opens the static track card
+        // without starting playback), INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH with ENTRY_CONTENT_TYPE + EXTRA_MEDIA_TITLE
+        // triggers Spotify's internal voice assistant auto-player so the track streams immediately!
+        if (targetPkg != null && fullSearchQuery.isNotBlank()) {
             try {
                 val mediaPlayIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
                     putExtra(SearchManager.QUERY, fullSearchQuery)
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-                    putExtra("autostart", true)
+                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Media.ENTRY_CONTENT_TYPE)
+                    if (cleanTitle.isNotBlank()) {
+                        putExtra(MediaStore.EXTRA_MEDIA_TITLE, cleanTitle)
+                    }
+                    if (cleanArtist.isNotBlank()) {
+                        putExtra(MediaStore.EXTRA_MEDIA_ARTIST, cleanArtist)
+                    }
                     putExtra("android.intent.extra.START_PLAYBACK", true)
+                    putExtra("autostart", true)
+                    putExtra("play", true)
                     setPackage(targetPkg)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
                 }
                 context.startActivity(mediaPlayIntent)
-                scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
+                scheduleAutoPlayKicker(
+                    context = context,
+                    targetPackage = targetPkg,
+                    track = track,
+                    overrideQuery = fullSearchQuery,
+                    previousTitle = previousTitle,
+                    spotifyTrackUri = normalizedSpotifyUri
+                )
                 scheduleReturnToTuneMindWhenPlaying(context)
                 return true
             } catch (e: Exception) {
@@ -131,17 +178,51 @@ object MusicPlayerAutoLauncher {
             }
         }
 
-        // 3. Deep Link with Search Query
+        // 2. Direct Track Deep Link Fallback (spotify:track:<id>) + aggressive MediaSession kicker
+        if (!normalizedSpotifyUri.isNullOrBlank()) {
+            try {
+                val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(normalizedSpotifyUri)).apply {
+                    if (targetPkg != null) setPackage(targetPkg)
+                    putExtra("android.intent.extra.START_PLAYBACK", true)
+                    putExtra("autostart", true)
+                    putExtra("play", true)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                }
+                context.startActivity(uriIntent)
+                scheduleAutoPlayKicker(
+                    context = context,
+                    targetPackage = targetPkg,
+                    track = track,
+                    overrideQuery = fullSearchQuery,
+                    previousTitle = previousTitle,
+                    spotifyTrackUri = normalizedSpotifyUri
+                )
+                scheduleReturnToTuneMindWhenPlaying(context)
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct track URI launch failed, falling back: ${e.message}")
+            }
+        }
+
+        // 3. Generic Deep Link Fallback
         if (!deepLinkUri.isNullOrBlank()) {
             try {
                 val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLinkUri)).apply {
                     if (targetPkg != null) setPackage(targetPkg)
                     putExtra("android.intent.extra.START_PLAYBACK", true)
                     putExtra("autostart", true)
+                    putExtra("play", true)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
                 }
                 context.startActivity(uriIntent)
-                scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
+                scheduleAutoPlayKicker(
+                    context = context,
+                    targetPackage = targetPkg,
+                    track = track,
+                    overrideQuery = fullSearchQuery,
+                    previousTitle = previousTitle,
+                    spotifyTrackUri = normalizedSpotifyUri
+                )
                 scheduleReturnToTuneMindWhenPlaying(context)
                 return true
             } catch (e: Exception) {
@@ -153,74 +234,31 @@ object MusicPlayerAutoLauncher {
 
     /**
      * Brings TuneMind back to the foreground ONLY AFTER Spotify has started playing the new song
-     * (at 3400ms), so Spotify is never interrupted while loading the track.
+     * (checked at 3600ms and 4600ms), so Spotify is never interrupted while buffering the track.
      */
     private fun scheduleReturnToTuneMindWhenPlaying(context: Context) {
-        mainHandler.postDelayed({
-            try {
-                val listener = TuneMindListenerService.instance
-                if (listener != null && listener.isPlaying()) {
-                    val returnIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
-                        addFlags(
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_NO_ANIMATION
-                        )
-                    }
-                    context.startActivity(returnIntent)
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Return to TuneMind foreground notice: ${e.message}")
-            }
-        }, 3400L)
-    }
-
-    private fun scheduleDirectTrackKicker(
-        context: Context,
-        targetPackage: String?,
-        deepLinkUri: String,
-        track: RecommendedTrack,
-        previousTitle: String?
-    ) {
-        val extras = android.os.Bundle().apply {
-            putBoolean("android.intent.extra.START_PLAYBACK", true)
-            putBoolean("autostart", true)
-        }
-        // Stage 1: Cue media ID / URI on active MediaSession
-        mainHandler.postDelayed({
-            try {
-                val listener = TuneMindListenerService.instance
-                listener?.playFromMediaId(targetPackage, deepLinkUri, extras)
-                listener?.playFromUri(targetPackage, Uri.parse(deepLinkUri), extras)
-            } catch (_: Throwable) {}
-        }, 350L)
-
-        // Stage 2: Trigger Play only if it's the new track; if still stuck on previousTitle, skipNext instead of replaying old track!
-        val playDelays = listOf(850L, 1500L, 2300L)
-        for (delay in playDelays) {
+        var returned = false
+        for (checkDelay in listOf(3600L, 4700L)) {
             mainHandler.postDelayed({
+                if (returned) return@postDelayed
                 try {
                     val listener = TuneMindListenerService.instance
-                    val activeTitle = listener?.getActiveTitle(targetPackage)?.trim()
-                    val isStillOldTrack = !previousTitle.isNullOrBlank() &&
-                        activeTitle.equals(previousTitle, ignoreCase = true) &&
-                        !previousTitle.equals(track.title.trim(), ignoreCase = true)
-
-                    if (isStillOldTrack) {
-                        Log.d(TAG, "Session still on old track '$previousTitle'; triggering skipNext/playFromUri instead of replaying old song")
-                        listener?.playFromUri(targetPackage, Uri.parse(deepLinkUri), extras)
-                        listener?.skipNext(targetPackage)
-                    } else {
-                        if (listener != null && !listener.isPlaying()) {
-                            listener.play(targetPackage)
+                    if (listener != null && listener.isPlaying()) {
+                        returned = true
+                        val returnIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
+                            addFlags(
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_NO_ANIMATION
+                            )
                         }
-                        if (listener == null || !listener.isPlaying()) {
-                            dispatchMediaPlayKey(context, targetPackage)
-                        }
+                        context.startActivity(returnIntent)
                     }
-                } catch (_: Throwable) {}
-            }, delay)
+                } catch (e: Exception) {
+                    Log.d(TAG, "Return to TuneMind foreground notice: ${e.message}")
+                }
+            }, checkDelay)
         }
     }
 
@@ -229,37 +267,49 @@ object MusicPlayerAutoLauncher {
         targetPackage: String?,
         track: RecommendedTrack,
         overrideQuery: String? = null,
-        previousTitle: String? = null
+        previousTitle: String? = null,
+        spotifyTrackUri: String? = null
     ) {
-        val primaryArtist = track.artist.split(",", "&", "feat.", "ft.").firstOrNull()?.trim() ?: track.artist.trim()
-        val query = overrideQuery ?: if (primaryArtist.isNotBlank() && !track.title.contains(primaryArtist, ignoreCase = true)) {
-            "${track.title} $primaryArtist".trim()
-        } else {
-            track.title.trim()
-        }
+        val cleanTitle = sanitizeTrackTitleForPlay(track.title)
+        val cleanArtist = sanitizeArtistForPlay(track.artist)
+        val query = overrideQuery?.takeIf { it.isNotBlank() }
+            ?: if (cleanArtist.isNotBlank() && !cleanTitle.contains(cleanArtist, ignoreCase = true)) {
+                "$cleanTitle $cleanArtist".trim()
+            } else {
+                cleanTitle
+            }
 
         val extras = android.os.Bundle().apply {
-            putString(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            putString(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Media.ENTRY_CONTENT_TYPE)
+            if (cleanTitle.isNotBlank()) putString(MediaStore.EXTRA_MEDIA_TITLE, cleanTitle)
+            if (cleanArtist.isNotBlank()) putString(MediaStore.EXTRA_MEDIA_ARTIST, cleanArtist)
             putString(SearchManager.QUERY, query)
             putBoolean("android.intent.extra.START_PLAYBACK", true)
             putBoolean("autostart", true)
+            putBoolean("play", true)
         }
 
-        // Stage 1: Queue new track via MediaSession playFromSearch
-        val searchDelays = listOf(350L, 900L)
-        for (delay in searchDelays) {
+        // Stage 1: Cue new track on active MediaSession via playFromSearch + playFromUri (if URI known)
+        val cueDelays = listOf(380L, 880L)
+        for (delay in cueDelays) {
             mainHandler.postDelayed({
                 try {
                     val listener = TuneMindListenerService.instance
+                    if (!spotifyTrackUri.isNullOrBlank()) {
+                        listener?.playFromUri(targetPackage, Uri.parse(spotifyTrackUri), extras)
+                        listener?.playFromMediaId(targetPackage, spotifyTrackUri, extras)
+                    }
                     listener?.playFromSearch(targetPackage, query, extras)
                 } catch (t: Throwable) {
-                    Log.d(TAG, "Auto-play search pulse notice: ${t.message}")
+                    Log.d(TAG, "Auto-play cue pulse notice: ${t.message}")
                 }
             }, delay)
         }
 
-        // Stage 2: Start playback, guarding against replaying the old song from the top
-        val playDelays = listOf(1300L, 2000L, 2800L)
+        // Stage 2: Multi-wave Play Verification across 1.35s -> 4.3s.
+        // If Spotify opened the track screen or buffered the track without starting playback,
+        // this fires transportControls.play() and KEYCODE_MEDIA_PLAY until listener.isPlaying() is true!
+        val playDelays = listOf(1350L, 1950L, 2650L, 3450L, 4300L)
         for (delay in playDelays) {
             mainHandler.postDelayed({
                 try {
@@ -267,17 +317,19 @@ object MusicPlayerAutoLauncher {
                     val activeTitle = listener?.getActiveTitle(targetPackage)?.trim()
                     val isStillOldTrack = !previousTitle.isNullOrBlank() &&
                         activeTitle.equals(previousTitle, ignoreCase = true) &&
+                        !previousTitle.equals(cleanTitle, ignoreCase = true) &&
                         !previousTitle.equals(track.title.trim(), ignoreCase = true)
 
                     if (isStillOldTrack) {
-                        Log.d(TAG, "Preventing replay of old song '$previousTitle'; dispatching playFromSearch + skipNext")
-                        listener?.playFromSearch(targetPackage, query, extras)
-                        listener?.skipNext(targetPackage)
-                    } else {
-                        if (listener != null && !listener.isPlaying()) {
-                            listener.play(targetPackage)
+                        Log.d(TAG, "Session still on old track '$previousTitle'; dispatching playFromSearch/Uri + play")
+                        if (!spotifyTrackUri.isNullOrBlank()) {
+                            listener?.playFromUri(targetPackage, Uri.parse(spotifyTrackUri), extras)
                         }
+                        listener?.playFromSearch(targetPackage, query, extras)
+                        listener?.play(targetPackage)
+                    } else {
                         if (listener == null || !listener.isPlaying()) {
+                            listener?.play(targetPackage)
                             dispatchMediaPlayKey(context, targetPackage)
                         }
                     }

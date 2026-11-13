@@ -105,10 +105,11 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private anthropic: Anthropic;
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
   private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
+  private static cachedWorkingModel: string | null = null;
   private static pendingProposedTrack: {
     title: string;
     artist: string;
@@ -124,7 +125,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
 
   constructor() {
     this.anthropic = new Anthropic(); // Uses ANTHROPIC_API_KEY from .env
-    this.activeModelUsed = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+    this.activeModelUsed = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
   }
 
   getLastDiagnostics() {
@@ -146,6 +147,80 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       return null;
     }
     return trimmed;
+  }
+
+  public static sanitizeTrackTitle(rawTitle?: string): string {
+    if (!rawTitle) return '';
+    return rawTitle
+      .replace(/\s*\((official\s*(music\s*)?(video|audio|lyric\s*video|visualizer)|lyrics?|audio|hd|4k|live.*?)\)/gi, '')
+      .replace(/\s*\[(official\s*(music\s*)?(video|audio|lyric\s*video|visualizer)|lyrics?|audio|hd|4k|live.*?)\]/gi, '')
+      .replace(/,\s*tenzi\s*no\.?\s*\d+\.?/gi, '')
+      .replace(/\s+-\s+(official\s*(music\s*)?(video|audio)|lyrics?)$/gi, '')
+      .replace(/[."']+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  public static sanitizeArtistName(rawArtist?: string): string {
+    if (!rawArtist || rawArtist === 'Unknown Artist') return '';
+    return rawArtist
+      .split(/[,&]|feat\.?|ft\.?/i)[0]
+      .replace(/[."']+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private async callClaudeWithSonnetPriority(
+    systemPrompt: string,
+    userContent: string,
+    maxTokens: number = 1400
+  ): Promise<any> {
+    const envModel = process.env.ANTHROPIC_MODEL?.trim();
+    const candidateModels: string[] = [];
+
+    if (ClaudeMusicReasoningProvider.cachedWorkingModel) {
+      candidateModels.push(ClaudeMusicReasoningProvider.cachedWorkingModel);
+    }
+    if (envModel && envModel !== 'claude-haiku-5-5' && !candidateModels.includes(envModel)) {
+      candidateModels.push(envModel);
+    }
+    for (const m of [
+      'claude-sonnet-4-20250514',
+      'claude-3-7-sonnet-20250219',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-haiku-20241022',
+      'claude-3-haiku-20240307'
+    ]) {
+      if (!candidateModels.includes(m)) {
+        candidateModels.push(m);
+      }
+    }
+
+    let lastErr: any = null;
+    for (const modelId of candidateModels) {
+      try {
+        const res = await this.anthropic.messages.create({
+          model: modelId,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }]
+        });
+        this.activeModelUsed = modelId;
+        ClaudeMusicReasoningProvider.cachedWorkingModel = modelId;
+        return res;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || err);
+        if (msg.includes('not_found_error') || msg.includes('404') || msg.includes('model:')) {
+          if (ClaudeMusicReasoningProvider.cachedWorkingModel === modelId) {
+            ClaudeMusicReasoningProvider.cachedWorkingModel = null;
+          }
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error('All Claude models failed');
   }
 
   private extractRawText(content: any): string {
@@ -187,6 +262,12 @@ You have real-time access to the listener's complete telemetry:
 - 'hearing_telemetry': Live decibel exposure ('estimated_db'), safe headroom ('safe_headroom_db'), output device, and ear-fatigue guidance.
 - 'recent_dialogue_turns': Rolling multi-turn conversation memory.
 
+VOICE & ANTI-REPETITION CONSTITUTION (CRITICAL):
+- NEVER start 'voice_agent_tts' with "How about...", "Would you like me to...", or stock filler phrases.
+- NEVER repeat sentence structures or openings already used in 'recent_dialogue_turns'.
+- Speak like a perceptive, intelligent studio producer and neuro-acoustic companion who genuinely understands why a track's harmonic mood, tempo, or vocal warmth fits the listener's exact moment.
+- Explain your reasoning naturally from first principles (e.g. contrasting the current track's energy with the next track, referencing play counts, receptor freshness, or decibel headroom).
+
 YOUR CAPABILITIES & DECISION RULES:
 1. TRUE CONVERSATIONAL & PSYCHOACOUSTIC ADVISOR ('ADVISE_ONLY'):
    - When the user asks about their music journey, listening habits, ear fatigue, decibels, hearing safety, why a song feels stale, or just wants to chat/reflect:
@@ -199,9 +280,13 @@ YOUR CAPABILITIES & DECISION RULES:
    - Present the compacted tracks from 'dopamine_capsule' (or top 'fresh_unplayed_user_tracks'), explain the micro-pattern why you compacted them, and ask if they want to kick off the capsule with the lead track.
    - Set 'agent_tool_call.action' to "LAUNCH_DOPAMINE_CAPSULE", populate 'track_title' and 'track_artist' with the #1 capsule track, and set 'expect_follow_up' to true.
 
-3. SMART SONG PLAYBACK — DIRECT NAMED REQUEST vs. CONSULTATIVE SUGGESTION:
-   - DIRECT REQUEST ('PLAY_TRACK_NOW'): If the user explicitly names a specific song or artist to play (e.g. "Play Utaniinua", "Play Wakadinali", "Play Calm Down") OR approves your previous suggestion ("yes", "play it", "go ahead"), set 'agent_tool_call.action' to "PLAY_TRACK_NOW" and 'os_execution_command.intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK" so it plays immediately!
-   - CONSULTATIVE SUGGESTION ('PROPOSE_TRACK'): If the user asks generally for a song without naming a specific title (e.g. "Play me a song", "Suggest something fresh", "Change the song", "Give me a vibe"), pick the best track from 'fresh_unplayed_user_tracks', explain in 1 vivid clause why it fits their dopamine/circadian state, and ask if they want you to play it. Set 'agent_tool_call.action' to "PROPOSE_TRACK", 'os_execution_command.intent' to "NONE", and 'expect_follow_up' to true.
+3. SMART SONG PLAYBACK — PLAY COMMANDS vs. CONSULTATIVE SUGGESTIONS:
+   - IMMEDIATE PLAY EXECUTION ('PLAY_TRACK_NOW'):
+     * Whenever the user commands playback — whether they name a specific song/artist (e.g. "Play Utaniinua", "Play Wakadinali", "Play Calm Down"), OR command you to play/change a song generally (e.g. "Play a song", "Play me a song", "Play something", "Change the song", "Switch the track", "Spin something fresh"), OR approve your previous suggestion ("yes", "play it", "go ahead"):
+     * Pick the best matching or freshest track from 'fresh_unplayed_user_tracks' (or the named track), explain in 1 vivid, unscripted sentence WHY you are spinning it for their current vibe/dopamine state, and set 'agent_tool_call.action' to "PLAY_TRACK_NOW" and 'os_execution_command.intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK" so Spotify plays it immediately!
+   - CONSULTATIVE SUGGESTION ('PROPOSE_TRACK'):
+     * When the user asks for a recommendation, suggestion, or opinion WITHOUT commanding immediate play (e.g. "What should I listen to?", "Suggest a song", "Recommend something", "What track fits my mood?"):
+     * Pick the optimal track from 'fresh_unplayed_user_tracks', explain your psychoacoustic rationale in a fresh, non-repetitive way, and ask if they want to spin it. Set 'agent_tool_call.action' to "PROPOSE_TRACK", 'os_execution_command.intent' to "NONE", and 'expect_follow_up' to true.
 
 4. FULL APP & OS TOOL EXECUTION:
    - STOP / PAUSE: User asks to stop, pause, hold, mute, or quiet the music -> 'action': "PAUSE_PLAYBACK", 'intent': "OS_MEDIA_PAUSE", 'expect_follow_up': false.
@@ -212,13 +297,13 @@ YOUR CAPABILITIES & DECISION RULES:
    - ATMOSPHERE / THEME SHIFT: User asks to change the theme, mood color, or studio atmosphere -> 'action': "SHIFT_ATMOSPHERE", 'palette_id': "morning" (Glacier Dawn), "afternoon" (Emerald Velocity), "evening" (Solar Ember), "night" (Synaptic Violet), or "auto".
    - SCREEN NAVIGATION: User asks to open/show the Dopamine Vault, Rhythm DNA, or Agent screen -> 'action': "NAVIGATE_SCREEN", 'target_screen': "DOPAMINE" | "RHYTHM" | "AGENT".
 
-Keep 'voice_agent_tts' natural, warm, insightful, and concise (1-3 spoken sentences, max 38 words).
+Keep 'voice_agent_tts' natural, original, warm, insightful, and concise (1-3 spoken sentences, max 38 words).
 Respond ONLY with raw valid JSON matching this schema:
 {
   "calculated_satiety_percentage": 32,
   "reasoning_mode": "JOURNEY_ADVISOR",
   "flow_state_analysis": "1 concise studio telemetry insight for the UI console",
-  "voice_agent_tts": "Natural spoken response to the user",
+  "voice_agent_tts": "Natural, unscripted spoken response to the user",
   "agent_tool_call": {
     "action": "ADVISE_ONLY",
     "track_title": "",
@@ -283,26 +368,39 @@ Respond ONLY with raw valid JSON matching this schema:
     const token = await this.getSpotifyAccessToken();
     if (!token) return null;
 
-    try {
-      const q = artist ? `track:${query} artist:${artist}` : query;
-      const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+    const cleanTitle = ClaudeMusicReasoningProvider.sanitizeTrackTitle(query);
+    const cleanArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(artist);
 
-      const searchData = (await searchRes.json()) as any;
-      const item = searchData.tracks?.items?.[0];
+    const searchCandidates: string[] = [];
+    if (cleanTitle && cleanArtist) {
+      searchCandidates.push(`track:${cleanTitle} artist:${cleanArtist}`);
+      searchCandidates.push(`${cleanTitle} ${cleanArtist}`);
+    }
+    if (cleanTitle) {
+      searchCandidates.push(cleanTitle);
+    }
 
-      if (item && item.uri) {
-        console.log(`[Spotify Lookup] 🎯 Resolved exact Spotify URI for "${query}": ${item.uri} (${item.name} by ${item.artists?.[0]?.name})`);
-        return {
-          trackId: item.id,
-          uri: item.uri,
-          title: item.name,
-          artist: item.artists?.[0]?.name || ''
-        };
+    for (const q of searchCandidates) {
+      try {
+        const searchRes = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        const searchData = (await searchRes.json()) as any;
+        const item = searchData.tracks?.items?.[0];
+
+        if (item && item.uri) {
+          console.log(`[Spotify Lookup] 🎯 Resolved exact Spotify URI for "${q}": ${item.uri} (${item.name} by ${item.artists?.[0]?.name})`);
+          return {
+            trackId: item.id,
+            uri: item.uri,
+            title: item.name,
+            artist: item.artists?.[0]?.name || ''
+          };
+        }
+      } catch (error) {
+        console.warn('[Spotify Lookup] Error resolving Spotify track:', error);
       }
-    } catch (error) {
-      console.warn('[Spotify Lookup] Error resolving Spotify track:', error);
     }
     return null;
   }
@@ -541,10 +639,19 @@ Respond ONLY with raw valid JSON matching this schema:
         )
       : null;
 
+    // Detect if the user is commanding immediate playback ("play a song", "play me a song", "play something", "change the song", "play [name]")
+    // versus asking for a consultative recommendation ("suggest a song", "recommend something", "what should I listen to?")
+    const isConsultativeQuestion = /\b(suggest|recommend|what should|which song|advice|advise|analyze|tell me about|capsule|stored for me|what do you have)\b/i.test(cleanCommandNoPunct);
+    const isDirectPlayCommand = !isConsultativeQuestion && (
+      Boolean(explicitlyNamedQuery) ||
+      /^\s*(please\s+)?(play|spin|put on|start playing|change the song|switch the song|switch the track|change track)\b/i.test(cleanCommandNoPunct)
+    );
+
     const claudePayload = {
       circadian_daypart: context.circadian_daypart,
       current_track: context.current_track,
       user_command: userCommandRaw,
+      is_direct_play_command: isDirectPlayCommand,
       explicit_named_play_request: explicitlyNamedQuery || null,
       matched_library_track_for_explicit_request: matchedExplicitLibraryTrack || null,
       fresh_unplayed_user_tracks: freshTracks.slice(0, 20),
@@ -577,44 +684,15 @@ Respond ONLY with raw valid JSON matching this schema:
       );
     }
 
-    console.log('[Claude Provider] ⚡ Dispatching full telemetry & tool-calling reasoning to Claude...');
+    console.log('[Claude Provider] ⚡ Dispatching full telemetry & tool-calling reasoning to Claude Sonnet...');
 
     try {
-      const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
       const systemPrompt = this.getSystemPrompt();
-      let response;
-      try {
-        response = await this.anthropic.messages.create({
-          model: targetModel,
-          max_tokens: 1400,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
-        });
-        this.activeModelUsed = targetModel;
-      } catch (modelErr: any) {
-        const errMsg = String(modelErr?.message || modelErr);
-        if (errMsg.includes('not_found_error') || errMsg.includes('404')) {
-          try {
-            response = await this.anthropic.messages.create({
-              model: 'claude-3-5-haiku-20241022',
-              max_tokens: 1000,
-              system: systemPrompt,
-              messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
-            });
-            this.activeModelUsed = 'claude-3-5-haiku-20241022';
-          } catch {
-            response = await this.anthropic.messages.create({
-              model: 'claude-3-haiku-20240307',
-              max_tokens: 1000,
-              system: systemPrompt,
-              messages: [{ role: 'user', content: JSON.stringify(claudePayload) }]
-            });
-            this.activeModelUsed = 'claude-3-haiku-20240307';
-          }
-        } else {
-          throw modelErr;
-        }
-      }
+      const response = await this.callClaudeWithSonnetPriority(
+        systemPrompt,
+        JSON.stringify(claudePayload),
+        1400
+      );
 
       const rawText = this.extractRawText(response?.content);
       if (!rawText || rawText.trim() === '') {
@@ -635,10 +713,17 @@ Respond ONLY with raw valid JSON matching this schema:
       const toolCallRaw = parsed.agent_tool_call || {};
       let action: AgentToolCall['action'] = toolCallRaw.action || 'ADVISE_ONLY';
 
-      // Enforce user preference: if user explicitly named a specific song/artist ("Play [Name]"), execute PLAY_TRACK_NOW immediately
-      if (explicitlyNamedQuery && (action === 'PROPOSE_TRACK' || action === 'ADVISE_ONLY')) {
+      // Enforce user preference: if user commanded "Play ..." (either a specific track or "play a song"), execute PLAY_TRACK_NOW immediately
+      if (isDirectPlayCommand && (action === 'PROPOSE_TRACK' || action === 'ADVISE_ONLY')) {
         action = 'PLAY_TRACK_NOW';
+        // If Claude ended with "Want me to play it?" while we're auto-playing, replace that trailing question with an active play statement
+        ttsText = ttsText
+          .replace(/\s*(want me to|should i|shall i|would you like me to)\s+(play|spin|put on|start|queue)\s+(it|that|this).*$/i, '')
+          .trim();
       }
+
+      // Guard against any residual "How about X?" opening
+      ttsText = ttsText.replace(/^how about\s+/i, 'Spinning ');
 
       const rawSearch = parsed.os_execution_command?.search_query || toolCallRaw.track_title || explicitlyNamedQuery || '';
       let trackTitle = toolCallRaw.track_title || parsed.os_execution_command?.track_title || parsed.track_title || '';
@@ -657,8 +742,8 @@ Respond ONLY with raw valid JSON matching this schema:
         trackTitle = explicitlyNamedQuery;
       }
 
-      // If proposing a track or launching capsule and Claude didn't populate trackTitle, bind from capsule/freshTracks
-      if ((action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE') && !trackTitle) {
+      // If playing, proposing, or launching capsule and Claude didn't populate trackTitle, bind from capsule/freshTracks
+      if ((action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE') && !trackTitle) {
         const chosen = action === 'LAUNCH_DOPAMINE_CAPSULE' && compactedCapsule[0]
           ? compactedCapsule[0]
           : (freshTracks[0] || allUserTracks[0]);
@@ -671,12 +756,12 @@ Respond ONLY with raw valid JSON matching this schema:
 
       // Resolve Spotify URI if we are playing or proposing a track
       if (!spotifyUri && trackTitle && (action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE')) {
-        const titleLower = trackTitle.toLowerCase().trim();
+        const titleLower = ClaudeMusicReasoningProvider.sanitizeTrackTitle(trackTitle).toLowerCase();
         const matchedHistoryTrack = allUserTracks.find(
           h => h.title && (
-            h.title.toLowerCase().trim() === titleLower ||
-            titleLower.includes(h.title.toLowerCase().trim()) ||
-            h.title.toLowerCase().trim().includes(titleLower)
+            ClaudeMusicReasoningProvider.sanitizeTrackTitle(h.title).toLowerCase() === titleLower ||
+            titleLower.includes(ClaudeMusicReasoningProvider.sanitizeTrackTitle(h.title).toLowerCase()) ||
+            ClaudeMusicReasoningProvider.sanitizeTrackTitle(h.title).toLowerCase().includes(titleLower)
           )
         );
         if (matchedHistoryTrack?.trackId) {
@@ -706,6 +791,10 @@ Respond ONLY with raw valid JSON matching this schema:
         }
       }
 
+      const cleanTitleForSearch = ClaudeMusicReasoningProvider.sanitizeTrackTitle(trackTitle);
+      const cleanArtistForSearch = ClaudeMusicReasoningProvider.sanitizeArtistName(trackArtist);
+      const cleanSearchQuery = `${cleanTitleForSearch} ${cleanArtistForSearch}`.trim() || ClaudeMusicReasoningProvider.sanitizeTrackTitle(rawSearch);
+
       const targetPlayer = toolCallRaw.target_player || parsed.os_execution_command?.target_player || targetPlayerDefault;
 
       // Map AgentToolCall action to OsExecutionCommand intent
@@ -721,8 +810,8 @@ Respond ONLY with raw valid JSON matching this schema:
           resolvedIntent = 'NONE';
           if (trackTitle) {
             ClaudeMusicReasoningProvider.pendingProposedTrack = {
-              title: trackTitle,
-              artist: trackArtist,
+              title: cleanTitleForSearch || trackTitle,
+              artist: cleanArtistForSearch || trackArtist,
               trackId: spotifyUri || undefined,
               source: targetPlayer
             };
@@ -749,7 +838,7 @@ Respond ONLY with raw valid JSON matching this schema:
 
       if (!ttsText) {
         ttsText = action === 'PLAY_TRACK_NOW' && trackTitle
-          ? `Playing "${trackTitle}"${trackArtist ? ` by ${trackArtist}` : ''} right now.`
+          ? `Playing "${cleanTitleForSearch || trackTitle}"${cleanArtistForSearch ? ` by ${cleanArtistForSearch}` : ''} right now.`
           : action === 'PAUSE_PLAYBACK'
           ? 'Paused your playback.'
           : 'I am synced to your listening telemetry. Tell me what you want to explore next.';
@@ -765,8 +854,8 @@ Respond ONLY with raw valid JSON matching this schema:
 
       const finalToolCall: AgentToolCall = {
         action,
-        track_title: trackTitle || undefined,
-        track_artist: trackArtist || undefined,
+        track_title: (cleanTitleForSearch || trackTitle) || undefined,
+        track_artist: (cleanArtistForSearch || trackArtist) || undefined,
         spotify_uri: spotifyUri || undefined,
         target_player: targetPlayer,
         volume_percent: typeof toolCallRaw.volume_percent === 'number' ? toolCallRaw.volume_percent : undefined,
@@ -793,9 +882,9 @@ Respond ONLY with raw valid JSON matching this schema:
         os_execution_command: {
           intent: resolvedIntent,
           target_player: targetPlayer,
-          search_query: `${trackTitle} ${trackArtist && trackArtist !== 'Unknown Artist' ? trackArtist : ''}`.trim() || rawSearch,
-          track_title: trackTitle,
-          track_artist: trackArtist,
+          search_query: cleanSearchQuery,
+          track_title: cleanTitleForSearch || trackTitle,
+          track_artist: cleanArtistForSearch || trackArtist,
           spotify_uri: spotifyUri,
           suggested_bpm_target: Number(parsed.os_execution_command?.suggested_bpm_target || 108)
         },
@@ -1160,13 +1249,11 @@ Respond ONLY with a valid JSON object matching this schema:
 }`;
 
     try {
-      const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
-      const response = await this.anthropic.messages.create({
-        model: targetModel,
-        max_tokens: 800,
-        system: this.getSystemPrompt(),
-        messages: [{ role: 'user', content: prompt }]
-      });
+      const response = await this.callClaudeWithSonnetPriority(
+        this.getSystemPrompt(),
+        prompt,
+        800
+      );
 
       const rawText = this.extractRawText(response?.content);
       if (!rawText || !rawText.trim()) {
@@ -1238,7 +1325,7 @@ Respond ONLY with a valid JSON object matching this schema:
           fatigueRisk: f.estimatedFatigue >= 0.75 ? 'HIGH' : f.estimatedFatigue >= 0.45 ? 'MODERATE' : 'LOW'
         })),
         isAiGenerated: true,
-        modelUsed: targetModel
+        modelUsed: this.activeModelUsed
       };
     } catch (err: any) {
       console.warn('[Claude Provider] Report generation failed or unconfigured, using baseline:', err?.message || err);
@@ -1375,13 +1462,11 @@ Respond ONLY with a JSON object:
   "probabilisticInferences": [{"inference": "High structural tolerance in current session", "confidence": 0.91, "basis": "Completion rates remain above 80%"}]
 }`;
 
-        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
-        const res = await this.anthropic.messages.create({
-          model: targetModel,
-          max_tokens: 600,
-          system: this.getSystemPrompt(),
-          messages: [{ role: 'user', content: prompt }]
-        });
+        const res = await this.callClaudeWithSonnetPriority(
+          this.getSystemPrompt(),
+          prompt,
+          600
+        );
 
         const raw = this.extractRawText(res?.content);
         if (!raw || !raw.trim()) {
@@ -1392,7 +1477,7 @@ Respond ONLY with a JSON object:
         return {
           status: 'ok',
           isAiGenerated: true,
-          modelUsed: targetModel,
+          modelUsed: this.activeModelUsed,
           generatedAt: new Date().toISOString(),
           ...parsed
         };
@@ -1458,13 +1543,11 @@ Generate 10 real, genre-congruent song recommendations (4 CORE_DOPAMINE, 3 DEEP_
 Respond ONLY with a JSON array:
 [{"title": "Song Title", "artist": "Artist", "album": "Album", "category": "DOPAMINE_FLOW", "subTier": "CORE_DOPAMINE", "reason": "Reason", "confidence": 0.95}]`;
 
-        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
-        const res = await this.anthropic.messages.create({
-          model: targetModel,
-          max_tokens: 1000,
-          system: this.getSystemPrompt(),
-          messages: [{ role: 'user', content: prompt }]
-        });
+        const res = await this.callClaudeWithSonnetPriority(
+          this.getSystemPrompt(),
+          prompt,
+          1000
+        );
 
         const raw = this.extractRawText(res?.content);
         if (!raw || !raw.trim()) {
@@ -1476,7 +1559,7 @@ Respond ONLY with a JSON array:
           return {
             status: 'ok',
             isAiGenerated: true,
-            modelUsed: targetModel,
+            modelUsed: this.activeModelUsed,
             recommendations: parsed.slice(0, 10)
           };
         }
@@ -1542,13 +1625,11 @@ Recent Catalog: ${tracks.slice(0, 15).map(t => `${t.title} by ${t.artist}`).join
 Respond with conversational audiophile assistance in JSON:
 {"reply": "short audiophile advice", "suggestedAction": "NEXT_TRACK" | "PLAY" | "PAUSE" | "NONE", "recommendedTrack": {"title": "Title", "artist": "Artist"}}`;
 
-        const targetModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
-        const res = await this.anthropic.messages.create({
-          model: targetModel,
-          max_tokens: 400,
-          system: this.getSystemPrompt(),
-          messages: [{ role: 'user', content: prompt }]
-        });
+        const res = await this.callClaudeWithSonnetPriority(
+          this.getSystemPrompt(),
+          prompt,
+          400
+        );
 
         const raw = this.extractRawText(res?.content);
         if (!raw || !raw.trim()) {
