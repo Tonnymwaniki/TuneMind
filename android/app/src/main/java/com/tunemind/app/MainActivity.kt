@@ -192,7 +192,9 @@ open class MainActivity : ComponentActivity() {
                     val agentState by agentVoiceManager.agentState.collectAsState()
                     val flowAnalysis by agentVoiceManager.flowAnalysisFlow.collectAsState()
                     val agentSatiety by agentVoiceManager.agentSatietyFlow.collectAsState()
+                    val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
+                    var hasCompletedLaunchStartFlow by remember { mutableStateOf(false) }
 
                     val orchestrator = remember(agentVoiceManager) {
                         AgentOrchestrator(
@@ -235,9 +237,10 @@ open class MainActivity : ComponentActivity() {
                     }
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
-                        if (!authSession.hasCompletedStartFlow || !hasAllPermissions) {
+                        if (!hasCompletedLaunchStartFlow || !authSession.hasCompletedStartFlow || !hasAllPermissions) {
                             OnboardingScreen(
                                 onComplete = {
+                                    hasCompletedLaunchStartFlow = true
                                     authSessionManager.markStartFlowCompleted()
                                     hasAllPermissions = true
                                 }
@@ -320,6 +323,13 @@ open class MainActivity : ComponentActivity() {
                                                 flowAnalysis = flowAnalysis,
                                                 recentTracks = combinedRecentTracks,
                                                 dopamineCapsule = dopamineCapsule,
+                                                pendingProposedTrack = pendingProposedTrack,
+                                                onApproveProposedTrack = {
+                                                    agentVoiceManager.approvePendingProposedTrack()
+                                                },
+                                                onRejectProposedTrack = {
+                                                    agentVoiceManager.rejectPendingProposedTrack()
+                                                },
                                                 onOrbTapped = {
                                                     agentVoiceManager.simulateWakeWordDetected()
                                                 },

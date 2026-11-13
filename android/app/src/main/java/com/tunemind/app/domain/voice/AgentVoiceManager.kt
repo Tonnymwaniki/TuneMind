@@ -70,8 +70,19 @@ class AgentVoiceManager(
     private val _agentSatietyFlow = MutableStateFlow(22)
     val agentSatietyFlow: StateFlow<Int> = _agentSatietyFlow
 
+    private val _pendingProposedTrackFlow = MutableStateFlow<PendingProposedTrack?>(null)
+    val pendingProposedTrackFlow: StateFlow<PendingProposedTrack?> = _pendingProposedTrackFlow
+
     @Volatile
     private var clientPendingProposedTrack: PendingProposedTrack? = null
+
+    @Volatile
+    private var lastUserTranscript: String = ""
+
+    private fun updatePendingProposedTrack(track: PendingProposedTrack?) {
+        clientPendingProposedTrack = track
+        _pendingProposedTrackFlow.value = track
+    }
 
     // Eagerly initialize TTS so the very first voice response is ready with zero initialization delay
     private val executionEngine = com.tunemind.app.domain.execution.TuneMindExecutionEngine(context)
@@ -274,7 +285,7 @@ class AgentVoiceManager(
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
         executionEngine.stopSpeaking()
-        clientPendingProposedTrack = null
+        updatePendingProposedTrack(null)
 
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
@@ -328,6 +339,39 @@ class AgentVoiceManager(
     }
 
     /**
+     * Triggered when the user approves a proposed song (either by tapping Approve on PulseAgentScreen
+     * or via voice confirmation). Executes playback immediately on Spotify.
+     */
+    fun approvePendingProposedTrack() {
+        val pending = clientPendingProposedTrack ?: return
+        updatePendingProposedTrack(null)
+        playTrackImmediatelyWithVoice(
+            title = pending.title,
+            artist = pending.artist,
+            spotifyUri = pending.trackId,
+            targetPlayer = pending.source.ifBlank { "com.spotify.music" }
+        )
+    }
+
+    /**
+     * Triggered when the user passes/rejects a proposed song on PulseAgentScreen and wants another suggestion.
+     */
+    fun rejectPendingProposedTrack() {
+        val rejected = clientPendingProposedTrack
+        updatePendingProposedTrack(null)
+        if (rejected != null) {
+            recordAgentSuggestedTrack(rejected.title)
+        }
+        errorResetJob?.cancel()
+        stopMicrophoneStream()
+        stopNativeSpeechRecognizer()
+        executionEngine.stopSpeaking()
+        lastUserTranscript = "Suggest another song instead"
+        setThinkingState()
+        processFinalTranscriptWithFallback("Suggest a different fresh song from my history and ask if I want to play it.")
+    }
+
+    /**
      * Triggered when the user selects Neural Voice Breakdown & Dialogue on any song card.
      * Routes through live Claude Sonnet reasoning so the agent generates a fresh, unscripted
      * psychoacoustic breakdown of the track and opens the microphone for follow-up or approval.
@@ -348,16 +392,19 @@ class AgentVoiceManager(
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(cleanTitle, cleanArtist)
 
-        clientPendingProposedTrack = PendingProposedTrack(
-            title = cleanTitle,
-            artist = cleanArtist,
-            trackId = spotifyUri,
-            source = targetPlayer
+        updatePendingProposedTrack(
+            PendingProposedTrack(
+                title = cleanTitle,
+                artist = cleanArtist,
+                trackId = spotifyUri,
+                source = targetPlayer
+            )
         )
 
         val artistPart = if (cleanArtist.isNotEmpty()) " by $cleanArtist" else ""
         val dynamicPrompt = "Give me a fresh psychoacoustic breakdown of \"$cleanTitle\"$artistPart (currently at $freshnessPercent% dopamine freshness, ${mood.label} mood) in my listening journey and ask if I want you to spin it right now."
 
+        lastUserTranscript = dynamicPrompt
         _flowAnalysisFlow.value = "Mood DNA: ${mood.label} • $freshnessPercent% Dopamine Readiness"
         _agentSatietyFlow.value = (100 - freshnessPercent).coerceIn(10, 90)
         setThinkingState()
@@ -385,16 +432,19 @@ class AgentVoiceManager(
             return
         }
 
-        clientPendingProposedTrack = PendingProposedTrack(
-            title = lead.title,
-            artist = lead.artist,
-            trackId = lead.spotifyUri,
-            source = targetPlayer
+        updatePendingProposedTrack(
+            PendingProposedTrack(
+                title = lead.title,
+                artist = lead.artist,
+                trackId = lead.spotifyUri,
+                source = targetPlayer
+            )
         )
 
         val trackSummary = tracks.joinToString(", ") { "${it.title} by ${it.artist} (${it.freshnessPercent}% fresh)" }
         val dynamicPrompt = "Brief me on my ${capsule.slotLabel} Dopamine Capsule that you compacted ($trackSummary) and ask if I want to kick off the capsule with \"${lead.title}\"."
 
+        lastUserTranscript = dynamicPrompt
         _flowAnalysisFlow.value = "Dopamine Capsule Ready: ${tracks.joinToString(" • ") { it.title }}"
         _agentSatietyFlow.value = (100 - lead.freshnessPercent).coerceIn(10, 45)
         setThinkingState()
@@ -533,7 +583,6 @@ class AgentVoiceManager(
                                 put("trackId", pendingProp.trackId ?: "")
                                 put("source", pendingProp.source)
                             })
-                            clientPendingProposedTrack = null
                         }
                     }
                     ws.send(metaJson.toString())
@@ -577,6 +626,7 @@ class AgentVoiceManager(
                     val isFinal = json.optBoolean("isFinal", false) || json.optString("message_type") == "FinalTranscript"
 
                     if (transcript.isNotBlank()) {
+                        lastUserTranscript = transcript
                         scope.launch {
                             _transcriptionFlow.emit(transcript)
                         }
@@ -584,6 +634,7 @@ class AgentVoiceManager(
 
                     if (isFinal && transcript.isNotBlank()) {
                         Log.d(TAG, "User finished speaking: $transcript")
+                        lastUserTranscript = transcript
                         stopAudioRecordingOnly()
                         setThinkingState()
                     }
@@ -644,13 +695,34 @@ class AgentVoiceManager(
         val cmdObj = dataObj?.optJSONObject("os_execution_command")
         val toolObj = dataObj?.optJSONObject("agent_tool_call")
 
-        val rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+        val pendingBeforeTurn = clientPendingProposedTrack
+        val userTranscriptLower = lastUserTranscript.lowercase().trim()
+        val isSyntheticPrompt = userTranscriptLower.startsWith("give me a fresh psychoacoustic breakdown") ||
+            userTranscriptLower.startsWith("brief me on my") ||
+            userTranscriptLower.startsWith("suggest a different fresh song")
+
+        val isRejectingPending = Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\\b")
+            .containsMatchIn(userTranscriptLower)
+        val isApprovingPending = pendingBeforeTurn != null && !isSyntheticPrompt && !isRejectingPending && (
+            Regex("\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|please|approve|confirm|start|spin it|guess|yet|yea|yah)\\b")
+                .containsMatchIn(userTranscriptLower) ||
+            (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
+        )
+
+        var rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
-        val rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+        var rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
-        val rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
+        var rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
         var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+
+        if (isApprovingPending && pendingBeforeTurn != null) {
+            rawTrackTitle = pendingBeforeTurn.title
+            rawTrackArtist = pendingBeforeTurn.artist
+            resolvedSpotifyUri = pendingBeforeTurn.trackId ?: resolvedSpotifyUri
+            rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
+        }
 
         if (!rawTrackTitle.isNullOrBlank()) {
             recordAgentSuggestedTrack(rawTrackTitle)
@@ -671,46 +743,107 @@ class AgentVoiceManager(
             }
         }
 
+        val rawAction = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY"
+        val rawIntent = cmdObj?.optString("intent", "NONE") ?: "NONE"
+        val targetPlayerPkg = toolObj?.optString("target_player", "com.spotify.music")
+            ?.takeIf { it.isNotBlank() }
+            ?: cmdObj?.optString("target_player", "com.spotify.music")
+            ?: "com.spotify.music"
+
+        // Determine whether this turn is proposing a song (must wait for user approval) vs executing an approved song
+        val isTrackProposalOrPlayAttempt = !rawTrackTitle.isNullOrBlank() && (
+            rawAction == "PROPOSE_TRACK" ||
+            rawAction == "LAUNCH_DOPAMINE_CAPSULE" ||
+            rawAction == "PLAY_TRACK_NOW" ||
+            rawIntent == "OS_MEDIA_NEXT_AND_DEEP_LINK"
+        )
+
+        val effectiveAction: String
+        val effectiveIntent: String
+        val effectiveExpectFollowUp: Boolean
+        var spokenTts = explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" }.trim()
+
+        if (isApprovingPending && pendingBeforeTurn != null) {
+            effectiveAction = "PLAY_TRACK_NOW"
+            effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
+            effectiveExpectFollowUp = false
+            updatePendingProposedTrack(null)
+            val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
+            spokenTts = "Awesome, playing ${rawTrackTitle}$artistPart on Spotify right now."
+        } else if (isTrackProposalOrPlayAttempt) {
+            // Always propose the song first and wait for the user's approval before executing!
+            effectiveAction = if (rawAction == "LAUNCH_DOPAMINE_CAPSULE") "LAUNCH_DOPAMINE_CAPSULE" else "PROPOSE_TRACK"
+            effectiveIntent = "NONE"
+            effectiveExpectFollowUp = true
+            updatePendingProposedTrack(
+                PendingProposedTrack(
+                    title = rawTrackTitle!!,
+                    artist = rawTrackArtist ?: "",
+                    trackId = resolvedSpotifyUri,
+                    source = targetPlayerPkg
+                )
+            )
+            // Ensure spoken TTS asks the user for approval instead of claiming it is already spinning
+            spokenTts = spokenTts
+                .replace(Regex("^(spinning|playing|launching)\\s+", RegexOption.IGNORE_CASE), "I picked ")
+                .replace(Regex("\\s+right now[.!]*$", RegexOption.IGNORE_CASE), ".")
+                .trim()
+            if (!spokenTts.contains("?")) {
+                val cleanSentence = spokenTts.trimEnd('.', '!').ifBlank {
+                    val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
+                    "I picked $rawTrackTitle$artistPart for your vibe"
+                }
+                spokenTts = "$cleanSentence. Would you like me to play it right now?"
+            }
+        } else {
+            effectiveAction = rawAction
+            effectiveIntent = rawIntent
+            effectiveExpectFollowUp = toolObj?.optBoolean("expect_follow_up", false) ?: false
+            if (effectiveAction == "PAUSE_PLAYBACK") {
+                updatePendingProposedTrack(null)
+            }
+        }
+
         val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
-            action = toolObj?.optString("action", "ADVISE_ONLY") ?: "ADVISE_ONLY",
+            action = effectiveAction,
             track_title = rawTrackTitle,
             track_artist = rawTrackArtist,
             spotify_uri = resolvedSpotifyUri,
-            target_player = toolObj?.optString("target_player", "com.spotify.music"),
+            target_player = targetPlayerPkg,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
             palette_id = toolObj?.optString("palette_id", null)?.takeIf { it.isNotBlank() },
             target_screen = toolObj?.optString("target_screen", null)?.takeIf { it.isNotBlank() },
-            expect_follow_up = toolObj?.optBoolean("expect_follow_up", false)
-                ?: (cmdObj?.optString("intent", "NONE") == "NONE" && !rawTrackTitle.isNullOrBlank())
+            expect_follow_up = effectiveExpectFollowUp
         )
 
-        if ((toolPayload.action == "PROPOSE_TRACK" || toolPayload.action == "LAUNCH_DOPAMINE_CAPSULE") && !rawTrackTitle.isNullOrBlank()) {
-            clientPendingProposedTrack = PendingProposedTrack(
-                title = rawTrackTitle,
-                artist = rawTrackArtist ?: "",
-                trackId = resolvedSpotifyUri,
-                source = toolPayload.target_player ?: "com.spotify.music"
-            )
-        } else if (toolPayload.action == "PLAY_TRACK_NOW") {
-            clientPendingProposedTrack = null
+        val effectiveFlowAnalysis = if (effectiveAction == "PROPOSE_TRACK" && !rawTrackTitle.isNullOrBlank()) {
+            val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " • $rawTrackArtist" else ""
+            "Proposed \"$rawTrackTitle\"$artistPart — say \"Yes\" or tap Approve to play."
+        } else {
+            dataObj?.optString("flow_state_analysis", "") ?: ""
         }
 
         val responseObj = com.tunemind.app.domain.execution.ReasoningResponse(
             calculated_satiety_percentage = dataObj?.optInt("calculated_satiety_percentage", 30) ?: 30,
-            flow_state_analysis = dataObj?.optString("flow_state_analysis", "") ?: "",
-            voice_agent_tts = explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" },
+            flow_state_analysis = effectiveFlowAnalysis,
+            voice_agent_tts = spokenTts,
             reasoning_mode = dataObj?.optString("reasoning_mode", "SONIC_CURATOR") ?: "SONIC_CURATOR",
             agent_tool_call = toolPayload,
             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
-                intent = cmdObj?.optString("intent", "NONE") ?: "NONE",
-                target_player = cmdObj?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
+                intent = effectiveIntent,
+                target_player = targetPlayerPkg,
                 search_query = rawSearchQuery,
                 suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
                 track_title = rawTrackTitle,
                 track_artist = rawTrackArtist,
                 spotify_uri = resolvedSpotifyUri
             ),
-            voice_agent_audio_base64 = dataObj?.optString("voice_agent_audio_base64", null)?.takeIf { it.isNotBlank() && it != "null" }
+            voice_agent_audio_base64 = if (effectiveAction == "PROPOSE_TRACK" && rawAction == "PLAY_TRACK_NOW") {
+                // Force Android TTS to speak our rewritten approval question if cloud audio said "Spinning..."
+                null
+            } else {
+                dataObj?.optString("voice_agent_audio_base64", null)?.takeIf { it.isNotBlank() && it != "null" }
+            }
         )
 
         mainHandler.post {
@@ -774,6 +907,7 @@ class AgentVoiceManager(
             resumeWakeWordListening()
             return
         }
+        lastUserTranscript = cleaned
 
         setThinkingState()
         scope.launch {
@@ -941,8 +1075,9 @@ class AgentVoiceManager(
         }
 
         // 3. Approval of pending proposed track
-        if (pending != null && Regex("\\b(yes|yeah|yep|sure|okay|ok|play it|go ahead|do it|sounds good|ndio|sawa|spin it)\\b").containsMatchIn(lower)) {
-            clientPendingProposedTrack = null
+        if (pending != null && Regex("\\b(yes|yeah|yep|sure|okay|ok|play|play it|go ahead|do it|sounds good|ndio|sawa|spin it)\\b").containsMatchIn(lower) &&
+            !Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\\b").containsMatchIn(lower)
+        ) {
             val artistPart = if (pending.artist.isNotBlank() && pending.artist != "Unknown Artist") " by ${pending.artist}" else ""
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 20)
@@ -1115,7 +1250,7 @@ class AgentVoiceManager(
             }
         }
 
-        // 9. Explicit named song request ("play [Song Name]") vs generic recommendation
+        // 9. Song Suggestion / Recommendation (Always propose first and wait for user approval)
         val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
         val genericPlayRegex = Regex("^\\s*(please\\s+)?(play|spin|put on|give me|suggest|recommend|find)(\\s+me)?(\\s+(a|some|any|another|different|fresh|good|nice|new|best|my))?\\s*(music|song|songs|track|tracks|vibe|vibes|tune|tunes|something|anything|bongo|bongo flava|afrobeats|hip hop|gospel|capsule|dopamine capsule)?(\\s+(for me|please|right now|now|today))?\\s*$")
         val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
@@ -1139,19 +1274,19 @@ class AgentVoiceManager(
             val artistPart = if (finalArtist.isNotBlank() && finalArtist != "Unknown Artist") " by $finalArtist" else ""
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 20)
-                put("reasoning_mode", "DIRECT_EXECUTION")
-                put("flow_state_analysis", "Direct studio launch: spinning $finalTitle$artistPart.")
-                put("voice_agent_tts", "Spinning $finalTitle$artistPart on Spotify right now.")
+                put("reasoning_mode", "PLAYBACK_SUGGESTION")
+                put("flow_state_analysis", "Proposed \"$finalTitle\"$artistPart — awaiting your approval to play.")
+                put("voice_agent_tts", "I found $finalTitle$artistPart ready for your session. Would you like me to play it right now?")
                 put("agent_tool_call", JSONObject().apply {
-                    put("action", "PLAY_TRACK_NOW")
+                    put("action", "PROPOSE_TRACK")
                     put("track_title", finalTitle)
                     put("track_artist", finalArtist)
                     put("spotify_uri", finalUri)
                     put("target_player", targetPlayer)
-                    put("expect_follow_up", false)
+                    put("expect_follow_up", true)
                 })
                 put("os_execution_command", JSONObject().apply {
-                    put("intent", "OS_MEDIA_NEXT_AND_DEEP_LINK")
+                    put("intent", "NONE")
                     put("target_player", targetPlayer)
                     put("search_query", "$finalTitle $finalArtist".trim())
                     put("track_title", finalTitle)
@@ -1161,45 +1296,24 @@ class AgentVoiceManager(
             }
         }
 
-        // 10. Direct Play Command ("play a song", "play me a song", "play something", "change the song") vs Consultative Question
-        val freshPick = capsule?.tracks?.firstOrNull()
+        // 10. Pick freshest unplayed track from capsule or history, propose it, and wait for user approval
+        val recentSuggested = getRecentlyPlayedByAgent().map { it.lowercase() }.toSet()
+        val freshHistoryPick = recents.firstOrNull { r ->
+            !r.title.isNullOrBlank() && !recentSuggested.contains(r.title.lowercase().trim())
+        } ?: recents.firstOrNull()
+        val freshPick = capsule?.tracks?.firstOrNull { ct ->
+            !recentSuggested.contains(ct.title.lowercase().trim())
+        } ?: capsule?.tracks?.firstOrNull()
+
         val chosenTitle = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeTrackTitleForPlay(
-            freshPick?.title ?: recents.firstOrNull()?.title ?: "Midnight City"
+            freshPick?.title ?: freshHistoryPick?.title ?: "Midnight City"
         )
         val chosenArtist = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeArtistForPlay(
-            freshPick?.artist ?: recents.firstOrNull()?.artist ?: "M83"
+            freshPick?.artist ?: freshHistoryPick?.artist ?: "M83"
         )
-        val chosenUri = freshPick?.spotifyUri ?: recents.firstOrNull()?.providerTrackId ?: ""
+        val chosenUri = freshPick?.spotifyUri ?: freshHistoryPick?.providerTrackId ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(chosenTitle, chosenArtist)
         val artistPart = if (chosenArtist.isNotBlank()) " by $chosenArtist" else ""
-
-        val isDirectPlayCmd = Regex("^\\s*(please\\s+)?(play|spin|put on|change the song|switch the song|switch the track)\\b").containsMatchIn(cleanNoPunct) &&
-            !Regex("\\b(suggest|recommend|what should|advice|advise|capsule)\\b").containsMatchIn(cleanNoPunct)
-
-        if (isDirectPlayCmd) {
-            return JSONObject().apply {
-                put("calculated_satiety_percentage", 20)
-                put("reasoning_mode", "DIRECT_EXECUTION")
-                put("flow_state_analysis", "Spinning $chosenTitle$artistPart • ${mood.label} Dopamine Anchor.")
-                put("voice_agent_tts", "Spinning $chosenTitle$artistPart right now—its ${mood.label.lowercase()} energy is at peak dopamine freshness for your session.")
-                put("agent_tool_call", JSONObject().apply {
-                    put("action", "PLAY_TRACK_NOW")
-                    put("track_title", chosenTitle)
-                    put("track_artist", chosenArtist)
-                    put("spotify_uri", chosenUri)
-                    put("target_player", targetPlayer)
-                    put("expect_follow_up", false)
-                })
-                put("os_execution_command", JSONObject().apply {
-                    put("intent", "OS_MEDIA_NEXT_AND_DEEP_LINK")
-                    put("target_player", targetPlayer)
-                    put("search_query", "$chosenTitle $chosenArtist".trim())
-                    put("track_title", chosenTitle)
-                    put("track_artist", chosenArtist)
-                    put("spotify_uri", chosenUri)
-                })
-            }
-        }
 
         return JSONObject().apply {
             put("calculated_satiety_percentage", 22)

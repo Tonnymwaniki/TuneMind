@@ -21,19 +21,9 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     private val authSessionManager = TuneMindAuthSessionManager.getInstance(application)
 
-    private val _currentStep = MutableStateFlow(determineInitialStep(application))
+    // Always start at the Welcome / Splash screen on every app launch
+    private val _currentStep = MutableStateFlow(OnboardingStep.WELCOME)
     val currentStep: StateFlow<OnboardingStep> = _currentStep.asStateFlow()
-
-    private fun determineInitialStep(app: Application): OnboardingStep {
-        val session = authSessionManager.sessionFlow.value
-        if (!session.hasCompletedStartFlow && !session.isLoggedIn) {
-            return OnboardingStep.WELCOME
-        }
-        if (!session.isLoggedIn) {
-            return OnboardingStep.AUTH_LOGIN
-        }
-        return evaluateRemainingPermissionStep(app)
-    }
 
     private fun evaluateRemainingPermissionStep(app: Application): OnboardingStep {
         return when {

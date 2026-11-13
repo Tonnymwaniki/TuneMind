@@ -280,13 +280,14 @@ YOUR CAPABILITIES & DECISION RULES:
    - Present the compacted tracks from 'dopamine_capsule' (or top 'fresh_unplayed_user_tracks'), explain the micro-pattern why you compacted them, and ask if they want to kick off the capsule with the lead track.
    - Set 'agent_tool_call.action' to "LAUNCH_DOPAMINE_CAPSULE", populate 'track_title' and 'track_artist' with the #1 capsule track, and set 'expect_follow_up' to true.
 
-3. SMART SONG PLAYBACK — PLAY COMMANDS vs. CONSULTATIVE SUGGESTIONS:
+3. SMART SONG PLAYBACK — PROPOSE FIRST & WAIT FOR APPROVAL vs. EXPLICIT NAMED PLAY:
+   - SONG SUGGESTION / RECOMMENDATION ('PROPOSE_TRACK' — DEFAULT FOR ALL SUGGESTIONS):
+     * Whenever you select, recommend, or suggest a song from the user's library (including when the user says "Play a song", "Play me a song", "Play something", "Change the song", "Switch the track", "Spin something fresh", "What should I listen to?", "Suggest a song", or "Recommend something"):
+     * You MUST propose the song FIRST and wait for the user's approval before executing!
+     * Pick the optimal track from 'fresh_unplayed_user_tracks', explain your psychoacoustic rationale in 1 vivid sentence, and explicitly ask the user if they want you to play it right now.
+     * Set 'agent_tool_call.action' to "PROPOSE_TRACK", 'os_execution_command.intent' to "NONE", and 'agent_tool_call.expect_follow_up' to true.
    - IMMEDIATE PLAY EXECUTION ('PLAY_TRACK_NOW'):
-     * Whenever the user commands playback — whether they name a specific song/artist (e.g. "Play Utaniinua", "Play Wakadinali", "Play Calm Down"), OR command you to play/change a song generally (e.g. "Play a song", "Play me a song", "Play something", "Change the song", "Switch the track", "Spin something fresh"), OR approve your previous suggestion ("yes", "play it", "go ahead"):
-     * Pick the best matching or freshest track from 'fresh_unplayed_user_tracks' (or the named track), explain in 1 vivid, unscripted sentence WHY you are spinning it for their current vibe/dopamine state, and set 'agent_tool_call.action' to "PLAY_TRACK_NOW" and 'os_execution_command.intent' to "OS_MEDIA_NEXT_AND_DEEP_LINK" so Spotify plays it immediately!
-   - CONSULTATIVE SUGGESTION ('PROPOSE_TRACK'):
-     * When the user asks for a recommendation, suggestion, or opinion WITHOUT commanding immediate play (e.g. "What should I listen to?", "Suggest a song", "Recommend something", "What track fits my mood?"):
-     * Pick the optimal track from 'fresh_unplayed_user_tracks', explain your psychoacoustic rationale in a fresh, non-repetitive way, and ask if they want to spin it. Set 'agent_tool_call.action' to "PROPOSE_TRACK", 'os_execution_command.intent' to "NONE", and 'expect_follow_up' to true.
+     * ONLY use "PLAY_TRACK_NOW" when the user explicitly names a specific track title or artist in 'explicit_named_play_request' (e.g. "Play Utaniinua", "Play Calm Down") OR when the user approves your previously proposed song ("yes", "play it", "go ahead", "sure").
 
 4. FULL APP & OS TOOL EXECUTION:
    - STOP / PAUSE: User asks to stop, pause, hold, mute, or quiet the music -> 'action': "PAUSE_PLAYBACK", 'intent': "OS_MEDIA_PAUSE", 'expect_follow_up': false.
@@ -639,13 +640,9 @@ Respond ONLY with raw valid JSON matching this schema:
         )
       : null;
 
-    // Detect if the user is commanding immediate playback ("play a song", "play me a song", "play something", "change the song", "play [name]")
-    // versus asking for a consultative recommendation ("suggest a song", "recommend something", "what should I listen to?")
+    // Detect if the user explicitly named a specific song title/artist ("play [name]") vs asking the agent to pick/suggest a song
     const isConsultativeQuestion = /\b(suggest|recommend|what should|which song|advice|advise|analyze|tell me about|capsule|stored for me|what do you have)\b/i.test(cleanCommandNoPunct);
-    const isDirectPlayCommand = !isConsultativeQuestion && (
-      Boolean(explicitlyNamedQuery) ||
-      /^\s*(please\s+)?(play|spin|put on|start playing|change the song|switch the song|switch the track|change track)\b/i.test(cleanCommandNoPunct)
-    );
+    const isDirectPlayCommand = !isConsultativeQuestion && Boolean(explicitlyNamedQuery);
 
     const claudePayload = {
       circadian_daypart: context.circadian_daypart,
@@ -713,10 +710,15 @@ Respond ONLY with raw valid JSON matching this schema:
       const toolCallRaw = parsed.agent_tool_call || {};
       let action: AgentToolCall['action'] = toolCallRaw.action || 'ADVISE_ONLY';
 
-      // Enforce user preference: if user commanded "Play ..." (either a specific track or "play a song"), execute PLAY_TRACK_NOW immediately
-      if (isDirectPlayCommand && (action === 'PROPOSE_TRACK' || action === 'ADVISE_ONLY')) {
+      // CRITICAL: Whenever the agent suggests/picks a song (user did not explicitly name a specific track to play immediately),
+      // ALWAYS propose the track first and wait for the user's approval before executing!
+      if (!explicitlyNamedQuery && action === 'PLAY_TRACK_NOW') {
+        action = 'PROPOSE_TRACK';
+        if (ttsText && !ttsText.includes('?')) {
+          ttsText = `${ttsText.replace(/[.!]+$/, '')}. Would you like me to play it right now?`;
+        }
+      } else if (isDirectPlayCommand && action === 'PROPOSE_TRACK') {
         action = 'PLAY_TRACK_NOW';
-        // If Claude ended with "Want me to play it?" while we're auto-playing, replace that trailing question with an active play statement
         ttsText = ttsText
           .replace(/\s*(want me to|should i|shall i|would you like me to)\s+(play|spin|put on|start|queue)\s+(it|that|this).*$/i, '')
           .trim();

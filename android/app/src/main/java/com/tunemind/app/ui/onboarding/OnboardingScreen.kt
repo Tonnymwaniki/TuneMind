@@ -60,6 +60,10 @@ fun OnboardingScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.resetToWelcome()
+    }
+
     LaunchedEffect(currentStep) {
         if (currentStep == OnboardingStep.COMPLETE) {
             onComplete()

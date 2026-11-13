@@ -1,18 +1,25 @@
 package com.tunemind.app.ui.screens
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -23,6 +30,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,156 +38,61 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.voice.AgentState
-import com.tunemind.app.ui.components.bouncyClickable
-import com.tunemind.app.ui.theme.LocalAdaptiveTheme
-import com.tunemind.app.ui.theme.MusicalMood
-import kotlinx.coroutines.delay
+import com.tunemind.app.domain.voice.PendingProposedTrack
+import com.tunemind.app.ui.DopamineCapsuleState
+import com.tunemind.app.ui.theme.LocalAdaptiveColors
+import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
+// Ultra-Dark Abyssal Obsidian Palette (Exclusive to the Agent Screen)
+private val AgentVoidTop = Color(0xFF010103)
+private val AgentVoidMid = Color(0xFF04030A)
+private val AgentVoidBottom = Color(0xFF010104)
+private val AgentObsidianCard = Color(0xFF07060F)
+private val AgentObsidianDeep = Color(0xFF040308)
+
+/**
+ * Screen 2 (Center Default): THE PULSE AGENT — Abyssal Obsidian Edition
+ * Features an exclusive pitch-dark obsidian void theme and an expressive Cyber-Acoustic Mascot
+ * with floating headphone ear-pods, neural visor, reactive cyber-brows, and a live Song Approval bar.
+ */
 @Composable
 fun PulseAgentScreen(
     agentState: AgentState,
     satietyPercentage: Int,
     currentTrackName: String?,
     artistName: String?,
-    isMusicPlaying: Boolean = false,
-    energy: Float = 0.78f,
-    liveTranscript: String = "",
+    isMusicPlaying: Boolean,
+    energy: Float,
+    liveTranscript: String,
     flowAnalysis: String = "",
     recentTracks: List<TrackMemoryEntry> = emptyList(),
-    dopamineCapsule: com.tunemind.app.ui.DopamineCapsuleState? = null,
+    dopamineCapsule: DopamineCapsuleState? = null,
+    pendingProposedTrack: PendingProposedTrack? = null,
+    onApproveProposedTrack: () -> Unit = {},
+    onRejectProposedTrack: () -> Unit = {},
     onOrbTapped: () -> Unit,
     onLaunchDopamineCapsule: () -> Unit = {},
     onCycleAtmospherePalette: () -> Unit = {}
 ) {
-    val theme = LocalAdaptiveTheme.current
+    val colors = LocalAdaptiveColors.current
+    val scrollState = rememberScrollState()
+    val hasPendingApproval = pendingProposedTrack != null
 
-    // Rotate through fresh tracks in the top Studio Pill when music is paused/standby so it is NEVER stuck on a single hardcoded track
-    var tickerIndex by remember { mutableStateOf(0) }
-    LaunchedEffect(recentTracks.size, isMusicPlaying) {
-        if (!isMusicPlaying && recentTracks.size > 1) {
-            while (true) {
-                delay(5500L)
-                tickerIndex = (tickerIndex + 1) % recentTracks.size
-            }
-        }
-    }
-
-    val rotatingCandidate = remember(recentTracks, tickerIndex) {
-        recentTracks.getOrNull(tickerIndex % maxOf(1, recentTracks.size))
-    }
-
-    // Dynamic Core & Aura Colors driven by Agent State + Song Mood + Adaptive Theme
-    val targetOrbColor = when (agentState) {
-        AgentState.LISTENING -> Color(0xFF00E5FF) // Acoustic Sonar Cyan
-        AgentState.THINKING -> Color(0xFFA855F7)  // Neural Synapse Violet
-        AgentState.SPEAKING -> Color(0xFFFFB000)  // Vocal Gold-Amber
-        AgentState.ERROR -> Color(0xFFFF2A55)     // Crimson Alert
-        AgentState.IDLE -> when {
-            isMusicPlaying -> when (theme.musicMood) {
-                MusicalMood.UPLIFTING -> Color(0xFFFFB000)
-                MusicalMood.ENERGETIC -> Color(0xFF10B981)
-                MusicalMood.CALM -> Color(0xFF00E5FF)
-                MusicalMood.REFLECTIVE -> Color(0xFFA855F7)
-                MusicalMood.INTENSE -> Color(0xFFFF2A55)
-                MusicalMood.UNKNOWN -> theme.primaryAccent
-            }
-            else -> theme.primaryAccent
-        }
-    }
-
-    val animatedOrbColor by animateColorAsState(
-        targetValue = targetOrbColor,
-        animationSpec = tween(550),
-        label = "StudioOrbColor"
-    )
-
-    val secondaryGlowColor by animateColorAsState(
-        targetValue = when (agentState) {
-            AgentState.SPEAKING -> Color(0xFF00E5FF)
-            AgentState.LISTENING -> Color(0xFF10B981)
-            AgentState.THINKING -> Color(0xFF00E5FF)
-            else -> theme.secondaryAccent
-        },
-        animationSpec = tween(550),
-        label = "SecondaryGlowColor"
-    )
-
-    // Continuous Physics & Harmonic Phase Animations
-    val infiniteTransition = rememberInfiniteTransition(label = "StudioMascotPhysics")
-
-    val wavePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when {
-                    agentState == AgentState.SPEAKING -> 520
-                    agentState == AgentState.LISTENING -> 720
-                    isMusicPlaying -> 900
-                    else -> 2200
-                },
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "WavePhase"
-    )
-
-    val orbitalRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (agentState) {
-                    AgentState.THINKING -> 2400
-                    AgentState.SPEAKING -> 4200
-                    AgentState.LISTENING -> 5000
-                    else -> if (isMusicPlaying) 6500 else 12000
-                },
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "OrbitalRotation"
-    )
-
-    val breatheScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
+    val activeAccent by animateColorAsState(
         targetValue = when {
-            agentState == AgentState.SPEAKING -> 1.10f
-            agentState == AgentState.LISTENING -> 1.07f
-            agentState == AgentState.THINKING -> 1.06f
-            isMusicPlaying -> 1.05f
-            else -> 1.01f
+            hasPendingApproval -> Color(0xFF00FFA3)
+            agentState == AgentState.LISTENING -> Color(0xFF00E5FF)
+            agentState == AgentState.THINKING -> Color(0xFFA855F7)
+            agentState == AgentState.SPEAKING -> Color(0xFF10B981)
+            agentState == AgentState.ERROR -> Color(0xFFF59E0B)
+            else -> colors.primaryAccent
         },
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when {
-                    agentState == AgentState.SPEAKING -> 420
-                    agentState == AgentState.LISTENING -> 650
-                    isMusicPlaying -> 760
-                    else -> 1800
-                },
-                easing = FastOutSlowInEasing
-            ),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "BreatheScale"
+        animationSpec = tween(450),
+        label = "agent_active_accent"
     )
-
-    // Natural Mascot Eye Blink Timer
-    var isBlinking by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(3800L)
-            isBlinking = true
-            delay(140L)
-            isBlinking = false
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -187,736 +100,1055 @@ fun PulseAgentScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        theme.primaryBackground,
-                        theme.secondaryBackground,
-                        theme.recessedBackground
+                        AgentVoidTop,
+                        AgentVoidMid,
+                        AgentVoidBottom
                     )
                 )
             )
     ) {
-        // Studio Atmosphere Dual Radial Spotlights (Adapts to Song Mood & Agent State)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = (-50).dp)
-                .size(280.dp)
-                .blur(85.dp)
-                .background(animatedOrbColor.copy(alpha = 0.22f), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = (-90).dp)
-                .size(240.dp)
-                .blur(90.dp)
-                .background(secondaryGlowColor.copy(alpha = 0.16f), CircleShape)
-        )
+        // Subtle pitch-dark abyssal nebula aura behind the mascot
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cx = size.width * 0.5f
+            val cy = size.height * 0.36f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        activeAccent.copy(alpha = 0.11f),
+                        colors.secondaryAccent.copy(alpha = 0.05f),
+                        Color.Transparent
+                    ),
+                    center = Offset(cx, cy),
+                    radius = size.minDimension * 0.68f
+                ),
+                radius = size.minDimension * 0.68f,
+                center = Offset(cx, cy)
+            )
+        }
 
-        // Non-Overlapping Full-Screen Studio Column (94dp bottom padding reserves space for FloatingGlassDock)
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(scrollState)
                 .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 94.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 20.dp)
+                .padding(top = 12.dp, bottom = 124.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. TOP: LIVE STUDIO TELEMETRY & MOOD BAR (Never hardcoded; reacts to Agent State, Live Playback, or Rotating Fresh Crate)
-            LiveStudioTelemetryHeader(
-                agentState = agentState,
-                isMusicPlaying = isMusicPlaying,
-                currentTrackName = currentTrackName,
-                artistName = artistName,
-                rotatingCandidate = rotatingCandidate,
-                moodLabel = theme.musicMood.label,
-                paletteName = theme.activePalette.name,
-                primaryColor = animatedOrbColor,
-                secondaryColor = secondaryGlowColor,
-                cardSurface = theme.cardSurface,
-                wavePhase = wavePhase,
-                onCycleAtmospherePalette = onCycleAtmospherePalette
-            )
-
-            // 2. CENTER: FULL-SCREEN LIVING STUDIO AI MASCOT & REACTIVE SONIC ENTITY
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+            // 1. Minimal Obsidian Top Studio Status Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(AgentObsidianCard.copy(alpha = 0.94f))
+                        .border(1.dp, activeAccent.copy(alpha = 0.25f), RoundedCornerShape(50))
+                        .clickable { onCycleAtmospherePalette() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Box(
-                        contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(274.dp)
-                            .bouncyClickable { onOrbTapped() }
-                    ) {
-                        // Ambient Studio Glow Behind Mascot
-                        Box(
-                            modifier = Modifier
-                                .size(210.dp * breatheScale)
-                                .blur(58.dp)
-                                .background(animatedOrbColor.copy(alpha = 0.32f), CircleShape)
-                        )
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(activeAccent)
+                    )
+                    Text(
+                        text = "OBSIDIAN NEURAL CORE • ${colors.paletteTitle.uppercase()}",
+                        style = TuneMindTypography.TechnicalLabel,
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 10.sp
+                    )
+                }
 
-                        // Custom Multi-Layer Studio Mascot & Frequency Spectrum Canvas
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val center = Offset(size.width / 2f, size.height / 2f)
-                            val maxRadius = size.minDimension / 2f
-
-                            // LAYER A: Outer Orbital Studio Ring & Satiety/Dopamine Arc
-                            drawArc(
-                                color = Color.White.copy(alpha = 0.07f),
-                                startAngle = 135f,
-                                sweepAngle = 270f,
-                                useCenter = false,
-                                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
-                                topLeft = Offset(center.x - maxRadius * 0.92f, center.y - maxRadius * 0.92f),
-                                size = Size(maxRadius * 1.84f, maxRadius * 1.84f)
-                            )
-                            val freshnessSweep = 270f * ((100 - satietyPercentage).coerceIn(12, 98) / 100f)
-                            drawArc(
-                                brush = Brush.sweepGradient(
-                                    colors = listOf(animatedOrbColor, secondaryGlowColor, animatedOrbColor)
-                                ),
-                                startAngle = 135f,
-                                sweepAngle = freshnessSweep,
-                                useCenter = false,
-                                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
-                                topLeft = Offset(center.x - maxRadius * 0.92f, center.y - maxRadius * 0.92f),
-                                size = Size(maxRadius * 1.84f, maxRadius * 1.84f)
-                            )
-
-                            // LAYER B: Rotating Gyroscope Studio Halo when Thinking or Playing Music
-                            rotate(degrees = orbitalRotation, pivot = center) {
-                                val gyroRadius = maxRadius * 0.78f
-                                for (i in 0 until 3) {
-                                    drawArc(
-                                        color = if (i % 2 == 0) animatedOrbColor.copy(alpha = 0.45f)
-                                                else secondaryGlowColor.copy(alpha = 0.35f),
-                                        startAngle = i * 120f,
-                                        sweepAngle = if (agentState == AgentState.THINKING) 75f else 48f,
-                                        useCenter = false,
-                                        style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
-                                        topLeft = Offset(center.x - gyroRadius, center.y - gyroRadius),
-                                        size = Size(gyroRadius * 2f, gyroRadius * 2f)
-                                    )
-                                }
-                            }
-
-                            // LAYER C: 36-Petal Radial Vocal & Musical Spectrum Equalizer
-                            val petalCount = 36
-                            val baseRingRadius = maxRadius * 0.54f * breatheScale
-                            for (i in 0 until petalCount) {
-                                val angleRad = (i * (360f / petalCount)) * (PI / 180f)
-                                val dynamicAmp = when (agentState) {
-                                    AgentState.SPEAKING -> {
-                                        val v1 = sin(wavePhase * 2.2f + i * 0.55f).toFloat()
-                                        val v2 = cos(wavePhase * 1.4f - i * 0.35f).toFloat()
-                                        0.35f + 0.65f * ((v1 * v2 + 1f) / 2f)
-                                    }
-                                    AgentState.LISTENING -> {
-                                        0.25f + 0.45f * ((sin(wavePhase * 1.8f + i * 0.4f).toFloat() + 1f) / 2f)
-                                    }
-                                    AgentState.THINKING -> {
-                                        0.20f + 0.55f * ((sin(wavePhase * 3.0f + i * 0.9f).toFloat() + 1f) / 2f)
-                                    }
-                                    else -> {
-                                        if (isMusicPlaying) {
-                                            val speedMul = when (theme.musicMood) {
-                                                MusicalMood.ENERGETIC, MusicalMood.INTENSE -> 2.4f
-                                                MusicalMood.UPLIFTING -> 1.8f
-                                                else -> 1.2f
-                                            }
-                                            0.22f + 0.58f * ((sin(wavePhase * speedMul + i * 0.65f).toFloat() + 1f) / 2f)
-                                        } else {
-                                            0.12f + 0.14f * ((sin(wavePhase + i * 0.3f).toFloat() + 1f) / 2f)
-                                        }
-                                    }
-                                }
-
-                                val barLen = maxRadius * 0.22f * dynamicAmp
-                                val startR = baseRingRadius + 4.dp.toPx()
-                                val endR = startR + barLen
-                                val sx = center.x + (startR * cos(angleRad)).toFloat()
-                                val sy = center.y + (startR * sin(angleRad)).toFloat()
-                                val ex = center.x + (endR * cos(angleRad)).toFloat()
-                                val ey = center.y + (endR * sin(angleRad)).toFloat()
-
-                                drawLine(
-                                    color = if (i % 2 == 0) animatedOrbColor.copy(alpha = 0.85f)
-                                            else secondaryGlowColor.copy(alpha = 0.75f),
-                                    start = Offset(sx, sy),
-                                    end = Offset(ex, ey),
-                                    strokeWidth = if (agentState == AgentState.SPEAKING) 4.dp.toPx() else 3.dp.toPx(),
-                                    cap = StrokeCap.Round
-                                )
-                            }
-
-                            // LAYER D: 3D Studio Mascot Core Sphere
-                            val coreRadius = baseRingRadius
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        animatedOrbColor.copy(alpha = 0.92f),
-                                        secondaryGlowColor.copy(alpha = 0.78f),
-                                        Color(0xFF090A14)
-                                    ),
-                                    center = Offset(center.x - coreRadius * 0.22f, center.y - coreRadius * 0.22f),
-                                    radius = coreRadius * 1.15f
-                                ),
-                                radius = coreRadius,
-                                center = center
-                            )
-
-                            // Inner Obsidian Studio Visor for the Mascot Face
-                            val visorWidth = coreRadius * 1.32f
-                            val visorHeight = coreRadius * 0.86f
-                            drawRoundRect(
-                                color = Color(0xFF070811).copy(alpha = 0.86f),
-                                topLeft = Offset(center.x - visorWidth / 2f, center.y - visorHeight / 2f),
-                                size = Size(visorWidth, visorHeight),
-                                cornerRadius = CornerRadius(visorHeight / 2f, visorHeight / 2f)
-                            )
-                            drawRoundRect(
-                                color = Color.White.copy(alpha = 0.18f),
-                                topLeft = Offset(center.x - visorWidth / 2f, center.y - visorHeight / 2f),
-                                size = Size(visorWidth, visorHeight),
-                                cornerRadius = CornerRadius(visorHeight / 2f, visorHeight / 2f),
-                                style = Stroke(width = 1.5.dp.toPx())
-                            )
-
-                            // LAYER E: Expressive Studio Mascot Eyes
-                            val eyeOffsetX = visorWidth * 0.23f
-                            val eyeY = center.y - visorHeight * 0.12f
-                            val eyeWidth = 14.dp.toPx()
-                            val eyeHeight = when {
-                                isBlinking -> 2.5.dp.toPx()
-                                agentState == AgentState.SPEAKING -> 13.dp.toPx()
-                                agentState == AgentState.LISTENING -> 16.dp.toPx()
-                                isMusicPlaying -> 12.dp.toPx()
-                                else -> 11.dp.toPx()
-                            }
-
-                            listOf(-1f, 1f).forEach { dir ->
-                                val ex = center.x + dir * eyeOffsetX
-                                drawRoundRect(
-                                    color = Color.White,
-                                    topLeft = Offset(ex - eyeWidth / 2f, eyeY - eyeHeight / 2f),
-                                    size = Size(eyeWidth, eyeHeight),
-                                    cornerRadius = CornerRadius(eyeWidth / 2f, eyeWidth / 2f)
-                                )
-                                drawCircle(
-                                    color = animatedOrbColor.copy(alpha = 0.55f),
-                                    radius = eyeWidth * 0.75f,
-                                    center = Offset(ex, eyeY)
-                                )
-                            }
-
-                            // LAYER F: Expressive Vocal Mouth / Studio Waveform inside Visor
-                            val mouthY = center.y + visorHeight * 0.22f
-                            val mouthWidth = visorWidth * 0.52f
-                            when (agentState) {
-                                AgentState.SPEAKING -> {
-                                    val path = Path()
-                                    val segments = 20
-                                    val startX = center.x - mouthWidth / 2f
-                                    path.moveTo(startX, mouthY)
-                                    for (s in 0..segments) {
-                                        val frac = s / segments.toFloat()
-                                        val x = startX + frac * mouthWidth
-                                        val envelope = sin(frac * PI).toFloat()
-                                        val wave = sin(wavePhase * 3f + frac * 10f).toFloat() * 8.dp.toPx() * envelope
-                                        path.lineTo(x, mouthY + wave)
-                                    }
-                                    drawPath(
-                                        path = path,
-                                        color = Color(0xFFFFB000),
-                                        style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                                    )
-                                    val path2 = Path()
-                                    path2.moveTo(startX, mouthY)
-                                    for (s in 0..segments) {
-                                        val frac = s / segments.toFloat()
-                                        val x = startX + frac * mouthWidth
-                                        val envelope = sin(frac * PI).toFloat()
-                                        val wave = -sin(wavePhase * 3f + frac * 10f).toFloat() * 5.dp.toPx() * envelope
-                                        path2.lineTo(x, mouthY + wave)
-                                    }
-                                    drawPath(
-                                        path = path2,
-                                        color = Color.White.copy(alpha = 0.85f),
-                                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                                    )
-                                }
-                                AgentState.LISTENING -> {
-                                    val openR = (4.dp.toPx() + 4.dp.toPx() * ((sin(wavePhase * 2f).toFloat() + 1f) / 2f))
-                                    drawRoundRect(
-                                        color = Color(0xFF00E5FF),
-                                        topLeft = Offset(center.x - openR * 1.6f, mouthY - openR),
-                                        size = Size(openR * 3.2f, openR * 2f),
-                                        cornerRadius = CornerRadius(openR, openR),
-                                        style = Stroke(width = 2.5.dp.toPx())
-                                    )
-                                }
-                                else -> {
-                                    if (isMusicPlaying) {
-                                        val bars = 5
-                                        val bWidth = 3.dp.toPx()
-                                        val bGap = 4.dp.toPx()
-                                        val totalW = bars * bWidth + (bars - 1) * bGap
-                                        val bStart = center.x - totalW / 2f
-                                        for (b in 0 until bars) {
-                                            val bh = (4.dp.toPx() + 8.dp.toPx() * ((sin(wavePhase * 2.2f + b * 1.1f).toFloat() + 1f) / 2f))
-                                            drawRoundRect(
-                                                color = animatedOrbColor,
-                                                topLeft = Offset(bStart + b * (bWidth + bGap), mouthY - bh / 2f),
-                                                size = Size(bWidth, bh),
-                                                cornerRadius = CornerRadius(bWidth / 2f, bWidth / 2f)
-                                            )
-                                        }
-                                    } else {
-                                        drawArc(
-                                            color = animatedOrbColor.copy(alpha = 0.9f),
-                                            startAngle = 20f,
-                                            sweepAngle = 140f,
-                                            useCenter = false,
-                                            topLeft = Offset(center.x - 14.dp.toPx(), mouthY - 8.dp.toPx()),
-                                            size = Size(28.dp.toPx(), 14.dp.toPx()),
-                                            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Dynamic Studio Mode Pill Caption underneath Mascot
-                    val modeBadgeText = when (agentState) {
-                        AgentState.LISTENING -> "🎙 LISTENING TO YOUR VOICE • SPEAK FREELY"
-                        AgentState.THINKING -> "🧠 CLAUDE SYNTHESIZING DOPAMINE & MOOD..."
-                        AgentState.SPEAKING -> "🔊 TALKING TO YOU • TAP MASCOT TO INTERRUPT"
-                        AgentState.ERROR -> "⚠️ TAP MASCOT TO RECONNECT VOICE"
-                        AgentState.IDLE -> if (isMusicPlaying) {
-                            "🎵 STUDIO VISUALIZER LIVE • TAP MASCOT TO TALK"
-                        } else {
-                            "✦ STUDIO AGENT READY • TAP MASCOT TO TALK"
-                        }
-                    }
-
+                // Live Satiety Badge
+                val satietyColor = when {
+                    satietyPercentage >= 75 -> Color(0xFFFF2A55)
+                    satietyPercentage >= 50 -> Color(0xFFFFB020)
+                    else -> Color(0xFF00FFA3)
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(AgentObsidianCard.copy(alpha = 0.94f))
+                        .border(1.dp, satietyColor.copy(alpha = 0.32f), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(animatedOrbColor.copy(alpha = 0.14f))
-                            .border(1.dp, animatedOrbColor.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                            .padding(horizontal = 14.dp, vertical = 5.dp)
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(satietyColor)
+                    )
+                    Text(
+                        text = "$satietyPercentage% SATIETY",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = satietyColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 2. Compact Obsidian Dopamine Capsule Banner
+            if (dopamineCapsule != null && dopamineCapsule.tracks.isNotEmpty()) {
+                DopamineCapsuleBanner(
+                    capsule = dopamineCapsule,
+                    accentColor = activeAccent,
+                    onClick = onLaunchDopamineCapsule
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // 3. Centerpiece: Creative Cyber-Acoustic Studio Mascot
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(292.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onOrbTapped
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                StudioNeuralMascot(
+                    agentState = agentState,
+                    isMusicPlaying = isMusicPlaying,
+                    hasPendingApproval = hasPendingApproval,
+                    energy = energy,
+                    primaryAccent = activeAccent,
+                    secondaryAccent = colors.secondaryAccent,
+                    satietyPercentage = satietyPercentage,
+                    modifier = Modifier.size(280.dp)
+                )
+            }
+
+            // 4. Interactive Song Proposal Approval Card (Visible whenever the agent suggests a song)
+            AnimatedVisibility(
+                visible = pendingProposedTrack != null,
+                enter = fadeIn(tween(250)),
+                exit = fadeOut(tween(200))
+            ) {
+                pendingProposedTrack?.let { proposed ->
+                    ProposedTrackApprovalCard(
+                        proposedTrack = proposed,
+                        isListeningForVoiceApproval = agentState == AgentState.LISTENING,
+                        onApprove = onApproveProposedTrack,
+                        onReject = onRejectProposedTrack
+                    )
+                }
+            }
+
+            if (pendingProposedTrack != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // 5. Mascot State Pill & Voice Dialogue Console
+            MascotDialogueConsole(
+                agentState = agentState,
+                hasPendingApproval = hasPendingApproval,
+                liveTranscript = liveTranscript,
+                flowAnalysis = flowAnalysis,
+                accentColor = activeAccent,
+                onTapSpeak = onOrbTapped
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 6. Active Track Telemetry Strip
+            NowPlayingMiniBar(
+                trackTitle = currentTrackName,
+                artistName = artistName,
+                isMusicPlaying = isMusicPlaying,
+                satietyPercentage = satietyPercentage,
+                accentColor = activeAccent
+            )
+        }
+    }
+}
+
+/**
+ * Interactive Approval Card shown whenever TuneMind proposes a song and waits for user approval.
+ */
+@Composable
+private fun ProposedTrackApprovalCard(
+    proposedTrack: PendingProposedTrack,
+    isListeningForVoiceApproval: Boolean,
+    onApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    val approvalAccent = Color(0xFF00FFA3)
+    val infiniteTransition = rememberInfiniteTransition(label = "approval_pulse")
+    val borderAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "approval_border_alpha"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = AgentObsidianCard.copy(alpha = 0.96f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.2.dp,
+            approvalAccent.copy(alpha = borderAlpha)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 15.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(approvalAccent)
+                    )
+                    Text(
+                        text = if (isListeningForVoiceApproval) {
+                            "AWAITING APPROVAL • SAY \"YES\" TO PLAY"
+                        } else {
+                            "PROPOSED TRACK • AWAITING YOUR APPROVAL"
+                        },
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 10.sp,
+                        color = approvalAccent,
+                        letterSpacing = 0.7.sp
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = proposedTrack.title,
+                        style = TuneMindTypography.TrackTitle,
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val cleanArtist = proposedTrack.artist.takeIf {
+                        it.isNotBlank() && !it.equals("Unknown Artist", ignoreCase = true)
+                    } ?: "Spotify Studio Selection"
+                    Text(
+                        text = cleanArtist,
+                        style = TuneMindTypography.ArtistSubtitle,
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.65f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Reject / Another Track button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                            .clickable { onReject() }
+                            .padding(horizontal = 11.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = modeBadgeText,
-                            color = Color.White,
-                            fontSize = 10.sp,
+                            text = "✕ Next",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.78f)
+                        )
+                    }
+
+                    // Approve & Play Now button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(Color(0xFF00FFA3), Color(0xFF00E5FF))
+                                )
+                            )
+                            .clickable { onApprove() }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "✓ Play Now",
+                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.2.sp
+                            fontSize = 11.sp,
+                            color = Color(0xFF020205)
                         )
                     }
                 }
             }
-
-            // 3. BOTTOM STACK (ABOVE FLOATING DOCK — GUARANTEED ZERO COLLISION):
-            //    PROACTIVE DOPAMINE CAPSULE PILL + STUDIO DIALOGUE & AI REASONING CONSOLE
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (dopamineCapsule != null && dopamineCapsule.tracks.isNotEmpty()) {
-                    DopamineCapsuleBriefingPill(
-                        capsule = dopamineCapsule,
-                        primaryColor = animatedOrbColor,
-                        secondaryColor = secondaryGlowColor,
-                        cardSurface = theme.cardSurface,
-                        onLaunchCapsule = onLaunchDopamineCapsule
-                    )
-                }
-
-                StudioDialogueAndReasoningConsole(
-                    agentState = agentState,
-                    liveTranscript = liveTranscript,
-                    flowAnalysis = flowAnalysis,
-                    moodLabel = theme.musicMood.label,
-                    freshnessPercent = (100 - satietyPercentage).coerceIn(12, 98),
-                    primaryColor = animatedOrbColor,
-                    secondaryColor = secondaryGlowColor,
-                    cardSurface = theme.cardSurface
-                )
-            }
         }
     }
 }
 
+/**
+ * Creative Cyber-Acoustic Studio Mascot:
+ * Features an obsidian dark-matter head, floating cyber-acoustic headphone ear-pods on both sides,
+ * a glowing neural headband arc, a dark-glass cyber visor with expressive eyes + eyebrows,
+ * an animated harmonic vocalizer mouth, and multi-layered gyroscopic plasma rings.
+ */
 @Composable
-private fun DopamineCapsuleBriefingPill(
-    capsule: com.tunemind.app.ui.DopamineCapsuleState,
-    primaryColor: Color,
-    secondaryColor: Color,
-    cardSurface: Color,
-    onLaunchCapsule: () -> Unit
-) {
-    val lead = capsule.tracks.firstOrNull() ?: return
-    val pillShape = RoundedCornerShape(18.dp)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(pillShape)
-            .background(
-                Brush.horizontalGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.18f),
-                        cardSurface.copy(alpha = 0.88f),
-                        secondaryColor.copy(alpha = 0.16f)
-                    )
-                )
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.65f),
-                        secondaryColor.copy(alpha = 0.45f)
-                    )
-                ),
-                shape = pillShape
-            )
-            .bouncyClickable { onLaunchCapsule() }
-            .padding(horizontal = 14.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(primaryColor.copy(alpha = 0.22f))
-                .border(1.dp, primaryColor.copy(alpha = 0.6f), CircleShape)
-        ) {
-            Text(
-                text = "⚡",
-                fontSize = 14.sp
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "✦ ${capsule.slotLabel} CAPSULE STORED (${capsule.tracks.size} TRACKS)",
-                color = primaryColor,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.1.sp,
-                maxLines = 1
-            )
-            Text(
-                text = "Lead: ${lead.title} • ${lead.freshnessPercent}% Freshness",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(primaryColor.copy(alpha = 0.22f))
-                .border(1.dp, primaryColor.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Text(
-                text = "BRIEF ME",
-                color = Color.White,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.9.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun LiveStudioTelemetryHeader(
+private fun StudioNeuralMascot(
     agentState: AgentState,
     isMusicPlaying: Boolean,
-    currentTrackName: String?,
-    artistName: String?,
-    rotatingCandidate: TrackMemoryEntry?,
-    moodLabel: String,
-    paletteName: String,
-    primaryColor: Color,
-    secondaryColor: Color,
-    cardSurface: Color,
-    wavePhase: Float,
-    onCycleAtmospherePalette: () -> Unit
+    hasPendingApproval: Boolean,
+    energy: Float,
+    primaryAccent: Color,
+    secondaryAccent: Color,
+    satietyPercentage: Int,
+    modifier: Modifier = Modifier
 ) {
-    val headerShape = RoundedCornerShape(26.dp)
+    val infiniteTransition = rememberInfiniteTransition(label = "mascot_anim")
 
-    // Determine live header status so it is NEVER stuck on a stale hardcoded track
-    val statusBadge: String
-    val headlineText: String
-    val subtitleText: String
+    // Hover & breathing physics
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = -7f,
+        targetValue = 7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = when (agentState) {
+                    AgentState.LISTENING -> 950
+                    AgentState.THINKING -> 650
+                    AgentState.SPEAKING -> 800
+                    else -> if (isMusicPlaying) 1400 else 2400
+                },
+                easing = FastOutSlowInEasing
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "mascot_hover"
+    )
 
-    when (agentState) {
-        AgentState.LISTENING -> {
-            statusBadge = "🎙 VOICE CAPTURE LIVE"
-            headlineText = "Listening to your request..."
-            subtitleText = "Studio microphone active • High-clarity 16kHz stream"
+    val coreBreath by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = when (agentState) {
+            AgentState.LISTENING -> 1.12f
+            AgentState.SPEAKING -> 1.09f
+            AgentState.THINKING -> 1.06f
+            else -> if (hasPendingApproval) 1.07f else if (isMusicPlaying) 1.04f else 1.0f
+        },
+        animationSpec = infiniteRepeatable(
+            animation = tween(1150, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "core_breath"
+    )
+
+    val haloAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = if (agentState == AgentState.THINKING) 2600 else 10500,
+                easing = LinearEasing
+            ),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "halo_angle"
+    )
+
+    val wavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = when (agentState) {
+                    AgentState.SPEAKING -> 400
+                    AgentState.LISTENING -> 520
+                    else -> 1250
+                },
+                easing = LinearEasing
+            ),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wave_phase"
+    )
+
+    // Natural eye blink every ~3.6 seconds
+    val blinkCycle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "blink_cycle"
+    )
+    val eyeOpenScale = if (blinkCycle in 0.94f..0.985f && agentState != AgentState.LISTENING) 0.12f else 1.0f
+
+    Canvas(modifier = modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f + floatOffset)
+        val baseRadius = size.minDimension * 0.255f * coreBreath
+
+        // 1. Deep Obsidian Void Contrast Backdrop + Neon Halo Bloom
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    primaryAccent.copy(alpha = if (agentState == AgentState.IDLE && !hasPendingApproval) 0.20f else 0.36f),
+                    secondaryAccent.copy(alpha = 0.10f),
+                    Color.Transparent
+                ),
+                center = center,
+                radius = baseRadius * 2.35f
+            ),
+            radius = baseRadius * 2.35f,
+            center = center
+        )
+
+        // 2. Outer 36-Tick Sonar Precision Bezel
+        val tickCount = 36
+        val tickInner = baseRadius * 1.62f
+        val tickOuter = baseRadius * 1.74f
+        for (i in 0 until tickCount) {
+            val angleDeg = i * (360f / tickCount) + haloAngle * 0.25f
+            val rad = Math.toRadians(angleDeg.toDouble())
+            val isActiveTick = (i % 3 == 0) || agentState == AgentState.LISTENING || hasPendingApproval
+            val tickWave = if (agentState == AgentState.SPEAKING || agentState == AgentState.LISTENING) {
+                (sin(wavePhase + i * 0.5f) * 6f).coerceAtLeast(0f)
+            } else 0f
+            val start = Offset(
+                center.x + (tickInner * cos(rad)).toFloat(),
+                center.y + (tickInner * sin(rad)).toFloat()
+            )
+            val end = Offset(
+                center.x + ((tickOuter + tickWave) * cos(rad)).toFloat(),
+                center.y + ((tickOuter + tickWave) * sin(rad)).toFloat()
+            )
+            drawLine(
+                color = if (isActiveTick) primaryAccent.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.12f),
+                start = start,
+                end = end,
+                strokeWidth = if (i % 3 == 0) 2.5f else 1.3f,
+                cap = StrokeCap.Round
+            )
         }
-        AgentState.THINKING -> {
-            statusBadge = "🧠 NEURAL REASONING"
-            headlineText = "Matching your Taste Genome..."
-            subtitleText = "Evaluating dopamine freshness & $moodLabel flow"
+
+        // 3. Counter-Rotating Gyroscopic Orbital Rings + Satellites
+        rotate(degrees = haloAngle, pivot = center) {
+            drawOval(
+                brush = Brush.sweepGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        primaryAccent.copy(alpha = 0.65f),
+                        secondaryAccent.copy(alpha = 0.45f),
+                        Color.Transparent
+                    ),
+                    center = center
+                ),
+                topLeft = Offset(center.x - baseRadius * 1.48f, center.y - baseRadius * 1.16f),
+                size = Size(baseRadius * 2.96f, baseRadius * 2.32f),
+                style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
+            )
         }
-        AgentState.SPEAKING -> {
-            statusBadge = "🔊 AGENT SPEAKING"
-            headlineText = currentTrackName?.takeIf { it.isNotBlank() && it != "Deep Flow State" }
-                ?: "Proposing Next Dopamine Hit"
-            subtitleText = "Voice dialogue active • Tap mascot anytime to interrupt"
+
+        rotate(degrees = -haloAngle * 0.75f, pivot = center) {
+            drawOval(
+                brush = Brush.sweepGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        secondaryAccent.copy(alpha = 0.50f),
+                        primaryAccent.copy(alpha = 0.35f),
+                        Color.Transparent
+                    ),
+                    center = center
+                ),
+                topLeft = Offset(center.x - baseRadius * 1.18f, center.y - baseRadius * 1.45f),
+                size = Size(baseRadius * 2.36f, baseRadius * 2.90f),
+                style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+            )
         }
-        else -> {
-            if (isMusicPlaying && !currentTrackName.isNullOrBlank() && currentTrackName != "Deep Flow State") {
-                statusBadge = "● LIVE IN STUDIO"
-                headlineText = currentTrackName
-                subtitleText = "${artistName ?: "Active Player"} • $moodLabel"
-            } else if (rotatingCandidate != null && !rotatingCandidate.title.isNullOrBlank()) {
-                val plays = maxOf(1, rotatingCandidate.distinctAppearanceCount)
-                val fresh = (100 - minOf(92, plays * 18)).coerceIn(20, 98)
-                statusBadge = "✦ PEAK DOPAMINE QUEUE"
-                headlineText = rotatingCandidate.title ?: "Ready for Flow"
-                subtitleText = "${rotatingCandidate.artist ?: "Your Rotation"} • $fresh% Fresh in Vault"
-            } else {
-                statusBadge = "✦ STUDIO STANDBY"
-                headlineText = "Autonomous Sonic Intelligence"
-                subtitleText = "$paletteName Atmosphere • $moodLabel"
+
+        // 3 Orbiting Sonic Satellites
+        for (satIdx in 0..2) {
+            val satAngleRad = Math.toRadians((haloAngle * (1.15f + satIdx * 0.25f) + satIdx * 120f).toDouble())
+            val orbitR = baseRadius * (1.36f + satIdx * 0.08f)
+            val satPos = Offset(
+                x = center.x + (orbitR * cos(satAngleRad)).toFloat(),
+                y = center.y + (orbitR * sin(satAngleRad) * 0.80).toFloat()
+            )
+            drawCircle(
+                color = primaryAccent.copy(alpha = 0.30f),
+                radius = 7.dp.toPx(),
+                center = satPos
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 2.8.dp.toPx(),
+                center = satPos
+            )
+        }
+
+        // 4. Cyber-Acoustic Headband Arc + Floating Ear-Pods on Left & Right Flanks
+        val headbandRectSize = Size(baseRadius * 2.28f, baseRadius * 2.22f)
+        drawArc(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    primaryAccent.copy(alpha = 0.75f),
+                    Color.White.copy(alpha = 0.55f),
+                    primaryAccent.copy(alpha = 0.75f)
+                )
+            ),
+            startAngle = 198f,
+            sweepAngle = 144f,
+            useCenter = false,
+            topLeft = Offset(center.x - headbandRectSize.width / 2f, center.y - headbandRectSize.height / 2f - baseRadius * 0.06f),
+            size = headbandRectSize,
+            style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+        )
+
+        // Left & Right Floating Cyber Ear-Pods (pulse outward with beat/speech)
+        val earPulse = if (agentState == AgentState.SPEAKING || agentState == AgentState.LISTENING || isMusicPlaying) {
+            (sin(wavePhase * 1.5f) * 3.5f).dp.toPx()
+        } else 0f
+        val earPodWidth = baseRadius * 0.28f
+        val earPodHeight = baseRadius * 0.68f
+        val leftPodTopLeft = Offset(
+            x = center.x - baseRadius * 1.24f - earPulse,
+            y = center.y - earPodHeight * 0.48f
+        )
+        val rightPodTopLeft = Offset(
+            x = center.x + baseRadius * 0.96f + earPulse,
+            y = center.y - earPodHeight * 0.48f
+        )
+
+        listOf(leftPodTopLeft, rightPodTopLeft).forEach { podTopLeft ->
+            // Outer glow
+            drawRoundRect(
+                color = primaryAccent.copy(alpha = 0.28f),
+                topLeft = Offset(podTopLeft.x - 2.dp.toPx(), podTopLeft.y - 2.dp.toPx()),
+                size = Size(earPodWidth + 4.dp.toPx(), earPodHeight + 4.dp.toPx()),
+                cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx())
+            )
+            // Obsidian Ear-Pod Shell
+            drawRoundRect(
+                color = Color(0xFF05040C),
+                topLeft = podTopLeft,
+                size = Size(earPodWidth, earPodHeight),
+                cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+            )
+            drawRoundRect(
+                color = primaryAccent.copy(alpha = 0.85f),
+                topLeft = podTopLeft,
+                size = Size(earPodWidth, earPodHeight),
+                cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx()),
+                style = Stroke(width = 1.6.dp.toPx())
+            )
+            // Glowing LED slit inside each ear-pod
+            drawLine(
+                color = primaryAccent,
+                start = Offset(podTopLeft.x + earPodWidth * 0.5f, podTopLeft.y + earPodHeight * 0.25f),
+                end = Offset(podTopLeft.x + earPodWidth * 0.5f, podTopLeft.y + earPodHeight * 0.75f),
+                strokeWidth = 2.4.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
+
+        // 5. Mascot Pitch-Obsidian Head Sphere
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF100E20),
+                    Color(0xFF06050D),
+                    Color(0xFF020205)
+                ),
+                center = Offset(center.x - baseRadius * 0.22f, center.y - baseRadius * 0.24f),
+                radius = baseRadius * 1.15f
+            ),
+            radius = baseRadius,
+            center = center
+        )
+
+        // Subtle Crown Specular Rim
+        drawArc(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.48f),
+                    primaryAccent.copy(alpha = 0.85f),
+                    secondaryAccent.copy(alpha = 0.35f)
+                )
+            ),
+            startAngle = -140f,
+            sweepAngle = 280f,
+            useCenter = false,
+            topLeft = Offset(center.x - baseRadius, center.y - baseRadius),
+            size = Size(baseRadius * 2f, baseRadius * 2f),
+            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+        )
+
+        // 6. Recessed Dark-Glass Cyber Visor Plate across the Mascot's Face
+        val visorWidth = baseRadius * 1.54f
+        val visorHeight = baseRadius * 0.86f
+        val visorTopLeft = Offset(center.x - visorWidth / 2f, center.y - visorHeight * 0.56f)
+        drawRoundRect(
+            color = Color(0xFF020206),
+            topLeft = visorTopLeft,
+            size = Size(visorWidth, visorHeight),
+            cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx())
+        )
+        drawRoundRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    primaryAccent.copy(alpha = 0.55f),
+                    Color.White.copy(alpha = 0.20f),
+                    primaryAccent.copy(alpha = 0.55f)
+                )
+            ),
+            topLeft = visorTopLeft,
+            size = Size(visorWidth, visorHeight),
+            cornerRadius = CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+            style = Stroke(width = 1.4.dp.toPx())
+        )
+
+        // 7. Expressive Neural Eyes + Dynamic Cyber-Brows inside the Visor
+        val eyeSpacing = baseRadius * 0.36f
+        val eyeY = center.y - baseRadius * 0.12f
+        val eyeWidth = baseRadius * 0.22f
+        val eyeHeight = (baseRadius * 0.28f * eyeOpenScale).coerceAtLeast(3.dp.toPx())
+
+        val leftEyeCenter = Offset(center.x - eyeSpacing, eyeY)
+        val rightEyeCenter = Offset(center.x + eyeSpacing, eyeY)
+
+        // Expressive Cyber-Brows above each eye
+        val browY = eyeY - baseRadius * 0.22f
+        val browTilt = when {
+            hasPendingApproval -> -5.dp.toPx() // Curious raised inner brows asking for approval
+            agentState == AgentState.THINKING -> 4.dp.toPx() // Focused analytical tilt
+            agentState == AgentState.LISTENING -> -3.dp.toPx() // Alert wide-open focus
+            else -> 0f
+        }
+        // Left brow
+        drawLine(
+            color = primaryAccent.copy(alpha = 0.90f),
+            start = Offset(leftEyeCenter.x - eyeWidth * 0.7f, browY - browTilt * 0.4f),
+            end = Offset(leftEyeCenter.x + eyeWidth * 0.7f, browY + browTilt),
+            strokeWidth = 2.6.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        // Right brow
+        drawLine(
+            color = primaryAccent.copy(alpha = 0.90f),
+            start = Offset(rightEyeCenter.x - eyeWidth * 0.7f, browY + browTilt),
+            end = Offset(rightEyeCenter.x + eyeWidth * 0.7f, browY - browTilt * 0.4f),
+            strokeWidth = 2.6.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+
+        // Left & Right Glowing Neural Eyes
+        listOf(leftEyeCenter, rightEyeCenter).forEach { eyePos ->
+            // Outer iris aura
+            drawRoundRect(
+                color = primaryAccent.copy(alpha = 0.38f),
+                topLeft = Offset(eyePos.x - eyeWidth * 0.68f, eyePos.y - eyeHeight * 0.68f),
+                size = Size(eyeWidth * 1.36f, eyeHeight * 1.36f),
+                cornerRadius = CornerRadius(eyeWidth, eyeWidth)
+            )
+            // Bright cyber pupil capsule
+            drawRoundRect(
+                color = Color.White,
+                topLeft = Offset(eyePos.x - eyeWidth * 0.5f, eyePos.y - eyeHeight * 0.5f),
+                size = Size(eyeWidth, eyeHeight),
+                cornerRadius = CornerRadius(eyeWidth, eyeWidth)
+            )
+            // Inner cyan/emerald core glint
+            if (eyeOpenScale > 0.4f) {
+                drawCircle(
+                    color = primaryAccent,
+                    radius = eyeWidth * 0.24f,
+                    center = Offset(eyePos.x + eyeWidth * 0.12f, eyePos.y - eyeHeight * 0.12f)
+                )
             }
         }
-    }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(headerShape)
-            .background(cardSurface.copy(alpha = 0.78f))
-            .border(
-                width = 1.dp,
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.55f),
-                        secondaryColor.copy(alpha = 0.35f)
-                    )
-                ),
-                shape = headerShape
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Left: Live Animated 4-Bar Studio Equalizer Badge
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(primaryColor.copy(alpha = 0.16f))
-                .border(1.dp, primaryColor.copy(alpha = 0.45f), CircleShape)
-        ) {
-            Canvas(modifier = Modifier.size(18.dp, 16.dp)) {
-                val barW = 3.dp.toPx()
-                val gap = 2.dp.toPx()
-                for (i in 0 until 4) {
-                    val active = agentState != AgentState.IDLE || isMusicPlaying
-                    val frac = if (active) {
-                        0.35f + 0.65f * ((sin(wavePhase * 2f + i * 1.1f).toFloat() + 1f) / 2f)
-                    } else {
-                        0.35f + (i % 2) * 0.25f
-                    }
-                    val h = size.height * frac
-                    drawRoundRect(
-                        color = if (i % 2 == 0) primaryColor else secondaryColor,
-                        topLeft = Offset(i * (barW + gap), (size.height - h) / 2f),
-                        size = Size(barW, h),
-                        cornerRadius = CornerRadius(barW / 2f, barW / 2f)
+        // 8. Mascot Vocalizer Mouth / Expression Curve below Visor
+        val mouthCenterY = center.y + baseRadius * 0.44f
+        when {
+            agentState == AgentState.SPEAKING || agentState == AgentState.LISTENING -> {
+                val barCount = 7
+                val totalMouthWidth = baseRadius * 0.86f
+                val spacing = totalMouthWidth / (barCount - 1)
+                val startX = center.x - totalMouthWidth / 2f
+                for (i in 0 until barCount) {
+                    val centerWeight = 1f - kotlin.math.abs(i - 3) * 0.2f
+                    val wave = kotlin.math.abs(sin(wavePhase + i * 0.75f))
+                    val barH = (baseRadius * 0.08f + baseRadius * 0.28f * wave * centerWeight)
+                        .coerceAtLeast(4.dp.toPx())
+                    val x = startX + i * spacing
+                    drawLine(
+                        color = primaryAccent,
+                        start = Offset(x, mouthCenterY - barH / 2f),
+                        end = Offset(x, mouthCenterY + barH / 2f),
+                        strokeWidth = 3.2.dp.toPx(),
+                        cap = StrokeCap.Round
                     )
                 }
             }
-        }
-
-        // Center: Live Changing Track / Agent Telemetry
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = statusBadge,
-                color = primaryColor,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.4.sp,
-                maxLines = 1
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = headlineText,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = subtitleText,
-                color = Color.White.copy(alpha = 0.68f),
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // Right: 1-Tap Studio Atmosphere Switcher Pill
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(primaryColor.copy(alpha = 0.16f))
-                .border(1.dp, primaryColor.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                .bouncyClickable { onCycleAtmospherePalette() }
-                .padding(horizontal = 10.dp, vertical = 7.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "✦ MOOD",
-                    color = primaryColor,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 0.8.sp
-                )
-                Text(
-                    text = paletteName.split(" ").firstOrNull()?.uppercase() ?: "STUDIO",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
+            agentState == AgentState.THINKING -> {
+                for (i in -1..1) {
+                    val dotOffset = sin(wavePhase + i * 1.1f) * 4.dp.toPx()
+                    drawCircle(
+                        color = primaryAccent,
+                        radius = 3.5.dp.toPx(),
+                        center = Offset(center.x + i * 14.dp.toPx(), mouthCenterY + dotOffset)
+                    )
+                }
+            }
+            else -> {
+                // Expressive confident cyber-smile arc
+                val smileWidth = baseRadius * 0.46f
+                val smileHeight = if (hasPendingApproval || isMusicPlaying) baseRadius * 0.22f else baseRadius * 0.14f
+                val path = Path().apply {
+                    moveTo(center.x - smileWidth / 2f, mouthCenterY - smileHeight * 0.2f)
+                    quadraticBezierTo(
+                        center.x,
+                        mouthCenterY + smileHeight,
+                        center.x + smileWidth / 2f,
+                        mouthCenterY - smileHeight * 0.2f
+                    )
+                }
+                drawPath(
+                    path = path,
+                    color = primaryAccent.copy(alpha = 0.92f),
+                    style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
         }
     }
 }
 
+/**
+ * Compact Dopamine Capsule Banner:
+ * Displays the 3 tracks TuneMind compacted for the user's current circadian slot.
+ */
 @Composable
-private fun StudioDialogueAndReasoningConsole(
-    agentState: AgentState,
-    liveTranscript: String,
-    flowAnalysis: String,
-    moodLabel: String,
-    freshnessPercent: Int,
-    primaryColor: Color,
-    secondaryColor: Color,
-    cardSurface: Color
+private fun DopamineCapsuleBanner(
+    capsule: DopamineCapsuleState,
+    accentColor: Color,
+    onClick: () -> Unit
 ) {
-    val consoleShape = RoundedCornerShape(24.dp)
-    val displayDialogue = liveTranscript.ifBlank {
-        "Tap the Studio Mascot and say \"Play me a song\" or \"Change the vibe\"."
-    }
-    val displayReasoning = flowAnalysis.ifBlank {
-        "Mood DNA: $moodLabel • $freshnessPercent% Dopamine Readiness"
-    }
-
-    Column(
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = AgentObsidianCard.copy(alpha = 0.92f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            Brush.horizontalGradient(
+                colors = listOf(
+                    accentColor.copy(alpha = 0.42f),
+                    Color.White.copy(alpha = 0.08f),
+                    accentColor.copy(alpha = 0.22f)
+                )
+            )
+        ),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(consoleShape)
-            .background(cardSurface.copy(alpha = 0.82f))
-            .border(
-                width = 1.dp,
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.50f),
-                        secondaryColor.copy(alpha = 0.35f)
-                    )
-                ),
-                shape = consoleShape
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .clickable { onClick() }
     ) {
-        // Top Console Strip: Live Dialogue Status + Mood Tag
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(accentColor)
+                    )
+                    Text(
+                        text = "${capsule.slotLabel} DOPAMINE CAPSULE",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 10.sp,
+                        color = accentColor,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+
+                Text(
+                    text = "TAP FOR VOICE BRIEFING →",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    color = Color.White.copy(alpha = 0.65f)
+                )
+            }
+
+            // Compact horizontal pills for the 3 capsule tracks
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                capsule.tracks.take(3).forEachIndexed { index, track ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AgentObsidianDeep)
+                            .border(
+                                1.dp,
+                                if (index == 0) accentColor.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.07f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = track.title,
+                                style = TuneMindTypography.TrackTitle,
+                                fontSize = 11.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${track.freshnessPercent}% Fresh",
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp,
+                                color = accentColor.copy(alpha = 0.90f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Mascot Voice Dialogue Console:
+ * Displays the current mascot state, live Claude psychoacoustic insight, and spoken transcript.
+ */
+@Composable
+private fun MascotDialogueConsole(
+    agentState: AgentState,
+    hasPendingApproval: Boolean,
+    liveTranscript: String,
+    flowAnalysis: String,
+    accentColor: Color,
+    onTapSpeak: () -> Unit
+) {
+    val stateLabel = when {
+        hasPendingApproval && agentState == AgentState.LISTENING -> "LISTENING FOR YOUR APPROVAL — SAY \"YES\" OR \"NEXT\""
+        hasPendingApproval -> "SONG PROPOSED — AWAITING YOUR APPROVAL TO EXECUTE"
+        agentState == AgentState.IDLE -> "TAP CYBER MASCOT OR SAY \"HI TUNEMIND\""
+        agentState == AgentState.LISTENING -> "LISTENING TO YOU — SPEAK NATURALLY"
+        agentState == AgentState.THINKING -> "CLAUDE SONNET REASONING OVER YOUR TELEMETRY..."
+        agentState == AgentState.SPEAKING -> "TUNEMIND STUDIO ADVISOR SPEAKING"
+        agentState == AgentState.ERROR -> "TAP MASCOT TO SPEAK AGAIN"
+        else -> "STUDIO READY"
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = AgentObsidianCard.copy(alpha = 0.95f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            accentColor.copy(alpha = if (agentState == AgentState.IDLE && !hasPendingApproval) 0.18f else 0.45f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onTapSpeak() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Status Pill
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(accentColor.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(7.dp)
+                        .size(6.dp)
                         .clip(CircleShape)
-                        .background(primaryColor)
+                        .background(accentColor)
                 )
                 Text(
-                    text = if (agentState == AgentState.IDLE) "STUDIO VOICE CONSOLE" else "LIVE • ${agentState.name}",
-                    color = primaryColor,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.4.sp
+                    text = stateLabel,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp,
+                    color = accentColor,
+                    letterSpacing = 0.7.sp
                 )
             }
 
+            // Spoken Transcript or Natural Prompt Hint
+            val displayLine = liveTranscript.ifBlank {
+                "\"Ask me to suggest a song, check your decibel headroom, or launch your Dopamine Capsule.\""
+            }
             Text(
-                text = "$moodLabel • $freshnessPercent% Fresh",
-                color = secondaryColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
+                text = displayLine,
+                style = TuneMindTypography.BodyRegular,
+                fontSize = 13.sp,
+                color = if (liveTranscript.isNotBlank()) Color.White else Color.White.copy(alpha = 0.65f),
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 19.sp
             )
+
+            // Subtle Telemetry Analysis Footer
+            if (flowAnalysis.isNotBlank()) {
+                Text(
+                    text = flowAnalysis,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    color = Color.White.copy(alpha = 0.50f),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
+    }
+}
 
-        // Spoken Dialogue / User Transcript (Clean 2-3 line cap so it never overflows)
-        Text(
-            text = "\"$displayDialogue\"",
-            color = Color.White.copy(alpha = 0.95f),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 18.sp,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Start
-        )
+/**
+ * Compact Now-Playing Mini Bar at the bottom of the Studio Mascot screen.
+ */
+@Composable
+private fun NowPlayingMiniBar(
+    trackTitle: String?,
+    artistName: String?,
+    isMusicPlaying: Boolean,
+    satietyPercentage: Int,
+    accentColor: Color
+) {
+    val mood = remember(trackTitle, artistName) {
+        com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(trackTitle, artistName)
+    }
 
-        // AI Reasoning Sub-Bar
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = AgentObsidianCard.copy(alpha = 0.90f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.04f))
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+                .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = "🧠 AI:",
-                color = primaryColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(
-                text = displayReasoning,
-                color = Color.White.copy(alpha = 0.72f),
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accentColor.copy(alpha = 0.14f))
+                        .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isMusicPlaying) "♫" else "⏸",
+                        fontSize = 14.sp,
+                        color = accentColor
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = trackTitle ?: "Studio Standing By",
+                        style = TuneMindTypography.TrackTitle,
+                        fontSize = 13.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = artistName ?: "Tap the mascot or say 'Suggest a song'",
+                        style = TuneMindTypography.ArtistSubtitle,
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.55f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Mood DNA Badge
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(mood.accentHex).copy(alpha = 0.14f))
+                    .border(1.dp, Color(mood.accentHex).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = mood.label.uppercase(),
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    color = Color(mood.accentHex)
+                )
+            }
         }
     }
 }
