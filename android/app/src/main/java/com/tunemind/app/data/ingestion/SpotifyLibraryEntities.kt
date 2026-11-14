@@ -207,11 +207,19 @@ interface SpotifyLibraryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPlaylists(items: List<SpotifyPlaylistEntity>)
 
+    @Query("SELECT * FROM spotify_playlists")
+    suspend fun getAllPlaylistsSnapshot(): List<SpotifyPlaylistEntity>
+
     @Query("SELECT * FROM spotify_playlists ORDER BY synced_at_epoch_ms DESC LIMIT :limit")
     fun observePlaylists(limit: Int = 60): Flow<List<SpotifyPlaylistEntity>>
 
-    @Query("UPDATE spotify_playlists SET tracks_json = :tracksJson, synced_at_epoch_ms = :syncedAtMs WHERE playlist_id = :playlistId")
-    suspend fun updatePlaylistTracks(playlistId: String, tracksJson: String, syncedAtMs: Long = System.currentTimeMillis())
+    @Query("UPDATE spotify_playlists SET tracks_json = :tracksJson, track_count = CASE WHEN :trackCount > track_count THEN :trackCount ELSE track_count END, synced_at_epoch_ms = :syncedAtMs WHERE playlist_id = :playlistId")
+    suspend fun updatePlaylistTracks(
+        playlistId: String,
+        tracksJson: String,
+        trackCount: Int,
+        syncedAtMs: Long = System.currentTimeMillis()
+    )
 
     @Query("DELETE FROM spotify_playlists")
     suspend fun clearPlaylists()

@@ -38,6 +38,11 @@ sealed class SpotifyIngestionSyncResult {
     data class TransientFailure(val code: Int?, val reason: String) : SpotifyIngestionSyncResult()
 }
 
+sealed class PlaylistTracksLoadResult {
+    data class Success(val tracks: List<SpotifyPlaylistTrackEntry>) : PlaylistTracksLoadResult()
+    data class Error(val message: String, val isRestrictedBySpotify: Boolean = false) : PlaylistTracksLoadResult()
+}
+
 /**
  * End-to-End Spotify OAuth 2.0 Authorization Code + PKCE Repository & Local-First Ingestion Engine.
  *
@@ -405,19 +410,31 @@ class SpotifyOAuthRepository(context: Context) {
             Log.w(TAG, "Liked tracks sync note: ${e.message}")
         }
 
-        // 2. Playlists (+ tracks for top 10 playlists)
+        // 2. Playlists (+ tracks for top 10 playlists, preserving cached tracks on partial/background sync)
         try {
+            val existingById = runCatching {
+                libraryDao.getAllPlaylistsSnapshot().associateBy { it.playlistId }
+            }.getOrDefault(emptyMap())
             val plResp = webApiService.getUserPlaylists(authHeader = bearerHeader, limit = 30, offset = 0)
             if (plResp.isSuccessful) {
                 val rawPlaylists = plResp.body()?.items.orEmpty()
                 val playlistEntities = mutableListOf<SpotifyPlaylistEntity>()
                 rawPlaylists.forEachIndexed { idx, pDto ->
+                    val existing = existingById[pDto.id]
+                    val cachedTracks = existing?.decodeTracks().orEmpty()
                     val tracksList = if (forcePlaylistTracks && idx < 10 && pDto.id.isNotBlank()) {
-                        fetchPlaylistTrackEntries(pDto.id, bearerHeader)
+                        when (val res = fetchPlaylistTracksDetailed(pDto.id, bearerHeader)) {
+                            is PlaylistTracksLoadResult.Success -> res.tracks.ifEmpty { cachedTracks }
+                            is PlaylistTracksLoadResult.Error -> cachedTracks
+                        }
                     } else {
-                        emptyList()
+                        cachedTracks
                     }
-                    pDto.toPlaylistEntity(tracks = tracksList, nowMs = nowMs)?.let { entity ->
+                    pDto.toPlaylistEntity(
+                        tracks = tracksList,
+                        nowMs = nowMs,
+                        existingTrackCount = existing?.trackCount ?: 0
+                    )?.let { entity ->
                         playlistEntities.add(entity)
                     }
                 }
@@ -536,42 +553,137 @@ class SpotifyOAuthRepository(context: Context) {
         !hitPermissionForbidden
     }
 
-    suspend fun loadPlaylistTracksIfNeeded(playlistId: String): List<SpotifyPlaylistTrackEntry> =
-        withContext(Dispatchers.IO) {
-            val validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
-                ?: return@withContext emptyList()
-            val tracks = fetchPlaylistTrackEntries(playlistId, "Bearer $validToken")
-            if (tracks.isNotEmpty()) {
-                libraryDao.updatePlaylistTracks(playlistId, encodePlaylistTracksJson(tracks))
-            }
-            tracks
+    suspend fun loadPlaylistTracksIfNeeded(playlistId: String): List<SpotifyPlaylistTrackEntry> {
+        return when (val res = loadPlaylistTracksDetailed(playlistId)) {
+            is PlaylistTracksLoadResult.Success -> res.tracks
+            is PlaylistTracksLoadResult.Error -> emptyList()
         }
+    }
 
-    private suspend fun fetchPlaylistTrackEntries(
-        playlistId: String,
-        bearerHeader: String
-    ): List<SpotifyPlaylistTrackEntry> {
-        return try {
-            val resp = webApiService.getPlaylistTracks(playlistId = playlistId, authHeader = bearerHeader, limit = 50, offset = 0)
-            if (!resp.isSuccessful) return emptyList()
-            resp.body()?.items.orEmpty().mapNotNull { item ->
-                val t = item.track ?: return@mapNotNull null
-                if (t.name.isBlank()) return@mapNotNull null
-                val artist = t.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-                val id = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${artist.lowercase()}" }
-                SpotifyPlaylistTrackEntry(
-                    trackId = id,
-                    title = t.name.trim(),
-                    artist = artist.trim(),
-                    album = t.album?.name?.trim().orEmpty(),
-                    spotifyUri = t.uri.ifBlank { "spotify:track:$id" },
-                    durationMs = t.durationMs,
-                    albumArtUrl = t.album?.images?.firstOrNull()?.url
+    suspend fun loadPlaylistTracksDetailed(playlistId: String): PlaylistTracksLoadResult =
+        withContext(Dispatchers.IO) {
+            var validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
+                ?: return@withContext PlaylistTracksLoadResult.Error(
+                    "Connect Spotify to view songs inside this playlist."
+                )
+
+            var result = fetchPlaylistTracksDetailed(playlistId, "Bearer $validToken")
+            if (result is PlaylistTracksLoadResult.Error && result.message.contains("expired", ignoreCase = true)) {
+                val refreshed = authManager.refreshAccessTokenIfNeeded(forceRefresh = true)
+                    ?: tokenManager.refreshAccessTokenSilently(authService, forceRefresh = true)
+                if (!refreshed.isNullOrBlank()) {
+                    validToken = refreshed
+                    result = fetchPlaylistTracksDetailed(playlistId, "Bearer $validToken")
+                }
+            }
+
+            if (result is PlaylistTracksLoadResult.Success && result.tracks.isNotEmpty()) {
+                libraryDao.updatePlaylistTracks(
+                    playlistId = playlistId,
+                    tracksJson = encodePlaylistTracksJson(result.tracks),
+                    trackCount = result.tracks.size
                 )
             }
+            result
+        }
+
+    private suspend fun fetchPlaylistTracksDetailed(
+        playlistId: String,
+        bearerHeader: String
+    ): PlaylistTracksLoadResult {
+        return try {
+            var usedItemsEndpoint = true
+            var activeResp = webApiService.getPlaylistItems(
+                playlistId = playlistId,
+                authHeader = bearerHeader,
+                limit = 50,
+                offset = 0
+            )
+            if (!activeResp.isSuccessful) {
+                val itemsCode = activeResp.code()
+                Log.w(TAG, "GET /v1/playlists/$playlistId/items returned HTTP $itemsCode; trying /tracks fallback")
+                val legacyResp = webApiService.getPlaylistTracks(
+                    playlistId = playlistId,
+                    authHeader = bearerHeader,
+                    limit = 50,
+                    offset = 0
+                )
+                if (legacyResp.isSuccessful) {
+                    usedItemsEndpoint = false
+                    activeResp = legacyResp
+                } else {
+                    val code = legacyResp.code()
+                    Log.w(TAG, "GET /v1/playlists/$playlistId/tracks also returned HTTP $code")
+                    return when {
+                        code == 401 || itemsCode == 401 -> PlaylistTracksLoadResult.Error(
+                            "Spotify session expired. Tap Sync or reconnect Spotify to reload."
+                        )
+                        code == 403 || itemsCode == 403 -> {
+                            if (!authManager.hasExtendedLibraryScopes()) {
+                                _needsLibraryScopeUpgrade.value = true
+                                PlaylistTracksLoadResult.Error(
+                                    "Spotify playlist permission update required. Tap 'Update Spotify Permissions' above."
+                                )
+                            } else {
+                                PlaylistTracksLoadResult.Error(
+                                    "Spotify restricts reading songs inside playlists you don't own (such as editorial mixes) in Development Mode. You can still play this playlist directly.",
+                                    isRestrictedBySpotify = true
+                                )
+                            }
+                        }
+                        else -> PlaylistTracksLoadResult.Error(
+                            "Could not load playlist songs from Spotify (HTTP $code). Tap Retry."
+                        )
+                    }
+                }
+            }
+
+            val page1Body = activeResp.body()
+            val allEntries = parsePlaylistItems(page1Body?.items.orEmpty()).toMutableList()
+
+            val totalReported = page1Body?.total ?: allEntries.size
+            if (totalReported > 50 || !page1Body?.next.isNullOrBlank()) {
+                val page2Resp = if (usedItemsEndpoint) {
+                    webApiService.getPlaylistItems(playlistId = playlistId, authHeader = bearerHeader, limit = 50, offset = 50)
+                } else {
+                    webApiService.getPlaylistTracks(playlistId = playlistId, authHeader = bearerHeader, limit = 50, offset = 50)
+                }
+                if (page2Resp.isSuccessful) {
+                    allEntries.addAll(parsePlaylistItems(page2Resp.body()?.items.orEmpty()))
+                }
+            }
+
+            PlaylistTracksLoadResult.Success(allEntries)
         } catch (e: Exception) {
-            Log.w(TAG, "fetchPlaylistTrackEntries error for $playlistId: ${e.message}")
-            emptyList()
+            Log.w(TAG, "fetchPlaylistTracksDetailed error for $playlistId: ${e.message}")
+            PlaylistTracksLoadResult.Error("Network issue while loading playlist songs. Tap Retry.")
+        }
+    }
+
+    private fun parsePlaylistItems(items: List<SpotifyPlaylistTrackItemDto>): List<SpotifyPlaylistTrackEntry> {
+        return items.mapNotNull { item ->
+            val t = item.resolvedMedia() ?: return@mapNotNull null
+            if (t.name.isBlank()) return@mapNotNull null
+            val artist = t.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() }
+                ?: t.show?.name?.takeIf { it.isNotBlank() }
+                ?: t.show?.publisher?.takeIf { it.isNotBlank() }
+                ?: "Unknown Artist"
+            val album = t.album?.name?.trim()?.takeIf { it.isNotBlank() }
+                ?: t.show?.publisher?.trim().orEmpty()
+            val artUrl = t.album?.images?.firstOrNull()?.url
+                ?: t.images?.firstOrNull()?.url
+                ?: t.show?.images?.firstOrNull()?.url
+            val id = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${artist.lowercase()}" }
+            val fallbackUri = if (t.show != null && t.artists.isEmpty()) "spotify:episode:$id" else "spotify:track:$id"
+            SpotifyPlaylistTrackEntry(
+                trackId = id,
+                title = t.name.trim(),
+                artist = artist.trim(),
+                album = album,
+                spotifyUri = t.uri.ifBlank { fallbackUri },
+                durationMs = t.durationMs,
+                albumArtUrl = artUrl
+            )
         }
     }
 

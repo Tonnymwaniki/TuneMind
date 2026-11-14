@@ -82,7 +82,8 @@ data class SpotifyPlaylistDto(
     @SerializedName("uri") val uri: String = "",
     @SerializedName("images") val images: List<SpotifyImageDto>? = null,
     @SerializedName("owner") val owner: SpotifyOwnerDto? = null,
-    @SerializedName("tracks") val tracks: SpotifyPlaylistTracksRefDto? = null
+    @SerializedName("tracks") val tracks: SpotifyPlaylistTracksRefDto? = null,
+    @SerializedName("items") val items: SpotifyPlaylistTracksRefDto? = null
 )
 
 data class SpotifyOwnerDto(
@@ -97,13 +98,18 @@ data class SpotifyPlaylistTracksRefDto(
 
 data class SpotifyPlaylistTracksResponse(
     @SerializedName("items") val items: List<SpotifyPlaylistTrackItemDto> = emptyList(),
-    @SerializedName("total") val total: Int = 0
+    @SerializedName("total") val total: Int = 0,
+    @SerializedName("next") val next: String? = null
 )
 
 data class SpotifyPlaylistTrackItemDto(
     @SerializedName("added_at") val addedAtIso: String? = null,
-    @SerializedName("track") val track: SpotifyTrackDto? = null
-)
+    @SerializedName("is_local") val isLocal: Boolean = false,
+    @SerializedName("track") val track: SpotifyTrackDto? = null,
+    @SerializedName("item") val item: SpotifyTrackDto? = null
+) {
+    fun resolvedMedia(): SpotifyTrackDto? = item ?: track
+}
 
 data class SpotifySavedShowsResponse(
     @SerializedName("items") val items: List<SpotifySavedShowItemDto> = emptyList(),
@@ -167,7 +173,8 @@ data class SpotifyTrackDto(
     @SerializedName("album") val album: SpotifyAlbumDto? = null,
     @SerializedName("artists") val artists: List<SpotifyArtistDto> = emptyList(),
     @SerializedName("external_urls") val externalUrls: SpotifyExternalUrlsDto? = null,
-    @SerializedName("show") val show: SpotifyShowDto? = null
+    @SerializedName("show") val show: SpotifyShowDto? = null,
+    @SerializedName("images") val images: List<SpotifyImageDto>? = null
 )
 
 data class SpotifyAlbumDto(
@@ -452,9 +459,15 @@ fun SpotifySavedTrackItemDto.toLikedTrackEntity(nowMs: Long = System.currentTime
 
 fun SpotifyPlaylistDto.toPlaylistEntity(
     tracks: List<SpotifyPlaylistTrackEntry> = emptyList(),
-    nowMs: Long = System.currentTimeMillis()
+    nowMs: Long = System.currentTimeMillis(),
+    existingTrackCount: Int = 0
 ): SpotifyPlaylistEntity? {
     if (id.isBlank() || name.isBlank()) return null
+    val reportedTotal = maxOf(
+        this.items?.total ?: 0,
+        this.tracks?.total ?: 0,
+        existingTrackCount
+    )
     return SpotifyPlaylistEntity(
         playlistId = id,
         uri = uri.ifBlank { "spotify:playlist:$id" },
@@ -462,7 +475,7 @@ fun SpotifyPlaylistDto.toPlaylistEntity(
         description = description?.trim().orEmpty(),
         ownerName = owner?.displayName?.trim()?.ifBlank { owner.id ?: "Spotify" } ?: "Spotify",
         imageUrl = images?.firstOrNull()?.url,
-        trackCount = maxOf(tracks.size, this.tracks?.total ?: 0),
+        trackCount = maxOf(tracks.size, reportedTotal),
         tracksJson = encodePlaylistTracksJson(tracks),
         syncedAtEpochMs = nowMs
     )

@@ -16,6 +16,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -51,6 +52,9 @@ fun SpotifyLibrarySection(
     likedTracks: List<SpotifyLikedTrackEntity>,
     playlists: List<SpotifyPlaylistEntity>,
     podcasts: List<SpotifyPodcastEntity>,
+    loadingPlaylistIds: Set<String> = emptySet(),
+    loadedPlaylistIds: Set<String> = emptySet(),
+    playlistTrackErrors: Map<String, String> = emptyMap(),
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onRefreshLibrary: () -> Unit,
@@ -377,6 +381,11 @@ fun SpotifyLibrarySection(
             1 -> {
                 if (selectedPlaylist != null) {
                     val playlistTracks = selectedPlaylist.decodeTracks()
+                    val isLoadingThisPlaylist = selectedPlaylist.playlistId in loadingPlaylistIds
+                    val isLoadedThisPlaylist = selectedPlaylist.playlistId in loadedPlaylistIds
+                    val playlistError = playlistTrackErrors[selectedPlaylist.playlistId]
+                    val displayedSongCount = maxOf(selectedPlaylist.trackCount, playlistTracks.size)
+
                     item(key = "pl_back_header") {
                         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
@@ -409,23 +418,32 @@ fun SpotifyLibrarySection(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${selectedPlaylist.trackCount} songs${if (selectedPlaylist.ownerName.isNotBlank()) " • ${selectedPlaylist.ownerName}" else ""}",
+                                        text = buildString {
+                                            when {
+                                                displayedSongCount > 0 -> append("$displayedSongCount songs")
+                                                isLoadingThisPlaylist -> append("Fetching songs…")
+                                                else -> append("Playlist")
+                                            }
+                                            if (selectedPlaylist.ownerName.isNotBlank()) {
+                                                append(" • ${selectedPlaylist.ownerName}")
+                                            }
+                                        },
                                         color = spotifyGreen,
                                         fontSize = 11.sp
+                                    )
+                                }
+                                if (isLoadingThisPlaylist) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = spotifyGreen
                                     )
                                 }
                             }
                         }
                     }
 
-                    if (playlistTracks.isEmpty()) {
-                        item(key = "pl_tracks_loading") {
-                            LibraryEmptyCard(
-                                title = "Loading playlist tracks…",
-                                subtitle = "If tracks don't appear, tap Sync above or ensure playlist permissions are granted."
-                            )
-                        }
-                    } else {
+                    if (playlistTracks.isNotEmpty()) {
                         itemsIndexed(
                             items = playlistTracks,
                             key = { idx, tr -> "pl_${selectedPlaylist.playlistId}_${tr.trackId}_$idx" }
@@ -450,6 +468,104 @@ fun SpotifyLibrarySection(
                                 }
                             )
                         }
+                    } else if (isLoadingThisPlaylist || !isLoadedThisPlaylist) {
+                        item(key = "pl_tracks_loading") {
+                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.2.dp,
+                                        color = spotifyGreen
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Loading songs from Spotify…",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Fetching playlist items for ${selectedPlaylist.name}",
+                                            color = Color.White.copy(alpha = 0.62f),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        item(key = "pl_tracks_empty_or_error") {
+                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = if (!playlistError.isNullOrBlank()) {
+                                            "Could not load playlist songs"
+                                        } else {
+                                            "No songs returned for this playlist"
+                                        },
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = playlistError
+                                            ?: "This playlist appears empty or Spotify omitted its tracks for this account.",
+                                        color = Color.White.copy(alpha = 0.72f),
+                                        fontSize = 12.sp,
+                                        lineHeight = 17.sp
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { onLoadPlaylistTracks(selectedPlaylist.playlistId) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = "Retry",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                        Button(
+                                            onClick = {
+                                                onPlayTrack(
+                                                    selectedPlaylist.name,
+                                                    selectedPlaylist.ownerName.ifBlank { "Spotify Playlist" },
+                                                    selectedPlaylist.uri,
+                                                    "com.spotify.music"
+                                                )
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = spotifyGreen),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = "Play Playlist",
+                                                color = Color.Black,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 } else if (playlists.isEmpty()) {
                     item(key = "sp_playlists_empty") {
@@ -464,6 +580,13 @@ fun SpotifyLibrarySection(
                         key = { "playlist_${it.playlistId}" }
                     ) { pl ->
                         val previewTracks = pl.decodeTracks()
+                        val effectiveCount = maxOf(pl.trackCount, previewTracks.size)
+                        val isLoaded = pl.playlistId in loadedPlaylistIds
+                        val countLabel = when {
+                            effectiveCount > 0 -> "$effectiveCount songs"
+                            isLoaded -> "0 songs"
+                            else -> "Tap to view songs"
+                        }
                         val hasPlayingTrack = previewTracks.any {
                             isTrackCurrentlyPlaying(it.title, it.artist, it.spotifyUri)
                         }
@@ -512,7 +635,7 @@ fun SpotifyLibrarySection(
                                     )
                                     Text(
                                         text = buildString {
-                                            append("${pl.trackCount} songs")
+                                            append(countLabel)
                                             if (pl.ownerName.isNotBlank()) append(" • ${pl.ownerName}")
                                         },
                                         color = Color.White.copy(alpha = 0.62f),

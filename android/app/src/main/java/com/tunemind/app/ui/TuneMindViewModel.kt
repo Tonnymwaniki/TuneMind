@@ -286,6 +286,15 @@ class TuneMindViewModel : ViewModel() {
         return false
     }
 
+    private val _loadingPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
+    val loadingPlaylistIds: StateFlow<Set<String>> = _loadingPlaylistIds.asStateFlow()
+
+    private val _loadedPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
+    val loadedPlaylistIds: StateFlow<Set<String>> = _loadedPlaylistIds.asStateFlow()
+
+    private val _playlistTrackErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val playlistTrackErrors: StateFlow<Map<String, String>> = _playlistTrackErrors.asStateFlow()
+
     fun refreshSpotifyLibrary(forcePlaylistTracks: Boolean = true) {
         val repoInstance = spotifyRepo ?: return
         viewModelScope.launch {
@@ -300,10 +309,32 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    fun loadPlaylistTracksIfNeeded(playlistId: String) {
+    fun loadPlaylistTracksIfNeeded(playlistId: String, forceRefresh: Boolean = false) {
         val repoInstance = spotifyRepo ?: return
+        if (_loadingPlaylistIds.value.contains(playlistId)) return
+        if (!forceRefresh && _loadedPlaylistIds.value.contains(playlistId)) {
+            val cached = _spotifyPlaylists.value.firstOrNull { it.playlistId == playlistId }?.decodeTracks().orEmpty()
+            if (cached.isNotEmpty()) return
+        }
         viewModelScope.launch {
-            runCatching { repoInstance.loadPlaylistTracksIfNeeded(playlistId) }
+            _loadingPlaylistIds.value = _loadingPlaylistIds.value + playlistId
+            _playlistTrackErrors.value = _playlistTrackErrors.value - playlistId
+            try {
+                when (val res = repoInstance.loadPlaylistTracksDetailed(playlistId)) {
+                    is com.tunemind.app.data.ingestion.PlaylistTracksLoadResult.Success -> {
+                        _loadedPlaylistIds.value = _loadedPlaylistIds.value + playlistId
+                    }
+                    is com.tunemind.app.data.ingestion.PlaylistTracksLoadResult.Error -> {
+                        _loadedPlaylistIds.value = _loadedPlaylistIds.value + playlistId
+                        _playlistTrackErrors.value = _playlistTrackErrors.value + (playlistId to res.message)
+                    }
+                }
+            } catch (e: Exception) {
+                _loadedPlaylistIds.value = _loadedPlaylistIds.value + playlistId
+                _playlistTrackErrors.value = _playlistTrackErrors.value + (playlistId to "Could not load playlist songs. Tap Retry.")
+            } finally {
+                _loadingPlaylistIds.value = _loadingPlaylistIds.value - playlistId
+            }
         }
     }
 

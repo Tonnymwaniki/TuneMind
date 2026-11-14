@@ -137,7 +137,18 @@ interface SpotifyWebApiService {
     ): Response<SpotifyPlaylistsResponse>
 
     /**
-     * Fetches tracks inside a playlist (`GET /v1/playlists/{playlist_id}/tracks`).
+     * Fetches items inside a playlist (`GET /v1/playlists/{playlist_id}/items` - 2026 Spotify Web API).
+     */
+    @GET("v1/playlists/{playlist_id}/items")
+    suspend fun getPlaylistItems(
+        @Path("playlist_id") playlistId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): Response<SpotifyPlaylistTracksResponse>
+
+    /**
+     * Legacy fallback for playlists on older Spotify API behavior (`GET /v1/playlists/{playlist_id}/tracks`).
      */
     @GET("v1/playlists/{playlist_id}/tracks")
     suspend fun getPlaylistTracks(

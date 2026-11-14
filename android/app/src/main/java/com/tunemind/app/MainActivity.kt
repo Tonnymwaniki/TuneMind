@@ -103,6 +103,9 @@ open class MainActivity : ComponentActivity() {
                     val spotifyPodcasts by vm.spotifyPodcasts.collectAsState()
                     val isLibrarySyncing by vm.isLibrarySyncing.collectAsState()
                     val needsLibraryScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
+                    val loadingPlaylistIds by vm.loadingPlaylistIds.collectAsState()
+                    val loadedPlaylistIds by vm.loadedPlaylistIds.collectAsState()
+                    val playlistTrackErrors by vm.playlistTrackErrors.collectAsState()
                     val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
 
                     val playerPrefs = remember {
@@ -611,6 +614,9 @@ open class MainActivity : ComponentActivity() {
                                                 podcasts = spotifyPodcasts,
                                                 isLibrarySyncing = isLibrarySyncing,
                                                 needsLibraryScopeUpgrade = needsLibraryScopeUpgrade,
+                                                loadingPlaylistIds = loadingPlaylistIds,
+                                                loadedPlaylistIds = loadedPlaylistIds,
+                                                playlistTrackErrors = playlistTrackErrors,
                                                 resolvePlayCount = { title, artist, uri ->
                                                     vm.resolvePlayCount(title, artist, uri)
                                                 },
@@ -621,7 +627,7 @@ open class MainActivity : ComponentActivity() {
                                                     vm.refreshSpotifyLibrary(forcePlaylistTracks = true)
                                                 },
                                                 onLoadPlaylistTracks = { playlistId ->
-                                                    vm.loadPlaylistTracksIfNeeded(playlistId)
+                                                    vm.loadPlaylistTracksIfNeeded(playlistId, forceRefresh = true)
                                                 },
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
