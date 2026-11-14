@@ -1144,7 +1144,7 @@ private fun SettingsPermissionRow(
     title: String,
     description: String,
     isEnabled: Boolean,
-    colors: TuneMindThemeColors,
+    colors: AdaptiveThemeState,
     onClick: () -> Unit
 ) {
     Surface(
