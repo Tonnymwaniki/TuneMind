@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TuneMind" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/tunemind_accent</item>
+        <item name="colorPrimaryVariant">@color/tunemind_accent_dim</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSecondary">@color/tunemind_cyan</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:windowBackground">@color/tunemind_bg</item>
+        <item name="android:colorBackground">@color/tunemind_bg</item>
+        <item name="colorSurface">@color/tunemind_surface_l1</item>
+        <item name="colorOnSurface">@color/tunemind_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/tunemind_text_secondary</item>
+        <item name="android:statusBarColor">@color/tunemind_bg</item>
+        <item name="android:navigationBarColor">@color/tunemind_bg</item>
+
+        <!-- Android 12+ Pitch-Black Studio Cold-Start Splash -->
+        <item name="android:windowSplashScreenBackground">@color/tunemind_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_tunemind_splash</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/tunemind_bg</item>
+    </style>
+</resources>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Acoustic Ring Split (Cyan + Amber) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,52 A25,25 0 0,1 69,32"
+        android:strokeColor="#FF00E5FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.2" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,56 A25,25 0 0,1 39,76"
+        android:strokeColor="#FFFFB000"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.2" />
+
+    <!-- Subtle full acoustic circle -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,28 A26,26 0 1,1 53.99,28 Z"
+        android:strokeAlpha="0.22"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.2" />
+
+    <!-- Chromatic echo T layers -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39.5,41.5 H64.5 M52,41.5 V67.5"
+        android:strokeAlpha="0.80"
+        android:strokeColor="#FF00E5FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="5.2" />
+
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M43.5,42.5 H68.5 M56,42.5 V68.5"
+        android:strokeAlpha="0.80"
+        android:strokeColor="#FFFFB000"
+        android:strokeLineCap="round"
+        android:strokeWidth="5.2" />
+
+    <!-- Primary White TuneMind T Monogram -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M41.5,42 H66.5 M54,42 V68"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="5.4" />
+</vector>

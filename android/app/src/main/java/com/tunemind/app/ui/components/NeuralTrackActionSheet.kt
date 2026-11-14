@@ -9,6 +9,13 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AcUnit
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,9 +39,7 @@ import com.tunemind.app.ui.theme.AdaptiveThemeEngine
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 /**
- * Upgraded sculpted Neural Sonic Action Button at the right end of every song card.
- * Replaces the casual "Ask" text button with a custom animated 4-bar sonic waveform
- * and gradient-bordered neural capsule.
+ * Compact animated sonic waveform button on track cards.
  */
 @Composable
 fun NeuralSonicActionButton(
@@ -59,13 +65,13 @@ fun NeuralSonicActionButton(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         modifier = modifier
-            .defaultMinSize(minWidth = 76.dp, minHeight = 44.dp)
+            .defaultMinSize(minWidth = 74.dp, minHeight = 42.dp)
             .clip(pillShape)
             .background(
                 Brush.horizontalGradient(
                     colors = listOf(
-                        accentColor.copy(alpha = 0.16f),
-                        secondaryColor.copy(alpha = 0.12f)
+                        accentColor.copy(alpha = 0.14f),
+                        secondaryColor.copy(alpha = 0.10f)
                     )
                 )
             )
@@ -73,8 +79,8 @@ fun NeuralSonicActionButton(
                 width = 1.dp,
                 brush = Brush.horizontalGradient(
                     colors = listOf(
-                        accentColor.copy(alpha = 0.65f),
-                        secondaryColor.copy(alpha = 0.45f)
+                        accentColor.copy(alpha = 0.55f),
+                        secondaryColor.copy(alpha = 0.40f)
                     )
                 ),
                 shape = pillShape
@@ -82,7 +88,6 @@ fun NeuralSonicActionButton(
             .bouncyClickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 9.dp)
     ) {
-        // Custom 4-bar Neural Sonic Waveform Icon
         Canvas(modifier = Modifier.size(width = 16.dp, height = 14.dp)) {
             val barWidth = 2.4.dp.toPx()
             val gap = 2.0.dp.toPx()
@@ -106,17 +111,16 @@ fun NeuralSonicActionButton(
         }
 
         Text(
-            text = "SYNC",
+            text = "Sync",
             color = Color.White,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 1.2.sp
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
 
 /**
- * Interactive Neural Track Intelligence Sheet triggered when tapping the SYNC button on any song card.
+ * Interactive Track Actions bottom sheet triggered when tapping Sync on any track card.
  */
 @Composable
 fun NeuralTrackActionDialog(
@@ -144,7 +148,7 @@ fun NeuralTrackActionDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.68f))
+                .background(Color.Black.copy(alpha = 0.72f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -156,24 +160,24 @@ fun NeuralTrackActionDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(32.dp))
+                    .clip(RoundedCornerShape(30.dp))
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                theme.elevatedSurface,
-                                theme.primaryBackground
+                                Color(0xFF121622),
+                                Color(0xFF080A10)
                             )
                         )
                     )
                     .border(
-                        width = 1.2.dp,
+                        width = 1.dp,
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                theme.primaryAccent.copy(alpha = 0.65f),
-                                theme.secondaryAccent.copy(alpha = 0.45f)
+                                theme.primaryAccent.copy(alpha = 0.45f),
+                                theme.secondaryAccent.copy(alpha = 0.30f)
                             )
                         ),
-                        shape = RoundedCornerShape(32.dp)
+                        shape = RoundedCornerShape(30.dp)
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -181,19 +185,17 @@ fun NeuralTrackActionDialog(
                         onClick = {}
                     )
                     .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Drag Handle Pill
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .width(42.dp)
+                        .width(40.dp)
                         .height(4.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.22f))
                 )
 
-                // Track Telemetry Header with Radial Dopamine Ring
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -201,7 +203,7 @@ fun NeuralTrackActionDialog(
                 ) {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(64.dp)
+                        modifier = Modifier.size(62.dp)
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
                             drawArc(
@@ -223,19 +225,18 @@ fun NeuralTrackActionDialog(
                             text = "$freshnessPercent%",
                             color = Color.White,
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "NEURAL TRACK INTELLIGENCE",
+                            text = "Track Insights",
                             color = theme.primaryAccent,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.6.sp
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(modifier = Modifier.height(3.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = title,
                             color = Color.White,
@@ -254,36 +255,34 @@ fun NeuralTrackActionDialog(
                     }
                 }
 
-                // 3 Sonic DNA Badges (Mood, Dopamine State, Rotation Count)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     TelemetryMiniPill(
-                        label = "MOOD DNA",
+                        label = "Mood",
                         value = detectedMood.label,
                         accent = theme.primaryAccent,
                         modifier = Modifier.weight(1f)
                     )
                     TelemetryMiniPill(
-                        label = "DOPAMINE",
-                        value = if (isCoolingDown) "Cooling" else "Peak Hit",
+                        label = "Freshness",
+                        value = if (isCoolingDown) "Cooling" else "Fresh",
                         accent = ringColor,
                         modifier = Modifier.weight(1f)
                     )
                     TelemetryMiniPill(
-                        label = "ROTATION",
-                        value = "${playCount}x Played",
+                        label = "Plays",
+                        value = "${playCount}x",
                         accent = theme.secondaryAccent,
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-                // Upgraded Action 1: Live Voice Agent Synthesis & Dialogue
                 ActionSheetButton(
-                    badge = "AI",
-                    title = "Neural Voice Breakdown & Dialogue",
-                    subtitle = "Agent analyzes this track's vibe & asks before spinning",
+                    icon = Icons.Rounded.GraphicEq,
+                    title = "Ask TuneMind about this track",
+                    subtitle = "Hear why it fits your flow or ask for a similar pick",
                     accentColor = theme.primaryAccent,
                     isPrimary = true,
                     onClick = {
@@ -292,11 +291,10 @@ fun NeuralTrackActionDialog(
                     }
                 )
 
-                // Upgraded Action 2: Direct Spin Now
                 ActionSheetButton(
-                    badge = "▶",
-                    title = "Spin Track Immediately",
-                    subtitle = "Launch straight into playback with voice intro",
+                    icon = Icons.Rounded.PlayArrow,
+                    title = "Play now",
+                    subtitle = "Start playback in your selected player",
                     accentColor = Color(0xFF10B981),
                     isPrimary = false,
                     onClick = {
@@ -305,11 +303,10 @@ fun NeuralTrackActionDialog(
                     }
                 )
 
-                // Upgraded Action 3: Sync Adaptive Atmosphere Theme to Song Mood
                 ActionSheetButton(
-                    badge = "✦",
-                    title = "Shift App Atmosphere to ${detectedMood.label}",
-                    subtitle = "Adapt TuneMind's colors & glow to this track's mood",
+                    icon = Icons.Rounded.Palette,
+                    title = "Match theme to ${detectedMood.label}",
+                    subtitle = "Shift studio lighting to match this track's mood",
                     accentColor = theme.secondaryAccent,
                     isPrimary = false,
                     onClick = {
@@ -318,12 +315,11 @@ fun NeuralTrackActionDialog(
                     }
                 )
 
-                // Upgraded Action 4: Cooldown Vault / Restore
                 ActionSheetButton(
-                    badge = if (isCoolingDown) "⚡" else "❄️",
-                    title = if (isCoolingDown) "Restore to Peak Dopamine" else "Rest in Cooldown Vault",
-                    subtitle = if (isCoolingDown) "Mark track as fresh and ready for rotation"
-                               else "Prevent ear fatigue by resting this track for 5 days",
+                    icon = if (isCoolingDown) Icons.Rounded.Bolt else Icons.Rounded.AcUnit,
+                    title = if (isCoolingDown) "Return to Fresh" else "Rest in Vault",
+                    subtitle = if (isCoolingDown) "Move this track back into active rotation"
+                               else "Give this song a break so it feels new again",
                     accentColor = Color(0xFFFFB000),
                     isPrimary = false,
                     onClick = {
@@ -345,24 +341,23 @@ private fun TelemetryMiniPill(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, accent.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.04f))
+            .border(1.dp, accent.copy(alpha = 0.24f), RoundedCornerShape(14.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.45f),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp
+            color = Color.White.copy(alpha = 0.50f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = value,
             color = accent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -371,14 +366,14 @@ private fun TelemetryMiniPill(
 
 @Composable
 private fun ActionSheetButton(
-    badge: String,
+    icon: ImageVector,
     title: String,
     subtitle: String,
     accentColor: Color,
     isPrimary: Boolean,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(18.dp)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -386,13 +381,13 @@ private fun ActionSheetButton(
             .fillMaxWidth()
             .clip(shape)
             .background(
-                if (isPrimary) accentColor.copy(alpha = 0.18f)
+                if (isPrimary) accentColor.copy(alpha = 0.16f)
                 else Color.White.copy(alpha = 0.04f)
             )
             .border(
                 width = 1.dp,
-                color = if (isPrimary) accentColor.copy(alpha = 0.55f)
-                        else Color.White.copy(alpha = 0.09f),
+                color = if (isPrimary) accentColor.copy(alpha = 0.45f)
+                        else Color.White.copy(alpha = 0.08f),
                 shape = shape
             )
             .bouncyClickable { onClick() }
@@ -403,14 +398,14 @@ private fun ActionSheetButton(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(accentColor.copy(alpha = 0.20f))
-                .border(1.dp, accentColor.copy(alpha = 0.5f), CircleShape)
+                .background(accentColor.copy(alpha = 0.18f))
+                .border(1.dp, accentColor.copy(alpha = 0.42f), CircleShape)
         ) {
-            Text(
-                text = badge,
-                color = accentColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.ExtraBold
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(19.dp)
             )
         }
 
@@ -419,7 +414,7 @@ private fun ActionSheetButton(
                 text = title,
                 color = Color.White,
                 fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = subtitle,

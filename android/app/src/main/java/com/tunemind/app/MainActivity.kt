@@ -31,6 +31,7 @@ import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.AppHolder
 import com.tunemind.app.ui.components.FloatingGlassDock
+import com.tunemind.app.ui.components.TuneMindSplashOverlay
 import com.tunemind.app.ui.onboarding.OnboardingScreen
 import com.tunemind.app.ui.screens.DopamineVaultScreen
 import com.tunemind.app.ui.screens.PulseAgentScreen
@@ -137,6 +138,7 @@ open class MainActivity : ComponentActivity() {
                     var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
                     var showSettingsScreen by remember { mutableStateOf(false) }
                     var currentPagerPage by remember { mutableStateOf(1) }
+                    var showLaunchSplash by remember { mutableStateOf(true) }
 
                     val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
                     val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
@@ -350,42 +352,47 @@ open class MainActivity : ComponentActivity() {
                     }
 
                     TuneMindTheme(adaptiveState = adaptiveState) {
-                        if (!isMainAppActive) {
-                            OnboardingScreen(
-                                onComplete = {
-                                    hasCompletedLaunchStartFlow = true
-                                    authSessionManager.markStartFlowCompleted()
-                                    hasAllPermissions = true
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF05060A))
+                        ) {
+                            if (!isMainAppActive) {
+                                OnboardingScreen(
+                                    onComplete = {
+                                        hasCompletedLaunchStartFlow = true
+                                        authSessionManager.markStartFlowCompleted()
+                                        hasAllPermissions = true
+                                    }
+                                )
+                            } else {
+                                // 3-Screen Horizontal Pager: 0 = DOPAMINE, 1 = TUNEMIND (Center), 2 = RHYTHM
+                                val pagerState = rememberPagerState(
+                                    initialPage = 1,
+                                    pageCount = { 3 }
+                                )
+
+                                LaunchedEffect(pagerState.currentPage) {
+                                    currentPagerPage = pagerState.currentPage
                                 }
-                            )
-                        } else {
-                            // 3-Screen Horizontal Pager: 0 = DOPAMINE, 1 = AGENT (Default Center Home), 2 = RHYTHM
-                            val pagerState = rememberPagerState(
-                                initialPage = 1,
-                                pageCount = { 3 }
-                            )
 
-                            LaunchedEffect(pagerState.currentPage) {
-                                currentPagerPage = pagerState.currentPage
-                            }
-
-                            LaunchedEffect(requestedScreenPage) {
-                                val target = requestedScreenPage
-                                if (target != null && target in 0..2) {
-                                    pagerState.animateScrollToPage(target)
-                                    requestedScreenPage = null
+                                LaunchedEffect(requestedScreenPage) {
+                                    val target = requestedScreenPage
+                                    if (target != null && target in 0..2) {
+                                        pagerState.animateScrollToPage(target)
+                                        requestedScreenPage = null
+                                    }
                                 }
-                            }
 
-                            androidx.activity.compose.BackHandler(enabled = showSettingsScreen) {
-                                showSettingsScreen = false
-                            }
+                                androidx.activity.compose.BackHandler(enabled = showSettingsScreen) {
+                                    showSettingsScreen = false
+                                }
 
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(adaptiveState.primaryBackground)
-                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF05060A))
+                                ) {
                                 HorizontalPager(
                                     state = pagerState,
                                     modifier = Modifier.fillMaxSize()
@@ -620,6 +627,13 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+                            }
+
+                            if (showLaunchSplash) {
+                                TuneMindSplashOverlay(
+                                    onFinished = { showLaunchSplash = false }
+                                )
+                            }
                         }
                     }
                 }
@@ -676,9 +690,9 @@ private fun CrashDiagnosticsScreen(error: Throwable, onReset: () -> Unit) {
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF06050A))
+            .background(Color(0xFF05060A))
             .padding(24.dp),
-        color = Color(0xFF06050A)
+        color = Color(0xFF05060A)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

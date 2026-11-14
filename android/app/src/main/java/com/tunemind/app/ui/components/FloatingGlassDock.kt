@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,7 +31,7 @@ fun FloatingGlassDock(
     modifier: Modifier = Modifier
 ) {
     val theme = LocalAdaptiveTheme.current
-    val dockShape = RoundedCornerShape(32.dp)
+    val dockShape = RoundedCornerShape(30.dp)
     val isAgentActive = agentState != AgentState.IDLE
 
     val infiniteTransition = rememberInfiniteTransition(label = "DockPulse")
@@ -52,26 +53,34 @@ fun FloatingGlassDock(
         AgentState.IDLE -> theme.primaryAccent
     }
 
+    val centerLabel = when (agentState) {
+        AgentState.LISTENING -> "Listening"
+        AgentState.THINKING -> "Thinking"
+        AgentState.SPEAKING -> "Speaking"
+        AgentState.ERROR -> "Retry"
+        AgentState.IDLE -> "TuneMind"
+    }
+
+    val dockTop = lerp(Color(0xFF121622), theme.elevatedSurface, 0.25f).copy(alpha = 0.94f)
+    val dockBottom = Color(0xFF07090F).copy(alpha = 0.97f)
+
     Box(
         modifier = modifier
-            .height(60.dp)
-            .widthIn(min = 292.dp, max = 340.dp)
+            .height(58.dp)
+            .widthIn(min = 296.dp, max = 344.dp)
             .clip(dockShape)
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(
-                        theme.elevatedSurface.copy(alpha = 0.92f),
-                        theme.primaryBackground.copy(alpha = 0.96f)
-                    )
+                    colors = listOf(dockTop, dockBottom)
                 )
             )
             .border(
-                width = 1.2.dp,
+                width = 1.dp,
                 brush = Brush.horizontalGradient(
                     colors = listOf(
-                        theme.primaryAccent.copy(alpha = 0.35f),
-                        agentAccentColor.copy(alpha = if (isAgentActive) 0.70f else 0.40f),
-                        theme.secondaryAccent.copy(alpha = 0.35f)
+                        theme.primaryAccent.copy(alpha = 0.28f),
+                        agentAccentColor.copy(alpha = if (isAgentActive) 0.68f else 0.36f),
+                        theme.secondaryAccent.copy(alpha = 0.26f)
                     )
                 ),
                 shape = dockShape
@@ -83,9 +92,9 @@ fun FloatingGlassDock(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // TAB 0: DOPAMINE VAULT
+            // TAB 0: DOPAMINE
             DockPillItem(
-                label = "DOPAMINE",
+                label = "Dopamine",
                 isSelected = currentPage == 0,
                 activeColor = theme.primaryAccent,
                 badgeDotColor = if (freshTrackCount > 0) Color(0xFF10B981) else null,
@@ -95,21 +104,21 @@ fun FloatingGlassDock(
                 modifier = Modifier.weight(1f)
             )
 
-            // TAB 1: CENTER LIVING ORB (HOME)
+            // TAB 1: CENTER TUNEMIND LIVING SPHERE
             DockPillItem(
-                label = if (isAgentActive) agentState.name else "AGENT",
+                label = centerLabel,
                 isSelected = currentPage == 1,
                 activeColor = agentAccentColor,
                 badgeDotColor = agentAccentColor,
                 isCenterOrb = true,
-                orbPulseAlpha = if (isAgentActive) pulseAlpha else 0.85f,
+                orbPulseAlpha = if (isAgentActive) pulseAlpha else 0.9f,
                 onClick = { onSelectPage(1) },
-                modifier = Modifier.weight(1.1f)
+                modifier = Modifier.weight(1.08f)
             )
 
-            // TAB 2: RHYTHM DNA
+            // TAB 2: RHYTHM
             DockPillItem(
-                label = "RHYTHM",
+                label = "Rhythm",
                 isSelected = currentPage == 2,
                 activeColor = theme.secondaryAccent,
                 badgeDotColor = null,
@@ -133,14 +142,14 @@ private fun DockPillItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pillShape = RoundedCornerShape(26.dp)
+    val pillShape = RoundedCornerShape(24.dp)
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) activeColor.copy(alpha = 0.20f) else Color.Transparent,
+        targetValue = if (isSelected) activeColor.copy(alpha = 0.18f) else Color.Transparent,
         animationSpec = tween(250),
         label = "DockTabBg"
     )
     val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
+        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.60f),
         animationSpec = tween(250),
         label = "DockTabText"
     )
@@ -149,18 +158,18 @@ private fun DockPillItem(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .fillMaxHeight()
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .defaultMinSize(minWidth = 48.dp, minHeight = 46.dp)
             .clip(pillShape)
             .background(bgColor)
             .then(
                 if (isSelected) {
-                    Modifier.border(1.dp, activeColor.copy(alpha = 0.55f), pillShape)
+                    Modifier.border(1.dp, activeColor.copy(alpha = 0.45f), pillShape)
                 } else {
                     Modifier
                 }
             )
             .bouncyClickable { onClick() }
-            .padding(horizontal = 10.dp)
+            .padding(horizontal = 8.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -169,7 +178,7 @@ private fun DockPillItem(
             if (isCenterOrb) {
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(activeColor.copy(alpha = orbPulseAlpha))
                 )
@@ -177,7 +186,7 @@ private fun DockPillItem(
             } else if (badgeDotColor != null) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(5.dp)
                         .clip(CircleShape)
                         .background(badgeDotColor)
                 )
@@ -187,9 +196,8 @@ private fun DockPillItem(
             Text(
                 text = label,
                 color = textColor,
-                fontSize = 11.sp,
-                fontWeight = if (isSelected || isCenterOrb) FontWeight.Bold else FontWeight.Medium,
-                letterSpacing = 1.1.sp,
+                fontSize = 12.sp,
+                fontWeight = if (isSelected || isCenterOrb) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1
             )
         }

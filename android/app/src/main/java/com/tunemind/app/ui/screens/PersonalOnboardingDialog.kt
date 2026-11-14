@@ -2,6 +2,7 @@ package com.tunemind.app.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,8 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,12 +21,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.theme.*
 
 @Composable
@@ -43,197 +43,112 @@ fun PersonalOnboardingDialog(
     var selectedProviderId by remember { mutableStateOf(vm.getPreferredProviderId(context)) }
     val hasNotificationAccess = NotificationAccess.isEnabled(context)
 
-    Surface(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.primaryBackground),
-        color = colors.primaryBackground
-    ) {
+    StudioAmbientBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. TOP TELEMETRY STRIP
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(DeepObsidianAmber.Success)
-                    )
-                    Text(
-                        text = "TUNEMIND // CALIBRATION PROTOCOL 1.0",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.secondaryText,
-                        letterSpacing = 1.sp
-                    )
-                }
-
+                Text(
+                    text = "TuneMind Setup",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primaryAccent
+                )
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = colors.cardSurface
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0C1018)
                 ) {
                     Text(
-                        text = "SYNC: READY 48kHz / 24-BIT",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.AccentSoft,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        text = "Step 1 of 1",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.65f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
 
-            // Recessed Chassis Groove
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(colors.border.copy(alpha = 0.4f))
-            )
-
-            // 2. ACOUSTIC SENSOR DIAL MODULE (Knurled Bezel Well & Harmonic Waveform)
-            Box(
-                modifier = Modifier
-                    .size(220.dp)
+                    .size(160.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
                             listOf(
-                                colors.elevatedSurface,
-                                colors.cardSurface,
-                                colors.primaryBackground
+                                colors.primaryAccent.copy(alpha = 0.24f),
+                                Color(0xFF0C1018),
+                                Color(0xFF05060A)
                             )
                         )
                     )
-                    .border(2.dp, colors.border, CircleShape)
-                    .padding(10.dp),
+                    .border(1.5.dp, colors.primaryAccent.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                // Inner Aluminum Cavity
-                Column(
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .size(64.dp)
                         .clip(CircleShape)
-                        .background(colors.secondaryBackground)
-                        .border(1.dp, colors.border.copy(alpha = 0.5f), CircleShape),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .background(colors.primaryAccent.copy(alpha = 0.16f))
+                        .border(1.dp, colors.primaryAccent.copy(alpha = 0.45f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Lissajous / Soundwave Vector Visualization Icon
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(colors.primaryAccent.copy(alpha = 0.15f))
-                            .border(1.dp, colors.primaryAccent.copy(alpha = 0.4f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Outlined.GraphicEq,
-                            contentDescription = null,
-                            tint = colors.primaryAccent,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "FLOOR: -42.8 dBFS",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.primaryText
-                    )
-                    Text(
-                        text = "RES: 99.4% OPTIMAL",
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = DeepObsidianAmber.SecondaryAccent
+                    Icon(
+                        Icons.Rounded.GraphicEq,
+                        contentDescription = null,
+                        tint = colors.primaryAccent,
+                        modifier = Modifier.size(34.dp)
                     )
                 }
             }
 
-            // Sensor Bus Tag
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(colors.primaryAccent)
-                )
-                Text(
-                    text = "AWA-28 ACOUSTIC SENSOR BUS",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.secondaryText,
-                    letterSpacing = 1.sp
-                )
-            }
-
-            // Recessed Chassis Groove
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(colors.border.copy(alpha = 0.4f))
-            )
-
-            // 3. HARDWARE NARRATIVE
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "Calibrate Your Auditory Anchor",
-                    fontSize = 18.sp,
+                    text = "Choose Your Music Player",
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = colors.primaryText,
-                    letterSpacing = (-0.3).sp
+                    color = Color.White
                 )
                 Text(
-                    text = "TuneMind monitors song fatigue, peak spectral density, and acoustic saturation across your music players in real-time.",
-                    fontSize = 12.sp,
-                    color = colors.secondaryText,
-                    lineHeight = 18.sp
+                    text = "TuneMind tracks freshness across your music apps and helps keep every playlist feeling new.",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.68f),
+                    lineHeight = 19.sp
                 )
             }
 
-            // 4. SOURCE SELECTOR MODULE
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "SELECT PRIMARY OBSERVED AUDIO BUS",
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.secondaryText,
-                    letterSpacing = 1.sp
+                    text = "Primary Music App",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White.copy(alpha = 0.72f)
                 )
 
                 installedProviders.forEach { provider ->
                     val isSelected = provider.providerId == selectedProviderId
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) colors.cardSurface else colors.secondaryBackground,
-                        border = androidx.compose.foundation.BorderStroke(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) colors.primaryAccent.copy(alpha = 0.14f) else Color(0xFF0C1018),
+                        border = BorderStroke(
                             1.dp,
-                            if (isSelected) colors.primaryAccent else colors.border.copy(alpha = 0.4f)
+                            if (isSelected) colors.primaryAccent else Color.White.copy(alpha = 0.08f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -245,28 +160,27 @@ fun PersonalOnboardingDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = provider.displayName,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primaryText
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
                             )
                             if (isSelected) {
                                 Surface(
-                                    shape = RoundedCornerShape(4.dp),
+                                    shape = RoundedCornerShape(6.dp),
                                     color = colors.primaryAccent.copy(alpha = 0.2f)
                                 ) {
                                     Text(
-                                        text = "ACTIVE BUS",
-                                        fontSize = 8.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
+                                        text = "Selected",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = colors.primaryAccent,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                     )
                                 }
                             }
@@ -275,27 +189,24 @@ fun PersonalOnboardingDialog(
                 }
             }
 
-            // 5. NOTIFICATION INGEST PERMISSION
             if (!hasNotificationAccess) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.secondaryBackground,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.secondaryAccent.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF0C1018),
+                    border = BorderStroke(1.dp, colors.secondaryAccent.copy(alpha = 0.45f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            text = "MEDIA LISTENER PERMISSION REQUIRED",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.secondaryAccent,
-                            letterSpacing = 1.sp
+                            text = "Notification Access Needed",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.secondaryAccent
                         )
                         Text(
-                            text = "TuneMind requires Android Notification Access to observe now-playing metadata locally without external servers.",
-                            fontSize = 11.sp,
-                            color = colors.secondaryText
+                            text = "Enable Notification Access so TuneMind can see what song is playing without leaving the app.",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.68f)
                         )
                         Button(
                             onClick = {
@@ -303,40 +214,36 @@ fun PersonalOnboardingDialog(
                                 context.startActivity(intent)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = colors.secondaryAccent),
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                "GRANT MEDIA INGEST ACCESS",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
+                                "Enable Notification Access",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.primaryBackground
+                                color = Color(0xFF05060A)
                             )
                         }
                     }
                 }
             }
 
-            // 6. INITIALIZE CALIBRATION BUTTON
             Button(
                 onClick = {
                     vm.completeOnboarding(context, selectedProviderId)
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(50.dp)
             ) {
                 Text(
-                    text = "INITIALIZE ACOUSTIC CALIBRATION",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
+                    text = "Get Started",
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = colors.primaryBackground,
-                    letterSpacing = 1.sp
+                    color = Color(0xFF05060A)
                 )
             }
         }

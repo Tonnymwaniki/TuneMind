@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Deep Obsidian Amber Visual Identity -->
-    <color name="tunemind_bg">#FF652814</color>
-    <color name="tunemind_sec_bg">#FF713019</color>
-    <color name="tunemind_recessed">#FF4F2012</color>
-    <color name="tunemind_surface_l1">#FF78351E</color>
-    <color name="tunemind_surface_l2">#FF854126</color>
-    <color name="tunemind_card">#FF78351E</color>
-    <color name="tunemind_card_border">#FF985B3C</color>
-    <color name="tunemind_card_border_active">#FFC68A46</color>
+    <!-- TuneMind Dark Studio Visual Identity -->
+    <color name="tunemind_bg">#FF05060A</color>
+    <color name="tunemind_sec_bg">#FF0A0D14</color>
+    <color name="tunemind_recessed">#FF030407</color>
+    <color name="tunemind_surface_l1">#FF101420</color>
+    <color name="tunemind_surface_l2">#FF181E2E</color>
+    <color name="tunemind_card">#FF0E121C</color>
+    <color name="tunemind_card_border">#FF262E42</color>
+    <color name="tunemind_card_border_active">#FFFFB000</color>
 
-    <color name="tunemind_accent">#FFC68A46</color>
-    <color name="tunemind_accent_dim">#FFC2763F</color>
-    <color name="tunemind_cyan">#FFD9A054</color>
-    <color name="tunemind_cyan_light">#FFE9A84F</color>
-    <color name="tunemind_amber">#FFC68A46</color>
-    <color name="tunemind_green">#FF8FAF83</color>
-    <color name="tunemind_red">#FFD77C69</color>
+    <color name="tunemind_accent">#FFFFB000</color>
+    <color name="tunemind_accent_dim">#FFD98A00</color>
+    <color name="tunemind_cyan">#FF00E5FF</color>
+    <color name="tunemind_cyan_light">#FF5CEEFF</color>
+    <color name="tunemind_amber">#FFFFB000</color>
+    <color name="tunemind_green">#FF10B981</color>
+    <color name="tunemind_red">#FFFF2A55</color>
 
-    <color name="tunemind_text_primary">#FFF5E5D0</color>
-    <color name="tunemind_text_secondary">#FFCFAE91</color>
-    <color name="tunemind_text_muted">#FFB99578</color>
-    <color name="tunemind_text_dim">#FF99745C</color>
-    <color name="tunemind_divider">#FF985B3C</color>
+    <color name="tunemind_text_primary">#FFF5F7FA</color>
+    <color name="tunemind_text_secondary">#FFB0B7C6</color>
+    <color name="tunemind_text_muted">#FF758095</color>
+    <color name="tunemind_text_dim">#FF4A5468</color>
+    <color name="tunemind_divider">#FF202636</color>
 
-    <color name="white">#FFF5E5D0</color>
-    <color name="black">#FF4F2012</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF05060A</color>
 </resources>

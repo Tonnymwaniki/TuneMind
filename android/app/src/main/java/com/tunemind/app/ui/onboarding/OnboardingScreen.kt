@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,15 +14,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.MailOutline
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -33,6 +45,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
+import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.util.PermissionUtils
 import kotlinx.coroutines.launch
 
@@ -80,36 +93,7 @@ fun OnboardingScreen(
         onResult = { viewModel.checkPermissions() }
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF07060E),
-                        Color(0xFF0E0B1C),
-                        Color(0xFF06050A)
-                    )
-                )
-            )
-    ) {
-        // Ambient background glow orbs
-        Box(
-            modifier = Modifier
-                .offset(x = (-60).dp, y = (-40).dp)
-                .size(260.dp)
-                .blur(90.dp)
-                .background(Color(0xFF7000FF).copy(alpha = 0.22f), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 50.dp, y = 40.dp)
-                .size(240.dp)
-                .blur(85.dp)
-                .background(Color(0xFF00E5FF).copy(alpha = 0.16f), CircleShape)
-        )
-
+    StudioAmbientBackground {
         when (currentStep) {
             OnboardingStep.WELCOME -> {
                 StartSplashWelcomeStep(
@@ -129,10 +113,10 @@ fun OnboardingScreen(
                 PermissionSetupStep(
                     stepIndex = 1,
                     totalSteps = 3,
-                    badge = "NEURAL VOICE INPUT",
-                    title = "Enable Microphone Access",
-                    description = "TuneMind listens for 'Hi TuneMind' or orb taps so you can ask Claude Sonnet to play songs, shift genres, or analyze your listening satiety.",
-                    primaryButtonText = "Grant Microphone Access",
+                    badge = "Voice Control",
+                    title = "Allow Microphone",
+                    description = "Talk naturally to TuneMind with \"Hey TuneMind\" or by tapping the sphere to ask for tracks and playlists.",
+                    primaryButtonText = "Allow Microphone",
                     onPrimaryClick = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                     onSkipClick = { viewModel.skipCurrentPermissionStep() }
                 )
@@ -141,10 +125,10 @@ fun OnboardingScreen(
                 PermissionSetupStep(
                     stepIndex = 2,
                     totalSteps = 3,
-                    badge = "REAL-TIME MEDIA SYNAPSE",
-                    title = "Enable Notification Listener",
-                    description = "Allows TuneMind to observe active media sessions alongside the 15-minute Spotify Web API sync engine for instant satiety protection.",
-                    primaryButtonText = "Open Notification Access",
+                    badge = "Now Playing",
+                    title = "Enable Music Detection",
+                    description = "Lets TuneMind see what song is playing across your music apps and protect tracks from getting overplayed.",
+                    primaryButtonText = "Enable Notification Access",
                     onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getNotificationListenerIntent()) },
                     onSkipClick = { viewModel.skipCurrentPermissionStep() }
                 )
@@ -153,10 +137,10 @@ fun OnboardingScreen(
                 PermissionSetupStep(
                     stepIndex = 3,
                     totalSteps = 3,
-                    badge = "AUTONOMOUS BACKGROUND CORE",
-                    title = "Unrestricted Background Sync",
-                    description = "Ensures the 15-minute Spotify Web API WorkManager sync and autonomous satiety foreground service never get throttled while your screen is off.",
-                    primaryButtonText = "Allow Background Execution",
+                    badge = "Background Sync",
+                    title = "Keep Sync Running",
+                    description = "Keeps your Spotify history synced and background playback smooth even when your screen is off.",
+                    primaryButtonText = "Allow Unrestricted Battery",
                     onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context)) },
                     onSkipClick = { viewModel.skipCurrentPermissionStep() }
                 )
@@ -174,171 +158,115 @@ private fun StartSplashWelcomeStep(
     userDisplayName: String?,
     onSplashFinished: () -> Unit
 ) {
-    var progressTarget by remember { mutableFloatStateOf(0.08f) }
+    var progressTarget by remember { mutableFloatStateOf(0.15f) }
     val animatedProgress by animateFloatAsState(
         targetValue = progressTarget,
-        animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
         label = "splash_progress"
     )
 
     val infiniteTransition = rememberInfiniteTransition(label = "splash_pulse")
     val ringScale by infiniteTransition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "ring_scale"
-    )
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.75f,
+        initialValue = 0.96f,
+        targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "glow_alpha"
+        label = "ring_scale"
     )
 
     LaunchedEffect(Unit) {
         progressTarget = 1.0f
-        kotlinx.coroutines.delay(1650L)
+        kotlinx.coroutines.delay(700L)
         onSplashFinished()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF030207),
-                        Color(0xFF070510),
-                        Color(0xFF020205)
-                    )
-                )
-            )
+            .background(Color(0xFF05060A))
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 32.dp, vertical = 36.dp)
     ) {
-        // Center Branded Emblem & Wordmark
         Column(
             modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(164.dp)
+                modifier = Modifier
+                    .size(144.dp)
+                    .scale(ringScale)
             ) {
-                // Outer pulse ring
-                Box(
-                    modifier = Modifier
-                        .size(156.dp)
-                        .scale(ringScale)
-                        .border(
-                            width = 1.2.dp,
-                            brush = Brush.sweepGradient(
-                                colors = listOf(
-                                    Color(0xFF00E5FF).copy(alpha = glowAlpha),
-                                    Color(0xFF7000FF).copy(alpha = 0.3f),
-                                    Color(0xFF1DB954).copy(alpha = glowAlpha),
-                                    Color(0xFF00E5FF).copy(alpha = glowAlpha)
-                                )
-                            ),
-                            shape = CircleShape
-                        )
-                )
-                // Soft ambient radial glow
-                Box(
-                    modifier = Modifier
-                        .size(132.dp)
-                        .scale(ringScale)
-                        .blur(32.dp)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF00E5FF).copy(alpha = 0.45f),
-                                    Color(0xFF7000FF).copy(alpha = 0.28f),
-                                    Color.Transparent
-                                )
-                            ),
-                            CircleShape
-                        )
-                )
-                // Core Obsidian Emblem Badge
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(96.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFF111526),
-                                    Color(0xFF080A14)
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.5.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFF00E5FF),
-                                    Color(0xFF7000FF),
-                                    Color(0xFF1DB954)
-                                )
-                            ),
-                            shape = RoundedCornerShape(28.dp)
-                        )
-                ) {
-                    // Acoustic Waveform Bars inside Emblem
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val barHeights = listOf(18.dp, 32.dp, 44.dp, 26.dp, 36.dp)
-                        val barColors = listOf(
-                            Color(0xFF00E5FF),
-                            Color(0xFF38BDF8),
-                            Color(0xFF1DB954),
-                            Color(0xFFA855F7),
-                            Color(0xFF00E5FF)
-                        )
-                        barHeights.forEachIndexed { idx, h ->
-                            Box(
-                                modifier = Modifier
-                                    .width(5.dp)
-                                    .height(h)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(barColors[idx])
-                            )
-                        }
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val ringRadius = size.minDimension * 0.36f
+                    val cyanColor = Color(0xFF00E5FF)
+                    val amberColor = Color(0xFFFFB000)
+
+                    val arcTopLeft = Offset(cx - ringRadius, cy - ringRadius)
+                    val arcSize = Size(ringRadius * 2f, ringRadius * 2f)
+
+                    drawArc(
+                        color = cyanColor,
+                        startAngle = 155f,
+                        sweepAngle = 155f,
+                        useCenter = false,
+                        topLeft = Offset(arcTopLeft.x - 1.5.dp.toPx(), arcTopLeft.y - 1.5.dp.toPx()),
+                        size = arcSize,
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    drawArc(
+                        color = amberColor,
+                        startAngle = -25f,
+                        sweepAngle = 155f,
+                        useCenter = false,
+                        topLeft = Offset(arcTopLeft.x + 1.5.dp.toPx(), arcTopLeft.y + 1.5.dp.toPx()),
+                        size = arcSize,
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                    )
+
+                    val topBarHalf = ringRadius * 0.45f
+                    val topY = cy - ringRadius * 0.34f
+                    val bottomY = cy + ringRadius * 0.44f
+                    val strokeW = 6.5.dp.toPx()
+
+                    val tPath = Path().apply {
+                        moveTo(cx - topBarHalf, topY)
+                        lineTo(cx + topBarHalf, topY)
+                        moveTo(cx, topY)
+                        lineTo(cx, bottomY)
                     }
+                    drawPath(
+                        path = tPath,
+                        color = Color.White,
+                        style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = "TUNEMIND",
+                text = "TuneMind",
                 color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 7.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "NEURO-ACOUSTIC AUDIO INTELLIGENCE",
-                color = Color(0xFF00E5FF).copy(alpha = 0.82f),
-                fontSize = 10.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 2.8.sp
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "LISTEN IN FLOW",
+                color = Color.White.copy(alpha = 0.48f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 3.sp
             )
         }
 
-        // Bottom Minimalist Progress Bar & Auto-Login Status
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -347,12 +275,12 @@ private fun StartSplashWelcomeStep(
         ) {
             Text(
                 text = if (isReturningUser) {
-                    if (!userDisplayName.isNullOrBlank()) "Welcome back, $userDisplayName" else "Signing you in automatically..."
+                    if (!userDisplayName.isNullOrBlank()) "Welcome back, $userDisplayName" else "Signing you in…"
                 } else {
-                    "Initializing Studio Core..."
+                    "Preparing your space…"
                 },
                 color = Color.White.copy(alpha = 0.58f),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(10.dp))
@@ -372,50 +300,12 @@ private fun StartSplashWelcomeStep(
                             Brush.horizontalGradient(
                                 colors = listOf(
                                     Color(0xFF00E5FF),
-                                    Color(0xFF7000FF),
-                                    Color(0xFF1DB954)
+                                    Color(0xFFFFB000)
                                 )
                             )
                         )
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun FeatureHighlightRow(
-    dotColor: Color,
-    title: String,
-    subtitle: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(dotColor, CircleShape)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column {
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = subtitle,
-                color = Color.White.copy(alpha = 0.62f),
-                fontSize = 11.sp
-            )
         }
     }
 }
@@ -445,7 +335,6 @@ private fun AuthLoginStep(
     var supabaseUrlInput by remember { mutableStateOf(authManager.getSupabaseUrl()) }
     var supabaseAnonKeyInput by remember { mutableStateOf(authManager.getSupabaseAnonKey()) }
 
-    // Native Android System Google Account Picker (shows the user's real @gmail.com accounts on the phone)
     val googleAccountPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -475,25 +364,26 @@ private fun AuthLoginStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Top Header + Supabase Config Button
+        // Top Header + Cloud Sync Config Button
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "IDENTITY & MUSIC LINK",
+                text = "Account & Music",
                 color = Color(0xFF00E5FF),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
             )
 
-            Box(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White.copy(alpha = 0.07f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
                     .clickable {
                         supabaseUrlInput = authManager.getSupabaseUrl()
                         supabaseAnonKeyInput = authManager.getSupabaseAnonKey()
@@ -501,18 +391,23 @@ private fun AuthLoginStep(
                     }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
+                Icon(
+                    imageVector = if (authManager.isSupabaseConfigured()) Icons.Rounded.Bolt else Icons.Rounded.Settings,
+                    contentDescription = null,
+                    tint = if (authManager.isSupabaseConfigured()) Color(0xFF10B981) else Color.White.copy(alpha = 0.72f),
+                    modifier = Modifier.size(13.dp)
+                )
                 Text(
-                    text = if (authManager.isSupabaseConfigured()) "⚡ SUPABASE ACTIVE" else "⚙️ SUPABASE SETUP",
+                    text = if (authManager.isSupabaseConfigured()) "Cloud Sync Ready" else "Server Setup",
                     color = if (authManager.isSupabaseConfigured()) Color(0xFF10B981) else Color.White.copy(alpha = 0.75f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Main Auth Card
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -522,12 +417,12 @@ private fun AuthLoginStep(
                 text = "Sign in to TuneMind",
                 color = Color.White,
                 fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
             Text(
-                text = "Connect your Spotify account for automated 15-minute Web API history ingestion and sign in with your Google account.",
-                color = Color.White.copy(alpha = 0.68f),
+                text = "Link Spotify to keep your listening history synced and sign in with your Google or email account.",
+                color = Color.White.copy(alpha = 0.66f),
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 19.sp
@@ -535,7 +430,6 @@ private fun AuthLoginStep(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 1. ONE-TAP LOGIN WITH GOOGLE BUTTON (Launches Native System Google Account Picker)
             Button(
                 onClick = {
                     authError = null
@@ -562,20 +456,23 @@ private fun AuthLoginStep(
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(54.dp)
             ) {
+                if (session.isGoogleConnected) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
                 Text(
                     text = if (session.isGoogleConnected) {
-                        "✓ Google Connected (${session.email.ifBlank { session.displayName }})"
+                        "Google Connected (${session.email.ifBlank { session.displayName }})"
                     } else {
-                        "G   Continue with Google"
+                        "Continue with Google"
                     },
                     fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            // 2. ONE-TAP LOGIN WITH SPOTIFY BUTTON
             Button(
                 onClick = {
                     authError = null
@@ -588,36 +485,43 @@ private fun AuthLoginStep(
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
+                    .height(54.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
+                    Icon(
+                        imageVector = if (session.isSpotifyConnected) Icons.Rounded.Check else Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = if (session.isSpotifyConnected) {
-                            "✓ Spotify Connected (Tap to Re-Link)"
+                            "Spotify Connected"
                         } else {
-                            "♫  Continue with Spotify"
+                            "Continue with Spotify"
                         },
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // 3. EMAIL / PASSWORD SIGN IN TOGGLE
             OutlinedButton(
                 onClick = { showEmailForm = !showEmailForm },
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(50.dp)
             ) {
+                Icon(Icons.Rounded.MailOutline, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (showEmailForm) "Hide Email Sign-In" else "✉️  Continue with Email & Password",
+                    text = if (showEmailForm) "Hide Email Sign-In" else "Continue with Email",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -628,8 +532,8 @@ private fun AuthLoginStep(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.05f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                        .background(Color(0xFF0C1018))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -639,13 +543,13 @@ private fun AuthLoginStep(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isSignUpMode) "Create TuneMind Account" else "Sign In with Email",
+                            text = if (isSignUpMode) "Create Account" else "Sign In",
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isSignUpMode) "Have an account? Sign In" else "New user? Sign Up",
+                            text = if (isSignUpMode) "Have an account? Sign In" else "New here? Sign Up",
                             color = Color(0xFF00E5FF),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -657,7 +561,7 @@ private fun AuthLoginStep(
                         OutlinedTextField(
                             value = nameInput,
                             onValueChange = { nameInput = it },
-                            label = { Text("Display Name") },
+                            label = { Text("Name") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -672,7 +576,7 @@ private fun AuthLoginStep(
                     OutlinedTextField(
                         value = emailInput,
                         onValueChange = { emailInput = it },
-                        label = { Text("Email Address") },
+                        label = { Text("Email") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -738,36 +642,34 @@ private fun AuthLoginStep(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = if (isSubmitting) "Authenticating..." else if (isSignUpMode) "Create Account" else "Sign In",
+                            text = if (isSubmitting) "Signing in…" else if (isSignUpMode) "Create Account" else "Sign In",
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
 
-            // Live Connection Summary Card
             if (session.isLoggedIn || session.isSpotifyConnected || session.isGoogleConnected) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF10B981).copy(alpha = 0.12f))
-                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.42f), RoundedCornerShape(14.dp))
                         .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "✓ SESSION READY",
+                        text = "Signed In",
                         color = Color(0xFF10B981),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.4.sp
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = buildString {
-                            append("User: ${session.displayName}")
+                            append(session.displayName)
                             if (session.email.isNotBlank()) append(" (${session.email})")
-                            if (session.isSpotifyConnected) append(" • Spotify Web API Linked")
+                            if (session.isSpotifyConnected) append(" • Spotify Linked")
                         },
                         color = Color.White,
                         fontSize = 12.sp,
@@ -779,7 +681,6 @@ private fun AuthLoginStep(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Bottom Continue / Skip Actions
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -788,32 +689,27 @@ private fun AuthLoginStep(
             Button(
                 onClick = onContinue,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (session.isLoggedIn || session.isSpotifyConnected) Color(0xFF00E5FF) else Color(0xFF7000FF),
-                    contentColor = if (session.isLoggedIn || session.isSpotifyConnected) Color.Black else Color.White
+                    containerColor = Color(0xFF00E5FF),
+                    contentColor = Color.Black
                 ),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .height(52.dp)
             ) {
                 Text(
-                    text = if (session.isLoggedIn || session.isSpotifyConnected) {
-                        "Continue to TuneMind →"
-                    } else {
-                        "Continue to OS Setup →"
-                    },
+                    text = "Continue",
                     fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
     }
 
-    // Google Account Selected Confirmation Modal ("Show me my email then I click Login")
     if (showGoogleConfirmSheet) {
         AlertDialog(
             onDismissRequest = { showGoogleConfirmSheet = false },
-            containerColor = Color(0xFF12101E),
+            containerColor = Color(0xFF10131C),
             title = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -839,13 +735,12 @@ private fun AuthLoginStep(
                         fontSize = 13.sp
                     )
 
-                    // Highlighted Selected Google Account Card
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color(0xFF00E5FF).copy(alpha = 0.12f))
-                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -872,7 +767,7 @@ private fun AuthLoginStep(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = selectedGoogleEmail.ifBlank { "Tap below to enter email" },
+                                text = selectedGoogleEmail.ifBlank { "Enter your email below" },
                                 color = Color(0xFF00E5FF),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -908,7 +803,7 @@ private fun AuthLoginStep(
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Login", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                    Text("Sign In", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             },
             dismissButton = {
@@ -936,25 +831,24 @@ private fun AuthLoginStep(
         )
     }
 
-    // Supabase Project URL & Anon Key Configuration Dialog
     if (showSupabaseConfigDialog) {
         AlertDialog(
             onDismissRequest = { showSupabaseConfigDialog = false },
-            containerColor = Color(0xFF12101E),
+            containerColor = Color(0xFF10131C),
             title = {
-                Text("Supabase Auth Configuration", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Cloud Sync Configuration", color = Color.White, fontWeight = FontWeight.Bold)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Paste your Supabase Project URL and Anon Key. Redirect URI to add in Supabase Dashboard -> Authentication -> URL Configuration:\ntunemind://supabase-auth-callback",
+                        text = "Enter your Supabase Project URL and Anon Key. Redirect URI:\ntunemind://supabase-auth-callback",
                         color = Color.White.copy(alpha = 0.72f),
                         fontSize = 12.sp
                     )
                     OutlinedTextField(
                         value = supabaseUrlInput,
                         onValueChange = { supabaseUrlInput = it },
-                        label = { Text("https://xyzcompany.supabase.co") },
+                        label = { Text("Project URL") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -964,7 +858,7 @@ private fun AuthLoginStep(
                     OutlinedTextField(
                         value = supabaseAnonKeyInput,
                         onValueChange = { supabaseAnonKeyInput = it },
-                        label = { Text("Supabase Anon Public Key") },
+                        label = { Text("Anon Key") },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -981,7 +875,7 @@ private fun AuthLoginStep(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.Black)
                 ) {
-                    Text("Save Supabase Config", fontWeight = FontWeight.Bold)
+                    Text("Save", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1013,7 +907,6 @@ private fun PermissionSetupStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Step Progress Indicator
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1036,34 +929,33 @@ private fun PermissionSetupStep(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color.White.copy(alpha = 0.05f))
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                .background(Color(0xFF0C1018).copy(alpha = 0.90f))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(24.dp))
                 .padding(26.dp)
         ) {
             Text(
-                text = "STEP $stepIndex OF $totalSteps • $badge",
+                text = "Step $stepIndex of $totalSteps • $badge",
                 color = Color(0xFF00E5FF),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.6.sp
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(14.dp))
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = description,
-                color = Color.White.copy(alpha = 0.72f),
+                color = Color.White.copy(alpha = 0.70f),
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 21.sp
             )
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(26.dp))
             Button(
                 onClick = onPrimaryClick,
                 colors = ButtonDefaults.buttonColors(
@@ -1073,20 +965,20 @@ private fun PermissionSetupStep(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(50.dp)
             ) {
                 Text(
                     text = primaryButtonText,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
 
         TextButton(onClick = onSkipClick) {
             Text(
-                text = "Skip this step for now →",
-                color = Color.White.copy(alpha = 0.55f),
+                text = "Skip for now",
+                color = Color.White.copy(alpha = 0.56f),
                 fontSize = 13.sp
             )
         }
