@@ -28,7 +28,7 @@ data class OsExecutionCommand(
     val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_MEDIA_PAUSE", "OS_MEDIA_RESUME", "OS_MEDIA_NEXT", "OS_MEDIA_PREV", "NONE"
     val target_player: String, // e.g., "com.spotify.music"
     val search_query: String,
-    val suggested_bpm_target: Int?,
+    val suggested_bpm_target: Int? = null,
     val track_title: String? = null,
     val track_artist: String? = null,
     val spotify_uri: String? = null

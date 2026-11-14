@@ -732,7 +732,8 @@ class AgentVoiceManager(
             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                 intent = "OS_MEDIA_PAUSE",
                 target_player = targetPlayer,
-                search_query = ""
+                search_query = "",
+                suggested_bpm_target = null
             )
         )
 
