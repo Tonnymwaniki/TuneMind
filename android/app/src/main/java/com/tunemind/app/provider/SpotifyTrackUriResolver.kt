@@ -1120,9 +1120,15 @@ object SpotifyTrackUriResolver {
 
     /**
      * Fetches the 30-second MP3 preview URL for a `spotify:track:<id>` URI when available,
-     * enabling Option 3 (`TuneMindInAppPlayer`) fallback streaming inside TuneMind.
+     * falling back to Deezer's public catalog search preview URL when Spotify omits `preview_url`,
+     * enabling Option 3 (`TuneMindInAppPlayer`) playback inside TuneMind.
      */
-    fun fetchTrackPreviewUrlBlocking(context: Context, spotifyTrackUri: String): String? {
+    fun fetchTrackPreviewUrlBlocking(
+        context: Context,
+        spotifyTrackUri: String,
+        fallbackTitle: String = "",
+        fallbackArtist: String = ""
+    ): String? {
         val trackId = when {
             spotifyTrackUri.startsWith("spotify:track:") ->
                 spotifyTrackUri.removePrefix("spotify:track:").trim()
@@ -1132,30 +1138,96 @@ object SpotifyTrackUriResolver {
                 spotifyTrackUri.trim()
             else -> ""
         }
-        if (trackId.isBlank()) return null
         val appContext = context.applicationContext
         return runBlocking {
-            withTimeoutOrNull(1400L) {
+            withTimeoutOrNull(2200L) {
                 withContext(Dispatchers.IO) {
-                    try {
-                        val token = getSearchBearerToken(appContext) ?: return@withContext null
-                        val req = Request.Builder()
-                            .url("https://api.spotify.com/v1/tracks/$trackId")
-                            .addHeader("Authorization", "Bearer $token")
-                            .addHeader("Accept", "application/json")
-                            .get()
-                            .build()
-                        httpClient.newCall(req).execute().use { resp ->
-                            if (!resp.isSuccessful) return@withContext null
-                            val raw = resp.body?.string() ?: return@withContext null
-                            val previewUrl = JSONObject(raw).optString("preview_url", "").trim()
-                            previewUrl.takeIf { it.startsWith("http") }
-                        }
-                    } catch (_: Exception) {
-                        null
+                    var resolvedTitle = fallbackTitle.trim()
+                    var resolvedArtist = fallbackArtist.trim()
+
+                    if (trackId.isNotBlank()) {
+                        try {
+                            val token = getSearchBearerToken(appContext)
+                            if (!token.isNullOrBlank()) {
+                                val req = Request.Builder()
+                                    .url("https://api.spotify.com/v1/tracks/$trackId")
+                                    .addHeader("Authorization", "Bearer $token")
+                                    .addHeader("Accept", "application/json")
+                                    .get()
+                                    .build()
+                                httpClient.newCall(req).execute().use { resp ->
+                                    if (resp.isSuccessful) {
+                                        val obj = JSONObject(resp.body?.string() ?: "{}")
+                                        val previewUrl = obj.optString("preview_url", "").trim()
+                                        if (previewUrl.startsWith("http")) {
+                                            return@withContext previewUrl
+                                        }
+                                        if (resolvedTitle.isBlank()) {
+                                            resolvedTitle = obj.optString("name", "").trim()
+                                        }
+                                        if (resolvedArtist.isBlank()) {
+                                            resolvedArtist = obj.optJSONArray("artists")
+                                                ?.optJSONObject(0)
+                                                ?.optString("name", "")
+                                                ?.trim()
+                                                .orEmpty()
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
+
+                    if (resolvedTitle.isBlank()) return@withContext null
+                    fetchDeezerPreviewUrl(resolvedTitle, resolvedArtist)
                 }
             }
+        }
+    }
+
+    private fun fetchDeezerPreviewUrl(title: String, artist: String): String? {
+        return try {
+            val cleanQuery = if (artist.isNotBlank() && !artist.equals("Unknown Artist", ignoreCase = true)) {
+                "$title $artist"
+            } else {
+                title
+            }
+            val url = Uri.parse("https://api.deezer.com/search").buildUpon()
+                .appendQueryParameter("q", cleanQuery)
+                .appendQueryParameter("limit", "4")
+                .build()
+                .toString()
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Accept", "application/json")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val data = JSONObject(resp.body?.string() ?: "{}").optJSONArray("data") ?: return null
+                val normTargetTitle = normalizeTitleForExactMatch(title)
+                var firstPreview: String? = null
+                for (i in 0 until data.length()) {
+                    val item = data.optJSONObject(i) ?: continue
+                    val preview = item.optString("preview", "").trim()
+                    if (!preview.startsWith("http")) continue
+                    if (firstPreview == null) firstPreview = preview
+                    val itemTitle = normalizeTitleForExactMatch(item.optString("title", ""))
+                    val itemArtist = item.optJSONObject("artist")?.optString("name", "").orEmpty()
+                    val titleOk = normTargetTitle.isBlank() ||
+                        itemTitle == normTargetTitle ||
+                        itemTitle.contains(normTargetTitle) ||
+                        normTargetTitle.contains(itemTitle)
+                    if (titleOk && artistMatchesLoose(itemArtist, artist)) {
+                        Log.i(TAG, "Resolved in-app Deezer preview stream for '$title'")
+                        return preview
+                    }
+                }
+                firstPreview
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Deezer preview lookup notice: ${e.message}")
+            null
         }
     }
 }

@@ -64,10 +64,19 @@ object MusicPlayerAutoLauncher {
     private fun normalizeSpotifyTrackUri(rawUri: String?): String? {
         if (rawUri.isNullOrBlank()) return null
         val trimmed = rawUri.trim()
-        if (trimmed.startsWith("spotify:track:")) return trimmed
-        if (trimmed.startsWith("https://open.spotify.com/track/")) {
-            val id = trimmed.substringAfter("https://open.spotify.com/track/").substringBefore("?").substringBefore("/").trim()
-            if (id.isNotBlank()) return "spotify:track:$id"
+        if (trimmed.startsWith("spotify:track:") ||
+            trimmed.startsWith("spotify:episode:") ||
+            trimmed.startsWith("spotify:album:") ||
+            trimmed.startsWith("spotify:playlist:")
+        ) {
+            return trimmed
+        }
+        for (kind in listOf("track", "episode", "album", "playlist")) {
+            val prefix = "https://open.spotify.com/$kind/"
+            if (trimmed.startsWith(prefix)) {
+                val id = trimmed.substringAfter(prefix).substringBefore("?").substringBefore("/").trim()
+                if (id.isNotBlank()) return "spotify:$kind:$id"
+            }
         }
         if (Regex("^[A-Za-z0-9]{22}$").matches(trimmed)) {
             return "spotify:track:$trimmed"
@@ -222,7 +231,8 @@ object MusicPlayerAutoLauncher {
 
                 if (!webApiStarted && sessionDispatched) {
                     val normCleanTitle = SpotifyTrackUriResolver.normalizeTitleForExactMatch(cleanTitle)
-                    for (waitMs in listOf(260L, 300L, 300L)) {
+                    var nudgedPlay = false
+                    for (waitMs in listOf(300L, 400L, 450L, 500L)) {
                         try {
                             Thread.sleep(waitMs)
                         } catch (_: InterruptedException) {}
@@ -235,9 +245,14 @@ object MusicPlayerAutoLauncher {
                                 normCleanTitle.contains(normCurr) ||
                                 (!previousTitle.isNullOrBlank() && !currentTitle.equals(previousTitle, ignoreCase = true))
                             )
-                        if (switchedToNewTrack && listener?.isPlaying() == true) {
-                            mediaSessionStartedSilently = true
-                            break
+                        if (switchedToNewTrack) {
+                            if (listener?.isPlaying() == true) {
+                                mediaSessionStartedSilently = true
+                                break
+                            } else if (!nudgedPlay) {
+                                nudgedPlay = true
+                                listener?.play(targetPkg)
+                            }
                         }
                     }
                 }
@@ -303,15 +318,20 @@ object MusicPlayerAutoLauncher {
             } catch (_: Exception) {}
         }
 
-        // OPTION 3B: If Strict Never-Leave Mode prevented opening Spotify, check for a streamable preview URL on Spotify API
-        if (strictNoSwitch && preferInAppPlayer && !resolvedSpotifyUri.isNullOrBlank()) {
-            val previewUrl = SpotifyTrackUriResolver.fetchTrackPreviewUrlBlocking(context, resolvedSpotifyUri)
+        // OPTION 3B: If Strict Never-Leave Mode prevented opening external player, stream preview inside TuneMind
+        if (strictNoSwitch && preferInAppPlayer) {
+            val previewUrl = SpotifyTrackUriResolver.fetchTrackPreviewUrlBlocking(
+                context = context,
+                spotifyTrackUri = resolvedSpotifyUri.orEmpty(),
+                fallbackTitle = cleanTitle,
+                fallbackArtist = cleanArtist
+            )
             if (!previewUrl.isNullOrBlank() && TuneMindInAppPlayer.playStreamUrl(context, previewUrl, cleanTitle, cleanArtist)) {
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = true,
                     destinationUri = previewUrl,
-                    detailMessage = "Kept $displayName closed and started '$cleanTitle' inside TuneMind's In-App Player (30s preview)."
+                    detailMessage = "Playing '$cleanTitle' directly inside TuneMind (30s preview — connect Spotify Remote in Settings for full-length background tracks)."
                 )
             }
         }

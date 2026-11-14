@@ -434,17 +434,17 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     confidence = 0.98f
                 )
 
+                val launchRes = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
+                    context = context,
+                    providerId = if (targetPackage.contains("spotify", ignoreCase = true)) "spotify" else targetPackage,
+                    displayName = if (targetPackage.contains("spotify", ignoreCase = true)) "Spotify" else "Target Player",
+                    packageName = targetPackage,
+                    track = targetTrack,
+                    query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
+                    deepLinkUri = canonicalSpotifyUri,
+                    neverOpenExternalApp = neverOpenExternalApp
+                )
                 mainHandler.post {
-                    val launchRes = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
-                        context = context,
-                        providerId = if (targetPackage.contains("spotify", ignoreCase = true)) "spotify" else targetPackage,
-                        displayName = if (targetPackage.contains("spotify", ignoreCase = true)) "Spotify" else "Target Player",
-                        packageName = targetPackage,
-                        track = targetTrack,
-                        query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
-                        deepLinkUri = canonicalSpotifyUri,
-                        neverOpenExternalApp = neverOpenExternalApp
-                    )
                     onLaunchResult?.invoke(launchRes)
                 }
             } catch (e: Exception) {
