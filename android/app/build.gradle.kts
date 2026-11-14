@@ -13,14 +13,6 @@ if (localPropsFile.exists()) {
         localProps.load(stream)
     }
 }
-val geminiKey: String = localProps.getProperty("API_KEY")
-    ?: localProps.getProperty("GEMINI_API_KEY")
-    ?: (project.findProperty("API_KEY") as? String)
-    ?: (project.findProperty("GEMINI_API_KEY") as? String)
-    ?: System.getenv("API_KEY")
-    ?: System.getenv("GEMINI_API_KEY")
-    ?: ""
-
 val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
     ?: (project.findProperty("TUNEMIND_BASE_URL") as? String)
     ?: System.getenv("TUNEMIND_BASE_URL")
@@ -87,7 +79,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
         buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifyClientSecret\"")
         buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"$spotifyRedirectUri\"")

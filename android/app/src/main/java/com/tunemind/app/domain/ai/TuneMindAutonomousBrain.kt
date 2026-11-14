@@ -180,7 +180,7 @@ object TuneMindAutonomousBrain {
         // 3. TAG CATALOG IN BACKGROUND
         val tagsMap = examineAndTagCatalogWithLLM(context, historyTracks)
 
-        // 4. PRIMARY INTELLIGENCE: BACKEND GEMINI LLM AGENT CHAT (Secure server-side API Key)
+        // 4. PRIMARY INTELLIGENCE: BACKEND CLAUDE LLM AGENT CHAT (Paid server-side ANTHROPIC_API_KEY)
         try {
             val backendResponse = callBackendAgentChat(
                 query = input,
@@ -196,32 +196,10 @@ object TuneMindAutonomousBrain {
                 return@withContext backendResponse
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Backend agent-chat fallback: ${e.message}")
+            Log.w(TAG, "Backend Claude agent-chat fallback: ${e.message}")
         }
 
-        // 5. SECONDARY ATTEMPT: ON-DEVICE DIRECT GEMINI LLM REASONING (IF PREVIOUSLY CONFIGURED)
-        val apiKey = GeminiReasoningEngine.getApiKey(context)
-        if (apiKey.isNotBlank()) {
-            try {
-                val directResponse = callDirectGeminiAgent(
-                    apiKey = apiKey,
-                    query = input,
-                    tracks = historyTracks,
-                    tags = tagsMap,
-                    currentPlaying = nowPlaying?.title,
-                    userName = userName,
-                    currentProviderId = currentProviderId
-                )
-                if (directResponse != null) {
-                    recordSuggestion(directResponse.resolvedTrack?.title)
-                    return@withContext directResponse
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Direct Gemini API call failed, falling back: ${e.message}")
-            }
-        }
-
-        // 6. DYNAMIC NON-REPEATING OFFLINE MUSICOLOGY ENGINE
+        // 5. DYNAMIC NON-REPEATING OFFLINE MUSICOLOGY ENGINE
         val offlineResponse = offlineReasoning(
             query = cleanInput,
             tracks = historyTracks,
@@ -233,125 +211,6 @@ object TuneMindAutonomousBrain {
         )
         recordSuggestion(offlineResponse.resolvedTrack?.title)
         return@withContext offlineResponse
-    }
-
-    /**
-     * Direct on-device call to Google Gemini 2.5 Flash / 3.8 Flash REST API.
-     */
-    private suspend fun callDirectGeminiAgent(
-        apiKey: String,
-        query: String,
-        tracks: List<TrackMemoryEntry>,
-        tags: Map<String, TrackLlmTag>,
-        currentPlaying: String?,
-        userName: String,
-        currentProviderId: String
-    ): BrainResponse? = withContext(Dispatchers.IO) {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
-        val url = URL(endpoint)
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        conn.connectTimeout = 8000
-        conn.readTimeout = 12000
-        conn.doOutput = true
-
-        val sample = tracks.take(70).map { t ->
-            val tag = tags[t.entryId]
-            JSONObject().apply {
-                put("id", t.entryId)
-                put("title", t.title ?: "")
-                put("artist", t.artist ?: "")
-                put("genre", tag?.genre ?: "Unclassified")
-                put("language", tag?.language ?: "Unclassified")
-            }
-        }
-
-        val prompt = """
-You are TuneMind Voice Agent, an audiophile personal music assistant for $userName in Kenya.
-User Query: "$query"
-Currently Playing: "${currentPlaying ?: "None"}"
-Recently Played (DO NOT REPEAT): ${recentSuggestions.takeLast(10).joinToString(", ")}
-User's Real Timeline Catalog:
-${JSONArray(sample)}
-
-Instructions:
-1. If the user asks for Gikuyu / Mugithi, inspect the catalog and select a Kikuyu track by Kikuyu artists (Samidoh, Joyce wa Mamaa, De'Mathew, Salim, Gatutura, etc.). NEVER pick an English pop song.
-2. If the user asks for Gospel, pick a Gospel praise or worship track.
-3. If the user asks for Bongo, pick a Bongo Flava track.
-4. Keep spokenText short and natural (e.g., "Playing 'Wendo Wi Cama' by Samidoh from your Gikuyu collection.").
-5. If changing songs, select a fresh distinct track not in the recently played list.
-
-Respond ONLY with valid JSON:
-{
-  "matchedTrackId": "string or null",
-  "suggestedTitle": "string",
-  "suggestedArtist": "string",
-  "spokenText": "short spoken response",
-  "action": "PLAY_TRACK" or "CANCEL" or "SPEAK_ONLY",
-  "genre": "identified genre"
-}
-""".trimIndent()
-
-        val rootJson = JSONObject().apply {
-            val contents = JSONArray().put(
-                JSONObject().put("role", "user").put(
-                    "parts",
-                    JSONArray().put(JSONObject().put("text", prompt))
-                )
-            )
-            put("contents", contents)
-            put("generationConfig", JSONObject().put("temperature", 0.4).put("responseMimeType", "application/json"))
-        }
-
-        OutputStreamWriter(conn.outputStream, "UTF-8").use { it.write(rootJson.toString()); it.flush() }
-        if (conn.responseCode in 200..299) {
-            val responseText = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
-            val parsed = JSONObject(responseText)
-            val candidates = parsed.optJSONArray("candidates")
-            val content = candidates?.optJSONObject(0)?.optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            val text = parts?.optJSONObject(0)?.optString("text")
-
-            if (!text.isNullOrBlank()) {
-                val json = JSONObject(text)
-                val actionStr = json.optString("action", "PLAY_TRACK")
-                val spoken = json.optString("spokenText", "Playing track.")
-                val matchedId = json.optString("matchedTrackId", null)
-                val suggTitle = json.optString("suggestedTitle", "Song")
-                val suggArtist = json.optString("suggestedArtist", "Artist")
-
-                val action = when (actionStr) {
-                    "CANCEL" -> AgentActionType.CANCEL
-                    "SPEAK_ONLY" -> AgentActionType.SPEAK_ONLY
-                    else -> AgentActionType.PLAY_TRACK
-                }
-
-                if (action == AgentActionType.CANCEL || action == AgentActionType.SPEAK_ONLY) {
-                    return@withContext BrainResponse(spokenText = spoken, action = action)
-                }
-
-                val matchedEntry = tracks.firstOrNull { it.entryId == matchedId }
-                val resolvedTrack = RecommendedTrack(
-                    id = matchedEntry?.entryId ?: "gemini_${System.currentTimeMillis()}",
-                    title = matchedEntry?.title ?: suggTitle,
-                    artist = matchedEntry?.artist ?: suggArtist,
-                    album = matchedEntry?.album,
-                    reason = "Directly reasoned by Gemini AI from your timeline",
-                    confidence = 0.99f,
-                    category = RecommendationCategory.FAMILIAR_RECEPTIVE,
-                    suggestedProviderId = currentProviderId
-                )
-
-                return@withContext BrainResponse(
-                    spokenText = spoken,
-                    action = action,
-                    resolvedTrack = resolvedTrack,
-                    reasoningRationale = "Gemini on-device intelligence."
-                )
-            }
-        }
-        null
     }
 
     /**
