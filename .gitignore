@@ -31,6 +31,8 @@ backend/*.js.map
 *.sqlite3
 *.jks
 *.keystore
+keystore.properties
+android/keystore.properties
 
 # ─── OS ────────────────────────────────────────────────────────────────────
 .DS_Store

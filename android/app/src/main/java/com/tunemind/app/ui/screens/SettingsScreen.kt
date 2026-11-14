@@ -25,10 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,15 +63,10 @@ fun SettingsScreen(
     val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
     val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
-    val clipboardManager = LocalClipboardManager.current
     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
     val isConnectingRemote by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectingFlow.collectAsState()
     val appRemoteError by com.tunemind.app.provider.SpotifyAppRemoteManager.lastConnectionErrorFlow.collectAsState()
     val appRemoteSuccessMsg by com.tunemind.app.provider.SpotifyAppRemoteManager.connectionSuccessMessageFlow.collectAsState()
-    val appSha1 = remember(context) {
-        com.tunemind.app.provider.SpotifyAppRemoteManager.getAppSigningSha1Fingerprint(context)
-    }
-    var sha1Copied by remember { mutableStateOf(false) }
     var awaitingSpotifyWakeReturn by remember { mutableStateOf(false) }
 
     val spotifyAuthManager = remember(context) { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
@@ -418,78 +410,27 @@ fun SettingsScreen(
                                         lineHeight = 16.sp
                                     )
 
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = Color.Black.copy(alpha = 0.35f),
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Text(
-                                                text = "Package: ${context.packageName}",
-                                                fontSize = 10.sp,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = Color.White.copy(alpha = 0.78f)
-                                            )
-                                            Text(
-                                                text = "SHA-1: $appSha1",
-                                                fontSize = 10.sp,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = Color.White.copy(alpha = 0.90f)
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
+                                    if (isSpotifyInstalled) {
                                         OutlinedButton(
                                             onClick = {
-                                                clipboardManager.setText(AnnotatedString(appSha1))
-                                                sha1Copied = true
-                                                coroutineScope.launch {
-                                                    delay(2200L)
-                                                    sha1Copied = false
+                                                awaitingSpotifyWakeReturn = true
+                                                runCatching {
+                                                    context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
+                                                        wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        context.startActivity(wakeIntent)
+                                                    }
                                                 }
                                             },
                                             shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.6f)),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                         ) {
                                             Text(
-                                                text = if (sha1Copied) "SHA-1 Copied" else "Copy SHA-1",
+                                                text = "Wake Spotify",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                color = Color.White
+                                                color = warnAmber
                                             )
-                                        }
-
-                                        if (isSpotifyInstalled) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    awaitingSpotifyWakeReturn = true
-                                                    runCatching {
-                                                        context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
-                                                            wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            context.startActivity(wakeIntent)
-                                                        }
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.6f)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                            ) {
-                                                Text(
-                                                    text = "Wake Spotify",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = warnAmber
-                                                )
-                                            }
                                         }
                                     }
                                 }

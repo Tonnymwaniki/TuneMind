@@ -130,8 +130,10 @@ object SpotifyAppRemoteManager {
                 "Spotify is not signed in. Open Spotify, log in, then tap Connect Remote again."
             is UserNotAuthorizedException ->
                 "Spotify Remote permission was declined. Tap Connect Remote and tap Agree in Spotify."
-            is AuthenticationFailedException ->
-                "Spotify rejected Remote auth for ${context.packageName} (${throwable.message ?: "SHA-1 mismatch"}). Add SHA-1 $sha1 in Spotify Developer Dashboard -> Android Packages."
+            is AuthenticationFailedException -> {
+                Log.w(TAG, "Spotify App Remote auth failed for ${context.packageName} (SHA-1: $sha1): ${throwable.message}")
+                "Spotify could not verify this build right now. Make sure Spotify is signed in and up to date, then tap Connect Remote again."
+            }
             is OfflineModeException ->
                 "Spotify is in Offline Mode. Turn off Offline Mode inside Spotify and retry."
             is UnsupportedFeatureVersionException ->
@@ -258,10 +260,10 @@ object SpotifyAppRemoteManager {
                 _isConnectedFlow.value = false
                 if (showAuthView) {
                     val sha1 = getAppSigningSha1Fingerprint(appContext)
-                    val msg = "Spotify Remote did not respond in time. Either Spotify is asleep in background (tap 'Wake Spotify' first), or Spotify Developer Dashboard is missing package '${appContext.packageName}' + SHA-1 '$sha1'."
+                    val msg = "Spotify did not respond in time. Tap 'Wake Spotify' once to wake it up, then come back to TuneMind."
                     _lastConnectionErrorFlow.value = msg
                     _connectionSuccessMessageFlow.value = null
-                    Log.w(TAG, "Interactive Spotify App Remote watchdog timeout")
+                    Log.w(TAG, "Interactive Spotify App Remote watchdog timeout (package=${appContext.packageName}, sha1=$sha1)")
                     onComplete?.invoke(false, msg)
                 } else {
                     Log.d(TAG, "Background silent App Remote connect skipped (Spotify sleeping or unauthorized).")

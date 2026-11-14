@@ -51,6 +51,27 @@ val supabaseAnonKey: String = localProps.getProperty("SUPABASE_ANON_KEY")
     ?: System.getenv("SUPABASE_ANON_KEY")
     ?: ""
 
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.inputStream().use { stream ->
+        keystoreProps.load(stream)
+    }
+}
+val releaseStoreFilePath: String? = (keystoreProps.getProperty("storeFile")
+    ?: System.getenv("TUNEMIND_KEYSTORE_FILE"))?.takeIf { it.isNotBlank() }
+val releaseStorePassword: String? = (keystoreProps.getProperty("storePassword")
+    ?: System.getenv("TUNEMIND_KEYSTORE_PASSWORD"))?.takeIf { it.isNotBlank() }
+val releaseKeyAlias: String? = (keystoreProps.getProperty("keyAlias")
+    ?: System.getenv("TUNEMIND_KEY_ALIAS"))?.takeIf { it.isNotBlank() }
+val releaseKeyPassword: String? = (keystoreProps.getProperty("keyPassword")
+    ?: System.getenv("TUNEMIND_KEY_PASSWORD"))?.takeIf { it.isNotBlank() }
+val hasReleaseSigning = !releaseStoreFilePath.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank() &&
+    rootProject.file(releaseStoreFilePath).exists()
+
 android {
     namespace = "com.tunemind.app"
     compileSdk = 36
@@ -74,8 +95,22 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
