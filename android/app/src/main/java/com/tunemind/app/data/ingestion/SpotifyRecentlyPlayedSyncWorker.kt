@@ -94,7 +94,9 @@ class SpotifyRecentlyPlayedSyncWorker(
                     "Spotify Web API sync succeeded: ingested=${syncResult.ingestedRecentlyPlayedCount}, " +
                         "totalCached=${syncResult.totalCachedTracks}"
                 )
-                if (syncResult.totalCachedTracks > 0) {
+                if (syncResult.totalCachedTracks > 0 &&
+                    com.tunemind.app.domain.voice.AgentSettingsStore.isBackgroundAutoPlayEnabled(applicationContext)
+                ) {
                     com.tunemind.app.domain.execution.SatietyExecutionForegroundService.triggerSatietyEvaluation(
                         applicationContext
                     )

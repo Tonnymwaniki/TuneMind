@@ -49,6 +49,8 @@ export interface LongTermIntelligenceSummary {
     createdAt: string;
   }>;
   circadianPatternNotes: string[];
+  allListenedTitles: string[];
+  allListenedUris: string[];
 }
 
 export class SupabaseIntelligenceStore {
@@ -339,7 +341,7 @@ export class SupabaseIntelligenceStore {
           .select('user_id, trigger_transcript, computed_satiety, agent_tts_response, os_intent, target_search_query, created_at')
           .in('user_id', userCandidates)
           .order('created_at', { ascending: false })
-          .limit(35);
+          .limit(80);
 
         if (!error && Array.isArray(data)) {
           supabaseInterventions = data;
@@ -348,14 +350,15 @@ export class SupabaseIntelligenceStore {
         console.warn('[SupabaseIntelligenceStore] Live Supabase query notice:', e);
       }
 
-      // Also check `listening_events` table in Supabase if it exists
+      // Also check `listening_events` table in Supabase if it exists (up to 500 daily/historical events)
       try {
+        const userCandidates = Array.from(new Set([cleanUserId, 'tunemind-default-user']));
         const { data: eventRows, error: eventErr } = await client
           .from('listening_events')
           .select('track_title, track_artist, spotify_uri, play_count, media_source, observed_at')
-          .eq('user_id', cleanUserId)
-          .order('play_count', { ascending: false })
-          .limit(50);
+          .in('user_id', userCandidates)
+          .order('observed_at', { ascending: false })
+          .limit(500);
 
         if (!eventErr && Array.isArray(eventRows)) {
           for (const row of eventRows) {
@@ -375,6 +378,69 @@ export class SupabaseIntelligenceStore {
               } else {
                 existing.playCount = Math.max(existing.playCount, count);
                 if (!existing.spotifyUri && row.spotify_uri) existing.spotifyUri = row.spotify_uri;
+              }
+            }
+          }
+        }
+      } catch {
+        // Optional table
+      }
+
+      // Also hydrate `user_taste_genome` if present (top_tracks_json, approved_tracks_json, rejected_tracks_json)
+      try {
+        const { data: genomeRows, error: genomeErr } = await client
+          .from('user_taste_genome')
+          .select('top_tracks_json, approved_tracks_json, rejected_tracks_json')
+          .eq('user_id', cleanUserId)
+          .limit(1);
+
+        if (!genomeErr && Array.isArray(genomeRows) && genomeRows[0]) {
+          const row = genomeRows[0] as any;
+          if (row.top_tracks_json) {
+            const topTracks = JSON.parse(String(row.top_tracks_json));
+            if (Array.isArray(topTracks)) {
+              for (const t of topTracks) {
+                if (!t?.title) continue;
+                const key = `${String(t.title).toLowerCase().trim()}::${String(t.artist || '').toLowerCase().trim()}`;
+                const existing = this.inMemoryLearnedTracks.get(key);
+                const count = Math.max(1, Number(t.playCount || 1));
+                if (!existing) {
+                  this.inMemoryLearnedTracks.set(key, {
+                    title: String(t.title).trim(),
+                    artist: String(t.artist || 'Unknown Artist').trim(),
+                    spotifyUri: t.spotifyUri || undefined,
+                    playCount: count,
+                    source: t.source || 'com.spotify.music',
+                    lastPlayedAt: t.lastPlayedAt
+                  });
+                } else {
+                  existing.playCount = Math.max(existing.playCount, count);
+                  if (!existing.spotifyUri && t.spotifyUri) existing.spotifyUri = t.spotifyUri;
+                }
+              }
+            }
+          }
+          if (row.approved_tracks_json) {
+            const approved = JSON.parse(String(row.approved_tracks_json));
+            if (Array.isArray(approved)) {
+              for (const a of approved) {
+                if (!a?.title) continue;
+                const key = `${String(a.title).toLowerCase().trim()}::${String(a.artist || '').toLowerCase().trim()}`;
+                if (!this.inMemoryApprovedTracks.has(key)) {
+                  this.inMemoryApprovedTracks.set(key, a);
+                }
+              }
+            }
+          }
+          if (row.rejected_tracks_json) {
+            const rejected = JSON.parse(String(row.rejected_tracks_json));
+            if (Array.isArray(rejected)) {
+              for (const r of rejected) {
+                if (!r?.title) continue;
+                const key = `${String(r.title).toLowerCase().trim()}::${String(r.artist || '').toLowerCase().trim()}`;
+                if (!this.inMemoryRejectedTracks.has(key)) {
+                  this.inMemoryRejectedTracks.set(key, r);
+                }
               }
             }
           }
@@ -508,6 +574,21 @@ export class SupabaseIntelligenceStore {
         ? 'DEVELOPING'
         : 'SEEDING';
 
+    const allListenedTitlesSet = new Set<string>();
+    const allListenedUrisSet = new Set<string>();
+    for (const trk of allLearnedTracks) {
+      if (trk.title) allListenedTitlesSet.add(trk.title.toLowerCase().trim());
+      if (trk.spotifyUri && trk.spotifyUri.startsWith('spotify:track:')) {
+        allListenedUrisSet.add(trk.spotifyUri.trim());
+      }
+    }
+    for (const app of this.inMemoryApprovedTracks.values()) {
+      if (app.title) allListenedTitlesSet.add(app.title.toLowerCase().trim());
+      if (app.spotifyUri && app.spotifyUri.startsWith('spotify:track:')) {
+        allListenedUrisSet.add(app.spotifyUri.trim());
+      }
+    }
+
     return {
       userId: cleanUserId,
       isLiveSupabaseConnected: liveConnected,
@@ -519,7 +600,9 @@ export class SupabaseIntelligenceStore {
       topArtistsOverTime,
       topTracksOverTime: allLearnedTracks.slice(0, 20),
       recentInterventions: recentInterventionsFormatted,
-      circadianPatternNotes
+      circadianPatternNotes,
+      allListenedTitles: Array.from(allListenedTitlesSet),
+      allListenedUris: Array.from(allListenedUrisSet)
     };
   }
 }

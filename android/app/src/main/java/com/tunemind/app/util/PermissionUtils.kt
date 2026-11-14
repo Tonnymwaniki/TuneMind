@@ -28,6 +28,19 @@ object PermissionUtils {
         return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
 
+    fun hasOverlayPermission(context: Context): Boolean {
+        return Settings.canDrawOverlays(context)
+    }
+
+    fun getOverlayPermissionIntent(context: Context): Intent {
+        return Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
     fun getNotificationListenerIntent(): Intent {
         return Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
     }

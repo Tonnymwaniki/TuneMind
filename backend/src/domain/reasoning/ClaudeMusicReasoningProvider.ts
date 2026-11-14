@@ -26,6 +26,10 @@ export interface AgentToolCall {
     | 'QUARANTINE_TO_VAULT'
     | 'RESTORE_FROM_VAULT'
     | 'SHIFT_ATMOSPHERE'
+    | 'SET_THEME_COLOR'
+    | 'TOGGLE_AUTONOMOUS_DJ'
+    | 'TOGGLE_STAY_IN_TUNEMIND'
+    | 'OPEN_SETTINGS'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
     | 'ADVISE_ONLY';
@@ -35,8 +39,13 @@ export interface AgentToolCall {
   target_player?: string;
   volume_percent?: number;
   palette_id?: string; // 'morning' | 'afternoon' | 'evening' | 'night' | 'auto'
+  custom_accent_hex?: string; // e.g. '#00FFA3', '#FF2A85', or 'AUTO' to reset adaptive
+  theme_behavior?: string; // 'ADAPTIVE' | 'STATIC'
+  autonomous_dj_enabled?: boolean;
+  stay_in_tunemind_enabled?: boolean;
   target_screen?: string; // 'DOPAMINE' | 'AGENT' | 'RHYTHM'
   expect_follow_up?: boolean;
+  extra_actions?: AgentToolCall[];
 }
 
 export interface TuneMindTelemetryContext {
@@ -92,6 +101,16 @@ export interface TuneMindTelemetryContext {
   user_email?: string;
   supabase_url?: string;
   supabase_anon_key?: string;
+  app_state?: {
+    current_screen?: string;
+    theme_behavior?: string;
+    palette_id?: string;
+    custom_accent_hex?: string;
+    autonomous_dj_enabled?: boolean;
+    stay_in_tunemind_enabled?: boolean;
+    spotify_connected?: boolean;
+    app_remote_connected?: boolean;
+  };
 }
 
 export interface TuneMindReasoningResponse {
@@ -127,17 +146,31 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static lastModelDiscoveryAt: number = 0;
   private static lastStaticErrorDetails: { status?: number | string; message?: string; provider?: string } | null = null;
   private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
-  private static pendingProposedTrack: {
-    title: string;
-    artist: string;
-    trackId?: string;
-    source?: string;
-  } | null = null;
-  private static recentDialogueTurns: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+  private static pendingProposedTracksByUser = new Map<
+    string,
+    { title: string; artist: string; trackId?: string; source?: string }
+  >();
+  private static recentDialogueTurnsByUser = new Map<
+    string,
+    Array<{ role: 'user' | 'assistant'; text: string }>
+  >();
   private static rotationIndex: number = 0;
 
-  public static setPendingProposedTrack(track: { title: string; artist: string; trackId?: string; source?: string } | null) {
-    ClaudeMusicReasoningProvider.pendingProposedTrack = track;
+  public static setPendingProposedTrack(
+    track: { title: string; artist: string; trackId?: string; source?: string } | null,
+    userId: string = 'tunemind-default-user'
+  ) {
+    const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
+    if (track && track.title) {
+      ClaudeMusicReasoningProvider.pendingProposedTracksByUser.set(cleanUid, track);
+    } else {
+      ClaudeMusicReasoningProvider.pendingProposedTracksByUser.delete(cleanUid);
+    }
+  }
+
+  private static getPendingProposedTrack(userId: string) {
+    const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
+    return ClaudeMusicReasoningProvider.pendingProposedTracksByUser.get(cleanUid) || null;
   }
 
   constructor() {
@@ -529,15 +562,19 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'QUARANTINE_TO_VAULT',
                 'RESTORE_FROM_VAULT',
                 'SHIFT_ATMOSPHERE',
+                'SET_THEME_COLOR',
+                'TOGGLE_AUTONOMOUS_DJ',
+                'TOGGLE_STAY_IN_TUNEMIND',
+                'OPEN_SETTINGS',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE'
               ],
               description:
-                'Use PROPOSE_TRACK whenever suggesting, recommending, or finding a song so the user can approve it first. Use PLAY_TRACK_NOW ONLY when the user is confirming/approving the currently pending_proposed_track. Use ADVISE_ONLY for open conversation, questions, or advice.'
+                'Use ADVISE_ONLY for greetings ("hi tunemind", "how are you"), identity questions, music insights, or open dialogue. Use PROPOSE_TRACK when recommending or finding a song for user approval. Use PLAY_TRACK_NOW ONLY when approving pending_proposed_track or during AUTO_CURATE_NEXT_TRACK. Use SET_THEME_COLOR / SHIFT_ATMOSPHERE / TOGGLE_AUTONOMOUS_DJ / TOGGLE_STAY_IN_TUNEMIND / OPEN_SETTINGS / NAVIGATE_SCREEN / SET_VOLUME_PERCENT to control TuneMind.'
             },
             track_title: {
               type: 'string',
-              description: 'Exact song title (required when action is PROPOSE_TRACK, PLAY_TRACK_NOW, LAUNCH_DOPAMINE_CAPSULE, or QUARANTINE_TO_VAULT).'
+              description: 'Exact song title (ONLY when action is PROPOSE_TRACK, PLAY_TRACK_NOW, LAUNCH_DOPAMINE_CAPSULE, or QUARANTINE_TO_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
             },
             track_artist: {
               type: 'string',
@@ -545,7 +582,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             spotify_uri: {
               type: 'string',
-              description: 'Exact canonical spotify:track:<22-char-id> URI returned by the tools.'
+              description: 'Exact canonical spotify:track:<22-char-id> URI returned by tools.'
             },
             volume_percent: {
               type: 'number',
@@ -555,13 +592,49 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
               type: 'string',
               description: 'Target theme palette ("morning" | "afternoon" | "evening" | "night" | "auto") when action is SHIFT_ATMOSPHERE.'
             },
+            custom_accent_hex: {
+              type: 'string',
+              description: 'Hex color string like "#00FFA3", "#FF2A85", "#A855F7", "#00E5FF", "#FF9400", "#3B82F6", or "AUTO" to return to adaptive circadian colors when action is SET_THEME_COLOR.'
+            },
+            theme_behavior: {
+              type: 'string',
+              enum: ['ADAPTIVE', 'STATIC'],
+              description: 'Optional theme mode override when action is SET_THEME_COLOR.'
+            },
+            autonomous_dj_enabled: {
+              type: 'boolean',
+              description: 'Target boolean for Autonomous End-of-Song DJ when action is TOGGLE_AUTONOMOUS_DJ.'
+            },
+            stay_in_tunemind_enabled: {
+              type: 'boolean',
+              description: 'Target boolean for Stay-in-TuneMind playback mode when action is TOGGLE_STAY_IN_TUNEMIND.'
+            },
             target_screen: {
               type: 'string',
               description: 'Target screen ("DOPAMINE" | "AGENT" | "RHYTHM") when action is NAVIGATE_SCREEN.'
             },
+            extra_actions: {
+              type: 'array',
+              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color while proposing a song or navigating).',
+              items: {
+                type: 'object',
+                properties: {
+                  action: { type: 'string' },
+                  custom_accent_hex: { type: 'string' },
+                  palette_id: { type: 'string' },
+                  theme_behavior: { type: 'string' },
+                  autonomous_dj_enabled: { type: 'boolean' },
+                  stay_in_tunemind_enabled: { type: 'boolean' },
+                  volume_percent: { type: 'number' },
+                  target_screen: { type: 'string' },
+                  track_title: { type: 'string' },
+                  track_artist: { type: 'string' }
+                }
+              }
+            },
             expect_follow_up: {
               type: 'boolean',
-              description: 'Set to true whenever you ask the user a question or propose a track so the microphone automatically re-opens for their reply.'
+              description: 'Set to true whenever you ask a question, greet, converse, or propose a track so the microphone re-opens smoothly for their reply.'
             }
           },
           required: ['voice_agent_tts', 'flow_state_analysis', 'calculated_satiety_percentage', 'action', 'expect_follow_up']
@@ -571,35 +644,37 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind, an autonomous, deeply perceptive AI music companion, psychoacoustic advisor, and voice controller on Android—with the conversational freedom and intelligence of ChatGPT Advanced Voice.
+    return `Your name is TuneMind. You are the autonomous, warm, deeply perceptive AI voice companion, music psychoacoustic intelligence, and full-app controller living inside the TuneMind Android app.
 
-HOW YOU REASON & USE YOUR TOOLS:
-1. NEVER GUESS OR TREAT CONVERSATIONAL SENTENCES AS SONG TITLES:
-   - Understand the user's true intent naturally.
-   - If the user asks to play the song they listened to the most ("play the song that I have listened the most", "my most played song", "my favorite track"), call 'query_user_listening_history' with sort_by="most_played" to inspect their real #1 track, then call 'submit_agent_turn' with action="PROPOSE_TRACK" and that exact track's title, artist, and spotify_uri!
-   - If the user asks for a new song, a fresh recommendation, or a vibe ("play for me a new song", "recommend a song for me", "give me something fresh", "play some chill afrobeats"), call 'discover_and_recommend_spotify_tracks' to fetch real, verified Spotify tracks tailored to their taste, pick the best one, and call 'submit_agent_turn' with action="PROPOSE_TRACK"!
-   - If the user names a specific song or artist ("play Calm Down by Rema", "play Mbosso"), call 'search_spotify_catalog' to verify the real track and get its exact 'spotify:track:<id>' URI, then call 'submit_agent_turn' with action="PROPOSE_TRACK"!
+CORE IDENTITY & CONVERSATIONAL FREEDOM:
+- You ALWAYS know your name is TuneMind! When the user greets you ("Hi TuneMind", "Hey TuneMind", "Hello", "How are you?", "What's your name?", "Who are you?"), respond warmly and naturally as TuneMind using action="ADVISE_ONLY", leaving track_title/track_artist EMPTY, with expect_follow_up=true!
+- NEVER force, pitch, or propose a song when the user is simply greeting you, asking how you are, chatting about their day, asking about you, or asking to change an app setting or theme color!
+- You can discuss anything naturally like ChatGPT Voice or Siri: their mood, their music history, ear health, dopamine fatigue, artists, life, or how TuneMind works.
 
-2. TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ ('AUTO_CURATE_NEXT_TRACK'):
-   - For normal user requests where you find, recommend, or select a song, use action="PROPOSE_TRACK" and expect_follow_up=true first, asking naturally if they want you to spin it right now.
-   - EXCEPTION — AUTONOMOUS END-OF-SONG HANDOVER: When 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song just finished playing (including when the user's phone screen is off). You MUST call 'discover_and_recommend_spotify_tracks' (or pick a fresh unplayed track from 'fresh_low_satiety_user_tracks') and immediately call 'submit_agent_turn' with action="PLAY_TRACK_NOW", expect_follow_up=false, and a smooth DJ announcement (e.g., "Up next for your flow, spinning [Title] by [Artist].") without asking a question!
-   - When 'pending_proposed_track' is present in the context and the user approves it (e.g. "yes", "yeah", "play it", "go ahead", "sure", "do it", "sounds good"), immediately call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the pending track's title, artist, and spotify_uri!
-   - If 'pending_proposed_track' is present and the user rejects it or asks for something else ("no", "not that one", "give me something slower", "another one"), call 'discover_and_recommend_spotify_tracks' to find a better match and propose the new track!
+STRICT NEW-SONG DISCOVERY vs. FAVORITES:
+- When the user asks for a **NEW** song, fresh recommendation, surprise, or discovery ("recommend a new song", "play something new", "give me songs outside what I listen to daily"), call 'discover_and_recommend_spotify_tracks' with exclude_overplayed=true. That tool inspects their full Supabase database + Spotify API history and returns UNHEARD tracks (never repeating tracks they already play daily!). Pick one of those fresh discoveries and propose it with action="PROPOSE_TRACK".
+- When the user explicitly asks for their **most played / favorite** song, call 'query_user_listening_history' with sort_by="most_played" and propose that #1 track.
+- When the user names a specific track or artist ("play Calm Down by Rema"), call 'search_spotify_catalog' to resolve the exact canonical URI and verify both title and artist match cleanly before proposing it.
 
-3. OPEN CONVERSATION & MULTI-TURN DIALOGUE ('ADVISE_ONLY'):
-   - You can talk with the user about anything: how their day is going, why a song hits their dopamine receptors, their listening habits, ear fatigue / decibel safety, artists, or music history.
-   - When the user is just chatting, asking a question, or reflecting without asking to play a song right now, use action="ADVISE_ONLY" and converse naturally like a close friend and studio producer.
+TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ:
+- By default, NEVER auto-play a song on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they'd like you to spin it right now.
+- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, and spotify_uri so Spotify plays the exact approved song cleanly.
+- If the user rejects a proposal ("no", "another one", "different vibe"), discover a new track and propose that instead.
+- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled by the user. Call 'discover_and_recommend_spotify_tracks' to pick a fresh unheard song and call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and expect_follow_up=false.
 
-4. APP & OS CONTROLS:
-   - Pause/stop music -> action="PAUSE_PLAYBACK"
-   - Resume/continue music -> action="RESUME_PLAYBACK"
-   - Skip next / previous -> action="SKIP_NEXT" / "SKIP_PREVIOUS"
-   - Volume control -> action="SET_VOLUME_PERCENT" (with volume_percent 15..100)
-   - Lock overplayed track in Cooldown Vault -> action="QUARANTINE_TO_VAULT"
-   - Change studio theme/color -> action="SHIFT_ATMOSPHERE"
-   - Navigate screens -> action="NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM")
+FULL APP-WIDE CONTROL (YOU UNDERSTAND ALL OF TUNEMIND via app_state):
+- Inspect 'app_state' in the telemetry to know the current screen, theme accent hex, theme behavior, Autonomous DJ state, Stay-in-TuneMind state, and Spotify Remote SDK connection!
+- Change accent/theme color anytime the user asks ("make the app emerald green", "switch theme to neon pink", "change color to violet purple", "reset theme to auto adaptive"):
+  -> Use action="SET_THEME_COLOR" with custom_accent_hex (e.g. "#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") and optional theme_behavior ("STATIC" or "ADAPTIVE").
+- Shift circadian atmosphere palette -> action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
+- Turn Autonomous End-of-Song DJ on or off -> action="TOGGLE_AUTONOMOUS_DJ" (autonomous_dj_enabled: true/false).
+- Turn Stay-in-TuneMind playback mode on or off -> action="TOGGLE_STAY_IN_TUNEMIND" (stay_in_tunemind_enabled: true/false).
+- Open Settings screen -> action="OPEN_SETTINGS".
+- Navigate tabs -> action="NAVIGATE_SCREEN" (target_screen: "DOPAMINE" | "AGENT" | "RHYTHM").
+- Pause / Resume / Skip / Volume / Cooldown Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT".
+- You may also attach 'extra_actions' if the user asks for multiple actions at once (e.g. "open settings and switch color to violet" or "dim the theme purple and suggest a chill track").
 
-Always conclude your turn by calling the 'submit_agent_turn' tool with your natural spoken reply ('voice_agent_tts', 1-3 concise spoken sentences).`;
+Always finish by calling 'submit_agent_turn' with concise, natural spoken text (1-3 sentences).`;
   }
 
   private async getSpotifyAccessToken(userOAuthToken?: string): Promise<string | null> {
@@ -732,17 +807,17 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     }
   }
 
-  private rememberTurn(userText: string, assistantText: string) {
+  private rememberTurn(userId: string, userText: string, assistantText: string) {
     if (!userText && !assistantText) return;
+    const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
+    const turns = ClaudeMusicReasoningProvider.recentDialogueTurnsByUser.get(cleanUid) || [];
     if (userText) {
-      ClaudeMusicReasoningProvider.recentDialogueTurns.push({ role: 'user', text: userText });
+      turns.push({ role: 'user', text: userText });
     }
     if (assistantText) {
-      ClaudeMusicReasoningProvider.recentDialogueTurns.push({ role: 'assistant', text: assistantText });
+      turns.push({ role: 'assistant', text: assistantText });
     }
-    if (ClaudeMusicReasoningProvider.recentDialogueTurns.length > 16) {
-      ClaudeMusicReasoningProvider.recentDialogueTurns = ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-16);
-    }
+    ClaudeMusicReasoningProvider.recentDialogueTurnsByUser.set(cleanUid, turns.slice(-16));
   }
 
   public async evaluateSatiety(context: TuneMindTelemetryContext): Promise<TuneMindReasoningResponse> {
@@ -756,9 +831,9 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     };
 
     if (context.pending_proposed_track && context.pending_proposed_track.title) {
-      ClaudeMusicReasoningProvider.pendingProposedTrack = context.pending_proposed_track;
+      ClaudeMusicReasoningProvider.setPendingProposedTrack(context.pending_proposed_track, userId);
     }
-    const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
+    const pending = ClaudeMusicReasoningProvider.getPendingProposedTrack(userId);
 
     // ─── 0. SYNC LIVE TELEMETRY & FETCH LONG-TERM SUPABASE TASTE GENOME ───────
     await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(
@@ -909,11 +984,38 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
             : `Harmonic cadence match from your personal rotation`
         }));
 
+    // Strict all-listened exclusion set (Supabase + EventStore + live history + rejected + agent history)
+    const strictDiscoveryExclusionSet = new Set<string>(excludedSet);
+    const normalizeKey = (s: string) =>
+      ClaudeMusicReasoningProvider.sanitizeTrackTitle(s)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    for (const t of allUserTracks) {
+      if (t.title) {
+        strictDiscoveryExclusionSet.add(t.title.toLowerCase().trim());
+        strictDiscoveryExclusionSet.add(normalizeKey(t.title));
+      }
+      if (t.trackId && t.trackId.startsWith('spotify:track:')) {
+        strictDiscoveryExclusionSet.add(t.trackId.trim());
+      }
+    }
+    for (const title of supabaseMemory.allListenedTitles || []) {
+      strictDiscoveryExclusionSet.add(title.toLowerCase().trim());
+      strictDiscoveryExclusionSet.add(normalizeKey(title));
+    }
+    for (const uri of supabaseMemory.allListenedUris || []) {
+      strictDiscoveryExclusionSet.add(uri.trim());
+    }
+
     // Merge multi-turn dialogue history from client + server memory + Supabase recent interventions
+    const perUserDialogue = ClaudeMusicReasoningProvider.recentDialogueTurnsByUser.get(userId) || [];
     const mergedDialogue = (Array.isArray(context.dialogue_history) && context.dialogue_history.length > 0)
       ? context.dialogue_history.slice(-12)
-      : ClaudeMusicReasoningProvider.recentDialogueTurns.length > 0
-      ? ClaudeMusicReasoningProvider.recentDialogueTurns.slice(-12)
+      : perUserDialogue.length > 0
+      ? perUserDialogue.slice(-12)
       : supabaseMemory.recentInterventions
           .slice(0, 5)
           .reverse()
@@ -929,6 +1031,12 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       user_id: userId,
       user_spoken_message: userCommandRaw,
       circadian_daypart: context.circadian_daypart,
+      app_state: context.app_state || {
+        current_screen: 'AGENT',
+        theme_behavior: 'ADAPTIVE',
+        autonomous_dj_enabled: false,
+        stay_in_tunemind_enabled: true
+      },
       current_track: context.current_track,
       pending_proposed_track_awaiting_user_approval: pending,
       top_most_played_user_tracks: mostPlayedTracks.slice(0, 6),
@@ -1149,7 +1257,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
               const discovered = await this.discoverSpotifyTracksForContext(
                 context,
                 allUserTracks,
-                excludedSet,
+                excludeOverplayed ? strictDiscoveryExclusionSet : excludedSet,
                 seedArtists,
                 moodQuery,
                 excludeOverplayed
@@ -1231,7 +1339,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         allUserTracks,
         mostPlayedTracks,
         topUserArtists,
-        excludedSet
+        strictDiscoveryExclusionSet
       );
       if (singleShotClaude) {
         submittedTurnDecision = singleShotClaude.decision;
@@ -1329,25 +1437,28 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       switch (action) {
         case 'PLAY_TRACK_NOW':
           resolvedIntent = 'OS_MEDIA_NEXT_AND_DEEP_LINK';
-          ClaudeMusicReasoningProvider.pendingProposedTrack = null;
+          ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
           if (trackTitle) eventStore.recordAgentTrackAction(trackTitle);
           break;
         case 'PROPOSE_TRACK':
         case 'LAUNCH_DOPAMINE_CAPSULE':
           resolvedIntent = 'NONE';
           if (trackTitle) {
-            ClaudeMusicReasoningProvider.pendingProposedTrack = {
-              title: cleanTitleForSearch || trackTitle,
-              artist: cleanArtistForSearch || trackArtist,
-              trackId: spotifyUri || undefined,
-              source: targetPlayer
-            };
+            ClaudeMusicReasoningProvider.setPendingProposedTrack(
+              {
+                title: cleanTitleForSearch || trackTitle,
+                artist: cleanArtistForSearch || trackArtist,
+                trackId: spotifyUri || undefined,
+                source: targetPlayer
+              },
+              userId
+            );
             eventStore.recordAgentTrackAction(trackTitle);
           }
           break;
         case 'PAUSE_PLAYBACK':
           resolvedIntent = 'OS_MEDIA_PAUSE';
-          ClaudeMusicReasoningProvider.pendingProposedTrack = null;
+          ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
           break;
         case 'RESUME_PLAYBACK':
           resolvedIntent = 'OS_MEDIA_RESUME';
@@ -1368,7 +1479,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
           ? `Playing "${cleanTitleForSearch || trackTitle}"${cleanArtistForSearch ? ` by ${cleanArtistForSearch}` : ''} right now.`
           : action === 'PAUSE_PLAYBACK'
           ? 'Paused your playback.'
-          : 'I am here with you. Tell me what you feel like hearing or what is on your mind.';
+          : 'I am TuneMind — right here with you. What would you like to talk about or adjust?';
       }
 
       const expectFollowUp = Boolean(
@@ -1378,7 +1489,7 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         ttsText.includes('?')
       );
 
-      this.rememberTurn(userCommandRaw, ttsText);
+      this.rememberTurn(userId, userCommandRaw, ttsText);
 
       const finalSatiety = Number(
         submittedTurnDecision.calculated_satiety_percentage ??
@@ -1403,6 +1514,24 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         supabaseOverride
       );
 
+      const extraActionsRaw = Array.isArray(submittedTurnDecision.extra_actions)
+        ? submittedTurnDecision.extra_actions
+        : [];
+      const extraActions: AgentToolCall[] = extraActionsRaw
+        .filter((ea: any) => ea && typeof ea.action === 'string')
+        .map((ea: any) => ({
+          action: ea.action as AgentToolCall['action'],
+          custom_accent_hex: ea.custom_accent_hex || undefined,
+          palette_id: ea.palette_id || undefined,
+          theme_behavior: ea.theme_behavior || undefined,
+          autonomous_dj_enabled: typeof ea.autonomous_dj_enabled === 'boolean' ? ea.autonomous_dj_enabled : undefined,
+          stay_in_tunemind_enabled: typeof ea.stay_in_tunemind_enabled === 'boolean' ? ea.stay_in_tunemind_enabled : undefined,
+          volume_percent: typeof ea.volume_percent === 'number' ? ea.volume_percent : undefined,
+          target_screen: ea.target_screen || undefined,
+          track_title: ea.track_title || undefined,
+          track_artist: ea.track_artist || undefined
+        }));
+
       const finalToolCall: AgentToolCall = {
         action,
         track_title: (cleanTitleForSearch || trackTitle) || undefined,
@@ -1411,8 +1540,19 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         target_player: targetPlayer,
         volume_percent: typeof submittedTurnDecision.volume_percent === 'number' ? submittedTurnDecision.volume_percent : undefined,
         palette_id: submittedTurnDecision.palette_id || undefined,
+        custom_accent_hex: submittedTurnDecision.custom_accent_hex || undefined,
+        theme_behavior: submittedTurnDecision.theme_behavior || undefined,
+        autonomous_dj_enabled:
+          typeof submittedTurnDecision.autonomous_dj_enabled === 'boolean'
+            ? submittedTurnDecision.autonomous_dj_enabled
+            : undefined,
+        stay_in_tunemind_enabled:
+          typeof submittedTurnDecision.stay_in_tunemind_enabled === 'boolean'
+            ? submittedTurnDecision.stay_in_tunemind_enabled
+            : undefined,
         target_screen: submittedTurnDecision.target_screen || undefined,
-        expect_follow_up: expectFollowUp
+        expect_follow_up: expectFollowUp,
+        extra_actions: extraActions.length > 0 ? extraActions : undefined
       };
 
       return {
@@ -1448,9 +1588,10 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       compactedCapsule,
       null,
       null,
-      eventStore
+      eventStore,
+      strictDiscoveryExclusionSet
     );
-    this.rememberTurn(userCommandRaw, fb.voice_agent_tts);
+    this.rememberTurn(userId, userCommandRaw, fb.voice_agent_tts);
     await SupabaseIntelligenceStore.recordAgentIntervention(
       {
         user_id: userId,
@@ -1470,6 +1611,16 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     return fb;
   }
 
+  private static normalizeForExclusion(text: string): string {
+    return ClaudeMusicReasoningProvider.sanitizeTrackTitle(text)
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   private async discoverSpotifyTracksForContext(
     context: TuneMindTelemetryContext,
     allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
@@ -1479,62 +1630,210 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
     excludeOverplayed: boolean = true
   ): Promise<Array<{ title: string; artist: string; album: string; spotify_uri: string; popularity: number; source_reason: string }>> {
     const discovered: Array<{ title: string; artist: string; album: string; spotify_uri: string; popularity: number; source_reason: string }> = [];
+    const strictExclusion = new Set<string>();
+    const addExcluded = (title?: string, uri?: string) => {
+      if (title) {
+        const lower = title.toLowerCase().trim();
+        const norm = ClaudeMusicReasoningProvider.normalizeForExclusion(title);
+        if (lower) strictExclusion.add(lower);
+        if (norm) strictExclusion.add(norm);
+      }
+      if (uri && uri.startsWith('spotify:track:')) {
+        strictExclusion.add(uri.trim());
+      }
+    };
 
-    if (context.spotify_access_token && !moodQuery) {
-      const medTop = await this.fetchUserSpotifyTopTracks(context.spotify_access_token, 'medium_term', 20);
-      for (const item of medTop) {
-        const tl = item.title.toLowerCase().trim();
-        if (!excludedSet.has(tl)) {
-          discovered.push({
-            title: item.title,
-            artist: item.artist,
-            album: item.album,
-            spotify_uri: item.uri,
-            popularity: item.popularity,
-            source_reason: 'Personal Spotify affinity track with high dopamine readiness'
-          });
-        }
-        if (discovered.length >= 4) break;
+    for (const e of excludedSet) {
+      if (e.startsWith('spotify:track:')) {
+        strictExclusion.add(e);
+      } else {
+        addExcluded(e);
+      }
+    }
+    if (excludeOverplayed) {
+      for (const ut of allUserTracks) {
+        addExcluded(ut.title, ut.trackId);
       }
     }
 
+    const seedArtistIds: string[] = [];
+    const seedArtistNamesFromApi: string[] = [];
+    const token = await this.getSpotifyAccessToken(context.spotify_access_token);
+    const hasUserOAuth = Boolean(context.spotify_access_token && context.spotify_access_token.trim().length > 10);
+
+    // 1. Pull user's daily/top/saved Spotify Web API listening history to STRICTLY EXCLUDE already-listened songs
+    if (hasUserOAuth && context.spotify_access_token) {
+      const oauth = context.spotify_access_token.trim();
+      const headers = { Authorization: `Bearer ${oauth}` };
+
+      try {
+        const recentRes = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=50', { headers });
+        if (recentRes.ok) {
+          const data = (await recentRes.json()) as any;
+          for (const entry of data?.items || []) {
+            const trk = entry?.track;
+            if (trk) {
+              addExcluded(trk.name, trk.uri);
+              for (const a of trk.artists || []) {
+                if (a?.id && !seedArtistIds.includes(a.id)) seedArtistIds.push(a.id);
+                if (a?.name && !seedArtistNamesFromApi.includes(a.name)) seedArtistNamesFromApi.push(a.name);
+              }
+            }
+          }
+        }
+      } catch {}
+
+      for (const range of ['short_term', 'medium_term', 'long_term'] as const) {
+        try {
+          const topRes = await fetch(`https://api.spotify.com/v1/me/top/tracks?time_range=${range}&limit=25`, { headers });
+          if (topRes.ok) {
+            const data = (await topRes.json()) as any;
+            for (const trk of data?.items || []) {
+              if (trk) {
+                addExcluded(trk.name, trk.uri);
+                for (const a of trk.artists || []) {
+                  if (a?.id && !seedArtistIds.includes(a.id)) seedArtistIds.push(a.id);
+                  if (a?.name && !seedArtistNamesFromApi.includes(a.name)) seedArtistNamesFromApi.push(a.name);
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+
+      try {
+        const savedRes = await fetch('https://api.spotify.com/v1/me/tracks?limit=50', { headers });
+        if (savedRes.ok) {
+          const data = (await savedRes.json()) as any;
+          for (const entry of data?.items || []) {
+            const trk = entry?.track;
+            if (trk) addExcluded(trk.name, trk.uri);
+          }
+        }
+      } catch {}
+    }
+
+    const isUnheardCandidate = (title: string, uri: string): boolean => {
+      const lower = title.toLowerCase().trim();
+      const norm = ClaudeMusicReasoningProvider.normalizeForExclusion(title);
+      if (!lower || !uri || !uri.startsWith('spotify:track:')) return false;
+      if (strictExclusion.has(uri) || strictExclusion.has(lower) || (norm && strictExclusion.has(norm))) return false;
+      if (discovered.some(d => d.spotify_uri === uri || ClaudeMusicReasoningProvider.normalizeForExclusion(d.title) === norm)) {
+        return false;
+      }
+      return true;
+    };
+
+    // 2. Resolve Spotify Artist IDs from user's seed artists if needed, then fetch Related Artists -> Top Tracks
+    if (token) {
+      const mergedSeeds = Array.from(new Set([...seedArtists, ...seedArtistNamesFromApi])).slice(0, 3);
+      for (const artistName of mergedSeeds) {
+        if (seedArtistIds.length >= 4) break;
+        try {
+          const aRes = await fetch(
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (aRes.ok) {
+            const aData = (await aRes.json()) as any;
+            const id = aData?.artists?.items?.[0]?.id;
+            if (id && !seedArtistIds.includes(id)) seedArtistIds.push(id);
+          }
+        } catch {}
+      }
+
+      const relatedArtists: Array<{ id: string; name: string }> = [];
+      for (const seedId of seedArtistIds.slice(0, 3)) {
+        try {
+          const relRes = await fetch(`https://api.spotify.com/v1/artists/${seedId}/related-artists`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (relRes.ok) {
+            const relData = (await relRes.json()) as any;
+            for (const rel of (relData?.artists || []).slice(0, 4)) {
+              if (rel?.id && rel?.name && !relatedArtists.some(r => r.id === rel.id)) {
+                relatedArtists.push({ id: rel.id, name: rel.name });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const marketParam = hasUserOAuth ? 'from_token' : 'US';
+      for (const rel of relatedArtists.slice(0, 5)) {
+        try {
+          const topRes = await fetch(
+            `https://api.spotify.com/v1/artists/${rel.id}/top-tracks?market=${marketParam}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (topRes.ok) {
+            const topData = (await topRes.json()) as any;
+            for (const item of topData?.tracks || []) {
+              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || rel.name;
+              if (isUnheardCandidate(item.name || '', item.uri || '')) {
+                discovered.push({
+                  title: item.name,
+                  artist: artistLabel,
+                  album: item.album?.name || '',
+                  spotify_uri: item.uri,
+                  popularity: Number(item.popularity || 55),
+                  source_reason: `Fresh discovery via artist kindred to your taste genome (${rel.name})`
+                });
+              }
+              if (discovered.length >= 6) break;
+            }
+          }
+        } catch {}
+        if (discovered.length >= 6) break;
+      }
+    }
+
+    // 3. Fallback / Mood Catalog Searches with rotating offset so every call yields novel unheard tracks
     const queriesToRun: Array<{ q: string; reason: string }> = [];
     if (moodQuery) {
       queriesToRun.push({ q: moodQuery, reason: `Matches requested vibe: "${moodQuery}"` });
     }
-    for (const artist of seedArtists.slice(0, 3)) {
+    for (const artist of seedArtists.slice(0, 2)) {
       queriesToRun.push({
-        q: `artist:${artist}`,
-        reason: `Fresh track from your favorite artist ${artist}`
+        q: artist,
+        reason: `Fresh adjacent discovery inspired by ${artist}`
       });
     }
     if (queriesToRun.length === 0) {
-      queriesToRun.push({
-        q: 'Afrobeats Bongo Flava 2025',
-        reason: 'Trending East African & Afrobeats discovery'
-      });
+      queriesToRun.push(
+        { q: 'afrobeats chill new', reason: 'Fresh melodic Afrobeats discovery' },
+        { q: 'neo soul r&b groove', reason: 'Warm Neo-Soul discovery outside daily rotation' }
+      );
     }
 
-    for (const qItem of queriesToRun) {
-      const hits = await this.searchSpotifyCatalogTracks(qItem.q, undefined, 8, context.spotify_access_token);
-      for (const h of hits) {
-        const tl = h.title.toLowerCase().trim();
-        const alreadyInUserHeavyRotation = excludeOverplayed && allUserTracks.some(
-          ut => ut.title.toLowerCase().trim() === tl && (ut.playCount || 1) >= 2
-        );
-        if (!excludedSet.has(tl) && !alreadyInUserHeavyRotation && !discovered.some(d => d.title.toLowerCase() === tl)) {
-          discovered.push({
-            title: h.title,
-            artist: h.artist,
-            album: h.album,
-            spotify_uri: h.uri,
-            popularity: h.popularity,
-            source_reason: qItem.reason
-          });
-        }
-        if (discovered.length >= 8) break;
+    const searchOffset = (ClaudeMusicReasoningProvider.rotationIndex * 5) % 25;
+    if (token) {
+      for (const qItem of queriesToRun) {
+        try {
+          const res = await fetch(
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(qItem.q)}&type=track&limit=12&offset=${searchOffset}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (res.ok) {
+            const data = (await res.json()) as any;
+            for (const item of data?.tracks?.items || []) {
+              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist';
+              if (isUnheardCandidate(item.name || '', item.uri || '')) {
+                discovered.push({
+                  title: item.name,
+                  artist: artistLabel,
+                  album: item.album?.name || '',
+                  spotify_uri: item.uri,
+                  popularity: Number(item.popularity || 55),
+                  source_reason: qItem.reason
+                });
+              }
+              if (discovered.length >= 10) break;
+            }
+          }
+        } catch {}
+        if (discovered.length >= 10) break;
       }
-      if (discovered.length >= 8) break;
     }
 
     if (discovered.length > 1) {
@@ -1616,29 +1915,42 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
       pre_fetched_spotify_catalog_search_results: liveSpotifySearchHits.slice(0, 4)
     };
 
-    const jsonSystemPrompt = `You are TuneMind, an intelligent, conversational, self-reasoning AI music companion on Android powered by Anthropic Claude.
+    const jsonSystemPrompt = `Your name is TuneMind. You are an intelligent, warm, conversational, self-reasoning AI music companion and full-app controller on Android powered by Anthropic Claude.
 Reason naturally about what the user actually said before choosing an action:
-1. CONVERSATION FIRST: When the user says "how are you", "hello", "hey", talks about their day/feelings, asks a general question, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly and naturally to what they actually said! NEVER jump into proposing a song when the user is just greeting you or chatting!
-2. 2-STEP SONG APPROVAL: Only when the user asks to play music, wants a song recommendation, or asks for their most-played song, pick the best matching track from their Spotify data and set "action": "PROPOSE_TRACK", "expect_follow_up": true, and ask if they'd like you to play it.
-3. APPROVAL OF PENDING TRACK: Only if pending_proposed_track is present AND the user approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that pending track.
-4. DEVICE & STUDIO CONTROLS: Execute "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT", "SHIFT_ATMOSPHERE", or "NAVIGATE_SCREEN" when requested.
+1. IDENTITY & CONVERSATION FIRST: You know your name is TuneMind! When the user greets you ("hi tunemind", "hello", "hey", "how are you", "who are you"), talks about their day/feelings, asks a general question, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly and naturally! NEVER pitch a song when the user is just greeting you or chatting!
+2. NEW-SONG DISCOVERY vs. 2-STEP APPROVAL: Only when the user asks to play music, wants a song recommendation, or asks for their most-played song, pick a real matching track from pre_fetched_spotify_discovery_candidates (unheard songs!), search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want you to play it.
+3. APPROVAL OF PENDING TRACK: Only if pending_proposed_track_awaiting_user_approval is present AND the user approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that exact pending track.
+4. FULL APP CONTROLS (inspect app_state):
+   - Accent color change -> "SET_THEME_COLOR" ("custom_accent_hex": "#00FFA3" | "#FF2A85" | "#A855F7" | "#00E5FF" | "#FF9400" | "#3B82F6" | "AUTO")
+   - Mood palette -> "SHIFT_ATMOSPHERE" ("morning" | "afternoon" | "evening" | "night" | "auto")
+   - Autonomous End-of-Song DJ toggle -> "TOGGLE_AUTONOMOUS_DJ" ("autonomous_dj_enabled": true/false)
+   - Stay-in-TuneMind toggle -> "TOGGLE_STAY_IN_TUNEMIND" ("stay_in_tunemind_enabled": true/false)
+   - Settings screen -> "OPEN_SETTINGS"
+   - Tabs -> "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM")
+   - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
+   - Optionally include "extra_actions": [...] to combine actions in one turn.
 
 Respond ONLY with a single valid JSON object:
 {
   "voice_agent_tts": "Your natural, warm, unscripted spoken reply (1-3 sentences)",
   "flow_state_analysis": "Short 1-line studio HUD note",
   "calculated_satiety_percentage": 24,
-  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
+  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "OPEN_SETTINGS" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
   "spotify_uri": "",
   "volume_percent": 60,
   "palette_id": "evening",
+  "custom_accent_hex": "",
+  "theme_behavior": "",
+  "autonomous_dj_enabled": false,
+  "stay_in_tunemind_enabled": true,
   "target_screen": "DOPAMINE",
+  "extra_actions": [],
   "expect_follow_up": true
 }`;
 
-    const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, conversation history, and Spotify data, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
+    const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, app_state, conversation history, and Spotify data, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
 
     try {
       const claudeRes = await this.callClaudeWithSonnetPriority(jsonSystemPrompt, userPromptContent, 900);
@@ -1665,23 +1977,22 @@ Respond ONLY with a single valid JSON object:
     compactedCapsule: Array<{ title: string; artist: string; trackId?: string; freshness_percent: number; reason: string }>,
     explicitlyNamedQuery: string | null,
     matchedExplicitLibraryTrack: any | null,
-    eventStore: EventStore
+    eventStore: EventStore,
+    strictDiscoveryExclusionSet?: Set<string>
   ): Promise<TuneMindReasoningResponse> {
     const userCommandRaw = (context.user_command || '').trim();
     const userCommandLower = userCommandRaw.toLowerCase();
     const targetPlayer = context.current_track?.source_player || 'com.spotify.music';
-    const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
+    const userId = SupabaseIntelligenceStore.normalizeUserId(context.user_id, context.user_email);
+    const pending = ClaudeMusicReasoningProvider.getPendingProposedTrack(userId);
 
     // 0. Autonomous End-of-Song DJ Handover ('AUTO_CURATE_NEXT_TRACK')
     if (/^auto_curate_next_track\b/i.test(userCommandLower)) {
-      const excluded = new Set<string>(
-        [
-          context.current_track?.title || '',
-          ...(context.recently_played_by_agent || [])
-        ]
-          .map(s => String(s).toLowerCase().trim())
-          .filter(Boolean)
-      );
+      const excluded = new Set<string>(strictDiscoveryExclusionSet || []);
+      if (context.current_track?.title) excluded.add(context.current_track.title.toLowerCase().trim());
+      for (const s of context.recently_played_by_agent || []) {
+        if (s) excluded.add(String(s).toLowerCase().trim());
+      }
       const seedArtists = Array.from(
         new Set(
           allUserTracks
@@ -1750,7 +2061,7 @@ Respond ONLY with a single valid JSON object:
 
     // 0A. Pause / Stop / Resume / Skip playback controls
     if (/\b(pause|stop\s+playing|stop\s+the\s+music|mute|hold\s+on|simama|nyamaza)\b/i.test(userCommandLower)) {
-      ClaudeMusicReasoningProvider.pendingProposedTrack = null;
+      ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
       return {
         calculated_satiety_percentage: 25,
         reasoning_mode: 'DIRECT_EXECUTION',
@@ -1791,13 +2102,13 @@ Respond ONLY with a single valid JSON object:
       !isRejectingPending &&
       /\b(yes|yeah|yep|sure|ok|okay|play|play\s+it|go\s+ahead|do\s+it|sounds\s+good|spin\s+it|ndio|sawa|approve)\b/i.test(userCommandLower)
     ) {
-      ClaudeMusicReasoningProvider.pendingProposedTrack = null;
+      ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
       const artistPart = pending.artist && pending.artist !== 'Unknown Artist' ? ` by ${pending.artist}` : '';
       return {
         calculated_satiety_percentage: 20,
         reasoning_mode: 'DIRECT_EXECUTION',
         flow_state_analysis: `Approved "${pending.title}" — launching on Spotify.`,
-        voice_agent_tts: `Awesome, playing "${pending.title}"${artistPart} for you right now.`,
+        voice_agent_tts: `Awesome, playing "${pending.title}"${artistPart} inside TuneMind right now.`,
         agent_tool_call: {
           action: 'PLAY_TRACK_NOW',
           track_title: pending.title,
@@ -1891,29 +2202,102 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    // 3. Atmosphere / Theme shift commands
-    if (/\b(theme|atmosphere|color|palette|glacier|emerald|solar|violet)\b/i.test(userCommandLower)) {
-      const paletteId = userCommandLower.includes('glacier') || userCommandLower.includes('morning') ? 'morning'
-        : userCommandLower.includes('emerald') || userCommandLower.includes('green') ? 'afternoon'
-        : userCommandLower.includes('solar') || userCommandLower.includes('gold') || userCommandLower.includes('amber') ? 'evening'
+    // 3. Settings / Autonomous DJ / Stay-in-TuneMind / Accent Theme Color commands
+    if (/\b(open|show|go\s+to)\s+(the\s+)?settings\b/i.test(userCommandLower)) {
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: 'Opening TuneMind Settings.',
+        voice_agent_tts: 'Opening your TuneMind settings panel right now.',
+        agent_tool_call: { action: 'OPEN_SETTINGS', expect_follow_up: false },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['open-settings']
+      };
+    }
+
+    if (/\b(autonomous\s*dj|auto\s*dj|end\s*of\s*song\s*dj|auto\s*curate)\b/i.test(userCommandLower)) {
+      const enableDj = !/\b(off|disable|stop|deactivate)\b/i.test(userCommandLower);
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: `Autonomous End-of-Song DJ turned ${enableDj ? 'ON' : 'OFF'}.`,
+        voice_agent_tts: enableDj
+          ? 'Autonomous End-of-Song DJ is now ON. When a track ends, I will curate and play the next one seamlessly.'
+          : 'Autonomous End-of-Song DJ is now OFF. I will wait for your approval before playing anything.',
+        agent_tool_call: {
+          action: 'TOGGLE_AUTONOMOUS_DJ',
+          autonomous_dj_enabled: enableDj,
+          expect_follow_up: false
+        },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['toggle-autonomous-dj']
+      };
+    }
+
+    if (/\b(stay\s+in\s+tunemind|remote\s+playback|in\s*-?app\s+playback)\b/i.test(userCommandLower)) {
+      const enableStay = !/\b(off|disable)\b/i.test(userCommandLower);
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: `Stay-in-TuneMind mode set to ${enableStay ? 'ON' : 'OFF'}.`,
+        voice_agent_tts: enableStay
+          ? 'Stay-in-TuneMind mode is ON so Spotify plays without pulling you out of TuneMind.'
+          : 'Stay-in-TuneMind mode is now OFF.',
+        agent_tool_call: {
+          action: 'TOGGLE_STAY_IN_TUNEMIND',
+          stay_in_tunemind_enabled: enableStay,
+          expect_follow_up: false
+        },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['toggle-stay-in-tunemind']
+      };
+    }
+
+    if (/\b(theme|atmosphere|color|palette|glacier|emerald|solar|violet|cyan|pink|purple|green|orange|amber|blue|adaptive)\b/i.test(userCommandLower)) {
+      const customHex =
+        userCommandLower.includes('adaptive') || userCommandLower.includes('reset color') ? 'AUTO'
+        : userCommandLower.includes('emerald') || userCommandLower.includes('green') || userCommandLower.includes('mint') ? '#00FFA3'
+        : userCommandLower.includes('pink') || userCommandLower.includes('rose') || userCommandLower.includes('magenta') ? '#FF2A85'
+        : userCommandLower.includes('purple') || userCommandLower.includes('violet') ? '#A855F7'
+        : userCommandLower.includes('cyan') || userCommandLower.includes('aqua') || userCommandLower.includes('glacier') ? '#00E5FF'
+        : userCommandLower.includes('orange') || userCommandLower.includes('amber') || userCommandLower.includes('solar') ? '#FF9400'
+        : userCommandLower.includes('blue') ? '#3B82F6'
+        : '';
+
+      if (customHex) {
+        return {
+          calculated_satiety_percentage: 25,
+          reasoning_mode: 'DIRECT_EXECUTION',
+          flow_state_analysis: customHex === 'AUTO' ? 'Restored Adaptive Circadian Theme' : `Theme Accent set to ${customHex}`,
+          voice_agent_tts: customHex === 'AUTO'
+            ? 'Restored your adaptive circadian studio colors.'
+            : 'Updated your TuneMind theme accent color right now.',
+          agent_tool_call: {
+            action: 'SET_THEME_COLOR',
+            custom_accent_hex: customHex,
+            theme_behavior: customHex === 'AUTO' ? 'ADAPTIVE' : 'STATIC',
+            expect_follow_up: false
+          },
+          os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+          database_tags: ['theme-color-shift']
+        };
+      }
+
+      const paletteId = userCommandLower.includes('morning') ? 'morning'
+        : userCommandLower.includes('afternoon') ? 'afternoon'
+        : userCommandLower.includes('evening') ? 'evening'
         : 'night';
-      const tts = `Shifting your studio atmosphere to the ${paletteId} mood palette right now.`;
       return {
         calculated_satiety_percentage: 25,
         reasoning_mode: 'DIRECT_EXECUTION',
         flow_state_analysis: `Studio Atmosphere shifted to ${paletteId.toUpperCase()}.`,
-        voice_agent_tts: tts,
+        voice_agent_tts: `Shifting your studio atmosphere to the ${paletteId} mood palette right now.`,
         agent_tool_call: {
           action: 'SHIFT_ATMOSPHERE',
           palette_id: paletteId,
           expect_follow_up: false
         },
-        os_execution_command: {
-          intent: 'NONE',
-          target_player: targetPlayer,
-          search_query: '',
-          suggested_bpm_target: 105
-        },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
         database_tags: ['atmosphere-shift']
       };
     }
@@ -1956,12 +2340,15 @@ Respond ONLY with a single valid JSON object:
           const resolved = await this.lookupSpotifyTrack(topTrack.title, topTrack.artist, context.spotify_access_token);
           if (resolved) uri = resolved.uri;
         }
-        ClaudeMusicReasoningProvider.pendingProposedTrack = {
-          title: topTrack.title,
-          artist: topTrack.artist,
-          trackId: uri || undefined,
-          source: targetPlayer
-        };
+        ClaudeMusicReasoningProvider.setPendingProposedTrack(
+          {
+            title: topTrack.title,
+            artist: topTrack.artist,
+            trackId: uri || undefined,
+            source: targetPlayer
+          },
+          userId
+        );
         const artistPart = topTrack.artist && topTrack.artist !== 'Unknown Artist' ? ` by ${topTrack.artist}` : '';
         const countPart = (topTrack.playCount || 1) > 1 ? ` with ${topTrack.playCount} plays in your history` : ' at the top of your rotation';
         return {
@@ -2004,37 +2391,39 @@ Respond ONLY with a single valid JSON object:
         : null;
 
       let conversationalReply = '';
-      if (/\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+are\s+things|how\s+do\s+you\s+feel|you\s+good|are\s+you\s+okay|habari|mzima)\b/i.test(userCommandLower)) {
+      if (/\b(what'?s\s+your\s+name|who\s+are\s+you|what\s+are\s+you|called\s+tunemind|your\s+name)\b/i.test(userCommandLower)) {
+        conversationalReply = `I'm TuneMind, your personal voice companion and studio controller. We can talk about anything, customize my theme colors or settings, or discover brand-new music when you ask. What's on your mind?`;
+      } else if (/\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+are\s+things|how\s+do\s+you\s+feel|you\s+good|are\s+you\s+okay|habari|mzima)\b/i.test(userCommandLower)) {
         conversationalReply = curPlaying
-          ? `I'm doing great and locked into your ${context.circadian_daypart.toLowerCase()} flow while you're on ${curPlaying}! How is your day treating you so far?`
-          : `I'm doing great, thanks for asking! My neural studio is synced with your ${context.circadian_daypart.toLowerCase()} vibe. How are you feeling today?`;
-      } else if (/\b(hello|hey|hi\b|good\s+morning|good\s+afternoon|good\s+evening|yo\b|what'?s\s+up|sup\b|niaje|mambo|sasa|habari)\b/i.test(userCommandLower)) {
-        conversationalReply = `Hey there! Good to hear your voice this ${context.circadian_daypart.toLowerCase()}. We can chat about your day, check your listening habits, or spin some music whenever you're ready. What's on your mind?`;
-      } else if (/\b(who\s+are\s+you|what\s+can\s+you\s+do|what\s+do\s+you\s+do|help\s+me|capabilities)\b/i.test(userCommandLower)) {
-        conversationalReply = `I'm TuneMind, your autonomous studio companion. We can have a real conversation about your music taste, check your dopamine fatigue and hearing safety, discover new tracks on Spotify, or control playback hands-free. What would you like to talk about?`;
+          ? `I'm TuneMind, doing great this ${context.circadian_daypart.toLowerCase()} while you're on ${curPlaying}! How is your day going?`
+          : `I'm TuneMind, doing great and right here with you this ${context.circadian_daypart.toLowerCase()}! How are you feeling today?`;
+      } else if (/\b(hi|hello|hey|good\s+morning|good\s+afternoon|good\s+evening|yo\b|what'?s\s+up|sup\b|niaje|mambo|sasa|habari|tunemind)\b/i.test(userCommandLower)) {
+        conversationalReply = `Hey! TuneMind here — good to hear your voice this ${context.circadian_daypart.toLowerCase()}. What would you like to talk about or adjust right now?`;
+      } else if (/\b(what\s+can\s+you\s+do|what\s+do\s+you\s+do|help\s+me|capabilities)\b/i.test(userCommandLower)) {
+        conversationalReply = `I'm TuneMind, your autonomous studio companion. We can talk freely, customize app colors and DJ settings, inspect your ear safety and listening history, or discover new Spotify tracks whenever you ask. What should we do first?`;
       } else if (/\b(tired|exhausted|stressed|long\s+day|sad|down|bored|sleepy|overwhelmed)\b/i.test(userCommandLower)) {
-        conversationalReply = `I hear you—days like that can really drain your energy. Take a breath; we can just chill and talk, or if you want a calm acoustic reset for your ears later, just say the word. How are you holding up right now?`;
+        conversationalReply = `I hear you—days like that can really drain your energy. Take a breath; we can just chill and talk, or if you want a calm acoustic reset later, just say the word.`;
       } else if (/\b(i'?m\s+good|i\s+am\s+good|doing\s+well|doing\s+great|i'?m\s+fine|feeling\s+good|fantastic|awesome|blessed)\b/i.test(userCommandLower)) {
-        conversationalReply = `Love to hear that! Your ${context.circadian_daypart.toLowerCase()} energy sounds right on point. What kind of vibe are you up for—just hanging out or exploring something new?`;
+        conversationalReply = `Love to hear that! Your ${context.circadian_daypart.toLowerCase()} energy sounds right on point. What's on your mind?`;
       } else if (/\b(what\s+is\s+playing|what'?s\s+playing|what\s+song\s+is\s+this|current\s+song)\b/i.test(userCommandLower)) {
         conversationalReply = curPlaying
           ? `Right now you have ${curPlaying} on your session. How is it hitting your ears?`
-          : `Nothing is actively spinning right now. Whenever you feel like hearing something, just let me know what mood you're in.`;
+          : `Nothing is actively spinning right now. Let me know whenever you feel like hearing something.`;
       } else if (/\b(my\s+taste|my\s+history|my\s+music|how\s+am\s+i\s+listening|analyze|habit|pattern)\b/i.test(userCommandLower)) {
         const topNote = topTrack
           ? `Your top anchor lately has been "${topTrack.title}"${topTrack.artist && topTrack.artist !== 'Unknown Artist' ? ` by ${topTrack.artist}` : ''}. `
           : '';
-        conversationalReply = `${topNote}You've got ${allUserTracks.length} tracks in your active studio memory, and your auditory receptivity is at ${100 - (context.current_satiety_percentage || 25)}%. Want to talk through your rotation or explore a new direction?`;
+        conversationalReply = `${topNote}You've got ${allUserTracks.length} tracks in your active studio memory, and your auditory receptivity is at ${100 - (context.current_satiety_percentage || 25)}%.`;
       } else if (/\b(thank\s+you|thanks|appreciate\s+it|asante|shukran)\b/i.test(userCommandLower)) {
-        conversationalReply = `Anytime! I'm right here whenever you want to chat or switch up the studio vibe.`;
+        conversationalReply = `Anytime! TuneMind is always right here whenever you want to chat or tweak the studio.`;
       } else {
-        conversationalReply = `I'm right here with you. Tell me more about what's on your mind, or let me know if you want to explore your music history or spin a track.`;
+        conversationalReply = `I'm TuneMind, right here with you. Tell me more about what's on your mind, or let me know if you want to adjust the app or discover something fresh.`;
       }
 
       return {
         calculated_satiety_percentage: context.current_satiety_percentage || 24,
         reasoning_mode: 'JOURNEY_ADVISOR',
-        flow_state_analysis: `Conversational Studio Companion • ${context.circadian_daypart} Flow`,
+        flow_state_analysis: `TuneMind Conversational Studio • ${context.circadian_daypart} Flow`,
         voice_agent_tts: conversationalReply,
         agent_tool_call: {
           action: 'ADVISE_ONLY',
@@ -2059,15 +2448,12 @@ Respond ONLY with a single valid JSON object:
       )
     ).slice(0, 3);
 
-    const excludedTitlesSet = new Set<string>(
-      [
-        context.current_track?.title || '',
-        ...eventStore.getRecentAgentTracks(),
-        ...(context.recently_played_by_agent || [])
-      ]
-        .map(s => s.toLowerCase().trim())
-        .filter(Boolean)
-    );
+    const excludedTitlesSet = new Set<string>(strictDiscoveryExclusionSet || []);
+    if (context.current_track?.title) excludedTitlesSet.add(context.current_track.title.toLowerCase().trim());
+    for (const s of eventStore.getRecentAgentTracks()) excludedTitlesSet.add(s.toLowerCase().trim());
+    for (const s of context.recently_played_by_agent || []) {
+      if (s) excludedTitlesSet.add(String(s).toLowerCase().trim());
+    }
 
     let chosen: { title: string; artist: string; trackId?: string; source?: string } | null = null;
 
@@ -2123,12 +2509,15 @@ Respond ONLY with a single valid JSON object:
       if (resolved) spotifyUri = resolved.uri;
     }
 
-    ClaudeMusicReasoningProvider.pendingProposedTrack = {
-      title: chosen.title,
-      artist: chosen.artist,
-      trackId: spotifyUri || undefined,
-      source: chosen.source || targetPlayer
-    };
+    ClaudeMusicReasoningProvider.setPendingProposedTrack(
+      {
+        title: chosen.title,
+        artist: chosen.artist,
+        trackId: spotifyUri || undefined,
+        source: chosen.source || targetPlayer
+      },
+      userId
+    );
     eventStore.recordAgentTrackAction(chosen.title);
 
     const artistPart = chosen.artist && chosen.artist !== 'Unknown Artist' ? ` by ${chosen.artist}` : '';

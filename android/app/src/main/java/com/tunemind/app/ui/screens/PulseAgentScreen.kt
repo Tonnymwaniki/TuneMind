@@ -15,6 +15,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -76,7 +79,9 @@ fun PulseAgentScreen(
     onRejectProposedTrack: () -> Unit = {},
     onOrbTapped: () -> Unit,
     onLaunchDopamineCapsule: () -> Unit = {},
-    onCycleAtmospherePalette: () -> Unit = {}
+    onCycleAtmospherePalette: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    autonomousDjEnabled: Boolean = false
 ) {
     val colors = LocalAdaptiveTheme.current
     val scrollState = rememberScrollState()
@@ -166,34 +171,57 @@ fun PulseAgentScreen(
                     )
                 }
 
-                // Live Satiety Badge
-                val satietyColor = when {
-                    satietyPercentage >= 75 -> Color(0xFFFF2A55)
-                    satietyPercentage >= 50 -> Color(0xFFFFB020)
-                    else -> Color(0xFF00FFA3)
-                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(AgentObsidianCard.copy(alpha = 0.94f))
-                        .border(1.dp, satietyColor.copy(alpha = 0.32f), RoundedCornerShape(50))
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Live Satiety Badge
+                    val satietyColor = when {
+                        satietyPercentage >= 75 -> Color(0xFFFF2A55)
+                        satietyPercentage >= 50 -> Color(0xFFFFB020)
+                        else -> Color(0xFF00FFA3)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(AgentObsidianCard.copy(alpha = 0.94f))
+                            .border(1.dp, satietyColor.copy(alpha = 0.32f), RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(satietyColor)
+                        )
+                        Text(
+                            text = if (autonomousDjEnabled) "$satietyPercentage% • DJ" else "$satietyPercentage% SATIETY",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = satietyColor
+                        )
+                    }
+
+                    // Settings Button
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(30.dp)
                             .clip(CircleShape)
-                            .background(satietyColor)
-                    )
-                    Text(
-                        text = "$satietyPercentage% SATIETY",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        color = satietyColor
-                    )
+                            .background(AgentObsidianCard.copy(alpha = 0.94f))
+                            .border(1.dp, activeAccent.copy(alpha = 0.32f), CircleShape)
+                            .clickable { onOpenSettings() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = Color.White.copy(alpha = 0.88f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 

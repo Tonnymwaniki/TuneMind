@@ -222,11 +222,13 @@ object SpotifyTrackUriResolver {
     }
 
     /**
-     * Fetches a genuinely NEW / FRESH song recommendation tailored to the user's Spotify taste:
-     * 1. Queries `GET /v1/me/top/tracks?time_range=medium_term&limit=25` for tracks not in recent heavy rotation.
-     * 2. Queries `GET /v1/search?type=track&limit=15&q=artist:<TopArtist>` using the user's top artists from their
-     *    synced Spotify history, picking a fresh track by their favorite artists that they haven't overplayed.
-     * 3. Guarantees a valid `spotify:track:<22-char-id>` URI so Spotify plays the song directly.
+     * Fetches a genuinely NEW / FRESH song recommendation tailored to the user's Spotify taste
+     * that is strictly NOT present in their listening history, top tracks, saved library, or recent exclusions:
+     * 1. Builds a comprehensive exclusion set from local Room history (`unified`), `fallbackMemoryTracks`,
+     *    Spotify `/v1/me/player/recently-played`, `/v1/me/top/tracks`, `/v1/me/tracks`, and `excludedTitles`.
+     * 2. Queries Related Artists (`GET /v1/artists/{id}/related-artists` -> `top-tracks`) seeded from
+     *    the user's top artists, then falls back to rotated catalog searches and genre searches.
+     * 3. Guarantees a valid `spotify:track:<22-char-id>` URI and NEVER returns an already-listened track.
      */
     fun fetchNewDiscoveryRecommendationBlocking(
         context: Context,
@@ -234,35 +236,47 @@ object SpotifyTrackUriResolver {
         excludedTitles: Set<String> = emptySet()
     ): SpotifyTrackAggregate? {
         return runBlocking {
-            withTimeoutOrNull(2600L) {
+            withTimeoutOrNull(3200L) {
                 withContext(Dispatchers.IO) {
                     val unified = getUnifiedUserSpotifyTracksBlocking(context, fallbackMemoryTracks)
-                    val recentTitlesLower = unified.take(15).map { it.trackTitle.lowercase().trim() }.toSet()
-                    val allExcludedLower = excludedTitles.map { it.lowercase().trim() }.toSet()
+                    val knownTitlesNorm = mutableSetOf<String>()
+                    val knownUris = mutableSetOf<String>()
+
+                    fun recordKnown(title: String?, uri: String?) {
+                        val norm = normalizeTitleForExactMatch(title.orEmpty())
+                        if (norm.isNotBlank()) knownTitlesNorm.add(norm)
+                        val cleanTitleLower = title.orEmpty().lowercase().trim()
+                        if (cleanTitleLower.isNotBlank()) knownTitlesNorm.add(cleanTitleLower)
+                        val cleanUri = uri.orEmpty().trim()
+                        if (cleanUri.startsWith("spotify:track:")) knownUris.add(cleanUri)
+                    }
+
+                    for (u in unified) recordKnown(u.trackTitle, u.spotifyUri)
+                    for (m in fallbackMemoryTracks) recordKnown(m.title, m.providerTrackId)
+                    for (ex in excludedTitles) recordKnown(ex, null)
 
                     val token = getSearchBearerToken(context)
                     val authManager = SpotifyAuthManager(context)
                     val userToken = if (authManager.isAuthenticated()) authManager.getValidAccessToken() else null
 
-                    val candidateTracks = mutableListOf<SpotifyTrackAggregate>()
-
-                    // Strategy A: User's medium_term / long_term Spotify Top Tracks not in recent 15 plays
+                    // Pull user's Spotify history/top/saved tracks into exclusion set so we NEVER recommend daily songs
+                    val seedArtistIds = mutableListOf<String>()
+                    val seedArtistNames = mutableListOf<String>()
                     if (!userToken.isNullOrBlank()) {
-                        for (range in listOf("medium_term", "short_term")) {
-                            val topCandidates = fetchTopTracksListFromWebApi(userToken, range, 25)
-                            for (t in topCandidates) {
-                                val tl = t.trackTitle.lowercase().trim()
-                                if (!allExcludedLower.contains(tl) && !recentTitlesLower.contains(tl)) {
-                                    candidateTracks.add(t)
-                                }
-                            }
-                            if (candidateTracks.size >= 4) break
+                        for (range in listOf("short_term", "medium_term", "long_term")) {
+                            val topCandidates = fetchTopTracksListFromWebApi(userToken, range, 35)
+                            for (t in topCandidates) recordKnown(t.trackTitle, t.spotifyUri)
                         }
+                        for (saved in fetchSavedLibraryTracksFromWebApi(userToken, 40)) {
+                            recordKnown(saved.trackTitle, saved.spotifyUri)
+                        }
+                        val (topIds, topNames) = fetchTopArtistsFromWebApi(userToken, 6)
+                        seedArtistIds.addAll(topIds)
+                        seedArtistNames.addAll(topNames)
                     }
 
-                    // Strategy B: Search Spotify catalog for fresh tracks by the user's favorite artists
-                    if (candidateTracks.isEmpty() && !token.isNullOrBlank()) {
-                        val topArtists = unified
+                    if (seedArtistNames.isEmpty()) {
+                        val derived = unified
                             .map { it.artistName.split(",").firstOrNull()?.trim() ?: "" }
                             .filter { it.isNotBlank() && !it.equals("Unknown Artist", ignoreCase = true) }
                             .groupingBy { it }
@@ -270,41 +284,83 @@ object SpotifyTrackUriResolver {
                             .entries
                             .sortedByDescending { it.value }
                             .map { it.key }
-                            .take(4)
-                            .ifEmpty { listOf("Burna Boy", "Tems", "Sauti Sol", "Wizkid") }
+                            .take(5)
+                        seedArtistNames.addAll(derived.ifEmpty { listOf("Burna Boy", "Tems", "Sauti Sol", "Wizkid") })
+                    }
 
-                        val artistCursor = discoveryRotationCursor.getAndIncrement()
-                        val orderedArtists = topArtists.indices.map { idx ->
-                            topArtists[(idx + artistCursor) % topArtists.size]
-                        }
+                    fun isUnheard(track: SpotifyTrackAggregate): Boolean {
+                        if (track.spotifyUri.isNotBlank() && knownUris.contains(track.spotifyUri)) return false
+                        val norm = normalizeTitleForExactMatch(track.trackTitle)
+                        val rawLower = track.trackTitle.lowercase().trim()
+                        if (norm.isBlank()) return false
+                        return !knownTitlesNorm.contains(norm) && !knownTitlesNorm.contains(rawLower)
+                    }
 
-                        for (artist in orderedArtists) {
-                            val searchHits = searchArtistFreshTracks(token, artist, 12)
-                            for (hit in searchHits) {
-                                val tl = hit.trackTitle.lowercase().trim()
-                                if (!allExcludedLower.contains(tl) && !recentTitlesLower.contains(tl)) {
-                                    candidateTracks.add(hit)
-                                }
-                            }
-                            if (candidateTracks.size >= 5) break
+                    val candidateTracks = mutableListOf<SpotifyTrackAggregate>()
+
+                    // Resolve artist IDs if userToken didn't yield artist IDs directly
+                    if (seedArtistIds.isEmpty() && !token.isNullOrBlank()) {
+                        for (artistName in seedArtistNames.take(3)) {
+                            val resolvedId = searchSpotifyArtistId(token, artistName)
+                            if (!resolvedId.isNullOrBlank()) seedArtistIds.add(resolvedId)
                         }
                     }
 
-                    // Strategy C: Low-play-count fresh tracks from unified history
-                    if (candidateTracks.isEmpty()) {
-                        for (u in unified.filter { it.playCount <= 2 }) {
-                            val tl = u.trackTitle.lowercase().trim()
-                            if (!allExcludedLower.contains(tl)) {
-                                candidateTracks.add(u)
+                    // Strategy A: Related Artists' top tracks (genuinely new artists/songs aligned with user taste)
+                    val relatedToken = userToken ?: token
+                    if (!relatedToken.isNullOrBlank() && seedArtistIds.isNotEmpty()) {
+                        val cursor = discoveryRotationCursor.getAndIncrement()
+                        val orderedSeeds = seedArtistIds.indices.map { i -> seedArtistIds[(i + cursor) % seedArtistIds.size] }
+                        for (seedId in orderedSeeds.take(2)) {
+                            val relatedArtists = fetchRelatedArtistIds(relatedToken, seedId)
+                            for (relId in relatedArtists.take(4)) {
+                                val relTracks = fetchArtistTopTracks(relatedToken, relId)
+                                for (rt in relTracks) {
+                                    if (isUnheard(rt)) candidateTracks.add(rt)
+                                }
+                                if (candidateTracks.size >= 8) break
                             }
+                            if (candidateTracks.size >= 8) break
+                        }
+                    }
+
+                    // Strategy B: Rotated deep catalog search for unheard tracks by favorite artists
+                    if (candidateTracks.size < 4 && !token.isNullOrBlank() && seedArtistNames.isNotEmpty()) {
+                        val artistCursor = discoveryRotationCursor.getAndIncrement()
+                        val orderedArtists = seedArtistNames.indices.map { idx ->
+                            seedArtistNames[(idx + artistCursor) % seedArtistNames.size]
+                        }
+                        val offset = ((artistCursor * 5) % 25)
+                        for (artist in orderedArtists.take(4)) {
+                            val searchHits = searchArtistFreshTracks(token, artist, 15, offset)
+                            for (hit in searchHits) {
+                                if (isUnheard(hit)) candidateTracks.add(hit)
+                            }
+                            if (candidateTracks.size >= 8) break
+                        }
+                    }
+
+                    // Strategy C: Fresh mood / genre catalog discovery if all artist catalogs overlapped
+                    if (candidateTracks.isEmpty() && !token.isNullOrBlank()) {
+                        val discoveryQueries = listOf(
+                            "genre:afrobeats tag:new",
+                            "afro soul chill",
+                            "alt r&b smooth groove",
+                            "indie electronic downtempo"
+                        )
+                        val q = discoveryQueries[discoveryRotationCursor.getAndIncrement() % discoveryQueries.size]
+                        val hits = searchTracksRaw(token, q, 15, 0)
+                        for (hit in hits) {
+                            if (isUnheard(hit)) candidateTracks.add(hit)
                         }
                     }
 
                     val picked = if (candidateTracks.isNotEmpty()) {
-                        val idx = discoveryRotationCursor.getAndIncrement() % candidateTracks.size
-                        candidateTracks[idx]
+                        val distinct = candidateTracks.distinctBy { normalizeTitleForExactMatch(it.trackTitle) }
+                        val idx = discoveryRotationCursor.getAndIncrement() % distinct.size
+                        distinct[idx]
                     } else {
-                        unified.firstOrNull()
+                        null
                     } ?: return@withContext null
 
                     if (picked.spotifyUri.startsWith("spotify:track:")) {
@@ -324,6 +380,161 @@ object SpotifyTrackUriResolver {
                 }
             }
         }
+    }
+
+    private fun fetchSavedLibraryTracksFromWebApi(
+        userToken: String,
+        limit: Int
+    ): List<SpotifyTrackAggregate> {
+        val list = mutableListOf<SpotifyTrackAggregate>()
+        try {
+            val req = Request.Builder()
+                .url("https://api.spotify.com/v1/me/tracks?limit=$limit")
+                .addHeader("Authorization", "Bearer $userToken")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val items = JSONObject(resp.body?.string() ?: "{}").optJSONArray("items") ?: return emptyList()
+                val now = System.currentTimeMillis()
+                for (i in 0 until items.length()) {
+                    val trackObj = items.optJSONObject(i)?.optJSONObject("track") ?: continue
+                    val uri = trackObj.optString("uri", "")
+                    if (!uri.startsWith("spotify:track:")) continue
+                    val id = trackObj.optString("id", "").ifBlank { uri.removePrefix("spotify:track:") }
+                    val name = trackObj.optString("name", "").trim()
+                    if (name.isBlank()) continue
+                    val firstArtist = trackObj.optJSONArray("artists")?.optJSONObject(0)?.optString("name", "") ?: ""
+                    list.add(
+                        SpotifyTrackAggregate(
+                            trackId = id,
+                            spotifyUri = uri,
+                            trackTitle = name,
+                            artistName = firstArtist,
+                            albumName = "",
+                            albumArtUrl = null,
+                            durationMs = trackObj.optLong("duration_ms", 0L),
+                            playCount = 1,
+                            firstPlayedEpochMs = now,
+                            lastPlayedEpochMs = now
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    private fun fetchTopArtistsFromWebApi(userToken: String, limit: Int): Pair<List<String>, List<String>> {
+        val ids = mutableListOf<String>()
+        val names = mutableListOf<String>()
+        try {
+            val req = Request.Builder()
+                .url("https://api.spotify.com/v1/me/top/artists?time_range=medium_term&limit=$limit")
+                .addHeader("Authorization", "Bearer $userToken")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return Pair(ids, names)
+                val items = JSONObject(resp.body?.string() ?: "{}").optJSONArray("items") ?: return Pair(ids, names)
+                for (i in 0 until items.length()) {
+                    val obj = items.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "").trim()
+                    val name = obj.optString("name", "").trim()
+                    if (id.isNotBlank()) ids.add(id)
+                    if (name.isNotBlank()) names.add(name)
+                }
+            }
+        } catch (_: Exception) {}
+        return Pair(ids, names)
+    }
+
+    private fun searchSpotifyArtistId(bearerToken: String, artistName: String): String? {
+        return try {
+            val url = Uri.parse("https://api.spotify.com/v1/search").buildUpon()
+                .appendQueryParameter("q", artistName)
+                .appendQueryParameter("type", "artist")
+                .appendQueryParameter("limit", "1")
+                .build()
+                .toString()
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $bearerToken")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                JSONObject(resp.body?.string() ?: "{}")
+                    .optJSONObject("artists")
+                    ?.optJSONArray("items")
+                    ?.optJSONObject(0)
+                    ?.optString("id", "")
+                    ?.takeIf { it.isNotBlank() }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchRelatedArtistIds(bearerToken: String, artistId: String): List<String> {
+        val ids = mutableListOf<String>()
+        try {
+            val req = Request.Builder()
+                .url("https://api.spotify.com/v1/artists/${Uri.encode(artistId)}/related-artists")
+                .addHeader("Authorization", "Bearer $bearerToken")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val artists = JSONObject(resp.body?.string() ?: "{}").optJSONArray("artists") ?: return emptyList()
+                for (i in 0 until artists.length()) {
+                    val id = artists.optJSONObject(i)?.optString("id", "")?.trim() ?: ""
+                    if (id.isNotBlank()) ids.add(id)
+                }
+            }
+        } catch (_: Exception) {}
+        return ids
+    }
+
+    private fun fetchArtistTopTracks(bearerToken: String, artistId: String): List<SpotifyTrackAggregate> {
+        val list = mutableListOf<SpotifyTrackAggregate>()
+        try {
+            val req = Request.Builder()
+                .url("https://api.spotify.com/v1/artists/${Uri.encode(artistId)}/top-tracks?market=US")
+                .addHeader("Authorization", "Bearer $bearerToken")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val tracks = JSONObject(resp.body?.string() ?: "{}").optJSONArray("tracks") ?: return emptyList()
+                val now = System.currentTimeMillis()
+                for (i in 0 until tracks.length()) {
+                    val trackObj = tracks.optJSONObject(i) ?: continue
+                    val uri = trackObj.optString("uri", "")
+                    if (!uri.startsWith("spotify:track:")) continue
+                    val id = trackObj.optString("id", "").ifBlank { uri.removePrefix("spotify:track:") }
+                    val name = trackObj.optString("name", "").trim()
+                    if (name.isBlank()) continue
+                    val firstArtist = trackObj.optJSONArray("artists")?.optJSONObject(0)?.optString("name", "") ?: ""
+                    val albumObj = trackObj.optJSONObject("album")
+                    list.add(
+                        SpotifyTrackAggregate(
+                            trackId = id,
+                            spotifyUri = uri,
+                            trackTitle = name,
+                            artistName = firstArtist,
+                            albumName = albumObj?.optString("name", "") ?: "",
+                            albumArtUrl = albumObj?.optJSONArray("images")?.optJSONObject(0)?.optString("url"),
+                            durationMs = trackObj.optLong("duration_ms", 0L),
+                            playCount = 1,
+                            firstPlayedEpochMs = now,
+                            lastPlayedEpochMs = now
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return list
     }
 
     private suspend fun fetchLiveUserRecentAndTopTracks(
@@ -475,14 +686,25 @@ object SpotifyTrackUriResolver {
     private fun searchArtistFreshTracks(
         bearerToken: String,
         artistName: String,
-        limit: Int
+        limit: Int,
+        offset: Int = 0
+    ): List<SpotifyTrackAggregate> {
+        return searchTracksRaw(bearerToken, "artist:$artistName", limit, offset)
+    }
+
+    private fun searchTracksRaw(
+        bearerToken: String,
+        query: String,
+        limit: Int,
+        offset: Int = 0
     ): List<SpotifyTrackAggregate> {
         val list = mutableListOf<SpotifyTrackAggregate>()
         try {
             val url = Uri.parse("https://api.spotify.com/v1/search").buildUpon()
-                .appendQueryParameter("q", "artist:$artistName")
+                .appendQueryParameter("q", query)
                 .appendQueryParameter("type", "track")
                 .appendQueryParameter("limit", limit.toString())
+                .appendQueryParameter("offset", offset.toString())
                 .build()
                 .toString()
             val req = Request.Builder()
@@ -504,7 +726,7 @@ object SpotifyTrackUriResolver {
                     val name = trackObj.optString("name", "").trim()
                     if (name.isBlank()) continue
                     val artistsArr = trackObj.optJSONArray("artists")
-                    val firstArtist = artistsArr?.optJSONObject(0)?.optString("name", "") ?: artistName
+                    val firstArtist = artistsArr?.optJSONObject(0)?.optString("name", "") ?: ""
                     val albumObj = trackObj.optJSONObject("album")
                     val albumName = albumObj?.optString("name", "") ?: ""
                     val artUrl = albumObj?.optJSONArray("images")?.optJSONObject(0)?.optString("url")
@@ -526,14 +748,34 @@ object SpotifyTrackUriResolver {
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "searchArtistFreshTracks notice: ${e.message}")
+            Log.d(TAG, "searchTracksRaw notice: ${e.message}")
         }
         return list
     }
 
+    fun normalizeTitleForExactMatch(raw: String): String {
+        return raw.lowercase()
+            .replace(Regex("\\s*\\((feat\\.?|ft\\.?|with|official|lyrics|audio|remaster|live).*?\\)"), "")
+            .replace(Regex("\\s*\\[(feat\\.?|ft\\.?|with|official|lyrics|audio|remaster|live).*?\\]"), "")
+            .replace(Regex("\\s+-\\s+(remaster|single|live|acoustic|radio edit).*$"), "")
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun artistMatchesLoose(candidateArtist: String, expectedArtist: String): Boolean {
+        val cleanExpected = expectedArtist.trim()
+        if (cleanExpected.isBlank() || cleanExpected.equals("Unknown Artist", ignoreCase = true)) return true
+        val normCand = normalizeTitleForExactMatch(candidateArtist)
+        val normExp = normalizeTitleForExactMatch(cleanExpected)
+        if (normCand.isBlank() || normExp.isBlank()) return false
+        return normCand == normExp || normCand.contains(normExp) || normExp.contains(normCand)
+    }
+
     /**
      * Resolves a canonical `spotify:track:<id>` URI within a fast 1.6s budget:
-     * 1. Checks in-memory cache and local Room `spotify_listening_history` + `track_history_telemetry` tables.
+     * 1. Checks in-memory cache and local Room `spotify_listening_history` + `track_history_telemetry` tables
+     *    using strict normalized title + artist matching (never partial substring collisions).
      * 2. Queries `GET https://api.spotify.com/v1/search?type=track&limit=5&q=...` using either
      *    the user's OAuth token or a Spotify Client Credentials token (`CLIENT_ID:CLIENT_SECRET`).
      */
@@ -546,19 +788,20 @@ object SpotifyTrackUriResolver {
         val cacheKey = "${cleanTitle.lowercase().trim()}|${cleanArtist.lowercase().trim()}|${fullQuery.lowercase().trim()}"
         uriCache[cacheKey]?.let { return it }
 
+        val normCleanTitle = normalizeTitleForExactMatch(cleanTitle)
+
         return runBlocking {
             withTimeoutOrNull(1750L) {
                 withContext(Dispatchers.IO) {
-                    // 1. Check local Room Spotify history & telemetry cache first (< 3ms)
+                    // 1. Check local Room Spotify history & telemetry cache first (< 3ms) with STRICT title+artist match
                     try {
                         val dao = TuneMindDatabase.getInstance(context).spotifyListeningHistoryDao()
                         val localTracks = dao.getAggregatedTracksSnapshot(80)
                         val matchedLocal = localTracks.firstOrNull { item ->
-                            item.spotifyUri.startsWith("spotify:track:") && (
-                                item.trackTitle.equals(cleanTitle, ignoreCase = true) ||
-                                    (cleanTitle.length >= 3 && item.trackTitle.contains(cleanTitle, ignoreCase = true)) ||
-                                    (item.trackTitle.length >= 3 && fullQuery.contains(item.trackTitle, ignoreCase = true))
-                                )
+                            item.spotifyUri.startsWith("spotify:track:") &&
+                                normCleanTitle.isNotBlank() &&
+                                normalizeTitleForExactMatch(item.trackTitle) == normCleanTitle &&
+                                artistMatchesLoose(item.artistName, cleanArtist)
                         }
                         if (matchedLocal != null) {
                             uriCache[cacheKey] = matchedLocal.spotifyUri
@@ -567,11 +810,10 @@ object SpotifyTrackUriResolver {
 
                         val telemetryTracks = dao.getTelemetryItemsSnapshot(100)
                         val matchedTelemetry = telemetryTracks.firstOrNull { item ->
-                            item.spotifyUri.startsWith("spotify:track:") && (
-                                item.trackTitle.equals(cleanTitle, ignoreCase = true) ||
-                                    (cleanTitle.length >= 3 && item.trackTitle.contains(cleanTitle, ignoreCase = true)) ||
-                                    (item.trackTitle.length >= 3 && fullQuery.contains(item.trackTitle, ignoreCase = true))
-                                )
+                            item.spotifyUri.startsWith("spotify:track:") &&
+                                normCleanTitle.isNotBlank() &&
+                                normalizeTitleForExactMatch(item.trackTitle) == normCleanTitle &&
+                                artistMatchesLoose(item.artistName, cleanArtist)
                         }
                         if (matchedTelemetry != null) {
                             uriCache[cacheKey] = matchedTelemetry.spotifyUri

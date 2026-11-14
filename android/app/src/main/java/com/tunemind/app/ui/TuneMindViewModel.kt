@@ -421,6 +421,7 @@ class TuneMindViewModel : ViewModel() {
         val updated = _themePreferences.value.copy(
             behavior = com.tunemind.app.ui.theme.ThemeBehavior.FIXED,
             fixedPaletteId = nextId,
+            customAccentHex = null,
             enableMoodAdaptation = true
         )
         updateThemePreferences(updated)
@@ -431,6 +432,7 @@ class TuneMindViewModel : ViewModel() {
         if (clean == "auto" || clean == "time") {
             val updated = _themePreferences.value.copy(
                 behavior = com.tunemind.app.ui.theme.ThemeBehavior.ADAPTIVE,
+                customAccentHex = null,
                 enableMoodAdaptation = true
             )
             updateThemePreferences(updated)
@@ -446,8 +448,26 @@ class TuneMindViewModel : ViewModel() {
         val updated = _themePreferences.value.copy(
             behavior = com.tunemind.app.ui.theme.ThemeBehavior.FIXED,
             fixedPaletteId = targetId,
+            customAccentHex = null,
             enableMoodAdaptation = true
         )
+        updateThemePreferences(updated)
+    }
+
+    fun setCustomThemeAccentHex(hex: String?, behavior: com.tunemind.app.ui.theme.ThemeBehavior? = null) {
+        val normalizedHex = hex?.trim()?.takeIf { it.isNotBlank() }?.let { raw ->
+            if (raw.startsWith("#")) raw else "#$raw"
+        }
+        val nextBehavior = behavior ?: _themePreferences.value.behavior
+        val updated = _themePreferences.value.copy(
+            behavior = nextBehavior,
+            customAccentHex = normalizedHex
+        )
+        updateThemePreferences(updated)
+    }
+
+    fun setThemeBehavior(behavior: com.tunemind.app.ui.theme.ThemeBehavior) {
+        val updated = _themePreferences.value.copy(behavior = behavior)
         updateThemePreferences(updated)
     }
 

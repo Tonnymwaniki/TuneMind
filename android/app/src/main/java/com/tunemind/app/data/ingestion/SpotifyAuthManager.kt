@@ -233,7 +233,7 @@ class SpotifyAuthManager(context: Context) {
         const val CLIENT_ID = "dcfad6acbd594477b0705ecc1e6ace3a"
         const val CLIENT_SECRET = "134028eff64c4e2cafa4b1f617463650"
         const val REDIRECT_URI = "tunemind://spotify-auth-callback"
-        const val SCOPES = "user-read-recently-played user-read-currently-playing user-top-read user-modify-playback-state"
+        const val SCOPES = "user-read-recently-played user-read-currently-playing user-read-playback-state user-top-read user-library-read user-modify-playback-state app-remote-control"
 
         private const val AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
         private const val PREFS_FILE_NAME = "tunemind_spotify_secure_vault"

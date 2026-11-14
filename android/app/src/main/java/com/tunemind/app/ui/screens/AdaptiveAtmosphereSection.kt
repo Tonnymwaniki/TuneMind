@@ -326,6 +326,85 @@ fun AdaptiveAtmosphereSection(
                     }
                 }
             }
+
+            // Custom Studio Accent Swatches (also voice-controllable)
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "CUSTOM ACCENT OVERRIDE",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.secondaryText,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = themePreferences.customAccentHex?.uppercase() ?: "AUTO",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colors.primaryAccent
+                )
+            }
+            val customSwatches = listOf(
+                "#00E5FF" to "Cyan",
+                "#00FFA3" to "Mint",
+                "#FF2A85" to "Pink",
+                "#A855F7" to "Violet",
+                "#FF9400" to "Amber",
+                "#3B82F6" to "Blue"
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                customSwatches.forEach { (hex, label) ->
+                    val selected = themePreferences.customAccentHex?.equals(hex, ignoreCase = true) == true
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(android.graphics.Color.parseColor(hex)))
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) Color.White else colors.border.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable {
+                                vm?.setCustomThemeAccentHex(if (selected) null else hex)
+                            }
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (themePreferences.customAccentHex == null) colors.cardSurface else colors.secondaryBackground,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (themePreferences.customAccentHex == null) colors.primaryAccent else colors.border.copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clickable { vm?.setCustomThemeAccentHex(null) }
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "AUTO",
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                    }
+                }
+            }
         }
 
         // 3. ADAPTIVE INTENSITY & MOTION CONTROLS

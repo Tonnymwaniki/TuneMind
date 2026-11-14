@@ -232,6 +232,16 @@ wss.on('connection', async (ws: WebSocket) => {
     user_email?: string;
     supabase_url?: string;
     supabase_anon_key?: string;
+    app_state?: {
+      current_screen?: string;
+      theme_behavior?: string;
+      palette_id?: string;
+      custom_accent_hex?: string;
+      autonomous_dj_enabled?: boolean;
+      stay_in_tunemind_enabled?: boolean;
+      spotify_connected?: boolean;
+      app_remote_connected?: boolean;
+    };
   } | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
@@ -264,7 +274,10 @@ wss.on('connection', async (ws: WebSocket) => {
       const provider = new ClaudeMusicReasoningProvider();
 
       if (clientContext?.pending_proposed_track && clientContext.pending_proposed_track.title) {
-        ClaudeMusicReasoningProvider.setPendingProposedTrack(clientContext.pending_proposed_track);
+        ClaudeMusicReasoningProvider.setPendingProposedTrack(
+          clientContext.pending_proposed_track,
+          clientContext.user_id || clientContext.user_email || 'tunemind-default-user'
+        );
       }
 
       const eventStore = new EventStore();
@@ -330,7 +343,8 @@ wss.on('connection', async (ws: WebSocket) => {
         user_id: clientContext?.user_id,
         user_email: clientContext?.user_email,
         supabase_url: clientContext?.supabase_url,
-        supabase_anon_key: clientContext?.supabase_anon_key
+        supabase_anon_key: clientContext?.supabase_anon_key,
+        app_state: clientContext?.app_state
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);

@@ -4,3 +4,5 @@
 
 # Keep the application class
 -keep class com.tunemind.app.** { *; }
+-keep class com.spotify.** { *; }
+-dontwarn com.spotify.**

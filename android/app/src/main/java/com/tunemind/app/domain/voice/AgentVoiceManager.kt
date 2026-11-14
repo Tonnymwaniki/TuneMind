@@ -54,6 +54,7 @@ class AgentVoiceManager(
     private val getHearingInsights: (() -> com.tunemind.app.ui.HearingInsightsState)? = null,
     private val getVaultTracks: (() -> List<com.tunemind.app.ui.VaultTrack>)? = null,
     private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState)? = null,
+    private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null
 ) : RecognitionListener {
@@ -164,6 +165,7 @@ class AgentVoiceManager(
     private var errorResetJob: Job? = null
 
     init {
+        AgentSettingsStore.ensureLoaded(context)
         initWakeWordEngine()
         startCloudKeepAlivePing()
         startAutonomousEndOfSongMonitor()
@@ -241,7 +243,7 @@ class AgentVoiceManager(
         if (clean.length < 2) return true
         if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
         return Regex(
-            "\\b(most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history|how are you|how is it going|what is up|who are you)\\b"
+            "\\b(tunemind|tune mind|most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history|how are you|how is it going|what is up|who are you|settings|theme|color|colour|autonomous dj|stay in tunemind)\\b"
         ).containsMatchIn(clean)
     }
 
@@ -557,12 +559,30 @@ class AgentVoiceManager(
             evaluatePlaybackSnapshotForEndOfSong(snap)
         }
 
+        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener { title, artist, album, _, isPlaying, posMs, durMs ->
+            if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
+                evaluatePlaybackSnapshotForEndOfSong(
+                    com.tunemind.app.media.ActivePlaybackSnapshot(
+                        title = title,
+                        artist = artist,
+                        album = album,
+                        packageName = "com.spotify.music",
+                        isPlaying = isPlaying,
+                        positionMs = posMs,
+                        durationMs = durMs
+                    )
+                )
+            }
+        }
+
         scope.launch {
             while (isActive) {
                 try {
-                    val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
-                    if (snap != null) {
-                        evaluatePlaybackSnapshotForEndOfSong(snap)
+                    if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
+                        val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
+                        if (snap != null) {
+                            evaluatePlaybackSnapshotForEndOfSong(snap)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.d(TAG, "End-of-song monitor poll notice: ${e.message}")
@@ -583,6 +603,14 @@ class AgentVoiceManager(
     }
 
     private fun evaluatePlaybackSnapshotForEndOfSong(snap: com.tunemind.app.media.ActivePlaybackSnapshot) {
+        // Strict consent gate: NEVER talk or queue next songs autonomously unless user enabled Autonomous DJ
+        if (!AgentSettingsStore.isAutonomousDjEnabled(context)) {
+            isAwaitingEndOfSongUserChoice = false
+            monitoredTrackTitle = ""
+            monitoredTrackMaxPosMs = 0L
+            return
+        }
+
         val rawTitle = snap.title.trim()
         if (isPlaceholderTrackTitle(rawTitle)) return
 
@@ -683,6 +711,7 @@ class AgentVoiceManager(
         finishedArtist: String,
         targetPlayer: String
     ) {
+        if (!AgentSettingsStore.isAutonomousDjEnabled(context)) return
         if (isExecutingAutonomousHandover) return
         isExecutingAutonomousHandover = true
         lastHandoverCompletedForTitle = finishedTitle
@@ -875,6 +904,7 @@ class AgentVoiceManager(
                     put("supabase_anon_key", identity.supabaseAnonKey)
                     put("dialogue_history", getDialogueHistoryJsonArray())
                     put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                    getAppState?.invoke()?.let { put("app_state", it) }
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
@@ -1237,6 +1267,7 @@ class AgentVoiceManager(
                         put("supabase_anon_key", identity.supabaseAnonKey)
                         put("dialogue_history", getDialogueHistoryJsonArray())
                         put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                        getAppState?.invoke()?.let { put("app_state", it) }
                     }
                     ws.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -1434,13 +1465,19 @@ class AgentVoiceManager(
         }
 
         if (resolvedSpotifyUri.isNullOrBlank() && !rawTrackTitle.isNullOrBlank()) {
+            val normTargetTitle = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackTitle!!)
+            val normExpectedArtist = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackArtist ?: "")
             val recents = getRecentTracks?.invoke() ?: emptyList()
             val matchedLocal = recents.firstOrNull { r ->
-                val rTitle = r.title?.trim() ?: ""
-                rTitle.isNotEmpty() && (
-                    rTitle.equals(rawTrackTitle!!.trim(), ignoreCase = true) ||
-                    rawSearchQuery.lowercase().contains(rTitle.lowercase())
-                )
+                val normLocalTitle = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(r.title ?: "")
+                val normLocalArtist = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(r.artist ?: "")
+                val titleMatchesExactly = normTargetTitle.isNotBlank() && normLocalTitle == normTargetTitle
+                val artistMatches = normExpectedArtist.isBlank() ||
+                    normExpectedArtist == "unknown artist" ||
+                    normLocalArtist == normExpectedArtist ||
+                    normLocalArtist.contains(normExpectedArtist) ||
+                    normExpectedArtist.contains(normLocalArtist)
+                titleMatchesExactly && artistMatches
             }
             if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
                 resolvedSpotifyUri = matchedLocal.providerTrackId
@@ -1527,6 +1564,31 @@ class AgentVoiceManager(
             }
         }
 
+        val extraActionsList = mutableListOf<com.tunemind.app.domain.execution.AgentToolCallPayload>()
+        val extraArr = toolObj?.optJSONArray("extra_actions")
+        if (extraArr != null) {
+            for (i in 0 until extraArr.length()) {
+                val item = extraArr.optJSONObject(i) ?: continue
+                val act = item.optString("action", "").trim()
+                if (act.isNotBlank()) {
+                    extraActionsList.add(
+                        com.tunemind.app.domain.execution.AgentToolCallPayload(
+                            action = act,
+                            track_title = item.optString("track_title", "").takeIf { it.isNotBlank() },
+                            track_artist = item.optString("track_artist", "").takeIf { it.isNotBlank() },
+                            volume_percent = if (item.has("volume_percent")) item.optInt("volume_percent", 60) else null,
+                            palette_id = item.optString("palette_id", "").takeIf { it.isNotBlank() },
+                            custom_accent_hex = item.optString("custom_accent_hex", "").takeIf { it.isNotBlank() },
+                            theme_behavior = item.optString("theme_behavior", "").takeIf { it.isNotBlank() },
+                            autonomous_dj_enabled = if (item.has("autonomous_dj_enabled")) item.optBoolean("autonomous_dj_enabled") else null,
+                            stay_in_tunemind_enabled = if (item.has("stay_in_tunemind_enabled")) item.optBoolean("stay_in_tunemind_enabled") else null,
+                            target_screen = item.optString("target_screen", "").takeIf { it.isNotBlank() }
+                        )
+                    )
+                }
+            }
+        }
+
         val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
             action = effectiveAction,
             track_title = rawTrackTitle,
@@ -1535,8 +1597,13 @@ class AgentVoiceManager(
             target_player = targetPlayerPkg,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
             palette_id = toolObj?.optString("palette_id", "")?.takeIf { it.isNotBlank() },
+            custom_accent_hex = toolObj?.optString("custom_accent_hex", "")?.takeIf { it.isNotBlank() },
+            theme_behavior = toolObj?.optString("theme_behavior", "")?.takeIf { it.isNotBlank() },
+            autonomous_dj_enabled = if (toolObj != null && toolObj.has("autonomous_dj_enabled")) toolObj.optBoolean("autonomous_dj_enabled") else null,
+            stay_in_tunemind_enabled = if (toolObj != null && toolObj.has("stay_in_tunemind_enabled")) toolObj.optBoolean("stay_in_tunemind_enabled") else null,
             target_screen = toolObj?.optString("target_screen", "")?.takeIf { it.isNotBlank() },
-            expect_follow_up = effectiveExpectFollowUp
+            expect_follow_up = effectiveExpectFollowUp,
+            extra_actions = extraActionsList
         )
 
         val effectiveFlowAnalysis = if (effectiveAction == "PROPOSE_TRACK" && !rawTrackTitle.isNullOrBlank()) {
@@ -1772,6 +1839,7 @@ class AgentVoiceManager(
                     put("supabase_anon_key", identity.supabaseAnonKey)
                     put("dialogue_history", getDialogueHistoryJsonArray())
                     put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                    getAppState?.invoke()?.let { put("app_state", it) }
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
@@ -1942,15 +2010,15 @@ class AgentVoiceManager(
             }
         }
 
-        // 6. Theme / Atmosphere Shift
-        if (Regex("\\b(theme|atmosphere|color|palette|mood light)\\b").containsMatchIn(lower)) {
+        // 6. Custom Theme Color / Atmosphere Shift / App Settings Control
+        if (Regex("\\b(open settings|go to settings|show settings|settings page|settings screen)\\b").containsMatchIn(lower)) {
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 22)
                 put("reasoning_mode", "DIRECT_EXECUTION")
-                put("flow_state_analysis", "Shifting Studio Adaptive Atmosphere palette.")
-                put("voice_agent_tts", "Shifted your studio atmosphere palette to match your current vibe.")
+                put("flow_state_analysis", "Opening TuneMind Settings.")
+                put("voice_agent_tts", "Opening your TuneMind settings right now.")
                 put("agent_tool_call", JSONObject().apply {
-                    put("action", "SHIFT_ATMOSPHERE")
+                    put("action", "OPEN_SETTINGS")
                     put("expect_follow_up", false)
                 })
                 put("os_execution_command", JSONObject().apply {
@@ -1958,6 +2026,85 @@ class AgentVoiceManager(
                     put("target_player", targetPlayer)
                     put("search_query", "")
                 })
+            }
+        }
+        if (Regex("\\b(autonomous dj|auto dj|end of song dj|auto play next)\\b").containsMatchIn(lower)) {
+            val enableDj = !Regex("\\b(off|disable|stop|turn off|mute)\\b").containsMatchIn(lower)
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 22)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", if (enableDj) "Enabled Autonomous End-of-Song DJ." else "Disabled Autonomous End-of-Song DJ.")
+                put("voice_agent_tts", if (enableDj) "Autonomous DJ mode is now on. I'll curate and transition your next tracks smoothly." else "Autonomous DJ mode is now off. I'll only play music when you ask.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "TOGGLE_AUTONOMOUS_DJ")
+                    put("autonomous_dj_enabled", enableDj)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+        if (Regex("\\b(theme|atmosphere|color|colour|palette|mood light)\\b").containsMatchIn(lower)) {
+            val explicitHexMatch = Regex("#[0-9a-fA-F]{6}").find(transcript)?.value
+            val colorMap = listOf(
+                "pink" to "#FF2A85",
+                "magenta" to "#FF2A85",
+                "rose" to "#F43F5E",
+                "red" to "#EF4444",
+                "crimson" to "#DC2626",
+                "purple" to "#A855F7",
+                "violet" to "#8B5CF6",
+                "blue" to "#3B82F6",
+                "cyan" to "#00E5FF",
+                "teal" to "#14B8A6",
+                "mint" to "#00FFA3",
+                "green" to "#10B981",
+                "emerald" to "#10B981",
+                "amber" to "#FF9400",
+                "gold" to "#F59E0B",
+                "orange" to "#F97316"
+            )
+            val namedColor = colorMap.firstOrNull { (k, _) -> Regex("\\b$k\\b").containsMatchIn(lower) }
+            val isReset = Regex("\\b(reset|default|auto|automatic)\\b").containsMatchIn(lower)
+            return if (explicitHexMatch != null || namedColor != null) {
+                val chosenHex = explicitHexMatch ?: namedColor!!.second
+                val colorName = namedColor?.first ?: chosenHex
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Applied custom $colorName accent ($chosenHex) across TuneMind.")
+                    put("voice_agent_tts", "Updated your TuneMind theme accent to $colorName.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "SET_THEME_COLOR")
+                        put("custom_accent_hex", chosenHex)
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
+            } else {
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Shifting Studio Adaptive Atmosphere palette.")
+                    put("voice_agent_tts", if (isReset) "Reset your TuneMind theme back to adaptive mode." else "Shifted your studio atmosphere palette to match your vibe.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "SHIFT_ATMOSPHERE")
+                        if (isReset) put("palette_id", "auto")
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
             }
         }
 
@@ -2071,7 +2218,7 @@ class AgentVoiceManager(
                     put("calculated_satiety_percentage", 18)
                     put("reasoning_mode", "PLAYBACK_SUGGESTION")
                     put("flow_state_analysis", "Spotify Discovery: \"${discovery.trackTitle}\"$artistPart • ${mood.label} Mood DNA.")
-                    put("voice_agent_tts", "Based on your Spotify listening profile, I picked a fresh song for you: ${discovery.trackTitle}$artistPart. Would you like me to play it right now?")
+                    put("voice_agent_tts", "I found a fresh track you haven't been repeating: ${discovery.trackTitle}$artistPart. Would you like me to play it right now?")
                     put("agent_tool_call", JSONObject().apply {
                         put("action", "PROPOSE_TRACK")
                         put("track_title", discovery.trackTitle)
@@ -2101,12 +2248,11 @@ class AgentVoiceManager(
             ?.trim()
 
         if (!rawNamedTarget.isNullOrBlank() && rawNamedTarget.length >= 2 && !isConversationalNonTitlePhrase(rawNamedTarget)) {
+            val normNamed = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawNamedTarget)
             val unified = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
             val matchedLocal = unified.firstOrNull { u ->
-                val ut = u.trackTitle.lowercase().trim()
-                val ua = u.artistName.lowercase().trim()
-                (ut.isNotEmpty() && (ut.contains(rawNamedTarget) || rawNamedTarget.contains(ut))) ||
-                (ua.isNotEmpty() && ua != "unknown artist" && rawNamedTarget.contains(ua))
+                val normU = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(u.trackTitle)
+                normU.isNotEmpty() && normU == normNamed
             }
             val finalTitle = matchedLocal?.trackTitle ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
             val finalArtist = matchedLocal?.artistName ?: ""
@@ -2142,7 +2288,7 @@ class AgentVoiceManager(
             }
         }
 
-        // 11.5 Conversational / Open Dialogue Turn ("how are you", greetings, questions, feelings, chat)
+        // 11.5 Conversational / Open Dialogue Turn ("hi tunemind", "how are you", questions, feelings, chat)
         // NEVER propose a song unless the user explicitly asked to play or recommend music!
         if (!isExplicitMusicPlayOrRecommendRequest(lower)) {
             val activeTitle = np?.title?.takeIf { it.isNotBlank() && it != "Standing By" }
@@ -2154,14 +2300,15 @@ class AgentVoiceManager(
             }
 
             val conversationalReply = when {
+                Regex("\\b(who are you|what is your name|what's your name|what are you|what can you do|capabilities)\\b").containsMatchIn(lower) ->
+                    "I'm TuneMind, your voice music companion. We can talk naturally, change your app colors or settings, inspect your hearing telemetry and dopamine vault, or discover and play music on Spotify. What would you like to do?"
+
+                Regex("\\b(hi|hello|hey|yo|good morning|good afternoon|good evening|greetings)\\b").containsMatchIn(lower) &&
+                    lower.contains("tunemind") || Regex("^(hi|hello|hey|yo)\\b").containsMatchIn(lower) ->
+                    "Hey! TuneMind here—great to hear you$playingNote. How are you doing today?"
+
                 Regex("\\b(how are you|how're you|how are u|how is it going|how's it going|how you doing|habari|mambo|niaje|sasa)\\b").containsMatchIn(lower) ->
-                    "I'm doing great, thanks for asking! My neural audio engine is dialed in$playingNote. How are you feeling today, and what kind of vibe are you in the mood for?"
-
-                Regex("\\b(hi|hello|hey|yo|good morning|good afternoon|good evening|greetings)\\b").containsMatchIn(lower) ->
-                    "Hey there! Good to hear your voice. How's your day going so far?"
-
-                Regex("\\b(who are you|what are you|what can you do|help|capabilities)\\b").containsMatchIn(lower) ->
-                    "I'm TuneMind, your autonomous music companion. We can just chat about your day, check your hearing headroom and taste DNA, or whenever you're ready I can find and play music on Spotify. What's on your mind?"
+                    "I'm doing great, thanks for asking! I'm dialed in$playingNote. How is your day going?"
 
                 Regex("\\b(what is playing|what's playing|what song is this|current song|currently playing)\\b").containsMatchIn(lower) -> {
                     if (activeTitle != null) {
@@ -2172,22 +2319,22 @@ class AgentVoiceManager(
                 }
 
                 Regex("\\b(tired|exhausted|stressed|sad|down|anxious|overwhelmed|bored|sleepy)\\b").containsMatchIn(lower) ->
-                    "I hear you—some days really take it out of you. Do you want to just unwind and talk for a bit, or would you like me to put on something calm and restorative when you're ready?"
+                    "I hear you—some days really take it out of you. Do you want to just unwind and talk for a bit, or would you like me to find something calm and restorative when you're ready?"
 
                 Regex("\\b(good|great|awesome|fine|okay|doing well|happy|excited|chill|relaxed|fantastic|amazing)\\b").containsMatchIn(lower) ->
-                    "Love to hear that! Are you just chilling right now, working on something, or in the mood to explore some music together?"
+                    "Love to hear that! Are you relaxing right now, getting work done, or in the mood to talk or explore something new?"
 
                 Regex("\\b(thank|thanks|appreciate|asante|shukran)\\b").containsMatchIn(lower) ->
-                    "Anytime! I'm right here whenever you want to talk or switch up the vibe."
+                    "Anytime! I'm TuneMind—right here whenever you want to talk or switch up the vibe."
 
                 else ->
-                    "I'm right here with you. Tell me more about what's on your mind, or let me know if you'd like me to do anything with your music."
+                    "I'm TuneMind, right here with you. Tell me what's on your mind, or let me know if you want me to change the app theme, open settings, or find music."
             }
 
             return JSONObject().apply {
                 put("calculated_satiety_percentage", _agentSatietyFlow.value)
                 put("reasoning_mode", "JOURNEY_ADVISOR")
-                put("flow_state_analysis", "Conversational Neural Dialogue • Listening & reasoning with you.")
+                put("flow_state_analysis", "TuneMind Conversational Dialogue • Ready.")
                 put("voice_agent_tts", conversationalReply)
                 put("agent_tool_call", JSONObject().apply {
                     put("action", "ADVISE_ONLY")
@@ -2584,6 +2731,8 @@ class AgentVoiceManager(
     }
 
     fun destroy() {
+        com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = null
+        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener(null)
         errorResetJob?.cancel()
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()

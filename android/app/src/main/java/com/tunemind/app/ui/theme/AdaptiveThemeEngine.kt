@@ -125,23 +125,24 @@ object AdaptiveThemeEngine {
             basePalette.cardSurface
         }
 
-        val primaryAccent = if (blendFactor > 0f && moodProfile != null) {
-            blendColors(basePalette.primaryAccent, moodProfile.moodAccent, blendFactor)
-        } else if (preferences.customAccentHex != null) {
-            runCatching { Color(android.graphics.Color.parseColor(preferences.customAccentHex)) }
-                .getOrDefault(basePalette.primaryAccent)
-        } else {
-            basePalette.primaryAccent
+        val parsedCustomAccent = preferences.customAccentHex
+            ?.takeIf { it.isNotBlank() }
+            ?.let { rawHex -> runCatching { Color(android.graphics.Color.parseColor(rawHex.trim())) }.getOrNull() }
+
+        val primaryAccent = when {
+            parsedCustomAccent != null -> parsedCustomAccent
+            blendFactor > 0f && moodProfile != null -> blendColors(basePalette.primaryAccent, moodProfile.moodAccent, blendFactor)
+            else -> basePalette.primaryAccent
         }
 
-        val secondaryAccent = if (blendFactor > 0f && moodProfile != null) {
-            blendColors(basePalette.secondaryAccent, moodProfile.secondaryAccent, blendFactor)
-        } else {
-            basePalette.secondaryAccent
+        val secondaryAccent = when {
+            parsedCustomAccent != null -> blendColors(parsedCustomAccent, Color.White, 0.32f)
+            blendFactor > 0f && moodProfile != null -> blendColors(basePalette.secondaryAccent, moodProfile.secondaryAccent, blendFactor)
+            else -> basePalette.secondaryAccent
         }
 
-        val border = blendColors(basePalette.border, primaryAccent, 0.35f)
-        val highlight = primaryAccent.copy(alpha = 0.18f)
+        val border = blendColors(basePalette.border, primaryAccent, 0.40f)
+        val highlight = primaryAccent.copy(alpha = 0.20f)
 
         val energyBoost = if (preferences.enableEnergyAdaptation) {
             ((trackEnergy - 0.5f) * 0.20f).coerceIn(-0.1f, 0.15f)

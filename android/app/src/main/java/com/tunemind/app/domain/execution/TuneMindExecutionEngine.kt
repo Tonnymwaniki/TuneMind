@@ -20,8 +20,13 @@ data class AgentToolCallPayload(
     val target_player: String? = null,
     val volume_percent: Int? = null,
     val palette_id: String? = null,
+    val custom_accent_hex: String? = null,
+    val theme_behavior: String? = null,
+    val autonomous_dj_enabled: Boolean? = null,
+    val stay_in_tunemind_enabled: Boolean? = null,
     val target_screen: String? = null,
-    val expect_follow_up: Boolean = false
+    val expect_follow_up: Boolean = false,
+    val extra_actions: List<AgentToolCallPayload> = emptyList()
 )
 
 data class OsExecutionCommand(
@@ -264,6 +269,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
     fun pauseCurrentMedia() {
         try {
+            com.tunemind.app.provider.SpotifyAppRemoteManager.pause()
+        } catch (_: Throwable) {}
+        try {
             // 1. Direct MediaController transportControls.pause() via TuneMindListenerService
             com.tunemind.app.service.TuneMindListenerService.instance?.pause()
         } catch (e: Exception) {
@@ -278,55 +286,70 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         } catch (e: Exception) {
             Log.w(TAG, "AudioManager pause dispatch notice: ${e.message}")
         }
-        Log.d(TAG, "Executed 2-Layer OS Media Pause")
+        Log.d(TAG, "Executed Multi-Layer OS Media Pause")
     }
 
     fun resumeCurrentMedia() {
-        try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.play()
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaController play notice: ${e.message}")
+        val remoteResumed = runCatching {
+            com.tunemind.app.provider.SpotifyAppRemoteManager.resume()
+        }.getOrDefault(false)
+        if (!remoteResumed) {
+            try {
+                com.tunemind.app.service.TuneMindListenerService.instance?.play()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaController play notice: ${e.message}")
+            }
+            try {
+                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+                audioManager.dispatchMediaKeyEvent(downEvent)
+                audioManager.dispatchMediaKeyEvent(upEvent)
+            } catch (e: Exception) {
+                Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
+            }
         }
-        try {
-            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-            audioManager.dispatchMediaKeyEvent(downEvent)
-            audioManager.dispatchMediaKeyEvent(upEvent)
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
-        }
-        Log.d(TAG, "Executed 2-Layer OS Media Resume")
+        Log.d(TAG, "Executed Multi-Layer OS Media Resume (appRemote=$remoteResumed)")
     }
 
     fun skipToNextMedia() {
-        try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaController skipNext notice: ${e.message}")
-        }
-        try {
-            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
-            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
-            audioManager.dispatchMediaKeyEvent(downEvent)
-            audioManager.dispatchMediaKeyEvent(upEvent)
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
+        val remoteSkipped = runCatching {
+            com.tunemind.app.provider.SpotifyAppRemoteManager.skipNext()
+        }.getOrDefault(false)
+        if (!remoteSkipped) {
+            try {
+                com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaController skipNext notice: ${e.message}")
+            }
+            try {
+                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(downEvent)
+                audioManager.dispatchMediaKeyEvent(upEvent)
+            } catch (e: Exception) {
+                Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
+            }
         }
     }
 
     fun skipToPreviousMedia() {
-        try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
-        } catch (e: Exception) {
-            Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
-        }
-        try {
-            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            audioManager.dispatchMediaKeyEvent(downEvent)
-            audioManager.dispatchMediaKeyEvent(upEvent)
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
+        val remotePrev = runCatching {
+            com.tunemind.app.provider.SpotifyAppRemoteManager.skipPrev()
+        }.getOrDefault(false)
+        if (!remotePrev) {
+            try {
+                com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
+            }
+            try {
+                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(downEvent)
+                audioManager.dispatchMediaKeyEvent(upEvent)
+            } catch (e: Exception) {
+                Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
+            }
         }
     }
 

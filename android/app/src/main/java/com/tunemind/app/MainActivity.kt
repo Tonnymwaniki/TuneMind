@@ -135,6 +135,83 @@ open class MainActivity : ComponentActivity() {
 
                     val coroutineScope = rememberCoroutineScope()
                     var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
+                    var showSettingsScreen by remember { mutableStateOf(false) }
+                    var currentPagerPage by remember { mutableStateOf(1) }
+
+                    val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
+                    val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
+                    val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
+                    val spotifyAuthManager = remember { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
+
+                    LaunchedEffect(Unit) {
+                        com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
+                    }
+
+                    fun executeSingleAppToolAction(tool: com.tunemind.app.domain.execution.AgentToolCallPayload) {
+                        when (tool.action) {
+                            "PAUSE_PLAYBACK" -> {
+                                vm.setAgentPlaybackPaused()
+                            }
+                            "RESUME_PLAYBACK" -> {
+                                vm.setAgentPlaybackResumed()
+                            }
+                            "QUARANTINE_TO_VAULT" -> {
+                                val qTitle = tool.track_title ?: vm.homeState.value.nowPlaying?.title
+                                val qArtist = tool.track_artist ?: vm.homeState.value.nowPlaying?.artist ?: ""
+                                if (!qTitle.isNullOrBlank()) {
+                                    vm.quarantineTrack(qTitle, qArtist)
+                                }
+                            }
+                            "RESTORE_FROM_VAULT" -> {
+                                val rTitle = tool.track_title ?: ""
+                                vm.restoreTrackFromVaultByTitle(rTitle)
+                            }
+                            "SHIFT_ATMOSPHERE" -> {
+                                val pid = tool.palette_id
+                                if (!pid.isNullOrBlank()) {
+                                    vm.setAtmospherePaletteById(pid)
+                                } else {
+                                    vm.cycleAtmospherePalette()
+                                }
+                            }
+                            "SET_THEME_COLOR" -> {
+                                val hex = tool.custom_accent_hex
+                                val behavior = when (tool.theme_behavior?.uppercase()) {
+                                    "FIXED" -> com.tunemind.app.ui.theme.ThemeBehavior.FIXED
+                                    "ADAPTIVE" -> com.tunemind.app.ui.theme.ThemeBehavior.ADAPTIVE
+                                    "TIME_BASED" -> com.tunemind.app.ui.theme.ThemeBehavior.TIME_BASED
+                                    else -> null
+                                }
+                                vm.setCustomThemeAccentHex(hex, behavior)
+                            }
+                            "TOGGLE_AUTONOMOUS_DJ" -> {
+                                val target = tool.autonomous_dj_enabled
+                                    ?: !com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(context)
+                                com.tunemind.app.domain.voice.AgentSettingsStore.setAutonomousDjEnabled(context, target)
+                            }
+                            "TOGGLE_STAY_IN_TUNEMIND" -> {
+                                val target = tool.stay_in_tunemind_enabled
+                                    ?: !com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context)
+                                com.tunemind.app.domain.voice.AgentSettingsStore.setStayInTuneMindEnabled(context, target)
+                            }
+                            "OPEN_SETTINGS" -> {
+                                showSettingsScreen = true
+                            }
+                            "NAVIGATE_SCREEN" -> {
+                                val screen = tool.target_screen?.uppercase() ?: ""
+                                if (screen.contains("SETTING")) {
+                                    showSettingsScreen = true
+                                } else {
+                                    showSettingsScreen = false
+                                    requestedScreenPage = when {
+                                        screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
+                                        screen.contains("RHYTHM") || screen.contains("DNA") -> 2
+                                        else -> 1
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Voice Agent and Orchestrator with Full Telemetry + Multi-Tool Execution Bridge
                     val agentVoiceManager = remember {
@@ -147,44 +224,32 @@ open class MainActivity : ComponentActivity() {
                             getHearingInsights = { vm.hearingInsightsState.value },
                             getVaultTracks = { vm.vaultState.value },
                             getDopamineCapsule = { vm.compileDopamineCapsule() },
+                            getAppState = {
+                                val prefs = vm.themePreferences.value
+                                val screenName = when {
+                                    showSettingsScreen -> "SETTINGS"
+                                    currentPagerPage == 0 -> "DOPAMINE_VAULT"
+                                    currentPagerPage == 2 -> "RHYTHM_DNA"
+                                    else -> "PULSE_AGENT"
+                                }
+                                org.json.JSONObject().apply {
+                                    put("current_screen", screenName)
+                                    put("theme_behavior", prefs.behavior.name)
+                                    put("palette_id", vm.adaptiveThemeState.value.activePalette.id)
+                                    put("custom_accent_hex", prefs.customAccentHex ?: "")
+                                    put("autonomous_dj_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(context))
+                                    put("stay_in_tunemind_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context))
+                                    put("spotify_connected", spotifyAuthManager.isAuthenticated())
+                                    put("app_remote_connected", com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected())
+                                }
+                            },
                             onTrackDispatched = { dispatchedTitle, dispatchedArtist, dispatchedPkg ->
                                 vm.setAgentActiveTrack(dispatchedTitle, dispatchedArtist, dispatchedPkg)
                             },
                             onToolActionExecuted = { tool ->
-                                when (tool.action) {
-                                    "PAUSE_PLAYBACK" -> {
-                                        vm.setAgentPlaybackPaused()
-                                    }
-                                    "RESUME_PLAYBACK" -> {
-                                        vm.setAgentPlaybackResumed()
-                                    }
-                                    "QUARANTINE_TO_VAULT" -> {
-                                        val qTitle = tool.track_title ?: vm.homeState.value.nowPlaying?.title
-                                        val qArtist = tool.track_artist ?: vm.homeState.value.nowPlaying?.artist ?: ""
-                                        if (!qTitle.isNullOrBlank()) {
-                                            vm.quarantineTrack(qTitle, qArtist)
-                                        }
-                                    }
-                                    "RESTORE_FROM_VAULT" -> {
-                                        val rTitle = tool.track_title ?: ""
-                                        vm.restoreTrackFromVaultByTitle(rTitle)
-                                    }
-                                    "SHIFT_ATMOSPHERE" -> {
-                                        val pid = tool.palette_id
-                                        if (!pid.isNullOrBlank()) {
-                                            vm.setAtmospherePaletteById(pid)
-                                        } else {
-                                            vm.cycleAtmospherePalette()
-                                        }
-                                    }
-                                    "NAVIGATE_SCREEN" -> {
-                                        val screen = tool.target_screen?.uppercase() ?: ""
-                                        requestedScreenPage = when {
-                                            screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
-                                            screen.contains("RHYTHM") || screen.contains("DNA") -> 2
-                                            else -> 1
-                                        }
-                                    }
+                                executeSingleAppToolAction(tool)
+                                tool.extra_actions.forEach { extra ->
+                                    executeSingleAppToolAction(extra)
                                 }
                             }
                         )
@@ -209,6 +274,12 @@ open class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(isMainAppActive) {
                         agentVoiceManager.setForegroundActive(isMainAppActive)
+                        if (isMainAppActive && spotifyAuthManager.isAuthenticated()) {
+                            com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
+                                context = context,
+                                showAuthView = false
+                            )
+                        }
                     }
 
                     DisposableEffect(lifecycleOwner, agentVoiceManager, isMainAppActive) {
@@ -280,12 +351,20 @@ open class MainActivity : ComponentActivity() {
                                 pageCount = { 3 }
                             )
 
+                            LaunchedEffect(pagerState.currentPage) {
+                                currentPagerPage = pagerState.currentPage
+                            }
+
                             LaunchedEffect(requestedScreenPage) {
                                 val target = requestedScreenPage
                                 if (target != null && target in 0..2) {
                                     pagerState.animateScrollToPage(target)
                                     requestedScreenPage = null
                                 }
+                            }
+
+                            androidx.activity.compose.BackHandler(enabled = showSettingsScreen) {
+                                showSettingsScreen = false
                             }
 
                             Box(
@@ -369,7 +448,11 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onCycleAtmospherePalette = {
                                                     vm.cycleAtmospherePalette()
-                                                }
+                                                },
+                                                onOpenSettings = {
+                                                    showSettingsScreen = true
+                                                },
+                                                autonomousDjEnabled = autonomousDjEnabled
                                             )
                                         }
                                         2 -> {
@@ -438,6 +521,22 @@ open class MainActivity : ComponentActivity() {
                                         .navigationBarsPadding()
                                         .padding(bottom = 18.dp)
                                 )
+
+                                // Fullscreen TuneMind Settings Overlay
+                                if (showSettingsScreen) {
+                                    com.tunemind.app.ui.screens.SettingsScreen(
+                                        vm = vm,
+                                        onBack = { showSettingsScreen = false },
+                                        onOpenCrossApp = {
+                                            showSettingsScreen = false
+                                            coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                        },
+                                        onOpenWeeklyReport = {
+                                            showSettingsScreen = false
+                                            coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

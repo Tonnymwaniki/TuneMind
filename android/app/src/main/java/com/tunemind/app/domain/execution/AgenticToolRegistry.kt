@@ -113,10 +113,11 @@ object AgenticToolRegistry {
      */
     fun executeDecisionAndTools(context: Context, decision: SatietyDecisionPayload) {
         val appContext = context.applicationContext
+        val allowBackgroundPlayback = com.tunemind.app.domain.voice.AgentSettingsStore.isBackgroundAutoPlayEnabled(appContext)
         Log.i(
             TAG,
             "Executing Satiety Decision: state=${decision.state}, action=${decision.action}, " +
-                "score=${decision.satietyScore}%, tools=${decision.toolCalls.size}"
+                "score=${decision.satietyScore}%, tools=${decision.toolCalls.size}, allowBgPlay=$allowBackgroundPlayback"
         )
 
         var playbackExecutedViaTool = false
@@ -127,14 +128,18 @@ object AgenticToolRegistry {
             when (tool.toolName) {
                 "SpotifyPlaybackTool" -> {
                     playbackExecutedViaTool = true
-                    SpotifyPlaybackTool.execute(
-                        context = appContext,
-                        command = args.optString("command", decision.action),
-                        targetUri = args.optString("target_uri", "").ifBlank { decision.recommendedUri },
-                        searchQuery = args.optString("search_query", "").ifBlank { decision.recommendedQuery },
-                        targetGenre = args.optString("target_genre", "").ifBlank { decision.targetGenre },
-                        rationale = args.optString("rationale", decision.reasoning)
-                    )
+                    if (allowBackgroundPlayback) {
+                        SpotifyPlaybackTool.execute(
+                            context = appContext,
+                            command = args.optString("command", decision.action),
+                            targetUri = args.optString("target_uri", "").ifBlank { decision.recommendedUri },
+                            searchQuery = args.optString("search_query", "").ifBlank { decision.recommendedQuery },
+                            targetGenre = args.optString("target_genre", "").ifBlank { decision.targetGenre },
+                            rationale = args.optString("rationale", decision.reasoning)
+                        )
+                    } else {
+                        Log.i(TAG, "Blocked background SpotifyPlaybackTool call because backgroundAutoPlayEnabled is false.")
+                    }
                 }
                 "NotificationTool" -> {
                     notificationExecutedViaTool = true
@@ -144,14 +149,14 @@ object AgenticToolRegistry {
                         headline = args.optString("headline", "TuneMind Satiety Intelligence"),
                         subtext = args.optString("subtext", decision.reasoning),
                         satietyScore = args.optInt("satiety_score", decision.satietyScore),
-                        showHeadsUpBanner = args.optBoolean("show_heads_up_banner", decision.isFatigued)
+                        showHeadsUpBanner = allowBackgroundPlayback && args.optBoolean("show_heads_up_banner", decision.isFatigued)
                     )
                 }
             }
         }
 
         // If the backend returned a raw {"state": "fatigued", "action": "skip_track|change_genre"} without explicit tool_calls array:
-        if (!playbackExecutedViaTool && decision.isFatigued) {
+        if (!playbackExecutedViaTool && decision.isFatigued && allowBackgroundPlayback) {
             SpotifyPlaybackTool.execute(
                 context = appContext,
                 command = decision.action,
@@ -173,7 +178,7 @@ object AgenticToolRegistry {
                 },
                 subtext = decision.reasoning,
                 satietyScore = decision.satietyScore,
-                showHeadsUpBanner = decision.isFatigued
+                showHeadsUpBanner = false
             )
         }
     }

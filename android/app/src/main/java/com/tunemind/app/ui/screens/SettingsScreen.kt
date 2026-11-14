@@ -46,6 +46,17 @@ fun SettingsScreen(
     val audioFocusBehavior by vm.audioFocusBehavior.collectAsState()
     val isDecibelSafetyEnabled by vm.isDecibelSafetyAlertEnabled.collectAsState()
 
+    val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
+    val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
+    val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
+    val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
+    val appRemoteError by com.tunemind.app.provider.SpotifyAppRemoteManager.lastConnectionErrorFlow.collectAsState()
+
+    val spotifyAuthManager = remember(context) { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
+    var isSpotifyAuthorized by remember { mutableStateOf(spotifyAuthManager.isAuthenticated()) }
+    var hasOverlayPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)) }
+    val isSpotifyInstalled = remember(context) { com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context) }
+
     var persistentListener by remember { mutableStateOf(true) }
     var fatigueSensitivity by remember { mutableStateOf(0.75f) }
     var chronoReceptivity by remember { mutableStateOf(true) }
@@ -56,17 +67,64 @@ fun SettingsScreen(
     val colors = TuneMindTheme.colors
 
     LaunchedEffect(Unit) {
+        com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
         vm.checkBatteryOptimization(context)
+        isSpotifyAuthorized = spotifyAuthManager.isAuthenticated()
+        hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.primaryBackground)
+            .statusBarsPadding()
             .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 0. TOP BACK BAR
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = colors.secondaryBackground,
+                    border = BorderStroke(1.dp, colors.border.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable { onBack() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = colors.primaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "TuneMind Settings",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText
+                    )
+                    Text(
+                        text = "Agent Autonomy • Stay-in-TuneMind • Spotify SDK",
+                        fontSize = 11.sp,
+                        color = colors.secondaryText
+                    )
+                }
+            }
+        }
+
         // 1. TOP SWITCHBOARD HEADER STRIP
         Surface(
             shape = RoundedCornerShape(10.dp),
@@ -89,7 +147,7 @@ fun SettingsScreen(
                             .background(colors.primaryAccent)
                     )
                     Text(
-                        text = "STUDIO SWITCHBOARD // HARDWARE ENGINE",
+                        text = "AGENT AUTONOMY & STAY-IN-TUNEMIND",
                         fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -99,12 +157,247 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    text = "DSP OS BUS",
+                    text = if (appRemoteConnected) "REMOTE READY" else "ON-DEMAND",
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.SecondaryAccent
+                    color = if (appRemoteConnected) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.SecondaryAccent
                 )
+            }
+        }
+
+        // 1B. AUTONOMOUS DJ & STAY-IN-TUNEMIND AGENT CONTROLS
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.secondaryBackground,
+            border = BorderStroke(1.2.dp, colors.primaryAccent.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Toggle 1: Autonomous End-of-Song DJ
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Autonomous End-of-Song DJ",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (autonomousDjEnabled) {
+                                "ON: Asks what to play next when a track ends, or auto-spins Claude's curated pick (works with screen off)."
+                            } else {
+                                "OFF (Default): TuneMind never speaks or plays music unprompted when songs change."
+                            },
+                            fontSize = 11.sp,
+                            color = colors.secondaryText,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = autonomousDjEnabled,
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setAutonomousDjEnabled(context, it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Toggle 2: Stay-in-TuneMind Playback
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Stay-in-TuneMind Playback",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (stayInTuneMindEnabled) {
+                                "ON: Streams songs via Spotify App Remote SDK (Free & Premium) + Web API without stranding you in Spotify."
+                            } else {
+                                "OFF: Opens the Spotify app window directly when playing a song."
+                            },
+                            fontSize = 11.sp,
+                            color = colors.secondaryText,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = stayInTuneMindEnabled,
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setStayInTuneMindEnabled(context, it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Toggle 3: Background Auto-Intervention (Off by default for consent)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Allow Background Auto-Intervention",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (backgroundAutoPlayEnabled) {
+                                "ON: Background satiety checks can switch fatigued tracks automatically."
+                            } else {
+                                "OFF (Recommended): Only you approve and trigger music playback."
+                            },
+                            fontSize = 11.sp,
+                            color = colors.secondaryText,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = backgroundAutoPlayEnabled,
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setBackgroundAutoPlayEnabled(context, it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Spotify App Remote + OAuth Connection Card
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Spotify Remote SDK & Account",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryText
+                            )
+                            Text(
+                                text = when {
+                                    appRemoteConnected -> "Connected to Spotify App Remote (Free & Premium silent control active)"
+                                    !isSpotifyInstalled -> "Spotify app not detected on device"
+                                    !appRemoteError.isNullOrBlank() -> "App Remote status: ${appRemoteError?.take(60)}"
+                                    isSpotifyAuthorized -> "OAuth connected • Tap Connect Remote once for zero-switch playback"
+                                    else -> "Authorize Spotify so TuneMind controls playback and discovers unheard music"
+                                },
+                                fontSize = 10.sp,
+                                color = colors.secondaryText
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (appRemoteConnected) DeepObsidianAmber.DecibelSafe.copy(alpha = 0.15f) else colors.cardSurface,
+                            border = BorderStroke(
+                                1.dp,
+                                if (appRemoteConnected) DeepObsidianAmber.DecibelSafe else colors.border
+                            )
+                        ) {
+                            Text(
+                                text = if (appRemoteConnected) "LINKED" else "STANDBY",
+                                fontSize = 8.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (appRemoteConnected) DeepObsidianAmber.DecibelSafe else colors.primaryAccent,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (isSpotifyInstalled) {
+                            Button(
+                                onClick = {
+                                    com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
+                                        context = context,
+                                        showAuthView = true
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = if (appRemoteConnected) "Remote Linked" else "Connect Remote",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DeepObsidianAmber.AppBackground
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                spotifyAuthManager.launchSpotifyAuth(context)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.6f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = if (isSpotifyAuthorized) "Re-Auth Spotify" else "Link Spotify",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryAccent
+                            )
+                        }
+                    }
+                }
+
+                // Display Over Other Apps (SYSTEM_ALERT_WINDOW) helper for instant bounce-back
+                if (!hasOverlayPermission) {
+                    HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Return-to-TuneMind Overlay",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primaryText
+                            )
+                            Text(
+                                text = "Allows Android to return straight into TuneMind if Spotify cold-starts.",
+                                fontSize = 10.sp,
+                                color = colors.secondaryText
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
+                                }
+                            }
+                        ) {
+                            Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.primaryAccent)
+                        }
+                    }
+                }
             }
         }
 
