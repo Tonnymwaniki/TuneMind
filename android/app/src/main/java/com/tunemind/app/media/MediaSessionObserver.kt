@@ -18,6 +18,16 @@ import com.tunemind.app.service.NotificationAccess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+data class ActivePlaybackSnapshot(
+    val packageName: String,
+    val title: String,
+    val artist: String,
+    val isPlaying: Boolean,
+    val positionMs: Long,
+    val durationMs: Long,
+    val updatedAtElapsedMs: Long
+)
+
 /** Manages active MediaController callbacks while the notification listener is connected. */
 class MediaSessionObserver(
     private val service: NotificationListenerService,
@@ -97,6 +107,50 @@ class MediaSessionObserver(
             targetPackage == null || entry.controller.packageName == targetPackage
         } ?: controllers.values.firstOrNull() ?: return null
         return entry.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+    }
+
+    /**
+     * Returns a real-time snapshot of the currently active music player session, including
+     * live interpolated `positionMs` and `durationMs` so TuneMind can detect when a song reaches
+     * its end even when the phone screen is off.
+     */
+    fun getActivePlaybackSnapshot(targetPackage: String? = null): ActivePlaybackSnapshot? {
+        refreshSessions()
+        val playingEntry = controllers.values.firstOrNull { entry ->
+            (targetPackage == null || entry.controller.packageName == targetPackage) &&
+                entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        }
+        val entry = playingEntry ?: controllers.values.firstOrNull { entry ->
+            targetPackage == null || entry.controller.packageName == targetPackage
+        } ?: controllers.values.firstOrNull() ?: return null
+
+        val metadata = entry.controller.metadata
+        val state = entry.controller.playbackState
+        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
+        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
+        val durationMs = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
+            ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+
+        val isPlayingNow = state?.state == android.media.session.PlaybackState.STATE_PLAYING
+        val basePos = state?.position ?: 0L
+        val lastUpdateElapsed = state?.lastPositionUpdateTime ?: 0L
+        val speed = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val interpolatedPos = if (isPlayingNow && lastUpdateElapsed > 0L && nowElapsed >= lastUpdateElapsed) {
+            basePos + ((nowElapsed - lastUpdateElapsed) * speed).toLong()
+        } else {
+            basePos
+        }
+
+        return ActivePlaybackSnapshot(
+            packageName = sourcePackage(entry.controller) ?: "com.spotify.music",
+            title = title,
+            artist = artist,
+            isPlaying = isPlayingNow,
+            positionMs = interpolatedPos.coerceAtLeast(0L),
+            durationMs = durationMs.coerceAtLeast(0L),
+            updatedAtElapsedMs = nowElapsed
+        )
     }
 
     fun togglePlayback() {
@@ -300,6 +354,33 @@ class MediaSessionObserver(
         if (entry.advertisementFilterState.shouldSuppress(metadata)) {
             diagnosticStatus = "Skipping explicitly marked advertisement from ${source ?: "unknown source"}"
             return
+        }
+        runCatching {
+            val snapTitle = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
+            val snapArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
+            val snapDur = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
+                ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+            val isPlayingNow = state?.state == android.media.session.PlaybackState.STATE_PLAYING
+            val basePos = state?.position ?: 0L
+            val lastUpd = state?.lastPositionUpdateTime ?: 0L
+            val spd = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val interpPos = if (isPlayingNow && lastUpd > 0L && nowElapsed >= lastUpd) {
+                basePos + ((nowElapsed - lastUpd) * spd).toLong()
+            } else {
+                basePos
+            }
+            TuneMindListenerService.onPlaybackSnapshotUpdated?.invoke(
+                ActivePlaybackSnapshot(
+                    packageName = source ?: "com.spotify.music",
+                    title = snapTitle,
+                    artist = snapArtist,
+                    isPlaying = isPlayingNow,
+                    positionMs = interpPos.coerceAtLeast(0L),
+                    durationMs = snapDur.coerceAtLeast(0L),
+                    updatedAtElapsedMs = nowElapsed
+                )
+            )
         }
         val fingerprint = callbackFingerprint(
             controllerKey = entry.controller.sessionToken.toString(),

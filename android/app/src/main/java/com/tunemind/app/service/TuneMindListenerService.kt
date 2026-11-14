@@ -159,6 +159,9 @@ class TuneMindListenerService : NotificationListenerService() {
     fun getActiveTitle(targetPackage: String? = null): String? =
         observerOrNull()?.getActiveTitle(targetPackage)
 
+    fun getActivePlaybackSnapshot(targetPackage: String? = null): com.tunemind.app.media.ActivePlaybackSnapshot? =
+        observerOrNull()?.getActivePlaybackSnapshot(targetPackage)
+
     fun togglePlayback() {
         observerOrNull()?.togglePlayback()
     }
@@ -201,5 +204,8 @@ class TuneMindListenerService : NotificationListenerService() {
         @Volatile
         var instance: TuneMindListenerService? = null
             private set
+
+        @Volatile
+        var onPlaybackSnapshotUpdated: ((com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit)? = null
     }
 }

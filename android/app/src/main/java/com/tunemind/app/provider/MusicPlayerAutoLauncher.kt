@@ -161,37 +161,55 @@ object MusicPlayerAutoLauncher {
 
         val sessionExtras = buildAutoPlayExtras(cleanTitle, cleanArtist, fullSearchQuery)
 
-        // 2. If we have an exact `spotify:track:<id>` URI:
-        //    - Inject `playFromUri` into active MediaSession immediately
-        //    - Fire Spotify Web API `PUT /v1/me/player/play`
-        //    - Open `spotify:track:<id>` with Google Assistant Referrer so Spotify starts streaming immediately
+        // 2. UNIVERSAL 2-TIER STAY-IN-TUNEMIND PLAYBACK (Built for Spotify Premium & Free + Screen Off):
+        //    - TIER 1 (Silent Background Play — Zero App Switch):
+        //      Injects `playFromUri` into active MediaSession + triggers Spotify Web API `PUT /v1/me/player/play`.
+        //      If Spotify accepts Web API play OR active MediaSession starts playing in the background within 850ms,
+        //      we DO NOT open Spotify's UI Activity at all — the user stays 100% inside TuneMind!
+        //    - TIER 2 (Cold-Start / Free-Tier Wake + Immediate Bounce-Back to TuneMind):
+        //      If Spotify's process was cold/asleep or requires an intent wake-up, opens `spotify:track:<id>` with
+        //      Google Assistant Referrer, kicks playback, and bounces back into TuneMind as soon as audio starts.
         if (!resolvedSpotifyUri.isNullOrBlank()) {
+            var sessionDispatched = false
             try {
                 val listener = TuneMindListenerService.instance
                 if (listener != null && listener.hasActiveSession(targetPkg)) {
-                    listener.playFromUri(targetPkg, Uri.parse(resolvedSpotifyUri), sessionExtras)
+                    sessionDispatched = listener.playFromUri(targetPkg, Uri.parse(resolvedSpotifyUri), sessionExtras)
                     listener.play(targetPkg)
                 }
             } catch (_: Exception) {}
 
-            // Trigger Spotify Web API PUT /v1/me/player/play in parallel
+            // Attempt direct silent Web API playback first (returns true on Spotify Premium when device is reachable)
+            val webApiStarted = SpotifyTrackUriResolver.triggerWebApiRemotePlayBlocking(context, resolvedSpotifyUri)
+            // Also fire async reinforcement waves
             SpotifyTrackUriResolver.triggerWebApiRemotePlayAsync(context, resolvedSpotifyUri)
 
-            try {
-                val trackUriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(resolvedSpotifyUri)).apply {
-                    if (targetPkg != null) setPackage(targetPkg)
-                    putExtra(Intent.EXTRA_REFERRER, Uri.parse(GOOGLE_ASSISTANT_REFERRER))
-                    putExtra("android.intent.extra.REFERRER_NAME", GOOGLE_ASSISTANT_REFERRER)
-                    putExtra("android.intent.extra.START_PLAYBACK", true)
-                    putExtra("autostart", true)
-                    putExtra("play", true)
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_NO_ANIMATION
-                    )
+            // Check if MediaSession already started playing the new track in the background (works for active sessions)
+            var mediaSessionStartedSilently = false
+            if (!webApiStarted && sessionDispatched) {
+                for (waitMs in listOf(260L, 300L, 300L)) {
+                    try {
+                        Thread.sleep(waitMs)
+                    } catch (_: InterruptedException) {}
+                    val listener = TuneMindListenerService.instance
+                    val currentTitle = listener?.getActiveTitle(targetPkg)?.trim()
+                    val switchedToNewTrack = !currentTitle.isNullOrBlank() && (
+                        currentTitle.contains(cleanTitle, ignoreCase = true) ||
+                            cleanTitle.contains(currentTitle, ignoreCase = true) ||
+                            (!previousTitle.isNullOrBlank() && !currentTitle.equals(previousTitle, ignoreCase = true))
+                        )
+                    if (switchedToNewTrack && listener?.isPlaying() == true) {
+                        mediaSessionStartedSilently = true
+                        break
+                    }
                 }
-                context.startActivity(trackUriIntent)
+            }
+
+            if (webApiStarted || mediaSessionStartedSilently) {
+                Log.i(
+                    TAG,
+                    "✅ Tier-1 Silent Stay-in-TuneMind playback active (webApi=$webApiStarted, mediaSession=$mediaSessionStartedSilently) for '$cleanTitle'"
+                )
                 scheduleAutoPlayKicker(
                     context = context,
                     targetPackage = targetPkg,
@@ -200,10 +218,38 @@ object MusicPlayerAutoLauncher {
                     previousTitle = previousTitle,
                     spotifyTrackUri = resolvedSpotifyUri
                 )
-                scheduleReturnToTuneMindWhenPlaying(context)
+                // Safety net: if Web API returned 204 on a sleeping phone device that still hasn't started audio after 1900ms,
+                // wake Spotify and immediately return to TuneMind.
+                mainHandler.postDelayed({
+                    try {
+                        val listener = TuneMindListenerService.instance
+                        if (listener == null || !listener.isPlaying()) {
+                            Log.i(TAG, "Tier-1 safety net: waking Spotify cold session and bouncing back to TuneMind...")
+                            wakeSpotifyActivityAndBounceBack(
+                                context = context,
+                                targetPkg = targetPkg,
+                                resolvedSpotifyUri = resolvedSpotifyUri,
+                                track = track,
+                                fullSearchQuery = fullSearchQuery,
+                                previousTitle = previousTitle
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }, 1900L)
                 return true
-            } catch (e: Exception) {
-                Log.w(TAG, "Exact spotify:track URI launch notice: ${e.message}")
+            }
+
+            // TIER 2: Cold-Start / Spotify Free Fallback — Wake Spotify & immediately bounce back to TuneMind
+            if (wakeSpotifyActivityAndBounceBack(
+                    context = context,
+                    targetPkg = targetPkg,
+                    resolvedSpotifyUri = resolvedSpotifyUri,
+                    track = track,
+                    fullSearchQuery = fullSearchQuery,
+                    previousTitle = previousTitle
+                )
+            ) {
+                return true
             }
         }
 
@@ -240,7 +286,7 @@ object MusicPlayerAutoLauncher {
                     previousTitle = previousTitle,
                     spotifyTrackUri = resolvedSpotifyUri
                 )
-                scheduleReturnToTuneMindWhenPlaying(context)
+                scheduleReturnToTuneMindWhenPlaying(context, previousTitle, cleanTitle)
                 return true
             } catch (e: Exception) {
                 Log.d(TAG, "Media play from search not accepted by $targetPkg, falling back: ${e.message}")
@@ -271,13 +317,53 @@ object MusicPlayerAutoLauncher {
                     previousTitle = previousTitle,
                     spotifyTrackUri = resolvedSpotifyUri
                 )
-                scheduleReturnToTuneMindWhenPlaying(context)
+                scheduleReturnToTuneMindWhenPlaying(context, previousTitle, cleanTitle)
                 return true
             } catch (e: Exception) {
                 Log.w(TAG, "Deep link launch failed: ${e.message}")
             }
         }
         return false
+    }
+
+    private fun wakeSpotifyActivityAndBounceBack(
+        context: Context,
+        targetPkg: String?,
+        resolvedSpotifyUri: String,
+        track: RecommendedTrack,
+        fullSearchQuery: String,
+        previousTitle: String?
+    ): Boolean {
+        return try {
+            val cleanTitle = sanitizeTrackTitleForPlay(track.title)
+            val trackUriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(resolvedSpotifyUri)).apply {
+                if (targetPkg != null) setPackage(targetPkg)
+                putExtra(Intent.EXTRA_REFERRER, Uri.parse(GOOGLE_ASSISTANT_REFERRER))
+                putExtra("android.intent.extra.REFERRER_NAME", GOOGLE_ASSISTANT_REFERRER)
+                putExtra("android.intent.extra.START_PLAYBACK", true)
+                putExtra("autostart", true)
+                putExtra("play", true)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION
+                )
+            }
+            context.startActivity(trackUriIntent)
+            scheduleAutoPlayKicker(
+                context = context,
+                targetPackage = targetPkg,
+                track = track,
+                overrideQuery = fullSearchQuery,
+                previousTitle = previousTitle,
+                spotifyTrackUri = resolvedSpotifyUri
+            )
+            scheduleReturnToTuneMindWhenPlaying(context, previousTitle, cleanTitle)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Exact spotify:track URI launch notice: ${e.message}")
+            false
+        }
     }
 
     private fun buildAutoPlayExtras(
@@ -297,32 +383,74 @@ object MusicPlayerAutoLauncher {
     }
 
     /**
-     * Brings TuneMind back to the foreground ONLY AFTER Spotify has started playing the new song
-     * (checked at 3800ms and 4900ms), so Spotify is never interrupted while buffering the track.
+     * Brings TuneMind back to the foreground as soon as Spotify starts playing the track (or by 2.65s at latest
+     * so the user is never stranded in Spotify), using three complementary Android mechanisms:
+     * 1. `ActivityManager.moveTaskToFront` (via `REORDER_TASKS` permission)
+     * 2. `PendingIntent.getActivity(...).send()`
+     * 3. `context.startActivity(returnIntent)` with `FLAG_ACTIVITY_REORDER_TO_FRONT | FLAG_ACTIVITY_SINGLE_TOP`
      */
-    private fun scheduleReturnToTuneMindWhenPlaying(context: Context) {
+    private fun scheduleReturnToTuneMindWhenPlaying(
+        context: Context,
+        previousTitle: String? = null,
+        expectedTitle: String? = null
+    ) {
         var returned = false
-        for (checkDelay in listOf(3800L, 4900L)) {
+        val checkDelays = listOf(1050L, 1550L, 2100L, 2700L, 3450L, 4300L)
+        for (checkDelay in checkDelays) {
             mainHandler.postDelayed({
                 if (returned) return@postDelayed
                 try {
                     val listener = TuneMindListenerService.instance
-                    if (listener != null && listener.isPlaying()) {
+                    val activeTitle = listener?.getActiveTitle()?.trim()
+                    val titleSwitched = !activeTitle.isNullOrBlank() && (
+                        (!expectedTitle.isNullOrBlank() && activeTitle.contains(expectedTitle, ignoreCase = true)) ||
+                            (!previousTitle.isNullOrBlank() && !activeTitle.equals(previousTitle, ignoreCase = true))
+                        )
+                    val isPlayingNow = listener?.isPlaying() == true
+                    // Return immediately once playing (after 1.05s) OR unconditionally by 2700ms so user is never left in Spotify
+                    if ((isPlayingNow && (titleSwitched || checkDelay >= 1550L)) || checkDelay >= 2700L) {
                         returned = true
-                        val returnIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
-                            addFlags(
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_NO_ANIMATION
-                            )
-                        }
-                        context.startActivity(returnIntent)
+                        bringTuneMindToFrontNow(context)
                     }
                 } catch (e: Exception) {
                     Log.d(TAG, "Return to TuneMind foreground notice: ${e.message}")
                 }
             }, checkDelay)
+        }
+    }
+
+    fun bringTuneMindToFrontNow(context: Context) {
+        try {
+            // 1. Move TuneMind's task to front via ActivityManager (uses REORDER_TASKS permission)
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            am?.appTasks?.forEach { appTask ->
+                runCatching { appTask.moveToFront() }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val returnIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
+                action = Intent.ACTION_MAIN
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION
+                )
+            }
+            // 2. Dispatch via PendingIntent for Android 12-15 background launch privilege
+            runCatching {
+                val piFlags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                val pi = android.app.PendingIntent.getActivity(context, 7742, returnIntent, piFlags)
+                pi.send()
+            }
+            // 3. Also call startActivity directly
+            context.startActivity(returnIntent)
+            Log.i(TAG, "🔄 Returned user to TuneMind foreground while music streams in background.")
+        } catch (e: Exception) {
+            Log.d(TAG, "bringTuneMindToFrontNow notice: ${e.message}")
         }
     }
 

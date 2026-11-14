@@ -708,6 +708,74 @@ object SpotifyTrackUriResolver {
     }
 
     /**
+     * Attempts to start playback directly via Spotify Web API (`PUT /v1/me/player/play`) within a fast
+     * 1.3s budget so the user stays 100% inside TuneMind without opening the Spotify UI activity.
+     * Returns `true` if Spotify Web API accepted the play request (HTTP 2xx / 204).
+     */
+    fun triggerWebApiRemotePlayBlocking(context: Context, spotifyTrackUri: String): Boolean {
+        if (!spotifyTrackUri.startsWith("spotify:track:")) return false
+        val appContext = context.applicationContext
+        return runBlocking {
+            withTimeoutOrNull(1350L) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val authManager = SpotifyAuthManager(appContext)
+                        if (!authManager.isAuthenticated()) return@withContext false
+                        val token = authManager.getValidAccessToken() ?: return@withContext false
+
+                        val (deviceId, isActive) = findActiveOrSmartphoneDevice(token)
+                        if (!deviceId.isNullOrBlank() && !isActive) {
+                            runCatching {
+                                val transferPayload = JSONObject().apply {
+                                    put("device_ids", JSONArray().put(deviceId))
+                                    put("play", true)
+                                }
+                                val transferReq = Request.Builder()
+                                    .url("https://api.spotify.com/v1/me/player")
+                                    .addHeader("Authorization", "Bearer $token")
+                                    .addHeader("Content-Type", "application/json")
+                                    .put(transferPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                                    .build()
+                                httpClient.newCall(transferReq).execute().close()
+                            }
+                        }
+
+                        val playUrl = if (!deviceId.isNullOrBlank()) {
+                            "https://api.spotify.com/v1/me/player/play?device_id=${Uri.encode(deviceId)}"
+                        } else {
+                            "https://api.spotify.com/v1/me/player/play"
+                        }
+
+                        val payload = JSONObject().apply {
+                            put("uris", JSONArray().put(spotifyTrackUri))
+                            put("position_ms", 0)
+                        }
+
+                        val req = Request.Builder()
+                            .url(playUrl)
+                            .addHeader("Authorization", "Bearer $token")
+                            .addHeader("Content-Type", "application/json")
+                            .put(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                            .build()
+
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
+                                Log.i(TAG, "✅ Silent stay-in-TuneMind Web API play succeeded for $spotifyTrackUri")
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.d(TAG, "triggerWebApiRemotePlayBlocking notice: ${e.message}")
+                        false
+                    }
+                }
+            } ?: false
+        }
+    }
+
+    /**
      * Fires `PUT https://api.spotify.com/v1/me/player/play` with `{"uris": ["spotify:track:<id>"]}`
      * across 4 waves (`150ms`, `750ms`, `900ms`, `1100ms`) and transfers active playback to the
      * smartphone device if needed so the track starts streaming automatically.

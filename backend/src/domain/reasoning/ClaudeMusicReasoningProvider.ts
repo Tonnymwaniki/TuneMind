@@ -580,8 +580,9 @@ HOW YOU REASON & USE YOUR TOOLS:
    - If the user asks for a new song, a fresh recommendation, or a vibe ("play for me a new song", "recommend a song for me", "give me something fresh", "play some chill afrobeats"), call 'discover_and_recommend_spotify_tracks' to fetch real, verified Spotify tracks tailored to their taste, pick the best one, and call 'submit_agent_turn' with action="PROPOSE_TRACK"!
    - If the user names a specific song or artist ("play Calm Down by Rema", "play Mbosso"), call 'search_spotify_catalog' to verify the real track and get its exact 'spotify:track:<id>' URI, then call 'submit_agent_turn' with action="PROPOSE_TRACK"!
 
-2. TWO-STEP APPROVAL FLOW FOR SONGS:
-   - Whenever you find, recommend, or select a song for the user, ALWAYS use action="PROPOSE_TRACK" and expect_follow_up=true first, asking naturally if they want you to spin it right now.
+2. TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ ('AUTO_CURATE_NEXT_TRACK'):
+   - For normal user requests where you find, recommend, or select a song, use action="PROPOSE_TRACK" and expect_follow_up=true first, asking naturally if they want you to spin it right now.
+   - EXCEPTION — AUTONOMOUS END-OF-SONG HANDOVER: When 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song just finished playing (including when the user's phone screen is off). You MUST call 'discover_and_recommend_spotify_tracks' (or pick a fresh unplayed track from 'fresh_low_satiety_user_tracks') and immediately call 'submit_agent_turn' with action="PLAY_TRACK_NOW", expect_follow_up=false, and a smooth DJ announcement (e.g., "Up next for your flow, spinning [Title] by [Artist].") without asking a question!
    - When 'pending_proposed_track' is present in the context and the user approves it (e.g. "yes", "yeah", "play it", "go ahead", "sure", "do it", "sounds good"), immediately call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the pending track's title, artist, and spotify_uri!
    - If 'pending_proposed_track' is present and the user rejects it or asks for something else ("no", "not that one", "give me something slower", "another one"), call 'discover_and_recommend_spotify_tracks' to find a better match and propose the new track!
 
@@ -1271,21 +1272,36 @@ Always conclude your turn by calling the 'submit_agent_turn' tool with your natu
         }
       }
 
-      // Enforce two-step approval: only allow PLAY_TRACK_NOW if the user is approving a pending proposed track!
+      const isAutoCurateNextTrack = /^AUTO_CURATE_NEXT_TRACK\b/i.test(userCommandRaw);
+
+      // Enforce two-step approval for normal turns, EXCEPT when AUTO_CURATE_NEXT_TRACK is triggered at end-of-song!
       const isApprovingPending = Boolean(
         pending &&
         (action === 'PLAY_TRACK_NOW' ||
           (trackTitle && pending.title.toLowerCase() === trackTitle.toLowerCase() && /\b(yes|yeah|yep|sure|ok|okay|play|go ahead|do it|spin|approve|ndio|sawa)\b/i.test(userCommandRaw)))
       );
 
-      if (action === 'PLAY_TRACK_NOW' && !isApprovingPending) {
+      if (isAutoCurateNextTrack) {
+        if (!trackTitle && freshTracks[0]) {
+          trackTitle = freshTracks[0].title;
+          trackArtist = freshTracks[0].artist;
+          spotifyUri = freshTracks[0].trackId || spotifyUri;
+        }
+        if (trackTitle) {
+          action = 'PLAY_TRACK_NOW';
+          const cleanArt = trackArtist && trackArtist !== 'Unknown Artist' ? ` by ${trackArtist}` : '';
+          if (!ttsText || ttsText.includes('?')) {
+            ttsText = `Up next in your flow, playing ${trackTitle}${cleanArt} right now.`;
+          }
+        }
+      } else if (action === 'PLAY_TRACK_NOW' && !isApprovingPending) {
         action = 'PROPOSE_TRACK';
         if (ttsText && !ttsText.includes('?')) {
           ttsText = `${ttsText.replace(/[.!]+$/, '')}. Would you like me to play it right now?`;
         }
       }
 
-      if (isApprovingPending && pending) {
+      if (!isAutoCurateNextTrack && isApprovingPending && pending) {
         action = 'PLAY_TRACK_NOW';
         trackTitle = pending.title;
         trackArtist = pending.artist;
@@ -1655,6 +1671,82 @@ Respond ONLY with a single valid JSON object:
     const userCommandLower = userCommandRaw.toLowerCase();
     const targetPlayer = context.current_track?.source_player || 'com.spotify.music';
     const pending = ClaudeMusicReasoningProvider.pendingProposedTrack;
+
+    // 0. Autonomous End-of-Song DJ Handover ('AUTO_CURATE_NEXT_TRACK')
+    if (/^auto_curate_next_track\b/i.test(userCommandLower)) {
+      const excluded = new Set<string>(
+        [
+          context.current_track?.title || '',
+          ...(context.recently_played_by_agent || [])
+        ]
+          .map(s => String(s).toLowerCase().trim())
+          .filter(Boolean)
+      );
+      const seedArtists = Array.from(
+        new Set(
+          allUserTracks
+            .map(t => ClaudeMusicReasoningProvider.sanitizeArtistName(t.artist))
+            .filter(Boolean)
+        )
+      ).slice(0, 3);
+      const discovered = await this.discoverSpotifyTracksForContext(
+        context,
+        allUserTracks,
+        excluded,
+        seedArtists,
+        '',
+        true
+      );
+      const chosen = discovered[0]
+        ? {
+            title: discovered[0].title,
+            artist: discovered[0].artist,
+            uri: discovered[0].spotify_uri
+          }
+        : freshTracks[0]
+        ? {
+            title: freshTracks[0].title,
+            artist: freshTracks[0].artist,
+            uri: freshTracks[0].trackId || ''
+          }
+        : {
+            title: 'Midnight City',
+            artist: 'M83',
+            uri: ''
+          };
+      if (!chosen.uri && chosen.title) {
+        const resolved = await this.lookupSpotifyTrack(chosen.title, chosen.artist, context.spotify_access_token);
+        if (resolved) chosen.uri = resolved.uri;
+      }
+      const cleanTitle = ClaudeMusicReasoningProvider.sanitizeTrackTitle(chosen.title) || chosen.title;
+      const cleanArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(chosen.artist) || chosen.artist;
+      const artistPart = cleanArtist && cleanArtist !== 'Unknown Artist' ? ` by ${cleanArtist}` : '';
+      eventStore.recordAgentTrackAction(cleanTitle);
+      return {
+        calculated_satiety_percentage: 18,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: `Autonomous DJ Handover • Spinning "${cleanTitle}"${artistPart}`,
+        voice_agent_tts: `Up next for your flow, playing "${cleanTitle}"${artistPart} right now.`,
+        agent_tool_call: {
+          action: 'PLAY_TRACK_NOW',
+          track_title: cleanTitle,
+          track_artist: cleanArtist,
+          spotify_uri: chosen.uri || undefined,
+          target_player: targetPlayer,
+          expect_follow_up: false
+        },
+        os_execution_command: {
+          intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
+          target_player: targetPlayer,
+          search_query: `${cleanTitle} ${cleanArtist}`.trim(),
+          track_title: cleanTitle,
+          track_artist: cleanArtist,
+          spotify_uri: chosen.uri || undefined,
+          suggested_bpm_target: 108
+        },
+        database_tags: ['autonomous-end-of-song-dj', 'auto-curated-next-track']
+      };
+    }
 
     // 0A. Pause / Stop / Resume / Skip playback controls
     if (/\b(pause|stop\s+playing|stop\s+the\s+music|mute|hold\s+on|simama|nyamaza)\b/i.test(userCommandLower)) {

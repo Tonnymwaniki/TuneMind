@@ -123,6 +123,42 @@ class AgentVoiceManager(
     @Volatile
     private var isAppInForeground = false
 
+    private val powerManager by lazy {
+        context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+    }
+    private var autonomousDjWakeLock: android.os.PowerManager.WakeLock? = null
+
+    @Volatile
+    private var isExecutingAutonomousHandover = false
+    @Volatile
+    private var isAwaitingEndOfSongUserChoice = false
+    private var endOfSongAutoPlayTimeoutJob: Job? = null
+    @Volatile
+    private var lastEndOfSongFinishedTitle: String = ""
+    @Volatile
+    private var lastEndOfSongFinishedArtist: String = ""
+    @Volatile
+    private var lastEndOfSongTargetPlayer: String = "com.spotify.music"
+
+    @Volatile
+    private var monitoredTrackTitle: String = ""
+    @Volatile
+    private var monitoredTrackArtist: String = ""
+    @Volatile
+    private var monitoredTrackPackage: String = "com.spotify.music"
+    @Volatile
+    private var monitoredTrackDurationMs: Long = 0L
+    @Volatile
+    private var monitoredTrackMaxPosMs: Long = 0L
+    @Volatile
+    private var lastDispatchedByTuneMindTitle: String = ""
+    @Volatile
+    private var lastDispatchedAtMs: Long = 0L
+    @Volatile
+    private var lastHandoverCompletedForTitle: String = ""
+    @Volatile
+    private var lastHandoverAtMs: Long = 0L
+
     // Native Speech Recognizer Fallback
     private var nativeRecognizer: AndroidSpeechRecognizer? = null
     private var errorResetJob: Job? = null
@@ -130,29 +166,57 @@ class AgentVoiceManager(
     init {
         initWakeWordEngine()
         startCloudKeepAlivePing()
+        startAutonomousEndOfSongMonitor()
+    }
+
+    private fun isDeviceScreenInteractive(): Boolean {
+        return try {
+            powerManager?.isInteractive != false
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun acquireTemporaryHandoverWakeLock(timeoutMs: Long = 38_000L) {
+        try {
+            if (autonomousDjWakeLock == null) {
+                autonomousDjWakeLock = powerManager?.newWakeLock(
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                    "TuneMind:AutonomousDjWakeLock"
+                )?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            autonomousDjWakeLock?.acquire(timeoutMs)
+        } catch (e: Exception) {
+            Log.d(TAG, "WakeLock acquire notice: ${e.message}")
+        }
     }
 
     /**
-     * Controls whether the TuneMind app is actively visible on screen (past the Splash/Login screen
-     * and in the foreground). When false, immediately stops any TTS speech, microphone capture,
-     * and Vosk wake-word listening so the app NEVER talks or listens in the background.
+     * Controls whether the TuneMind UI is actively visible on screen.
+     * When false (e.g., screen turns off or Spotify briefly wakes), we pause the continuous Vosk
+     * wake-word microphone listener to save battery, while keeping autonomous track playback
+     * and End-of-Song DJ handover 100% active even when the screen is off!
      */
     fun setForegroundActive(active: Boolean) {
         isAppInForeground = active
         if (!active) {
-            errorResetJob?.cancel()
-            mainHandler.removeCallbacksAndMessages(null)
-            executionEngine.stopSpeaking()
-            stopMicrophoneStream()
-            stopNativeSpeechRecognizer()
             if (isVoskListening || speechService != null) {
                 try {
                     speechService?.stop()
                 } catch (_: Exception) {}
                 isVoskListening = false
             }
-            releaseAudioDucking()
-            Log.d(TAG, "App left active foreground — paused Vosk wake-word listener and stopped TTS.")
+            // If an autonomous DJ handover or track launch is actively running (e.g. screen off or Spotify wake),
+            // do NOT cancel TTS, mainHandler callbacks, or handover jobs!
+            if (!isExecutingAutonomousHandover && _agentState.value != AgentState.SPEAKING && _agentState.value != AgentState.THINKING) {
+                errorResetJob?.cancel()
+                stopMicrophoneStream()
+                stopNativeSpeechRecognizer()
+                releaseAudioDucking()
+            }
+            Log.d(TAG, "App left foreground (autonomousHandover=$isExecutingAutonomousHandover) — Vosk wake-word paused; End-of-Song DJ remains active.")
         } else {
             resumeWakeWordListening()
         }
@@ -397,15 +461,21 @@ class AgentVoiceManager(
     }
 
     /**
-     * Triggered when the user taps the circular ▶ button on any song card.
+     * Triggered when the user taps the circular ▶ button on any song card or when Autonomous End-of-Song DJ
+     * launches Claude's next curated recommendation.
      * Speaks a brief confirmation and immediately launches playback on the target player.
      */
     fun playTrackImmediatelyWithVoice(
         title: String,
         artist: String,
         spotifyUri: String? = null,
-        targetPlayer: String = "com.spotify.music"
+        targetPlayer: String = "com.spotify.music",
+        customSpokenLine: String? = null
     ) {
+        acquireTemporaryHandoverWakeLock(35_000L)
+        isExecutingAutonomousHandover = true
+        isAwaitingEndOfSongUserChoice = false
+        endOfSongAutoPlayTimeoutJob?.cancel()
         errorResetJob?.cancel()
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
@@ -414,11 +484,17 @@ class AgentVoiceManager(
 
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
-        val spokenLine = if (cleanArtist.isNotEmpty()) {
+        val spokenLine = customSpokenLine?.takeIf { it.isNotBlank() } ?: if (cleanArtist.isNotEmpty()) {
             "Playing $cleanTitle by $cleanArtist now."
         } else {
             "Playing $cleanTitle now."
         }
+
+        lastDispatchedByTuneMindTitle = cleanTitle
+        lastDispatchedAtMs = System.currentTimeMillis()
+        monitoredTrackTitle = cleanTitle
+        monitoredTrackArtist = cleanArtist
+        monitoredTrackMaxPosMs = 0L
 
         recordAgentSuggestedTrack(cleanTitle)
         _agentState.value = AgentState.SPEAKING
@@ -456,11 +532,431 @@ class AgentVoiceManager(
             },
             onFinished = {
                 mainHandler.post {
+                    isExecutingAutonomousHandover = false
                     releaseAudioDucking()
                     resumeWakeWordListening()
                 }
             }
         )
+    }
+
+    /**
+     * Autonomous End-of-Song DJ Monitor (Works both in foreground and when the phone screen is OFF):
+     * 1. Subscribes to real-time `TuneMindListenerService.onPlaybackSnapshotUpdated` events AND polls
+     *    active MediaSession progress every 750ms.
+     * 2. Detects when a playing song reaches its end (within the final 1.75s of `durationMs`) OR when
+     *    Spotify attempts to auto-play an unapproved random next track after the current track played.
+     * 3. Immediately pauses Spotify's random autoplay and:
+     *    - If the screen is OFF (or user is hands-free / away): automatically queries Claude for the
+     *      next curated recommendation and plays it immediately!
+     *    - If the screen is ON and TuneMind is visible: asks what song the user wants next for 6.5s,
+     *      and if they don't specify one, automatically plays Claude's next curated recommendation!
+     */
+    private fun startAutonomousEndOfSongMonitor() {
+        com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = { snap ->
+            evaluatePlaybackSnapshotForEndOfSong(snap)
+        }
+
+        scope.launch {
+            while (isActive) {
+                try {
+                    val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
+                    if (snap != null) {
+                        evaluatePlaybackSnapshotForEndOfSong(snap)
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "End-of-song monitor poll notice: ${e.message}")
+                }
+                delay(750L)
+            }
+        }
+    }
+
+    private fun isPlaceholderTrackTitle(title: String?): Boolean {
+        val clean = title?.trim() ?: return true
+        if (clean.length < 2) return true
+        return clean.equals("Standing By", ignoreCase = true) ||
+            clean.equals("Active Session", ignoreCase = true) ||
+            clean.equals("Deep Flow State", ignoreCase = true) ||
+            clean.equals("Advertisement", ignoreCase = true) ||
+            clean.equals("Spotify", ignoreCase = true)
+    }
+
+    private fun evaluatePlaybackSnapshotForEndOfSong(snap: com.tunemind.app.media.ActivePlaybackSnapshot) {
+        val rawTitle = snap.title.trim()
+        if (isPlaceholderTrackTitle(rawTitle)) return
+
+        val now = System.currentTimeMillis()
+        // Do not interrupt while TuneMind is actively launching a track or executing an end-of-song handover
+        if (isExecutingAutonomousHandover || _agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
+            return
+        }
+        if (now - lastDispatchedAtMs < 7500L || now - lastHandoverAtMs < 12_000L) {
+            if (lastDispatchedByTuneMindTitle.isNotBlank() &&
+                (rawTitle.contains(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
+                    lastDispatchedByTuneMindTitle.contains(rawTitle, ignoreCase = true))
+            ) {
+                monitoredTrackTitle = rawTitle
+                monitoredTrackArtist = snap.artist
+                monitoredTrackPackage = snap.packageName
+                if (snap.durationMs > 0L) monitoredTrackDurationMs = snap.durationMs
+                monitoredTrackMaxPosMs = snap.positionMs
+            }
+            return
+        }
+
+        val isSameTrack = monitoredTrackTitle.isBlank() ||
+            rawTitle.equals(monitoredTrackTitle, ignoreCase = true) ||
+            rawTitle.contains(monitoredTrackTitle, ignoreCase = true) ||
+            monitoredTrackTitle.contains(rawTitle, ignoreCase = true)
+
+        if (isSameTrack) {
+            monitoredTrackTitle = rawTitle
+            monitoredTrackArtist = snap.artist
+            monitoredTrackPackage = snap.packageName
+            if (snap.durationMs > 0L) {
+                monitoredTrackDurationMs = snap.durationMs
+            }
+            if (snap.positionMs > monitoredTrackMaxPosMs) {
+                monitoredTrackMaxPosMs = snap.positionMs
+            }
+
+            // TRIGGER A: Song is within the final 1.75 seconds of its duration
+            if (snap.isPlaying &&
+                monitoredTrackDurationMs >= 25_000L &&
+                snap.positionMs >= (monitoredTrackDurationMs - 1750L) &&
+                !lastHandoverCompletedForTitle.equals(rawTitle, ignoreCase = true)
+            ) {
+                Log.i(
+                    TAG,
+                    "🎵 Autonomous End-of-Song Trigger A (Near-End ${snap.positionMs}/${monitoredTrackDurationMs}ms) for '$rawTitle'"
+                )
+                triggerAutonomousEndOfSongHandover(
+                    finishedTitle = rawTitle,
+                    finishedArtist = snap.artist,
+                    targetPlayer = snap.packageName.ifBlank { "com.spotify.music" }
+                )
+            }
+            return
+        }
+
+        // Track title just changed (`rawTitle != monitoredTrackTitle`)
+        val prevTitle = monitoredTrackTitle
+        val prevArtist = monitoredTrackArtist
+        val prevDur = monitoredTrackDurationMs
+        val prevMaxPos = monitoredTrackMaxPosMs
+
+        val wasDispatchedByTuneMind = lastDispatchedByTuneMindTitle.isNotBlank() && (
+            rawTitle.equals(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
+                rawTitle.contains(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
+                lastDispatchedByTuneMindTitle.contains(rawTitle, ignoreCase = true)
+            )
+        val previousPlayedSubstantially = prevMaxPos >= 25_000L || (prevDur >= 25_000L && prevMaxPos >= (prevDur * 65L) / 100L)
+
+        // TRIGGER B: Previous track played substantially and Spotify auto-advanced to an unapproved random next track!
+        if (!wasDispatchedByTuneMind &&
+            previousPlayedSubstantially &&
+            !lastHandoverCompletedForTitle.equals(prevTitle, ignoreCase = true)
+        ) {
+            Log.i(
+                TAG,
+                "🎵 Autonomous End-of-Song Trigger B (Intercepted unapproved Spotify auto-advance '$prevTitle' -> '$rawTitle')"
+            )
+            triggerAutonomousEndOfSongHandover(
+                finishedTitle = prevTitle,
+                finishedArtist = prevArtist,
+                targetPlayer = snap.packageName.ifBlank { "com.spotify.music" }
+            )
+            return
+        }
+
+        // Otherwise, adopt the newly observed track as the active monitored track
+        monitoredTrackTitle = rawTitle
+        monitoredTrackArtist = snap.artist
+        monitoredTrackPackage = snap.packageName
+        monitoredTrackDurationMs = snap.durationMs
+        monitoredTrackMaxPosMs = snap.positionMs
+    }
+
+    private fun triggerAutonomousEndOfSongHandover(
+        finishedTitle: String,
+        finishedArtist: String,
+        targetPlayer: String
+    ) {
+        if (isExecutingAutonomousHandover) return
+        isExecutingAutonomousHandover = true
+        lastHandoverCompletedForTitle = finishedTitle
+        lastHandoverAtMs = System.currentTimeMillis()
+        lastEndOfSongFinishedTitle = finishedTitle
+        lastEndOfSongFinishedArtist = finishedArtist
+        lastEndOfSongTargetPlayer = targetPlayer
+
+        // Hold CPU WakeLock so handover completes even when the phone screen is OFF
+        acquireTemporaryHandoverWakeLock(40_000L)
+
+        // 1. Immediately pause Spotify so its random autoplay track does not play
+        try {
+            executionEngine.pauseCurrentMedia()
+            com.tunemind.app.service.TuneMindListenerService.instance?.pause()
+        } catch (e: Exception) {
+            Log.w(TAG, "End-of-song pause notice: ${e.message}")
+        }
+
+        val screenInteractiveAndVisible = isDeviceScreenInteractive() && isAppInForeground &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+        // 2A. If screen is OFF (or TuneMind is in background), immediately curate & play Claude's next pick!
+        if (!screenInteractiveAndVisible) {
+            Log.i(TAG, "🌙 Screen is OFF or hands-free — automatically curating & playing Claude's next recommendation after '$finishedTitle'...")
+            autoCurateAndPlayNextTrackWithClaude(
+                finishedTitle = finishedTitle,
+                finishedArtist = finishedArtist,
+                targetPlayer = targetPlayer
+            )
+            return
+        }
+
+        // 2B. Screen is ON & TuneMind is visible: Ask user what song they want next, with automatic 6.5s fallback to Claude's pick!
+        isAwaitingEndOfSongUserChoice = true
+        val promptLine = "$finishedTitle just finished. Tell me what song you want next, or in a few seconds I'll automatically spin my next pick for you."
+        _agentState.value = AgentState.SPEAKING
+        _flowAnalysisFlow.value = "Track Complete • Say your next song or let Claude auto-spin in 6s..."
+        scope.launch {
+            _transcriptionFlow.emit(promptLine)
+        }
+
+        val pauseResponse = com.tunemind.app.domain.execution.ReasoningResponse(
+            calculated_satiety_percentage = _agentSatietyFlow.value,
+            flow_state_analysis = "Track Complete • Awaiting your next request or auto-curating with Claude...",
+            voice_agent_tts = promptLine,
+            os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
+                intent = "OS_MEDIA_PAUSE",
+                target_player = targetPlayer,
+                search_query = ""
+            )
+        )
+
+        executionEngine.executeBackendCommand(
+            response = pauseResponse,
+            onBeforeLaunch = {},
+            onFinished = {
+                mainHandler.post {
+                    isExecutingAutonomousHandover = false
+                    if (!isDeviceScreenInteractive() || !isAppInForeground) {
+                        autoCurateAndPlayNextTrackWithClaude(finishedTitle, finishedArtist, targetPlayer)
+                        return@post
+                    }
+                    simulateWakeWordDetected()
+                    endOfSongAutoPlayTimeoutJob?.cancel()
+                    endOfSongAutoPlayTimeoutJob = scope.launch {
+                        delay(6800L)
+                        if (isAwaitingEndOfSongUserChoice && _agentState.value == AgentState.LISTENING) {
+                            Log.i(TAG, "⏱️ No user voice override within 6.8s after '$finishedTitle' — auto-curating next track with Claude!")
+                            isAwaitingEndOfSongUserChoice = false
+                            mainHandler.post {
+                                stopMicrophoneStream()
+                                stopNativeSpeechRecognizer()
+                            }
+                            autoCurateAndPlayNextTrackWithClaude(finishedTitle, finishedArtist, targetPlayer)
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Queries Claude (`/api/v1/reasoning/evaluate-satiety` with `AUTO_CURATE_NEXT_TRACK`) to select the best
+     * fresh next song after `finishedTitle` and immediately launches playback (even when the screen is off).
+     * Falls back to `SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking` if offline.
+     */
+    fun autoCurateAndPlayNextTrackWithClaude(
+        finishedTitle: String,
+        finishedArtist: String,
+        targetPlayer: String = "com.spotify.music"
+    ) {
+        acquireTemporaryHandoverWakeLock(40_000L)
+        isExecutingAutonomousHandover = true
+        isAwaitingEndOfSongUserChoice = false
+        endOfSongAutoPlayTimeoutJob?.cancel()
+
+        setThinkingState()
+        _flowAnalysisFlow.value = "Claude Autonomous DJ • Curating your next track after \"$finishedTitle\"..."
+
+        scope.launch {
+            var chosenTitle: String? = null
+            var chosenArtist: String? = null
+            var chosenUri: String? = null
+            var chosenAnnouncement: String? = null
+
+            try {
+                val recents = getRecentTracks?.invoke() ?: emptyList()
+                val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+                val hearing = getHearingInsights?.invoke()
+                val vaultList = getVaultTracks?.invoke() ?: emptyList()
+                val capsule = getDopamineCapsule?.invoke()
+
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val daypart = when (hour) {
+                    in 6..11 -> "Morning"
+                    in 12..16 -> "Midday"
+                    in 17..21 -> "Evening"
+                    else -> "Late Night"
+                }
+
+                val autoCommand = "AUTO_CURATE_NEXT_TRACK: The song \"$finishedTitle\"${if (finishedArtist.isNotBlank()) " by $finishedArtist" else ""} just ended. Select the single best next fresh song for my current flow and play it immediately."
+                val bodyJson = JSONObject().apply {
+                    put("timestamp_utc", java.time.Instant.now().toString())
+                    put("circadian_daypart", daypart)
+                    put("user_command", autoCommand)
+                    put("current_satiety_percentage", _agentSatietyFlow.value)
+                    put("current_track", JSONObject().apply {
+                        put("title", finishedTitle)
+                        put("artist", finishedArtist)
+                        put("source_player", targetPlayer)
+                        put("is_playing", false)
+                    })
+
+                    val historyArr = org.json.JSONArray()
+                    for (u in unifiedTracks.take(60)) {
+                        historyArr.put(JSONObject().apply {
+                            put("title", u.trackTitle)
+                            put("artist", u.artistName)
+                            put("source_player", "com.spotify.music")
+                            put("playCount", u.playCount)
+                            put("trackId", u.spotifyUri)
+                        })
+                    }
+                    put("rolling_history", historyArr)
+                    put("recently_played_by_agent", org.json.JSONArray((getRecentlyPlayedByAgent() + listOf(finishedTitle)).distinct()))
+
+                    if (hearing != null) {
+                        put("hearing_telemetry", JSONObject().apply {
+                            put("estimated_db", hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0)
+                            put("safe_headroom_db", hearing.currentHeadroomDb.toDouble().takeIf { !it.isNaN() } ?: 17.0)
+                            put("daily_exposure_minutes", hearing.dailyExposureMinutes)
+                            put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
+                            put("safety_guidance", hearing.safetyGuidance)
+                        })
+                    }
+
+                    val vaultArr = org.json.JSONArray()
+                    for (vt in vaultList) {
+                        vaultArr.put(JSONObject().apply {
+                            put("id", vt.id)
+                            put("title", vt.title)
+                            put("artist", vt.artist)
+                            put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble().takeIf { !it.isNaN() } ?: 3.0)
+                            put("recovery_percent", (vt.recoveryProgress * 100).toInt())
+                            put("satiety_score", vt.satietyScore)
+                        })
+                    }
+                    put("vault_tracks", vaultArr)
+
+                    if (capsule != null && capsule.tracks.isNotEmpty()) {
+                        val capArr = org.json.JSONArray()
+                        for (ct in capsule.tracks) {
+                            capArr.put(JSONObject().apply {
+                                put("title", ct.title)
+                                put("artist", ct.artist)
+                                put("trackId", ct.spotifyUri ?: "")
+                                put("freshness_percent", ct.freshnessPercent)
+                                put("reason", ct.reason)
+                            })
+                        }
+                        put("dopamine_capsule", capArr)
+                    }
+
+                    val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
+                    put("user_id", identity.userId)
+                    put("user_email", identity.email)
+                    put("supabase_url", identity.supabaseUrl)
+                    put("supabase_anon_key", identity.supabaseAnonKey)
+                    put("dialogue_history", getDialogueHistoryJsonArray())
+                    put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+                }
+
+                val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val req = Request.Builder()
+                    .url("$baseUrl/api/v1/reasoning/evaluate-satiety")
+                    .post(bodyJson.toString().toRequestBody(mediaType))
+                    .build()
+
+                reasoningHttpClient.newCall(req).execute().use { resp ->
+                    val respStr = resp.body?.string()
+                    if (resp.isSuccessful && !respStr.isNullOrBlank()) {
+                        val respJson = JSONObject(respStr)
+                        val cmdObj = respJson.optJSONObject("os_execution_command")
+                        val toolObj = respJson.optJSONObject("agent_tool_call")
+                        val candidateTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+                            ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+                        if (!candidateTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(candidateTitle)) {
+                            chosenTitle = candidateTitle
+                            chosenArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+                                ?: toolObj?.optString("track_artist", "") ?: ""
+                            chosenUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                                ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                            val rawTts = respJson.optString("voice_agent_tts", "").trim()
+                            if (rawTts.isNotBlank() && !rawTts.contains("?")) {
+                                chosenAnnouncement = rawTts
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Claude auto-curate next track fallback notice: ${e.message}")
+            }
+
+            // Fallback to live Spotify Discovery or Dopamine Capsule if backend was unreachable or didn't return a track
+            if (chosenTitle.isNullOrBlank()) {
+                val recents = getRecentTracks?.invoke() ?: emptyList()
+                val excluded = (getRecentlyPlayedByAgent() + listOf(finishedTitle)).toSet()
+                val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                    context = context,
+                    fallbackMemoryTracks = recents,
+                    excludedTitles = excluded
+                )
+                if (discovery != null) {
+                    chosenTitle = discovery.trackTitle
+                    chosenArtist = discovery.artistName
+                    chosenUri = discovery.spotifyUri
+                } else {
+                    val capsulePick = getDopamineCapsule?.invoke()?.tracks?.firstOrNull {
+                        !it.title.equals(finishedTitle, ignoreCase = true)
+                    }
+                    chosenTitle = capsulePick?.title ?: "Midnight City"
+                    chosenArtist = capsulePick?.artist ?: "M83"
+                    chosenUri = capsulePick?.spotifyUri
+                }
+            }
+
+            val finalTitle = chosenTitle ?: "Midnight City"
+            val finalArtist = chosenArtist ?: ""
+            val finalUri = chosenUri?.takeIf { it.startsWith("spotify:track:") }
+                ?: com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                    context = context,
+                    cleanTitle = finalTitle,
+                    cleanArtist = finalArtist,
+                    fullQuery = "$finalTitle $finalArtist".trim()
+                )
+            val artistPart = if (finalArtist.isNotBlank() && !finalArtist.equals("Unknown Artist", ignoreCase = true)) {
+                " by $finalArtist"
+            } else {
+                ""
+            }
+            val spokenAnnouncement = chosenAnnouncement ?: "Up next for your flow, playing $finalTitle$artistPart."
+
+            mainHandler.post {
+                playTrackImmediatelyWithVoice(
+                    title = finalTitle,
+                    artist = finalArtist,
+                    spotifyUri = finalUri,
+                    targetPlayer = targetPlayer,
+                    customSpokenLine = spokenAnnouncement
+                )
+            }
+        }
     }
 
     /**
@@ -846,6 +1342,9 @@ class AgentVoiceManager(
     }
 
     fun dispatchReasoningResult(dataObj: JSONObject?, explicitTtsPayload: String = "") {
+        val wasAwaitingEndOfSongChoice = isAwaitingEndOfSongUserChoice
+        isAwaitingEndOfSongUserChoice = false
+        endOfSongAutoPlayTimeoutJob?.cancel()
         setSpeakingState()
 
         val cmdObj = dataObj?.optJSONObject("os_execution_command")
@@ -984,6 +1483,15 @@ class AgentVoiceManager(
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
             spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
                 ?: "Awesome, playing ${rawTrackTitle}$artistPart on Spotify right now."
+        } else if (wasAwaitingEndOfSongChoice && isTrackProposalOrPlayAttempt && !rawTrackTitle.isNullOrBlank()) {
+            // When the user responds to the End-of-Song prompt ("Tell me what song you want next"),
+            // immediately play their requested song without requiring a second confirmation!
+            effectiveAction = "PLAY_TRACK_NOW"
+            effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
+            effectiveExpectFollowUp = false
+            updatePendingProposedTrack(null)
+            val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
+            spokenTts = "Spinning ${rawTrackTitle}$artistPart for you right now."
         } else if (isTrackProposalOrPlayAttempt) {
             // Always propose the song first and wait for the user's approval before executing!
             effectiveAction = if (rawAction == "LAUNCH_DOPAMINE_CAPSULE") "LAUNCH_DOPAMINE_CAPSULE" else "PROPOSE_TRACK"
@@ -1097,6 +1605,11 @@ class AgentVoiceManager(
                     if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
                         val dispatchedTitle = rawTrackTitle ?: rawSearchQuery.ifBlank { "Fresh Selection" }
                         val dispatchedArtist = rawTrackArtist ?: "Autonomous Studio Flow"
+                        lastDispatchedByTuneMindTitle = dispatchedTitle
+                        lastDispatchedAtMs = System.currentTimeMillis()
+                        monitoredTrackTitle = dispatchedTitle
+                        monitoredTrackArtist = dispatchedArtist
+                        monitoredTrackMaxPosMs = 0L
                         onTrackDispatched?.invoke(
                             dispatchedTitle,
                             dispatchedArtist,
@@ -1107,6 +1620,7 @@ class AgentVoiceManager(
             },
             onFinished = {
                 mainHandler.post {
+                    isExecutingAutonomousHandover = false
                     if (isAppInForeground && toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
                         Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
                         _agentState.value = AgentState.IDLE
@@ -1129,10 +1643,34 @@ class AgentVoiceManager(
      * with full client telemetry, or falls back to autonomous LLM / local on-device reasoning if offline.
      */
     fun processFinalTranscriptWithFallback(transcript: String) {
+        endOfSongAutoPlayTimeoutJob?.cancel()
         val cleaned = transcript.trim()
         if (cleaned.isEmpty()) {
+            if (isAwaitingEndOfSongUserChoice) {
+                isAwaitingEndOfSongUserChoice = false
+                autoCurateAndPlayNextTrackWithClaude(
+                    lastEndOfSongFinishedTitle,
+                    lastEndOfSongFinishedArtist,
+                    lastEndOfSongTargetPlayer
+                )
+                return
+            }
             releaseAudioDucking()
             resumeWakeWordListening()
+            return
+        }
+        // If user says "you pick", "surprise me", "next", "anything", or "go ahead" during end-of-song handover,
+        // immediately trigger Claude's auto-curated next track!
+        if (isAwaitingEndOfSongUserChoice &&
+            Regex("\\b(you pick|your pick|surprise me|anything|whatever|next|go ahead|auto|spin something|choose for me)\\b", RegexOption.IGNORE_CASE)
+                .containsMatchIn(cleaned)
+        ) {
+            isAwaitingEndOfSongUserChoice = false
+            autoCurateAndPlayNextTrackWithClaude(
+                lastEndOfSongFinishedTitle,
+                lastEndOfSongFinishedArtist,
+                lastEndOfSongTargetPlayer
+            )
             return
         }
         lastUserTranscript = cleaned
@@ -1745,6 +2283,17 @@ class AgentVoiceManager(
                         override fun onError(error: Int) {
                             Log.w(TAG, "Native SpeechRecognizer finished with code: $error")
                             stopNativeSpeechRecognizer()
+                            if (isAwaitingEndOfSongUserChoice) {
+                                Log.i(TAG, "No user speech detected after end-of-song prompt (code=$error) — auto-curating next track with Claude!")
+                                isAwaitingEndOfSongUserChoice = false
+                                endOfSongAutoPlayTimeoutJob?.cancel()
+                                autoCurateAndPlayNextTrackWithClaude(
+                                    lastEndOfSongFinishedTitle,
+                                    lastEndOfSongFinishedArtist,
+                                    lastEndOfSongTargetPlayer
+                                )
+                                return
+                            }
                             releaseAudioDucking()
                             resumeWakeWordListening()
                             scope.launch {
@@ -1757,11 +2306,20 @@ class AgentVoiceManager(
                             val transcript = matches?.firstOrNull()?.trim()
                             if (!transcript.isNullOrBlank()) {
                                 Log.d(TAG, "Native SpeechRecognizer transcript: $transcript")
+                                endOfSongAutoPlayTimeoutJob?.cancel()
                                 setThinkingState()
                                 scope.launch {
                                     _transcriptionFlow.emit(transcript)
                                     _finalTranscriptFlow.emit(transcript)
                                 }
+                            } else if (isAwaitingEndOfSongUserChoice) {
+                                isAwaitingEndOfSongUserChoice = false
+                                endOfSongAutoPlayTimeoutJob?.cancel()
+                                autoCurateAndPlayNextTrackWithClaude(
+                                    lastEndOfSongFinishedTitle,
+                                    lastEndOfSongFinishedArtist,
+                                    lastEndOfSongTargetPlayer
+                                )
                             } else {
                                 releaseAudioDucking()
                                 resumeWakeWordListening()
