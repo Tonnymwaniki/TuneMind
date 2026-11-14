@@ -559,17 +559,17 @@ class AgentVoiceManager(
             evaluatePlaybackSnapshotForEndOfSong(snap)
         }
 
-        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener { title, artist, album, _, isPlaying, posMs, durMs ->
+        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener { title, artist, _, _, isPlaying, posMs, durMs ->
             if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
                 evaluatePlaybackSnapshotForEndOfSong(
                     com.tunemind.app.media.ActivePlaybackSnapshot(
+                        packageName = "com.spotify.music",
                         title = title,
                         artist = artist,
-                        album = album,
-                        packageName = "com.spotify.music",
                         isPlaying = isPlaying,
                         positionMs = posMs,
-                        durationMs = durMs
+                        durationMs = durMs,
+                        updatedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
                     )
                 )
             }
