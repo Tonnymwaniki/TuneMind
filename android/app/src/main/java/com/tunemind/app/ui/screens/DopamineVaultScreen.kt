@@ -8,13 +8,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -31,11 +29,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.model.TrackMemoryEntry
+import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.ui.VaultTrack
-import com.tunemind.app.ui.components.NeuralSonicActionButton
 import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.bouncyClickable
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
@@ -61,13 +60,19 @@ fun DopamineVaultScreen(
     onSyncAtmosphereToTrack: (title: String, artist: String) -> Unit,
     onQuarantineTrack: (title: String, artist: String) -> Unit,
     onRestoreVaultTrack: (id: String) -> Unit,
-    onCycleAtmospherePalette: () -> Unit
+    onCycleAtmospherePalette: () -> Unit,
+    forYouPicks: List<AiRecommendationEntity> = emptyList(),
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
+    isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { t, _, _ ->
+        !nowPlayingTitle.isNullOrBlank() && !t.isNullOrBlank() && t.equals(nowPlayingTitle.trim(), ignoreCase = true)
+    },
+    onRefreshForYou: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
-    var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Cooling Down
+    var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Cooling Down, 2 = For You
     var activeSyncSong by remember { mutableStateOf<DopamineSongItem?>(null) }
 
-    val allSongs = remember(recentTracks, vaultTracks) {
+    val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount) {
         val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
 
@@ -75,13 +80,14 @@ fun DopamineVaultScreen(
             val key = "${v.title.trim().lowercase()}|${v.artist.trim().lowercase()}"
             if (!seenKeys.add(key)) continue
             val freshness = (v.recoveryProgress * 100f).toInt().coerceIn(15, 75)
+            val resolvedPlays = resolvePlayCount(v.title, v.artist, null).takeIf { it > 0 } ?: 4
             list.add(
                 DopamineSongItem(
                     id = v.id,
                     title = v.title,
                     artist = v.artist,
                     freshnessPercent = freshness,
-                    playCount = 5,
+                    playCount = resolvedPlays,
                     spotifyUri = null,
                     sourcePackage = "com.spotify.music",
                     isCoolingDown = true,
@@ -96,7 +102,9 @@ fun DopamineVaultScreen(
             val key = "${title.lowercase()}|${artist.lowercase()}"
             if (!seenKeys.add(key)) continue
 
-            val plays = maxOf(1, t.distinctAppearanceCount)
+            val uri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
+            val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
+                ?: maxOf(1, t.distinctAppearanceCount)
             val satiety = minOf(94, plays * 19)
             val freshness = (100 - satiety).coerceIn(12, 98)
             val cooling = plays >= 4 || freshness < 45
@@ -108,7 +116,7 @@ fun DopamineVaultScreen(
                     artist = artist,
                     freshnessPercent = freshness,
                     playCount = plays,
-                    spotifyUri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") },
+                    spotifyUri = uri,
                     sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
                     isCoolingDown = cooling,
                     isFromVault = false
@@ -219,7 +227,11 @@ fun DopamineVaultScreen(
                                 style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round)
                             )
                             drawArc(
-                                color = if (selectedTab == 0) theme.primaryAccent else Color(0xFFFFB000),
+                                color = when (selectedTab) {
+                                    1 -> Color(0xFFFFB000)
+                                    2 -> theme.secondaryAccent
+                                    else -> theme.primaryAccent
+                                },
                                 startAngle = 135f,
                                 sweepAngle = 270f * (averageFreshness / 100f),
                                 useCenter = false,
@@ -236,15 +248,22 @@ fun DopamineVaultScreen(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (selectedTab == 0) "${peakFreshSongs.size} Fresh Tracks" else "${coolingDownSongs.size} Cooling Down",
+                            text = when (selectedTab) {
+                                1 -> "${coolingDownSongs.size} Cooling Down"
+                                2 -> "${forYouPicks.size} Picks For You"
+                                else -> "${peakFreshSongs.size} Fresh Tracks"
+                            },
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (selectedTab == 0) "Ready to hit like the first listen. Tap play or Sync for actions."
-                            else "Resting from heavy rotation so they feel new again.",
+                            text = when (selectedTab) {
+                                1 -> "Resting from heavy rotation so they feel new again."
+                                2 -> "New discoveries tuned to your daily listening pattern."
+                                else -> "Ready to hit like the first listen. Tap play or Sync for actions."
+                            },
                             color = Color.White.copy(alpha = 0.68f),
                             fontSize = 12.sp,
                             lineHeight = 17.sp
@@ -255,7 +274,7 @@ fun DopamineVaultScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 2-Segment Filter Bar (Fresh vs Cooling Down)
+            // 3-Segment Filter Bar (Fresh | Cooling | For You)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -264,7 +283,7 @@ fun DopamineVaultScreen(
                     .background(Color(0xFF0C1018))
                     .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(23.dp))
                     .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 FilterTogglePill(
                     title = "Fresh (${peakFreshSongs.size})",
@@ -282,6 +301,14 @@ fun DopamineVaultScreen(
                     onClick = { selectedTab = 1 },
                     modifier = Modifier.weight(1f)
                 )
+                FilterTogglePill(
+                    title = "For You",
+                    icon = Icons.Rounded.Explore,
+                    isSelected = selectedTab == 2,
+                    activeColor = theme.secondaryAccent,
+                    onClick = { selectedTab = 2 },
+                    modifier = Modifier.weight(0.92f)
+                )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -292,8 +319,75 @@ fun DopamineVaultScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(bottom = 108.dp)
             ) {
-                if (displayedSongs.isEmpty()) {
-                    item {
+                if (selectedTab == 2) {
+                    val activeRecs = forYouPicks.filter { !it.isDismissed }
+                    if (activeRecs.isEmpty()) {
+                        item(key = "vault_foryou_empty") {
+                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Building personalized recommendations from your listening history.",
+                                        color = Color.White.copy(alpha = 0.70f),
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(theme.secondaryAccent.copy(alpha = 0.20f))
+                                            .border(1.dp, theme.secondaryAccent.copy(alpha = 0.50f), RoundedCornerShape(12.dp))
+                                            .bouncyClickable { onRefreshForYou() }
+                                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Refresh Picks",
+                                            color = theme.secondaryAccent,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        items(activeRecs, key = { "foryou_${it.id}" }) { rec ->
+                            val plays = resolvePlayCount(rec.title, rec.artist, null)
+                            val isPlaying = isTrackCurrentlyPlaying(rec.title, rec.artist, null)
+                            TuneMindTrackCard(
+                                title = rec.title,
+                                artist = rec.artist,
+                                subtitle = rec.reason,
+                                playCount = plays,
+                                showUnplayedLabel = true,
+                                isCurrentlyPlaying = isPlaying,
+                                freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(75, 99),
+                                accentColor = theme.secondaryAccent,
+                                secondaryAccent = theme.primaryAccent,
+                                onPlayClick = {
+                                    onPlayTrack(rec.title, rec.artist, null, "com.spotify.music")
+                                },
+                                onSyncClick = {
+                                    activeSyncSong = DopamineSongItem(
+                                        id = rec.id,
+                                        title = rec.title,
+                                        artist = rec.artist,
+                                        freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(75, 99),
+                                        playCount = plays,
+                                        spotifyUri = null,
+                                        sourcePackage = "com.spotify.music",
+                                        isCoolingDown = false,
+                                        isFromVault = false
+                                    )
+                                }
+                            )
+                        }
+                    }
+                } else if (displayedSongs.isEmpty()) {
+                    item(key = "vault_empty") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -314,19 +408,24 @@ fun DopamineVaultScreen(
                     }
                 } else {
                     items(displayedSongs, key = { it.id }) { song ->
-                        val isCurrentlyPlaying = !nowPlayingTitle.isNullOrBlank() &&
-                            song.title.equals(nowPlayingTitle.trim(), ignoreCase = true)
+                        val isCurrentlyPlaying = isTrackCurrentlyPlaying(song.title, song.artist, song.spotifyUri)
+                        val accurateCount = resolvePlayCount(song.title, song.artist, song.spotifyUri)
+                            .takeIf { it > 0 } ?: song.playCount
 
-                        DopamineSongCard(
-                            song = song,
+                        TuneMindTrackCard(
+                            title = song.title,
+                            artist = song.artist,
+                            playCount = accurateCount,
                             isCurrentlyPlaying = isCurrentlyPlaying,
-                            primaryAccent = theme.primaryAccent,
+                            freshnessPercent = song.freshnessPercent,
+                            isCoolingDown = song.isCoolingDown,
+                            accentColor = theme.primaryAccent,
                             secondaryAccent = theme.secondaryAccent,
-                            onPlayButtonClicked = {
+                            onPlayClick = {
                                 onPlayTrack(song.title, song.artist, song.spotifyUri, song.sourcePackage)
                             },
-                            onNeuralSyncClicked = {
-                                activeSyncSong = song
+                            onSyncClick = {
+                                activeSyncSong = song.copy(playCount = accurateCount)
                             }
                         )
                     }
@@ -397,125 +496,22 @@ private fun FilterTogglePill(
                 else Modifier
             )
             .bouncyClickable { onClick() }
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 6.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = if (isSelected) activeColor else contentColor,
-            modifier = Modifier.size(14.dp)
+            modifier = Modifier.size(13.dp)
         )
-        Spacer(modifier = Modifier.width(5.dp))
+        Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = title,
             color = contentColor,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun DopamineSongCard(
-    song: DopamineSongItem,
-    isCurrentlyPlaying: Boolean,
-    primaryAccent: Color,
-    secondaryAccent: Color,
-    onPlayButtonClicked: () -> Unit,
-    onNeuralSyncClicked: () -> Unit
-) {
-    val accentColor = when {
-        isCurrentlyPlaying -> Color(0xFF10B981)
-        song.isCoolingDown -> Color(0xFFFFB000)
-        else -> primaryAccent
-    }
-
-    val cardShape = RoundedCornerShape(22.dp)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(
-                if (isCurrentlyPlaying) accentColor.copy(alpha = 0.12f)
-                else Color(0xFF0C1018).copy(alpha = 0.90f)
-            )
-            .border(
-                width = 1.dp,
-                color = if (isCurrentlyPlaying) accentColor.copy(alpha = 0.48f)
-                else Color.White.copy(alpha = 0.08f),
-                shape = cardShape
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // Dedicated 46dp Play Button with freshness arc
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .bouncyClickable { onPlayButtonClicked() }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                drawCircle(color = accentColor.copy(alpha = 0.14f))
-                drawArc(
-                    color = accentColor,
-                    startAngle = -90f,
-                    sweepAngle = 360f * (song.freshnessPercent / 100f),
-                    useCenter = false,
-                    style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-            Icon(
-                imageVector = if (isCurrentlyPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (isCurrentlyPlaying) "Playing" else "Play",
-                tint = accentColor,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = song.title,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = song.artist,
-                color = Color.White.copy(alpha = 0.64f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(5.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(accentColor.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = if (isCurrentlyPlaying) "Playing"
-                    else if (song.isCoolingDown) "Cooling • ${song.playCount}x"
-                    else "${song.freshnessPercent}% Fresh",
-                    color = accentColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        NeuralSonicActionButton(
-            accentColor = accentColor,
-            secondaryColor = secondaryAccent,
-            onClick = onNeuralSyncClicked
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

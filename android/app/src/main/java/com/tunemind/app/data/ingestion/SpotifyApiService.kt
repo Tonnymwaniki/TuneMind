@@ -9,6 +9,7 @@ import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
@@ -97,18 +98,16 @@ interface SpotifyWebApiService {
 
     /**
      * Fetches the object currently being played on the user's Spotify account (`GET /v1/me/player/currently-playing`).
-     * Note: Returns HTTP 204 No Content if no track is currently playing.
+     * Supports both tracks and podcast episodes via `additional_types=track,episode`.
      */
     @GET("v1/me/player/currently-playing")
     suspend fun getCurrentlyPlaying(
-        @Header("Authorization") authHeader: String? = null
+        @Header("Authorization") authHeader: String? = null,
+        @Query("additional_types") additionalTypes: String = "track,episode"
     ): Response<SpotifyCurrentlyPlayingResponse>
 
     /**
-     * Fetches the current user's top tracks (`GET /v1/me/top/tracks`) based on calculated affinity.
-     *
-     * @param timeRange Over what time frame the affinities are computed (`short_term`, `medium_term`, `long_term`).
-     * @param limit The maximum number of items to return (1..50, default 30).
+     * Fetches the current user's top tracks (`GET /v1/me/top/tracks`).
      */
     @GET("v1/me/top/tracks")
     suspend fun getTopTracks(
@@ -116,6 +115,65 @@ interface SpotifyWebApiService {
         @Query("time_range") timeRange: String = "short_term",
         @Query("limit") limit: Int = 30
     ): Response<SpotifyTopTracksResponse>
+
+    /**
+     * Fetches the user's Liked Songs (`GET /v1/me/tracks`). Requires `user-library-read`.
+     */
+    @GET("v1/me/tracks")
+    suspend fun getSavedTracks(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): Response<SpotifySavedTracksResponse>
+
+    /**
+     * Fetches the user's Playlists (`GET /v1/me/playlists`). Requires `playlist-read-private` & `playlist-read-collaborative`.
+     */
+    @GET("v1/me/playlists")
+    suspend fun getUserPlaylists(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 40,
+        @Query("offset") offset: Int = 0
+    ): Response<SpotifyPlaylistsResponse>
+
+    /**
+     * Fetches tracks inside a playlist (`GET /v1/playlists/{playlist_id}/tracks`).
+     */
+    @GET("v1/playlists/{playlist_id}/tracks")
+    suspend fun getPlaylistTracks(
+        @Path("playlist_id") playlistId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): Response<SpotifyPlaylistTracksResponse>
+
+    /**
+     * Fetches saved podcast shows (`GET /v1/me/shows`). Requires `user-library-read`.
+     */
+    @GET("v1/me/shows")
+    suspend fun getSavedShows(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 30
+    ): Response<SpotifySavedShowsResponse>
+
+    /**
+     * Fetches saved podcast episodes with resume positions (`GET /v1/me/episodes`).
+     */
+    @GET("v1/me/episodes")
+    suspend fun getSavedEpisodes(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 30
+    ): Response<SpotifySavedEpisodesResponse>
+
+    /**
+     * Fetches latest episodes for a specific saved podcast show (`GET /v1/shows/{id}/episodes`).
+     */
+    @GET("v1/shows/{id}/episodes")
+    suspend fun getShowEpisodes(
+        @Path("id") showId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 10
+    ): Response<SpotifyShowEpisodesResponse>
 }
 
 /**

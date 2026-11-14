@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
@@ -82,6 +83,8 @@ fun PulseAgentScreen(
     onLaunchDopamineCapsule: () -> Unit = {},
     onCycleAtmospherePalette: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
+    currentTrackPlayCount: Int = 0,
     autonomousDjEnabled: Boolean = false
 ) {
     val colors = LocalAdaptiveTheme.current
@@ -182,6 +185,23 @@ fun PulseAgentScreen(
                             .size(34.dp)
                             .clip(CircleShape)
                             .background(StudioGlassCard.copy(alpha = 0.88f))
+                            .border(1.dp, activeAccent.copy(alpha = 0.25f), CircleShape)
+                            .clickable { onOpenStats() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.BarChart,
+                            contentDescription = "Listening Stats",
+                            tint = activeAccent,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(StudioGlassCard.copy(alpha = 0.88f))
                             .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                             .clickable { onOpenSettings() },
                         contentAlignment = Alignment.Center
@@ -268,6 +288,7 @@ fun PulseAgentScreen(
                 trackTitle = currentTrackName,
                 artistName = artistName,
                 isMusicPlaying = isMusicPlaying,
+                playCount = currentTrackPlayCount,
                 accentColor = activeAccent
             )
         }
@@ -941,6 +962,7 @@ private fun NowPlayingMiniBar(
     trackTitle: String?,
     artistName: String?,
     isMusicPlaying: Boolean,
+    playCount: Int,
     accentColor: Color
 ) {
     val mood = remember(trackTitle, artistName) {
@@ -950,7 +972,10 @@ private fun NowPlayingMiniBar(
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = StudioGlassCard.copy(alpha = 0.88f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (isMusicPlaying) Color(0xFF10B981).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f)
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -976,7 +1001,7 @@ private fun NowPlayingMiniBar(
                     Icon(
                         imageVector = if (isMusicPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.MusicNote,
                         contentDescription = null,
-                        tint = accentColor,
+                        tint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -991,7 +1016,12 @@ private fun NowPlayingMiniBar(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = artistName ?: "Tap the sphere or ask for a track",
+                        text = buildString {
+                            append(artistName ?: "Tap the sphere or ask for a track")
+                            if (!trackTitle.isNullOrBlank() && playCount > 0) {
+                                append(" • $playCount ${if (playCount == 1) "play" else "plays"}")
+                            }
+                        },
                         style = TuneMindTypography.bodySmall,
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.56f),
@@ -1003,7 +1033,7 @@ private fun NowPlayingMiniBar(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            val moodAccent = TuneMindPalettes.MoodProfiles[mood]?.moodAccent ?: accentColor
+            val moodAccent = if (isMusicPlaying) Color(0xFF10B981) else (TuneMindPalettes.MoodProfiles[mood]?.moodAccent ?: accentColor)
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
@@ -1012,7 +1042,7 @@ private fun NowPlayingMiniBar(
                     .padding(horizontal = 9.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = mood.label,
+                    text = if (isMusicPlaying) "Playing" else mood.label,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 10.sp,
                     color = moodAccent

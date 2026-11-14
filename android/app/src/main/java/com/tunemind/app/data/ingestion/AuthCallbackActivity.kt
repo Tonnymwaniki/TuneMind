@@ -74,9 +74,15 @@ class AuthCallbackActivity : ComponentActivity() {
         lifecycleScope.launch {
             val exchanged = authManager.exchangeCodeForTokens(code)
             if (exchanged) {
-                Log.i(TAG, "Spotify OAuth connected! Updating session and scheduling 15-min worker.")
+                Log.i(TAG, "Spotify OAuth connected! Updating session, library scopes, and scheduling 15-min worker.")
                 sessionManager.onSpotifyOAuthSucceeded()
+                val spotifyRepo = SpotifyOAuthRepository.getInstance(applicationContext)
+                spotifyRepo.refreshScopeStatus()
                 SpotifyRecentlyPlayedSyncWorker.schedulePeriodic15MinSync(applicationContext)
+                runCatching {
+                    spotifyRepo.syncRecentlyPlayedToLocalRoom()
+                    spotifyRepo.syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = true)
+                }
                 SpotifyRecentlyPlayedSyncWorker.enqueueImmediateOnAudioFocusChange(
                     context = applicationContext,
                     reason = "SPOTIFY_OAUTH_CALLBACK_SUCCESS",

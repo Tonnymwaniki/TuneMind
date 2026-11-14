@@ -1,7 +1,7 @@
 package com.tunemind.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -9,320 +9,303 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.model.TuneMindDemoData
 import com.tunemind.app.ui.TuneMindViewModel
-import com.tunemind.app.ui.components.SongProfileData
-import com.tunemind.app.ui.components.SongProfileSheet
-import com.tunemind.app.ui.theme.*
+import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.TuneMindTrackCard
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
 fun WeeklyReportScreen(
     vm: TuneMindViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit = { _, _, _, _ -> }
 ) {
-    val historyState by vm.historyState.collectAsState()
+    val stats by vm.listeningStats.collectAsState()
     val vaultTracks by vm.vaultState.collectAsState()
-    var selectedProfileData by remember { mutableStateOf<SongProfileData?>(null) }
+    val homeState by vm.homeState.collectAsState()
+    val liveSpotify by vm.spotifyLiveState.collectAsState()
+    val theme = LocalAdaptiveTheme.current
 
-    val realTracks = historyState.tracks.filter { !it.title.isNullOrBlank() }
-    val totalPlays = realTracks.sumOf { it.distinctAppearanceCount }.coerceAtLeast(42)
-    val monitoredHours = "%.1f hrs".format((totalPlays * 3.5) / 60.0)
+    val sevenDayDuration = formatListeningDuration(stats.sevenDayListeningMs)
+    val totalPlays = stats.totalVerifiedPlays
 
-    val avgSatietyPct = if (realTracks.isNotEmpty()) {
-        (realTracks.map { minOf(95, it.distinctAppearanceCount * 22) }.average()).toInt()
-    } else {
-        42
-    }
+    val avgFreshness = if (stats.topTracks.isNotEmpty()) {
+        stats.topTracks.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
+    } else 88
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DeepObsidianAmber.AppBackground)
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Hero Header Card
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-            modifier = Modifier.fillMaxWidth()
+    StudioAmbientBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = DeepObsidianAmber.TextPrimary)
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Outlined.Insights,
-                                contentDescription = null,
-                                tint = DeepObsidianAmber.PrimaryAccent,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "WEEKLY REPORT",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "Receptive Horizon",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.TextPrimary
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DeepObsidianAmber.CardElevated
-                    ) {
-                        Text(
-                            text = "Live Cycle",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = "Derived from $monitoredHours monitored across your media players. Identifies cyclical pattern shifts, recovery velocity, and acoustic freshness recommendations for your next rotation.",
-                    fontSize = 12.sp,
-                    color = DeepObsidianAmber.TextSecondary,
-                    lineHeight = 18.sp
-                )
-            }
-        }
-
-        // 3 Key Metrics Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Satiety Index", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
-                    Text("$avgSatietyPct%", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.SecondaryAccent)
-                    Text(if (avgSatietyPct < 60) "-8% (Optimal)" else "+12% (Elevated)", fontSize = 10.sp, color = if (avgSatietyPct < 60) DeepObsidianAmber.Success else DeepObsidianAmber.Warning)
-                }
-            }
-
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Peak Window", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
-                    Text("10:30 AM", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.PrimaryAccent)
-                    Text("Harmonic tolerance", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
-                }
-            }
-
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Loop Velocity", fontSize = 10.sp, color = DeepObsidianAmber.TextMuted, fontFamily = FontFamily.Monospace)
-                    Text("0.18 /d", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.CopperAccent)
-                    Text("Stable decay", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
-                }
-            }
-        }
-
-        // Top Rotation Tracks This Period
-        if (realTracks.isNotEmpty()) {
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "High Exposure Tracks (Click for Profile)",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.TextPrimary
-                )
-                Text(
-                    text = "${realTracks.size} Observed",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = DeepObsidianAmber.SecondaryAccent
-                )
-            }
-
-            realTracks.take(4).forEach { track ->
-                val trackSatiety = minOf(95, track.distinctAppearanceCount * 22)
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedProfileData = SongProfileData.fromTrackMemory(track)
-                        }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF0C1018).copy(alpha = 0.92f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clickable { onBack() }
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DeepObsidianAmber.RecessedBackground),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(20.dp))
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(track.title ?: "Unknown Title", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
-                            Text("${track.artist ?: "Unknown Artist"} • ${track.distinctAppearanceCount} play(s)", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.2f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = "$trackSatiety% Satiety",
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.AccentSoft,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-                }
-            }
-        }
 
-        // Auditory Anchors Breakdown
-        Text(
-            text = "Auditory Anchors Distribution",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = DeepObsidianAmber.TextPrimary
-        )
-
-        TuneMindDemoData.anchorWeights.forEach { anchor ->
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(anchor.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
-                        Text("${anchor.percentage}% (${anchor.driftDelta})", fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.SecondaryAccent)
+                    Column {
+                        Text(
+                            text = "WEEKLY RECAP",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = theme.primaryAccent,
+                            letterSpacing = 1.4.sp
+                        )
+                        Text(
+                            text = "Your Week in Music",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
-                    LinearProgressIndicator(
-                        progress = { anchor.percentage / 100f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = DeepObsidianAmber.SecondaryAccent,
-                        trackColor = DeepObsidianAmber.RecessedBackground
+                }
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(theme.primaryAccent.copy(alpha = 0.16f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Insights,
+                        contentDescription = null,
+                        tint = theme.primaryAccent,
+                        modifier = Modifier.size(20.dp)
                     )
-                    Text(anchor.description, fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
                 }
             }
-        }
 
-        // Recommendations Card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "ACTIONABLE RECOMMENDATIONS",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.Success
+            // Summary Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "$sevenDayDuration across $totalPlays plays",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Built from your verified plays across ${stats.appBreakdown.size.coerceAtLeast(1)} music ${if (stats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries.",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.68f),
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+
+            // Key Metrics Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                RecapMetricCard(
+                    label = "Freshness",
+                    value = "$avgFreshness%",
+                    note = if (avgFreshness >= 65) "Well balanced" else "High repeat",
+                    accent = Color(0xFF10B981),
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "Optimal Rotation for Coming Week",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DeepObsidianAmber.TextPrimary
+                RecapMetricCard(
+                    label = "Peak Hours",
+                    value = stats.peakWindowLabel.substringBefore(" "),
+                    note = stats.peakWindowLabel.substringAfter("(", "").removeSuffix(")").ifBlank { "Active" },
+                    accent = theme.primaryAccent,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "• Maintain the ${vaultTracks.size} tracks currently resting in Cooldown Vault to ensure complete receptor recovery.\n• Shift high-tempo electronic listening toward the 10:30 AM - 1:00 PM circadian window.\n• Introduce acoustic palate cleansers during late-evening listening to prevent loop fixation.",
-                    fontSize = 12.sp,
-                    color = DeepObsidianAmber.TextSecondary,
-                    lineHeight = 18.sp
+                RecapMetricCard(
+                    label = "Completion",
+                    value = "${stats.completionRatePercent}%",
+                    note = "Full listens",
+                    accent = theme.secondaryAccent,
+                    modifier = Modifier.weight(1f)
                 )
             }
+
+            // Top Tracks This Week with unified card + live Playing state
+            if (stats.topTracks.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Top Tracks",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "${stats.uniqueTrackCount} songs total",
+                        fontSize = 11.sp,
+                        color = theme.primaryAccent,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                stats.topTracks.take(5).forEachIndexed { index, track ->
+                    val _np = homeState.nowPlaying
+                    val _ls = liveSpotify
+                    val isPlaying = vm.isTrackCurrentlyPlaying(track.title, track.artist, track.spotifyUri)
+                    val strictCount = vm.resolvePlayCount(track.title, track.artist, track.spotifyUri)
+                        .takeIf { it > 0 } ?: track.verifiedPlayCount
+
+                    TuneMindTrackCard(
+                        title = track.title,
+                        artist = track.artist,
+                        subtitle = track.album,
+                        playCount = strictCount,
+                        isCurrentlyPlaying = isPlaying,
+                        appLabel = track.primaryAppName,
+                        freshnessPercent = track.freshnessPercent,
+                        isCoolingDown = track.isCoolingDown,
+                        leadingIndex = index + 1,
+                        onPlayClick = {
+                            onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
+                        }
+                    )
+                }
+            }
+
+            // Artists & Apps Breakdown
+            if (stats.topArtists.isNotEmpty()) {
+                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "Top Artists",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        val maxPlays = stats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
+                        stats.topArtists.take(4).forEach { artist ->
+                            val frac = (artist.playCount.toFloat() / maxPlays.toFloat()).coerceIn(0.1f, 1f)
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = artist.artistName,
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                                        color = theme.primaryAccent,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { frac },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = theme.primaryAccent,
+                                    trackColor = Color.White.copy(alpha = 0.08f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Practical Guidance Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Next Week Focus",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF10B981)
+                    )
+                    Text(
+                        text = buildString {
+                            append("• Keep ${vaultTracks.size} resting tracks in your Vault a little longer so their freshness rebounds.\n")
+                            append("• Peak listening energy lands around ${stats.peakWindowLabel} — great time for upbeat sets.\n")
+                            append("• Mix in songs from For You picks to raise your ${stats.discoveryRatePercent}% fresh discovery balance.")
+                        },
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.72f),
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
         }
-
-        Spacer(Modifier.height(16.dp))
     }
+}
 
-    selectedProfileData?.let { profile ->
-        SongProfileSheet(
-            profile = profile,
-            vm = vm,
-            onDismiss = { selectedProfileData = null }
-        )
+@Composable
+private fun RecapMetricCard(
+    label: String,
+    value: String,
+    note: String,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    SoftGlassCard(modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.58f)
+            )
+            Text(
+                text = value,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = accent
+            )
+            Text(
+                text = note,
+                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.64f),
+                maxLines = 1
+            )
+        }
     }
 }

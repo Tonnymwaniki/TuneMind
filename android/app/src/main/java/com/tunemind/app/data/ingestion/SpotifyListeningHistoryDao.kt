@@ -43,14 +43,21 @@ interface SpotifyListeningHistoryDao {
     suspend fun getTelemetryItemsSnapshot(limit: Int = 100): List<TrackHistoryTelemetryItem>
 
     /**
-     * Reactive stream of raw chronologically ordered play history for the UI.
+     * Reactive stream of verified chronologically ordered play history for the UI.
      */
-    @Query("SELECT * FROM spotify_listening_history ORDER BY played_at_epoch_ms DESC LIMIT :limit")
-    fun observeRecentHistory(limit: Int = 100): Flow<List<SpotifyListeningHistoryEntity>>
+    @Query(
+        """
+        SELECT * FROM spotify_listening_history
+        WHERE ingestion_source != 'CURRENTLY_PLAYING'
+        ORDER BY played_at_epoch_ms DESC
+        LIMIT :limit
+        """
+    )
+    fun observeRecentHistory(limit: Int = 200): Flow<List<SpotifyListeningHistoryEntity>>
 
     /**
      * Reactive stream of aggregated per-track statistics (play count, first/last played timestamps)
-     * computed in SQLite for instant Dopamine Satiety & Rhythm DNA rendering.
+     * computed in SQLite from verified RECENTLY_PLAYED records.
      */
     @Query(
         """
@@ -66,15 +73,16 @@ interface SpotifyListeningHistoryDao {
             MIN(played_at_epoch_ms) AS first_played_epoch_ms,
             MAX(played_at_epoch_ms) AS last_played_epoch_ms
         FROM spotify_listening_history
+        WHERE ingestion_source = 'RECENTLY_PLAYED'
         GROUP BY track_id
         ORDER BY last_played_epoch_ms DESC
         LIMIT :limit
         """
     )
-    fun observeAggregatedTracks(limit: Int = 60): Flow<List<SpotifyTrackAggregate>>
+    fun observeAggregatedTracks(limit: Int = 100): Flow<List<SpotifyTrackAggregate>>
 
     /**
-     * Synchronous snapshot of aggregated tracks for the Voice Agent & Claude telemetry payload.
+     * Synchronous snapshot of aggregated tracks for the Voice Agent & cloud sync.
      */
     @Query(
         """
@@ -90,12 +98,13 @@ interface SpotifyListeningHistoryDao {
             MIN(played_at_epoch_ms) AS first_played_epoch_ms,
             MAX(played_at_epoch_ms) AS last_played_epoch_ms
         FROM spotify_listening_history
+        WHERE ingestion_source = 'RECENTLY_PLAYED'
         GROUP BY track_id
         ORDER BY last_played_epoch_ms DESC
         LIMIT :limit
         """
     )
-    suspend fun getAggregatedTracksSnapshot(limit: Int = 60): List<SpotifyTrackAggregate>
+    suspend fun getAggregatedTracksSnapshot(limit: Int = 100): List<SpotifyTrackAggregate>
 
     /**
      * Returns the most recent `played_at_epoch_ms` cursor stored locally so the WorkManager
@@ -110,11 +119,24 @@ interface SpotifyListeningHistoryDao {
     )
     suspend fun getLatestPlayedEpochMs(): Long?
 
-    @Query("SELECT * FROM spotify_listening_history ORDER BY played_at_epoch_ms DESC LIMIT :limit")
-    suspend fun getRecentHistorySnapshot(limit: Int = 100): List<SpotifyListeningHistoryEntity>
+    @Query(
+        """
+        SELECT * FROM spotify_listening_history
+        WHERE ingestion_source != 'CURRENTLY_PLAYING'
+        ORDER BY played_at_epoch_ms DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getRecentHistorySnapshot(limit: Int = 200): List<SpotifyListeningHistoryEntity>
 
-    @Query("SELECT COUNT(*) FROM spotify_listening_history")
+    @Query("SELECT COUNT(*) FROM spotify_listening_history WHERE ingestion_source = 'RECENTLY_PLAYED'")
     fun observeTotalPlayRecordsCount(): Flow<Int>
+
+    @Query("DELETE FROM spotify_listening_history WHERE ingestion_source = 'CURRENTLY_PLAYING'")
+    suspend fun deletePollingDuplicates()
+
+    @Query("DELETE FROM spotify_listening_history WHERE ingestion_source = 'TOP_TRACKS'")
+    suspend fun deleteSyntheticTopTracks()
 
     @Query("DELETE FROM spotify_listening_history WHERE played_at_epoch_ms < :cutoffEpochMs")
     suspend fun pruneHistoryOlderThan(cutoffEpochMs: Long)

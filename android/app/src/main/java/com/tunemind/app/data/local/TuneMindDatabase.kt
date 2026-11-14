@@ -17,8 +17,12 @@ import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.provider.MusicProviderDao
 import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
+import com.tunemind.app.data.ingestion.SpotifyLibraryDao
+import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryDao
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
+import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
+import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.data.ingestion.TrackHistoryTelemetryItem
 import com.tunemind.app.domain.study.StudyEntity
 
@@ -36,6 +40,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   8 — Unique title-artist index, subTier, and reinforcement learning telemetry tracking fields.
  *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
  *   10 — Spotify TrackHistoryTelemetryItem table (track_history_telemetry).
+ *   11 — Spotify Library tables (spotify_liked_tracks, spotify_playlists, spotify_podcasts).
  */
 @Database(
     entities = [
@@ -49,9 +54,12 @@ import com.tunemind.app.domain.study.StudyEntity
         MusicProviderEntity::class,
         com.tunemind.app.domain.recommendation.AiRecommendationEntity::class,
         SpotifyListeningHistoryEntity::class,
-        TrackHistoryTelemetryItem::class
+        TrackHistoryTelemetryItem::class,
+        SpotifyLikedTrackEntity::class,
+        SpotifyPlaylistEntity::class,
+        SpotifyPodcastEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -64,6 +72,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun musicProviderDao(): MusicProviderDao
     abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
     abstract fun spotifyListeningHistoryDao(): SpotifyListeningHistoryDao
+    abstract fun spotifyLibraryDao(): SpotifyLibraryDao
 
     companion object {
         private const val DATABASE_NAME = "tunemind.db"
@@ -88,7 +97,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_5_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
-                        MIGRATION_9_10
+                        MIGRATION_9_10,
+                        MIGRATION_10_11
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -346,6 +356,69 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_track_history_telemetry_played_at_epoch_ms ON track_history_telemetry(played_at_epoch_ms DESC)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_track_history_telemetry_track_id ON track_history_telemetry(track_id)")
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_liked_tracks (
+                        track_id TEXT PRIMARY KEY NOT NULL,
+                        spotify_uri TEXT NOT NULL,
+                        track_title TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        album_name TEXT NOT NULL DEFAULT '',
+                        album_art_url TEXT,
+                        duration_ms INTEGER NOT NULL DEFAULT 0,
+                        added_at_iso TEXT NOT NULL DEFAULT '',
+                        added_at_epoch_ms INTEGER NOT NULL DEFAULT 0,
+                        synced_at_epoch_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_liked_tracks_added_at_epoch_ms ON spotify_liked_tracks(added_at_epoch_ms DESC)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_playlists (
+                        playlist_id TEXT PRIMARY KEY NOT NULL,
+                        uri TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        owner_name TEXT NOT NULL DEFAULT '',
+                        image_url TEXT,
+                        track_count INTEGER NOT NULL DEFAULT 0,
+                        tracks_json TEXT NOT NULL DEFAULT '[]',
+                        synced_at_epoch_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_playlists_synced_at_epoch_ms ON spotify_playlists(synced_at_epoch_ms DESC)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_podcasts (
+                        item_id TEXT PRIMARY KEY NOT NULL,
+                        show_id TEXT NOT NULL,
+                        show_name TEXT NOT NULL,
+                        publisher TEXT NOT NULL DEFAULT '',
+                        episode_title TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        uri TEXT NOT NULL,
+                        image_url TEXT,
+                        duration_ms INTEGER NOT NULL DEFAULT 0,
+                        resume_position_ms INTEGER NOT NULL DEFAULT 0,
+                        fully_played INTEGER NOT NULL DEFAULT 0,
+                        release_date TEXT NOT NULL DEFAULT '',
+                        total_episodes INTEGER NOT NULL DEFAULT 0,
+                        is_show_summary INTEGER NOT NULL DEFAULT 0,
+                        added_at_epoch_ms INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_podcasts_added_at_epoch_ms ON spotify_podcasts(added_at_epoch_ms DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_podcasts_show_id ON spotify_podcasts(show_id)")
             }
         }
     }

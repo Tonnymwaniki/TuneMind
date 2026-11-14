@@ -45,6 +45,7 @@ data class SpotifyCurrentlyPlayingResponse(
     @SerializedName("timestamp") val timestampMs: Long = 0L,
     @SerializedName("progress_ms") val progressMs: Long? = null,
     @SerializedName("is_playing") val isPlaying: Boolean = false,
+    @SerializedName("currently_playing_type") val currentlyPlayingType: String? = null,
     @SerializedName("item") val item: SpotifyTrackDto? = null,
     @SerializedName("context") val context: SpotifyContextDto? = null
 )
@@ -55,16 +56,118 @@ data class SpotifyTopTracksResponse(
     @SerializedName("limit") val limit: Int = 30
 )
 
+data class SpotifySavedTracksResponse(
+    @SerializedName("items") val items: List<SpotifySavedTrackItemDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0,
+    @SerializedName("limit") val limit: Int = 50,
+    @SerializedName("offset") val offset: Int = 0,
+    @SerializedName("next") val next: String? = null
+)
+
+data class SpotifySavedTrackItemDto(
+    @SerializedName("added_at") val addedAtIso: String? = null,
+    @SerializedName("track") val track: SpotifyTrackDto? = null
+)
+
+data class SpotifyPlaylistsResponse(
+    @SerializedName("items") val items: List<SpotifyPlaylistDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0,
+    @SerializedName("limit") val limit: Int = 40
+)
+
+data class SpotifyPlaylistDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("images") val images: List<SpotifyImageDto>? = null,
+    @SerializedName("owner") val owner: SpotifyOwnerDto? = null,
+    @SerializedName("tracks") val tracks: SpotifyPlaylistTracksRefDto? = null
+)
+
+data class SpotifyOwnerDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("display_name") val displayName: String? = null
+)
+
+data class SpotifyPlaylistTracksRefDto(
+    @SerializedName("href") val href: String? = null,
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifyPlaylistTracksResponse(
+    @SerializedName("items") val items: List<SpotifyPlaylistTrackItemDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifyPlaylistTrackItemDto(
+    @SerializedName("added_at") val addedAtIso: String? = null,
+    @SerializedName("track") val track: SpotifyTrackDto? = null
+)
+
+data class SpotifySavedShowsResponse(
+    @SerializedName("items") val items: List<SpotifySavedShowItemDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifySavedShowItemDto(
+    @SerializedName("added_at") val addedAtIso: String? = null,
+    @SerializedName("show") val show: SpotifyShowDto? = null
+)
+
+data class SpotifyShowDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("publisher") val publisher: String? = null,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("images") val images: List<SpotifyImageDto>? = null,
+    @SerializedName("total_episodes") val totalEpisodes: Int = 0
+)
+
+data class SpotifySavedEpisodesResponse(
+    @SerializedName("items") val items: List<SpotifySavedEpisodeItemDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifySavedEpisodeItemDto(
+    @SerializedName("added_at") val addedAtIso: String? = null,
+    @SerializedName("episode") val episode: SpotifyEpisodeDto? = null
+)
+
+data class SpotifyShowEpisodesResponse(
+    @SerializedName("items") val items: List<SpotifyEpisodeDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifyEpisodeDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("duration_ms") val durationMs: Long = 0L,
+    @SerializedName("release_date") val releaseDate: String? = null,
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("images") val images: List<SpotifyImageDto>? = null,
+    @SerializedName("resume_point") val resumePoint: SpotifyResumePointDto? = null,
+    @SerializedName("show") val show: SpotifyShowDto? = null
+)
+
+data class SpotifyResumePointDto(
+    @SerializedName("fully_played") val fullyPlayed: Boolean = false,
+    @SerializedName("resume_position_ms") val resumePositionMs: Long = 0L
+)
+
 data class SpotifyTrackDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("name") val name: String,
-    @SerializedName("uri") val uri: String,
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("name") val name: String = "",
+    @SerializedName("uri") val uri: String = "",
     @SerializedName("duration_ms") val durationMs: Long = 0L,
     @SerializedName("popularity") val popularity: Int = 0,
     @SerializedName("explicit") val explicit: Boolean = false,
     @SerializedName("album") val album: SpotifyAlbumDto? = null,
     @SerializedName("artists") val artists: List<SpotifyArtistDto> = emptyList(),
-    @SerializedName("external_urls") val externalUrls: SpotifyExternalUrlsDto? = null
+    @SerializedName("external_urls") val externalUrls: SpotifyExternalUrlsDto? = null,
+    @SerializedName("show") val show: SpotifyShowDto? = null
 )
 
 data class SpotifyAlbumDto(
@@ -251,7 +354,7 @@ fun SpotifyPlayHistoryItemDto.toTrackHistoryTelemetryItem(
 ): TrackHistoryTelemetryItem {
     val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
     val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-    val cleanId = track.id.ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
+    val cleanId = track.id.orEmpty().ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
     val cleanUri = track.uri.ifBlank { "spotify:track:$cleanId" }
 
     return TrackHistoryTelemetryItem(
@@ -274,7 +377,7 @@ fun SpotifyPlayHistoryItemDto.toHistoryEntity(nowMs: Long = System.currentTimeMi
     val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
     val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
     val artistIds = track.artists.mapNotNull { it.id }.joinToString(",")
-    val cleanId = track.id.ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
+    val cleanId = track.id.orEmpty().ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
     val cleanUri = track.uri.ifBlank { "spotify:track:$cleanId" }
 
     return SpotifyListeningHistoryEntity(
@@ -303,7 +406,7 @@ fun SpotifyTrackDto.toHistoryEntity(
 ): SpotifyListeningHistoryEntity {
     val primaryArtist = artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
     val artistIds = artists.mapNotNull { it.id }.joinToString(",")
-    val cleanId = id.ifBlank { "${name.lowercase()}_${primaryArtist.lowercase()}" }
+    val cleanId = id.orEmpty().ifBlank { "${name.lowercase()}_${primaryArtist.lowercase()}" }
     val cleanUri = uri.ifBlank { "spotify:track:$cleanId" }
     val iso = Instant.ofEpochMilli(playedAtMs).toString()
 
@@ -323,6 +426,72 @@ fun SpotifyTrackDto.toHistoryEntity(
         ingestionSource = ingestionSource,
         contextUri = contextUri,
         syncedAtEpochMs = System.currentTimeMillis()
+    )
+}
+
+fun SpotifySavedTrackItemDto.toLikedTrackEntity(nowMs: Long = System.currentTimeMillis()): SpotifyLikedTrackEntity? {
+    val t = track ?: return null
+    if (t.name.isBlank()) return null
+    val primaryArtist = t.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
+    val cleanId = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${primaryArtist.lowercase()}" }
+    val cleanUri = t.uri.ifBlank { "spotify:track:$cleanId" }
+    val addedMs = parseSpotifyIsoTimestampMs(addedAtIso)
+    return SpotifyLikedTrackEntity(
+        trackId = cleanId,
+        spotifyUri = cleanUri,
+        trackTitle = t.name.trim(),
+        artistName = primaryArtist.trim(),
+        albumName = t.album?.name?.trim() ?: "",
+        albumArtUrl = t.album?.images?.firstOrNull()?.url,
+        durationMs = t.durationMs,
+        addedAtIso = addedAtIso ?: "",
+        addedAtEpochMs = addedMs,
+        syncedAtEpochMs = nowMs
+    )
+}
+
+fun SpotifyPlaylistDto.toPlaylistEntity(
+    tracks: List<SpotifyPlaylistTrackEntry> = emptyList(),
+    nowMs: Long = System.currentTimeMillis()
+): SpotifyPlaylistEntity? {
+    if (id.isBlank() || name.isBlank()) return null
+    return SpotifyPlaylistEntity(
+        playlistId = id,
+        uri = uri.ifBlank { "spotify:playlist:$id" },
+        name = name.trim(),
+        description = description?.trim().orEmpty(),
+        ownerName = owner?.displayName?.trim()?.ifBlank { owner.id ?: "Spotify" } ?: "Spotify",
+        imageUrl = images?.firstOrNull()?.url,
+        trackCount = maxOf(tracks.size, this.tracks?.total ?: 0),
+        tracksJson = encodePlaylistTracksJson(tracks),
+        syncedAtEpochMs = nowMs
+    )
+}
+
+fun SpotifyCurrentlyPlayingResponse.toLiveTrackState(nowMs: Long = System.currentTimeMillis()): SpotifyLiveTrackState? {
+    val dto = item ?: return null
+    if (dto.name.isBlank()) return null
+    val isEp = currentlyPlayingType.equals("episode", ignoreCase = true) || dto.show != null
+    val primaryArtistOrShow = if (isEp) {
+        dto.show?.name?.takeIf { it.isNotBlank() } ?: dto.show?.publisher ?: "Podcast"
+    } else {
+        dto.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
+    }
+    val cleanId = dto.id.orEmpty().ifBlank { "${dto.name.lowercase()}_${primaryArtistOrShow.lowercase()}" }
+    val fallbackUri = if (isEp) "spotify:episode:$cleanId" else "spotify:track:$cleanId"
+    return SpotifyLiveTrackState(
+        id = cleanId,
+        title = dto.name.trim(),
+        artistOrShow = primaryArtistOrShow.trim(),
+        albumOrSubtitle = if (isEp) (dto.show?.publisher ?: "Spotify Podcast") else (dto.album?.name?.trim() ?: ""),
+        spotifyUri = dto.uri.ifBlank { fallbackUri },
+        albumArtUrl = dto.album?.images?.firstOrNull()?.url ?: dto.show?.images?.firstOrNull()?.url,
+        durationMs = dto.durationMs,
+        progressMs = progressMs ?: 0L,
+        isPlaying = isPlaying,
+        isPodcast = isEp,
+        contextUri = context?.uri,
+        updatedAtMs = if (timestampMs > 0L) timestampMs else nowMs
     )
 }
 

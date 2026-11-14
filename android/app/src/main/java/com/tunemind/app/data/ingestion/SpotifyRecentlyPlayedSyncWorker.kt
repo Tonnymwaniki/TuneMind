@@ -18,7 +18,6 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.tunemind.app.data.local.TuneMindDatabase
 import java.util.concurrent.TimeUnit
 
 /**
@@ -42,53 +41,12 @@ class SpotifyRecentlyPlayedSyncWorker(
             return Result.success()
         }
 
-        // 1. Obtain a valid (or silently refreshed) Access Token from EncryptedSharedPreferences
-        val validAccessToken = authManager.getValidAccessToken()
-        if (validAccessToken.isNullOrBlank()) {
-            Log.w(TAG, "Spotify Access Token expired and could not be refreshed.")
-            return Result.retry()
-        }
-
-        // 2. Fetch GET https://api.spotify.com/v1/me/player/recently-played with Authorization: Bearer {token}
-        val database = TuneMindDatabase.getInstance(applicationContext)
-        val historyDao = database.spotifyListeningHistoryDao()
-        val nowMs = System.currentTimeMillis()
-
-        try {
-            val response = SpotifyApiFactory.directWebApiService.getRecentlyPlayed(
-                authHeader = "Bearer $validAccessToken",
-                limit = 50
-            )
-
-            if (response.isSuccessful) {
-                val items = response.body()?.items.orEmpty()
-
-                // 3. Map fetched items to TrackHistoryTelemetryItem and SpotifyListeningHistoryEntity
-                val telemetryItems: List<TrackHistoryTelemetryItem> = items.map { dto ->
-                    dto.toTrackHistoryTelemetryItem(nowMs)
-                }
-                val historyEntities: List<SpotifyListeningHistoryEntity> = items.map { dto ->
-                    dto.toHistoryEntity(nowMs)
-                }
-
-                // 4. Insert into TuneMindDatabase while ignoring duplicates (OnConflictStrategy.IGNORE)
-                if (telemetryItems.isNotEmpty()) {
-                    historyDao.insertTelemetryItemsIgnoreDuplicates(telemetryItems)
-                    historyDao.insertHistoryIgnoreDuplicates(historyEntities)
-                }
-            } else if (response.code() in 500..599 || response.code() == 429) {
-                Log.w(TAG, "Spotify Web API returned HTTP ${response.code()} — scheduling WorkManager retry.")
-                return Result.retry()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Network exception fetching recently-played tracks: ${e.message}")
-            return Result.retry()
-        }
-
-        // 5. Run full repository sync (currently-playing + EventQueue mirror + Satiety evaluation)
         val repo = SpotifyOAuthRepository.getInstance(applicationContext)
         return when (val syncResult = repo.syncRecentlyPlayedToLocalRoom()) {
             is SpotifyIngestionSyncResult.Success -> {
+                if (repo.hasExtendedLibraryScopes()) {
+                    runCatching { repo.syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = false) }
+                }
                 Log.i(
                     TAG,
                     "Spotify Web API sync succeeded: ingested=${syncResult.ingestedRecentlyPlayedCount}, " +

@@ -69,8 +69,12 @@ fun SettingsScreen(
 
     val spotifyAuthManager = remember(context) { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
     val spotifyOAuthRepo = remember(context) { com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context) }
+    val needsLibraryScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
     var isSpotifyAuthorized by remember {
         mutableStateOf(spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated())
+    }
+    var hasExtendedLibraryScopes by remember {
+        mutableStateOf(spotifyOAuthRepo.hasExtendedLibraryScopes())
     }
     var hasOverlayPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)) }
     var hasNotificationAccess by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)) }
@@ -94,6 +98,7 @@ fun SettingsScreen(
             com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
             vm.checkBatteryOptimization(context)
             isSpotifyAuthorized = spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated()
+            hasExtendedLibraryScopes = spotifyOAuthRepo.hasExtendedLibraryScopes()
             hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
             hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
             hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
@@ -310,9 +315,15 @@ fun SettingsScreen(
                                 Text(
                                     text = when {
                                         isConnectingRemote -> "Connecting to Spotify Remote — approve prompt if asked…"
-                                        appRemoteConnected -> "Connected for silent Free & Premium playback control."
+                                        appRemoteConnected && isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade ->
+                                            "Connected for silent playback plus Liked Songs, Playlists & Podcasts."
+                                        appRemoteConnected ->
+                                            "Connected for silent Free & Premium playback control."
                                         !isSpotifyInstalled -> "Spotify app not found on this device."
-                                        isSpotifyAuthorized -> "Spotify linked — tap Connect Remote for in-app control."
+                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
+                                            "Spotify linked — update permissions to sync Liked Songs, Playlists & Podcasts."
+                                        isSpotifyAuthorized ->
+                                            "Spotify linked with Likes, Playlists & Podcasts — tap Connect Remote for in-app control."
                                         else -> "Link Spotify or connect Remote to control music without switching apps."
                                     },
                                     fontSize = 11.sp,
@@ -434,17 +445,39 @@ fun SettingsScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSpotifyAuthorized) safeGreen else colors.primaryAccent.copy(alpha = 0.55f)
+                                    when {
+                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
+                                        isSpotifyAuthorized -> safeGreen
+                                        else -> colors.primaryAccent.copy(alpha = 0.55f)
+                                    }
                                 ),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
-                                    text = if (isSpotifyAuthorized) "Spotify Linked" else "Link Spotify",
+                                    text = when {
+                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
+                                            "Update Spotify Permissions"
+                                        isSpotifyAuthorized -> "Spotify Linked"
+                                        else -> "Link Spotify"
+                                    },
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (isSpotifyAuthorized) safeGreen else colors.primaryAccent
+                                    color = when {
+                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
+                                        isSpotifyAuthorized -> safeGreen
+                                        else -> colors.primaryAccent
+                                    }
                                 )
                             }
+                        }
+
+                        if (isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade) {
+                            Text(
+                                text = "Library access active: Likes, Playlists & Podcasts",
+                                fontSize = 11.sp,
+                                color = safeGreen.copy(alpha = 0.90f),
+                                fontWeight = FontWeight.Medium
+                            )
                         }
                     }
                 }

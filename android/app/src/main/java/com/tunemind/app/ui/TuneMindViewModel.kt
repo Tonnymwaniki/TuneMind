@@ -25,10 +25,21 @@ import com.tunemind.app.domain.audio.VolumeObservationEntity
 import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.temporal.TimeSlot
 import com.tunemind.app.domain.temporal.TimePatternEngine
+import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
+import com.tunemind.app.domain.memory.OverallListeningStats
+import com.tunemind.app.domain.memory.UnifiedPlayEvent
+import com.tunemind.app.domain.memory.UnifiedTrackStats
+import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
+import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
+import com.tunemind.app.data.ingestion.SpotifyOAuthRepository
+import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
+import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -189,6 +200,112 @@ class TuneMindViewModel : ViewModel() {
 
     private val _hearingInsightsState = MutableStateFlow(HearingInsightsState())
     val hearingInsightsState: StateFlow<HearingInsightsState> = _hearingInsightsState.asStateFlow()
+
+    // Authoritative Deduplicated Listening & Cross-App Stats
+    private val spotifyRepo by lazy {
+        AppHolder.context?.let { SpotifyOAuthRepository.getInstance(it) }
+    }
+    private val _unifiedTracks = MutableStateFlow<List<UnifiedTrackStats>>(emptyList())
+    val unifiedTracks: StateFlow<List<UnifiedTrackStats>> = _unifiedTracks.asStateFlow()
+
+    private val _cleanPlayHistory = MutableStateFlow<List<UnifiedPlayEvent>>(emptyList())
+    val cleanPlayHistory: StateFlow<List<UnifiedPlayEvent>> = _cleanPlayHistory.asStateFlow()
+
+    private val _listeningStats = MutableStateFlow(OverallListeningStats())
+    val listeningStats: StateFlow<OverallListeningStats> = _listeningStats.asStateFlow()
+
+    private val _playCountByKey = MutableStateFlow<Map<String, Int>>(emptyMap())
+    private val _playCountByUri = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    // Spotify Library (Liked Songs, Playlists, Podcasts, Live State)
+    private val _spotifyLikedTracks = MutableStateFlow<List<SpotifyLikedTrackEntity>>(emptyList())
+    val spotifyLikedTracks: StateFlow<List<SpotifyLikedTrackEntity>> = _spotifyLikedTracks.asStateFlow()
+
+    private val _spotifyPlaylists = MutableStateFlow<List<SpotifyPlaylistEntity>>(emptyList())
+    val spotifyPlaylists: StateFlow<List<SpotifyPlaylistEntity>> = _spotifyPlaylists.asStateFlow()
+
+    private val _spotifyPodcasts = MutableStateFlow<List<SpotifyPodcastEntity>>(emptyList())
+    val spotifyPodcasts: StateFlow<List<SpotifyPodcastEntity>> = _spotifyPodcasts.asStateFlow()
+
+    private val _spotifyLiveState = MutableStateFlow<SpotifyLiveTrackState?>(null)
+    val spotifyLiveState: StateFlow<SpotifyLiveTrackState?> = _spotifyLiveState.asStateFlow()
+
+    private val _isLibrarySyncing = MutableStateFlow(false)
+    val isLibrarySyncing: StateFlow<Boolean> = _isLibrarySyncing.asStateFlow()
+
+    private val _needsLibraryScopeUpgrade = MutableStateFlow(false)
+    val needsLibraryScopeUpgrade: StateFlow<Boolean> = _needsLibraryScopeUpgrade.asStateFlow()
+
+    fun resolvePlayCount(title: String?, artist: String?, spotifyUri: String? = null): Int {
+        val cleanUri = spotifyUri?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        if (cleanUri != null) {
+            _playCountByUri.value[cleanUri]?.let { return it }
+        }
+        val key = ListeningPlayDeduplicator.canonicalTrackKey(title, artist)
+        _playCountByKey.value[key]?.let { return it }
+        val cleanTitle = ListeningPlayDeduplicator.normalizeText(title)
+        if (cleanTitle.isNotBlank()) {
+            val fuzzy = _unifiedTracks.value.firstOrNull {
+                ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, spotifyUri)
+            }
+            if (fuzzy != null) return fuzzy.verifiedPlayCount
+        }
+        return 0
+    }
+
+    fun isTrackCurrentlyPlaying(title: String?, artist: String?, spotifyUri: String? = null): Boolean {
+        if (title.isNullOrBlank()) return false
+        val nowPlaying = _homeState.value.nowPlaying
+        if (nowPlaying != null && nowPlaying.isPlaying) {
+            if (ListeningPlayDeduplicator.isSameTrack(
+                    nowPlaying.title,
+                    nowPlaying.artist,
+                    null,
+                    title,
+                    artist,
+                    spotifyUri
+                )
+            ) {
+                return true
+            }
+        }
+        val liveSpotify = _spotifyLiveState.value
+        val freshSpotify = liveSpotify != null &&
+            liveSpotify.isPlaying &&
+            (System.currentTimeMillis() - liveSpotify.updatedAtMs) < 12 * 60_000L
+        if (freshSpotify && liveSpotify != null) {
+            return ListeningPlayDeduplicator.isSameTrack(
+                liveSpotify.title,
+                liveSpotify.artistOrShow,
+                liveSpotify.spotifyUri,
+                title,
+                artist,
+                spotifyUri
+            )
+        }
+        return false
+    }
+
+    fun refreshSpotifyLibrary(forcePlaylistTracks: Boolean = true) {
+        val repoInstance = spotifyRepo ?: return
+        viewModelScope.launch {
+            if (_isLibrarySyncing.value) return@launch
+            _isLibrarySyncing.value = true
+            try {
+                repoInstance.syncRecentlyPlayedToLocalRoom()
+                repoInstance.syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = forcePlaylistTracks)
+            } finally {
+                _isLibrarySyncing.value = false
+            }
+        }
+    }
+
+    fun loadPlaylistTracksIfNeeded(playlistId: String) {
+        val repoInstance = spotifyRepo ?: return
+        viewModelScope.launch {
+            runCatching { repoInstance.loadPlaylistTracksIfNeeded(playlistId) }
+        }
+    }
 
     // Persistent Chrono AI Recommendation Crate
     private val _aiDiscoveryCrate = MutableStateFlow<List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>>(emptyList())
@@ -773,258 +890,238 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
+        // Observe Spotify Library (Liked Songs, Playlists, Podcasts, Live Playback State)
+        viewModelScope.launch {
+            runCatching {
+                spotifyRepo?.observeLikedTracks(150)?.collect { _spotifyLikedTracks.value = it }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                spotifyRepo?.observePlaylists(60)?.collect { _spotifyPlaylists.value = it }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                spotifyRepo?.observePodcasts(100)?.collect { _spotifyPodcasts.value = it }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                spotifyRepo?.currentlyPlayingLiveState?.collect { _spotifyLiveState.value = it }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                spotifyRepo?.needsLibraryScopeUpgrade?.collect { _needsLibraryScopeUpgrade.value = it }
+            }
+        }
+
+        // Purge any legacy CURRENTLY_PLAYING polling noise on startup
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { db?.spotifyListeningHistoryDao()?.deletePollingDuplicates() }
+        }
+
+        // Unified Authoritative Pipeline: Combine Device MediaSessions + Verified Spotify History + Live State
         viewModelScope.launch {
             try {
-                repo?.observeRecent()?.collect { rows ->
-                val memory: ListeningMemory
-                val coverage: CoverageAssessment
-                withContext(Dispatchers.Default) {
-                    val truncated = rows.size >= EventBufferRepository.MAX_OBSERVATIONS
-                    val episodes = ListeningSessionReconstructor().reconstruct(rows, retainedWindowMayBeTruncated = truncated)
-                    memory = ListeningMemoryBuilder().build(rows, episodes, retainedHistoryMayBeIncomplete = truncated)
-                    coverage = CoverageAssessor.assessFromRawEvents(rows)
-                }
+                val obsFlow = repo?.observeRecent() ?: flowOf(emptyList())
+                val spotifyHistoryFlow = db?.spotifyListeningHistoryDao()?.observeRecentHistory(200) ?: flowOf(emptyList())
 
-                val summary = memory.summary
-                val isBrowserOrWeb = { pkg: String?, title: String?, artist: String? ->
-                    val p = (pkg ?: "").lowercase()
-                    val t = (title ?: "").lowercase()
-                    val a = (artist ?: "").lowercase()
-                    p.contains("chrome") || p.contains("browser") || p.contains("chromium") ||
-                    p.contains("webview") || p.contains("firefox") || p.contains("opera") ||
-                    p.contains("edge") || p.contains("brave") || p.contains("searchbox") ||
-                    t.startsWith("http") || t.contains(".com") || t.contains("chrome") ||
-                    a.startsWith("http") || a.contains(".com") || a.contains("chrome")
-                }
+                combine(
+                    obsFlow,
+                    spotifyHistoryFlow,
+                    _spotifyLiveState
+                ) { rows, spotifyHistory, liveSpotify ->
+                    Triple(rows, spotifyHistory, liveSpotify)
+                }.collect { (rows, spotifyHistory, liveSpotify) ->
+                    val memory: ListeningMemory
+                    val coverage: CoverageAssessment
+                    val deviceObs = rows.filter { it.observerSessionId != "spotify_web_api_ingestion" }
 
-                // Merge reconstructed memory.tracks WITH all raw observed tracks in Room so no played song is ever dropped!
-                val combinedTrackMap = linkedMapOf<String, TrackMemoryEntry>()
-                for (t in memory.tracks.filter { !it.title.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.title, it.artist) }.sortedByDescending { it.lastObservedAppearanceAtMs }) {
-                    val key = "${t.title?.trim()?.lowercase()}|${t.artist?.trim()?.lowercase() ?: ""}"
-                    combinedTrackMap[key] = t
-                }
-                val rawGrouped = rows
-                    .filter { !it.trackTitle.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist) }
-                    .groupBy { "${it.trackTitle?.trim()?.lowercase()}|${it.trackArtist?.trim()?.lowercase() ?: ""}" }
-                for ((key, group) in rawGrouped) {
-                    val latest = group.maxByOrNull { it.eventTimeMs } ?: group.first()
-                    val rawTrackId = group.mapNotNull { it.trackId?.takeIf(String::isNotBlank) }.firstOrNull()
-                    val existing = combinedTrackMap[key]
-                    if (existing == null) {
-                        combinedTrackMap[key] = TrackMemoryEntry(
-                            entryId = "raw:$key",
-                            sourcePackage = latest.sourcePackage ?: "com.spotify.music",
-                            providerTrackId = rawTrackId,
-                            title = latest.trackTitle?.trim(),
-                            artist = latest.trackArtist?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown Artist",
-                            album = latest.trackAlbum?.trim(),
-                            distinctAppearanceCount = group.size,
-                            firstObservedAppearanceAtMs = group.minOfOrNull { it.eventTimeMs },
-                            lastObservedAppearanceAtMs = latest.eventTimeMs,
-                            supportingObservationIds = group.map { it.eventId }.take(10),
-                            identityBasis = if (rawTrackId != null) TrackIdentityBasis.PROVIDER_TRACK_ID else TrackIdentityBasis.METADATA_FINGERPRINT,
-                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
-                            historyMayBeIncomplete = false,
-                            appearances = emptyList()
-                        )
-                    } else if (existing.providerTrackId.isNullOrBlank() && !rawTrackId.isNullOrBlank()) {
-                        combinedTrackMap[key] = existing.copy(providerTrackId = rawTrackId)
+                    val latestStateObs = deviceObs.firstOrNull {
+                        it.playbackStateCode != null &&
+                            !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
                     }
-                }
+                    val latestTrackMeta = deviceObs.firstOrNull {
+                        !it.trackTitle.isNullOrBlank() &&
+                            !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
+                    }
+                    val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
+                    val isRecentObservation = (System.currentTimeMillis() - latestObsTimeMs) < 12 * 60 * 1000L
+                    val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
 
-                // Merge Local-First Spotify Web API Listening History from Room (spotify_listening_history table)
-                val spotifyIngested = runCatching {
-                    db?.spotifyListeningHistoryDao()?.getAggregatedTracksSnapshot(60).orEmpty()
-                }.getOrDefault(emptyList())
-                for (agg in spotifyIngested) {
-                    val key = "${agg.trackTitle.trim().lowercase()}|${agg.artistName.trim().lowercase()}"
-                    val existing = combinedTrackMap[key]
-                    if (existing == null) {
-                        combinedTrackMap[key] = TrackMemoryEntry(
-                            entryId = "spotify:${agg.trackId}",
-                            sourcePackage = "com.spotify.music",
-                            providerTrackId = agg.spotifyUri.ifBlank { "spotify:track:${agg.trackId}" },
-                            title = agg.trackTitle,
-                            artist = agg.artistName,
-                            album = agg.albumName.ifBlank { null },
-                            distinctAppearanceCount = agg.playCount.coerceAtLeast(1),
-                            firstObservedAppearanceAtMs = agg.firstPlayedEpochMs,
-                            lastObservedAppearanceAtMs = agg.lastPlayedEpochMs,
-                            supportingObservationIds = listOf("spotify_api:${agg.trackId}"),
-                            identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
-                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
-                            historyMayBeIncomplete = false,
-                            appearances = emptyList()
-                        )
-                    } else if (existing.providerTrackId.isNullOrBlank() && agg.spotifyUri.isNotBlank()) {
-                        combinedTrackMap[key] = existing.copy(
-                            providerTrackId = agg.spotifyUri,
-                            distinctAppearanceCount = maxOf(existing.distinctAppearanceCount, agg.playCount),
-                            lastObservedAppearanceAtMs = maxOf(existing.lastObservedAppearanceAtMs ?: 0L, agg.lastPlayedEpochMs)
+                    val overrideObs = manualActiveTrackOverride
+                    val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
+                    val freshLiveSpotify = liveSpotify != null &&
+                        (System.currentTimeMillis() - liveSpotify.updatedAtMs) < 12 * 60 * 1000L
+
+                    val nowPlayingObs = when {
+                        useAgentOverride -> overrideObs
+                        (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
+                            NowPlayingObservation(
+                                title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
+                                artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
+                                album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
+                                sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
+                                isPlaying = isPlayingNow,
+                                playbackStateCode = latestStateObs?.playbackStateCode,
+                                positionMs = latestStateObs?.positionMs ?: 0L,
+                                durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
+                                speed = latestStateObs?.playbackSpeed ?: 1.0f,
+                                updatedAtMs = latestObsTimeMs
+                            )
+                        }
+                        freshLiveSpotify && liveSpotify != null -> {
+                            NowPlayingObservation(
+                                title = liveSpotify.title,
+                                artist = liveSpotify.artistOrShow,
+                                album = liveSpotify.albumOrSubtitle.ifBlank { null },
+                                sourcePackage = "com.spotify.music",
+                                isPlaying = liveSpotify.isPlaying,
+                                playbackStateCode = if (liveSpotify.isPlaying) 3 else 2,
+                                positionMs = liveSpotify.progressMs,
+                                durationMs = liveSpotify.durationMs,
+                                speed = 1.0f,
+                                updatedAtMs = liveSpotify.updatedAtMs
+                            )
+                        }
+                        overrideObs != null -> overrideObs
+                        else -> null
+                    }
+
+                    val snapshot: com.tunemind.app.domain.memory.DeduplicatedListeningSnapshot
+                    withContext(Dispatchers.Default) {
+                        val truncated = rows.size >= EventBufferRepository.MAX_OBSERVATIONS
+                        val episodes = ListeningSessionReconstructor().reconstruct(rows, retainedWindowMayBeTruncated = truncated)
+                        memory = ListeningMemoryBuilder().build(rows, episodes, retainedHistoryMayBeIncomplete = truncated)
+                        coverage = CoverageAssessor.assessFromRawEvents(rows)
+                        snapshot = ListeningPlayDeduplicator.buildSnapshot(
+                            rawObservations = rows,
+                            spotifyHistory = spotifyHistory,
+                            nowPlayingTitle = nowPlayingObs?.title,
+                            nowPlayingArtist = nowPlayingObs?.artist,
+                            nowPlayingSourcePkg = nowPlayingObs?.sourcePackage,
+                            isMusicPlayingNow = nowPlayingObs?.isPlaying == true
                         )
                     }
-                }
 
-                // Also merge 15-minute WorkManager track_history_telemetry rows from Room
-                val telemetryIngested = runCatching {
-                    db?.spotifyListeningHistoryDao()?.getTelemetryItemsSnapshot(100).orEmpty()
-                }.getOrDefault(emptyList())
-                for ((key, rowsGroup) in telemetryIngested.groupBy { "${it.trackTitle.trim().lowercase()}|${it.artistName.trim().lowercase()}" }) {
-                    val sample = rowsGroup.firstOrNull() ?: continue
-                    if (sample.trackTitle.isBlank()) continue
-                    val count = rowsGroup.size
-                    val firstMs = rowsGroup.minOfOrNull { it.playedAtEpochMs } ?: sample.playedAtEpochMs
-                    val lastMs = rowsGroup.maxOfOrNull { it.playedAtEpochMs } ?: sample.playedAtEpochMs
-                    val existing = combinedTrackMap[key]
-                    if (existing == null) {
-                        combinedTrackMap[key] = TrackMemoryEntry(
-                            entryId = "spotify_tel:${sample.trackId}",
-                            sourcePackage = "com.spotify.music",
-                            providerTrackId = sample.spotifyUri.ifBlank { "spotify:track:${sample.trackId}" },
-                            title = sample.trackTitle,
-                            artist = sample.artistName,
-                            album = sample.albumName.ifBlank { null },
-                            distinctAppearanceCount = count.coerceAtLeast(1),
-                            firstObservedAppearanceAtMs = firstMs,
-                            lastObservedAppearanceAtMs = lastMs,
-                            supportingObservationIds = listOf("spotify_telemetry:${sample.trackId}"),
-                            identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
-                            evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
-                            historyMayBeIncomplete = false,
-                            appearances = emptyList()
-                        )
-                    } else {
-                        combinedTrackMap[key] = existing.copy(
-                            providerTrackId = existing.providerTrackId?.takeIf { it.isNotBlank() } ?: sample.spotifyUri,
-                            distinctAppearanceCount = maxOf(existing.distinctAppearanceCount, count),
-                            lastObservedAppearanceAtMs = maxOf(existing.lastObservedAppearanceAtMs ?: 0L, lastMs)
-                        )
+                    _unifiedTracks.value = snapshot.unifiedTracks
+                    _cleanPlayHistory.value = snapshot.cleanPlayHistory
+                    _listeningStats.value = snapshot.stats
+                    _playCountByKey.value = snapshot.playCountByTrackKey
+                    _playCountByUri.value = snapshot.playCountByUri
+
+                    // Build authoritative deduplicated TrackMemoryEntry list (accurate play counts everywhere)
+                    val recent = snapshot.unifiedTracks
+                        .map { ut ->
+                            TrackMemoryEntry(
+                                entryId = ut.entryId,
+                                sourcePackage = ut.primarySourcePackage,
+                                providerTrackId = ut.spotifyUri,
+                                title = ut.title,
+                                artist = ut.artist,
+                                album = ut.album,
+                                distinctAppearanceCount = ut.verifiedPlayCount.coerceAtLeast(1),
+                                firstObservedAppearanceAtMs = ut.firstPlayedAtMs,
+                                lastObservedAppearanceAtMs = ut.lastPlayedAtMs,
+                                supportingObservationIds = emptyList(),
+                                identityBasis = if (!ut.spotifyUri.isNullOrBlank()) TrackIdentityBasis.PROVIDER_TRACK_ID else TrackIdentityBasis.METADATA_FINGERPRINT,
+                                evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
+                                historyMayBeIncomplete = false,
+                                appearances = emptyList()
+                            )
+                        }
+                        .take(80)
+
+                    val summary = memory.summary
+                    _homeState.value = HomeState(
+                        identifiableTrackCount = snapshot.unifiedTracks.size,
+                        distinctAppearanceCount = snapshot.stats.totalVerifiedPlays,
+                        recurringTrackCount = snapshot.unifiedTracks.count { it.verifiedPlayCount >= 2 },
+                        recentTracks = recent,
+                        nowPlaying = nowPlayingObs,
+                        coverage = coverage,
+                        isLoading = false,
+                    )
+                    recomputeAdaptiveTheme()
+
+                    _historyState.value = HistoryState(
+                        tracks = recent,
+                        filterMode = _historyState.value.filterMode,
+                        isLoading = false,
+                    )
+
+                    // Profile data
+                    var sigText = "No signal data yet."
+                    var dynText = "No dynamics data yet."
+                    var resText = "No research data yet."
+                    withContext(Dispatchers.Default) {
+                        val signalSummary = TemporalSignalEvaluator.evaluate(memory)
+                        val dynamicsSummary = TemporalDynamicsEvaluator.evaluate(memory)
+                        val researchSummary = PatternResearchEvaluator.evaluate(memory)
+
+                        sigText = signalSummary.trackSignals
+                            .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
+                            .sortedByDescending { it.signal.signal }.take(5)
+                            .joinToString("\n") { "${it.title ?: it.entryId.take(12)}: %.3f".format(it.signal.signal) }
+                            .ifEmpty { "No signal data yet." }
+
+                        dynText = dynamicsSummary.trackDynamics.filter { it.currentEligibleCount > 0 }
+                            .sortedByDescending { it.currentSignal }.take(5)
+                            .joinToString("\n") { "${it.title ?: it.entryId.take(12)}: ${it.direction.name.lowercase()} (Δ=%+.3f".format(it.signalDelta) + ")" }
+                            .let { "$it\n↑${dynamicsSummary.increasingCount} ↓${dynamicsSummary.decreasingCount} →${dynamicsSummary.stableCount}" }
+
+                        resText = buildString {
+                            val ra = researchSummary.recurrenceAcceleration
+                            appendLine("Acceleration: ${ra.earlierWindow.distinctAppearanceCount} → ${ra.laterWindow.distinctAppearanceCount}")
+                            appendLine("Reappearances: ${researchSummary.reappearances.size}")
+                            val c = researchSummary.concentration
+                            appendLine("Concentration: ${c.distinctIdentifiedTrackCount} tracks, ${c.totalIdentifiedAppearanceCount} appearances")
+                            val eq = researchSummary.evidenceQuality
+                            appendLine("Identified: ${eq.identifiedTrackCount} · Insufficient: ${eq.insufficientIdentityCount}")
+                        }
+                    }
+
+                    // Study day evidence from experiment events
+                    val expId = _studyState.value.experimentId
+                    val studyDays = if (expId.isNotEmpty() && _studyState.value.status == ExperimentStatus.ACTIVE) {
+                        val eventTimes = runCatching { experimentRepo?.getEventTimestamps(expId) }.getOrNull()?.filterNotNull() ?: emptyList()
+                        computeStudyDayEvidence(eventTimes, _studyState.value)
+                    } else emptyList()
+                    val sources = if (expId.isNotEmpty()) {
+                        runCatching { experimentRepo?.getSummary(expId)?.observedSources ?: emptyList() }.getOrNull() ?: emptyList()
+                    } else emptyList()
+
+                    _studyState.value = _studyState.value.copy(
+                        dayEvidence = studyDays,
+                        daysWithEvents = studyDays.count { it.hasEvents },
+                        observedSources = sources,
+                    )
+
+                    _profileState.value = ProfileState(
+                        signalText = sigText, dynamicsText = dynText, researchText = resText,
+                        observationCount = summary.distinctReconstructedAppearanceCount.coerceAtLeast(rows.size),
+                    )
+
+                    refreshRecommendations()
+
+                    // If real tracks are observed and the crate was uncalibrated or empty, auto-calibrate
+                    val observedArtists = recent.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct()
+                    if (observedArtists.isNotEmpty()) {
+                        val currentCrate = _aiDiscoveryCrate.value
+                        val needsCalibration = currentCrate.isEmpty() || currentCrate.any {
+                            it.telemetryBasisSummary.contains("Emerging") || it.telemetryBasisSummary.contains("Daypart:")
+                        }
+                        if (needsCalibration && !_isDiscovering.value) {
+                            triggerChronoDiscovery(forceRefresh = true)
+                        }
                     }
                 }
-
-                val recent = combinedTrackMap.values
-                    .sortedByDescending { it.lastObservedAppearanceAtMs ?: 0L }
-                    .take(60)
-
-                val latestStateObs = rows.firstOrNull { 
-                    it.playbackStateCode != null && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
-                }
-                val latestTrackMeta = rows.firstOrNull { 
-                    !it.trackTitle.isNullOrBlank() && !isBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
-                }
-                val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
-                val isRecentObservation = (System.currentTimeMillis() - latestObsTimeMs) < 12 * 60 * 1000L
-                val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
-
-                val overrideObs = manualActiveTrackOverride
-                val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
-
-                val nowPlayingObs = when {
-                    useAgentOverride -> overrideObs
-                    (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
-                        NowPlayingObservation(
-                            title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
-                            artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
-                            album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
-                            sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
-                            isPlaying = isPlayingNow,
-                            playbackStateCode = latestStateObs?.playbackStateCode,
-                            positionMs = latestStateObs?.positionMs ?: 0L,
-                            durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
-                            speed = latestStateObs?.playbackSpeed ?: 1.0f,
-                            updatedAtMs = latestObsTimeMs
-                        )
-                    }
-                    overrideObs != null -> overrideObs
-                    else -> null
-                }
-
-                _homeState.value = HomeState(
-                    identifiableTrackCount = maxOf(summary.identifiableTrackCount, recent.size),
-                    distinctAppearanceCount = summary.distinctReconstructedAppearanceCount,
-                    recurringTrackCount = summary.recurringTrackIdentityCount,
-                    recentTracks = recent,
-                    nowPlaying = nowPlayingObs,
-                    coverage = coverage,
-                    isLoading = false,
-                )
-                recomputeAdaptiveTheme()
-
-                _historyState.value = HistoryState(
-                    tracks = recent,
-                    isLoading = false,
-                )
-
-                // Profile data
-                var sigText: String = "No signal data yet."
-                var dynText: String = "No dynamics data yet."
-                var resText: String = "No research data yet."
-                withContext(Dispatchers.Default) {
-                    val signalSummary = TemporalSignalEvaluator.evaluate(memory)
-                    val dynamicsSummary = TemporalDynamicsEvaluator.evaluate(memory)
-                    val researchSummary = PatternResearchEvaluator.evaluate(memory)
-
-                    sigText = signalSummary.trackSignals
-                        .filter { it.identityBasis != TrackIdentityBasis.INSUFFICIENT }
-                        .sortedByDescending { it.signal.signal }.take(5)
-                        .joinToString("\n") { "${it.title ?: it.entryId.take(12)}: %.3f".format(it.signal.signal) }
-                        .ifEmpty { "No signal data yet." }
-
-                    dynText = dynamicsSummary.trackDynamics.filter { it.currentEligibleCount > 0 }
-                        .sortedByDescending { it.currentSignal }.take(5)
-                        .joinToString("\n") { "${it.title ?: it.entryId.take(12)}: ${it.direction.name.lowercase()} (Δ=%+.3f".format(it.signalDelta) + ")" }
-                        .let { "$it\n↑${dynamicsSummary.increasingCount} ↓${dynamicsSummary.decreasingCount} →${dynamicsSummary.stableCount}" }
-
-                    resText = buildString {
-                        val ra = researchSummary.recurrenceAcceleration
-                        appendLine("Acceleration: ${ra.earlierWindow.distinctAppearanceCount} → ${ra.laterWindow.distinctAppearanceCount}")
-                        appendLine("Reappearances: ${researchSummary.reappearances.size}")
-                        val c = researchSummary.concentration
-                        appendLine("Concentration: ${c.distinctIdentifiedTrackCount} tracks, ${c.totalIdentifiedAppearanceCount} appearances")
-                        val eq = researchSummary.evidenceQuality
-                        appendLine("Identified: ${eq.identifiedTrackCount} · Insufficient: ${eq.insufficientIdentityCount}")
-                    }
-                }
-
-                // Study day evidence from experiment events
-                val expId = _studyState.value.experimentId
-                val studyDays = if (expId.isNotEmpty() && _studyState.value.status == ExperimentStatus.ACTIVE) {
-                    val eventTimes = runCatching { experimentRepo?.getEventTimestamps(expId) }.getOrNull()?.filterNotNull() ?: emptyList()
-                    computeStudyDayEvidence(eventTimes, _studyState.value)
-                } else emptyList()
-                val sources = if (expId.isNotEmpty()) {
-                    runCatching { experimentRepo?.getSummary(expId)?.observedSources ?: emptyList() }.getOrNull() ?: emptyList()
-                } else emptyList()
-
-                _studyState.value = _studyState.value.copy(
-                    dayEvidence = studyDays,
-                    daysWithEvents = studyDays.count { it.hasEvents },
-                    observedSources = sources,
-                )
-
-                _profileState.value = ProfileState(
-                    signalText = sigText, dynamicsText = dynText, researchText = resText,
-                    observationCount = rows.size,
-                )
-
-                refreshRecommendations()
-
-                // If real tracks are observed and the crate was uncalibrated or empty, auto-calibrate
-                val observedArtists = memory.tracks.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct()
-                if (observedArtists.isNotEmpty()) {
-                    val currentCrate = _aiDiscoveryCrate.value
-                    val needsCalibration = currentCrate.isEmpty() || currentCrate.any {
-                        it.telemetryBasisSummary.contains("Emerging") || it.telemetryBasisSummary.contains("Daypart:")
-                    }
-                    if (needsCalibration && !_isDiscovering.value) {
-                        triggerChronoDiscovery(forceRefresh = true)
-                    }
-                }
+            } catch (t: Throwable) {
+                android.util.Log.w("TuneMindVM", "observeRecent error: ${t.message}")
             }
-        } catch (t: Throwable) {
-            android.util.Log.w("TuneMindVM", "observeRecent error: ${t.message}")
         }
-    }
     }
 
     fun showReadinessScreen() {

@@ -95,6 +95,16 @@ open class MainActivity : ComponentActivity() {
                     val adaptiveState by vm.adaptiveThemeState.collectAsState()
                     val themePreferences by vm.themePreferences.collectAsState()
 
+                    val listeningStats by vm.listeningStats.collectAsState()
+                    val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
+                    val spotifyLiveState by vm.spotifyLiveState.collectAsState()
+                    val spotifyLikedTracks by vm.spotifyLikedTracks.collectAsState()
+                    val spotifyPlaylists by vm.spotifyPlaylists.collectAsState()
+                    val spotifyPodcasts by vm.spotifyPodcasts.collectAsState()
+                    val isLibrarySyncing by vm.isLibrarySyncing.collectAsState()
+                    val needsLibraryScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
+                    val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
+
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
                     }
@@ -137,6 +147,11 @@ open class MainActivity : ComponentActivity() {
                     val coroutineScope = rememberCoroutineScope()
                     var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
                     var showSettingsScreen by remember { mutableStateOf(false) }
+                    var showStatsScreen by remember { mutableStateOf(false) }
+                    var showWeeklyReportScreen by remember { mutableStateOf(false) }
+                    var showHearingScreen by remember { mutableStateOf(false) }
+                    var showMusicProfileScreen by remember { mutableStateOf(false) }
+                    var showMomentsScreen by remember { mutableStateOf(false) }
                     var currentPagerPage by remember { mutableStateOf(1) }
                     var showLaunchSplash by remember { mutableStateOf(true) }
 
@@ -208,14 +223,46 @@ open class MainActivity : ComponentActivity() {
                             }
                             "NAVIGATE_SCREEN" -> {
                                 val screen = tool.target_screen?.uppercase() ?: ""
-                                if (screen.contains("SETTING")) {
-                                    showSettingsScreen = true
-                                } else {
-                                    showSettingsScreen = false
-                                    requestedScreenPage = when {
-                                        screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
-                                        screen.contains("RHYTHM") || screen.contains("DNA") -> 2
-                                        else -> 1
+                                when {
+                                    screen.contains("SETTING") -> {
+                                        showSettingsScreen = true
+                                    }
+                                    screen.contains("STAT") || screen.contains("LISTENING_SUMMARY") -> {
+                                        showSettingsScreen = false
+                                        showWeeklyReportScreen = false
+                                        showHearingScreen = false
+                                        showMusicProfileScreen = false
+                                        showMomentsScreen = false
+                                        showStatsScreen = true
+                                    }
+                                    screen.contains("WEEKLY") || screen.contains("RECAP") -> {
+                                        showSettingsScreen = false
+                                        showWeeklyReportScreen = true
+                                    }
+                                    screen.contains("HEARING") || screen.contains("EAR") -> {
+                                        showSettingsScreen = false
+                                        showHearingScreen = true
+                                    }
+                                    screen.contains("PROFILE") || screen.contains("TASTE") -> {
+                                        showSettingsScreen = false
+                                        showMusicProfileScreen = true
+                                    }
+                                    screen.contains("MOMENT") -> {
+                                        showSettingsScreen = false
+                                        showMomentsScreen = true
+                                    }
+                                    else -> {
+                                        showSettingsScreen = false
+                                        showStatsScreen = false
+                                        showWeeklyReportScreen = false
+                                        showHearingScreen = false
+                                        showMusicProfileScreen = false
+                                        showMomentsScreen = false
+                                        requestedScreenPage = when {
+                                            screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
+                                            screen.contains("RHYTHM") || screen.contains("DNA") || screen.contains("SPOTIFY") || screen.contains("HISTORY") -> 2
+                                            else -> 1
+                                        }
                                     }
                                 }
                             }
@@ -237,6 +284,11 @@ open class MainActivity : ComponentActivity() {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
                                     showSettingsScreen -> "SETTINGS"
+                                    showWeeklyReportScreen -> "WEEKLY_REPORT"
+                                    showHearingScreen -> "HEARING_HEALTH"
+                                    showMusicProfileScreen -> "MUSIC_PROFILE"
+                                    showMomentsScreen -> "SOUND_MOMENTS"
+                                    showStatsScreen -> "STATS"
                                     currentPagerPage == 0 -> "DOPAMINE_VAULT"
                                     currentPagerPage == 2 -> "RHYTHM_DNA"
                                     else -> "PULSE_AGENT"
@@ -384,8 +436,38 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                androidx.activity.compose.BackHandler(enabled = showSettingsScreen) {
-                                    showSettingsScreen = false
+                                fun playAnyTrack(
+                                    title: String,
+                                    artist: String,
+                                    spotifyUri: String?,
+                                    sourcePkg: String
+                                ) {
+                                    val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                    vm.setAgentActiveTrack(title, artist, targetPkg)
+                                    agentVoiceManager.playTrackImmediatelyWithVoice(
+                                        title = title,
+                                        artist = artist,
+                                        spotifyUri = spotifyUri,
+                                        targetPlayer = targetPkg
+                                    )
+                                }
+
+                                val hasOverlayOpen = showSettingsScreen ||
+                                    showWeeklyReportScreen ||
+                                    showHearingScreen ||
+                                    showMusicProfileScreen ||
+                                    showMomentsScreen ||
+                                    showStatsScreen
+
+                                androidx.activity.compose.BackHandler(enabled = hasOverlayOpen) {
+                                    when {
+                                        showSettingsScreen -> showSettingsScreen = false
+                                        showWeeklyReportScreen -> showWeeklyReportScreen = false
+                                        showHearingScreen -> showHearingScreen = false
+                                        showMusicProfileScreen -> showMusicProfileScreen = false
+                                        showMomentsScreen -> showMomentsScreen = false
+                                        showStatsScreen -> showStatsScreen = false
+                                    }
                                 }
 
                                 Box(
@@ -403,16 +485,7 @@ open class MainActivity : ComponentActivity() {
                                                 recentTracks = combinedRecentTracks,
                                                 vaultTracks = vaultState,
                                                 nowPlayingTitle = nowPlaying?.title,
-                                                onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
-                                                    val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
-                                                    vm.setAgentActiveTrack(title, artist, targetPkg)
-                                                    agentVoiceManager.playTrackImmediatelyWithVoice(
-                                                        title = title,
-                                                        artist = artist,
-                                                        spotifyUri = spotifyUri,
-                                                        targetPlayer = targetPkg
-                                                    )
-                                                },
+                                                onPlayTrack = ::playAnyTrack,
                                                 onAskAgentAboutTrack = { title, artist, freshness, spotifyUri ->
                                                     coroutineScope.launch {
                                                         pagerState.animateScrollToPage(1)
@@ -436,6 +509,16 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onCycleAtmospherePalette = {
                                                     vm.cycleAtmospherePalette()
+                                                },
+                                                forYouPicks = aiDiscoveryCrate,
+                                                resolvePlayCount = { title, artist, uri ->
+                                                    vm.resolvePlayCount(title, artist, uri)
+                                                },
+                                                isTrackCurrentlyPlaying = { title, artist, uri ->
+                                                    vm.isTrackCurrentlyPlaying(title, artist, uri)
+                                                },
+                                                onRefreshForYou = {
+                                                    vm.triggerChronoDiscovery(forceRefresh = true)
                                                 }
                                             )
                                         }
@@ -473,6 +556,18 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenSettings = {
                                                     showSettingsScreen = true
                                                 },
+                                                onOpenStats = {
+                                                    showStatsScreen = true
+                                                },
+                                                currentTrackPlayCount = if (trackTitle != null) {
+                                                    vm.resolvePlayCount(
+                                                        trackTitle,
+                                                        artistName,
+                                                        spotifyLiveState?.spotifyUri
+                                                    )
+                                                } else {
+                                                    0
+                                                },
                                                 autonomousDjEnabled = autonomousDjEnabled
                                             )
                                         }
@@ -489,16 +584,7 @@ open class MainActivity : ComponentActivity() {
                                                     selectedTargetPlayer = newPkg
                                                     playerPrefs.edit().putString("target_player_pkg", newPkg).apply()
                                                 },
-                                                onPlayTrack = { title, artist, spotifyUri, sourcePkg ->
-                                                    val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
-                                                    vm.setAgentActiveTrack(title, artist, targetPkg)
-                                                    agentVoiceManager.playTrackImmediatelyWithVoice(
-                                                        title = title,
-                                                        artist = artist,
-                                                        spotifyUri = spotifyUri,
-                                                        targetPlayer = targetPkg
-                                                    )
-                                                },
+                                                onPlayTrack = ::playAnyTrack,
                                                 onAskAgentAboutTrack = { title, artist, freshness, spotifyUri ->
                                                     coroutineScope.launch {
                                                         pagerState.animateScrollToPage(1)
@@ -516,13 +602,37 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onQuarantineTrack = { title, artist ->
                                                     vm.quarantineTrack(title, artist)
-                                                }
+                                                },
+                                                listeningStats = listeningStats,
+                                                cleanPlayHistory = cleanPlayHistory,
+                                                spotifyLiveState = spotifyLiveState,
+                                                likedTracks = spotifyLikedTracks,
+                                                playlists = spotifyPlaylists,
+                                                podcasts = spotifyPodcasts,
+                                                isLibrarySyncing = isLibrarySyncing,
+                                                needsLibraryScopeUpgrade = needsLibraryScopeUpgrade,
+                                                resolvePlayCount = { title, artist, uri ->
+                                                    vm.resolvePlayCount(title, artist, uri)
+                                                },
+                                                isTrackCurrentlyPlaying = { title, artist, uri ->
+                                                    vm.isTrackCurrentlyPlaying(title, artist, uri)
+                                                },
+                                                onRefreshSpotifyLibrary = {
+                                                    vm.refreshSpotifyLibrary(forcePlaylistTracks = true)
+                                                },
+                                                onLoadPlaylistTracks = { playlistId ->
+                                                    vm.loadPlaylistTracksIfNeeded(playlistId)
+                                                },
+                                                onOpenWeeklyReport = { showWeeklyReportScreen = true },
+                                                onOpenHearingHealth = { showHearingScreen = true },
+                                                onOpenMusicProfile = { showMusicProfileScreen = true },
+                                                onOpenMoments = { showMomentsScreen = true }
                                             )
                                         }
                                     }
                                 }
 
-                                // Centered Floating Glass Pill Dock
+                                // Centered Floating Glass Pill Dock (Strictly 3 Tabs)
                                 FloatingGlassDock(
                                     currentPage = pagerState.currentPage,
                                     agentState = agentState,
@@ -545,7 +655,7 @@ open class MainActivity : ComponentActivity() {
 
                                 // Playback Launch / Strict Never-Leave-TuneMind Diagnostic Banner
                                 val currentFeedback = playbackLaunchFeedback
-                                if (!showSettingsScreen && currentFeedback != null &&
+                                if (!hasOverlayOpen && currentFeedback != null &&
                                     (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed ||
                                         (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched &&
                                             currentFeedback.providerId == "tunemind_inapp"))
@@ -611,18 +721,63 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                // Fullscreen TuneMind Settings Overlay
+                                // Fullscreen Cross-App Listening Stats Overlay
+                                if (showStatsScreen) {
+                                    com.tunemind.app.ui.screens.StatsScreen(
+                                        vm = vm,
+                                        onBack = { showStatsScreen = false },
+                                        onPlayTrack = ::playAnyTrack,
+                                        onOpenWeeklyReport = { showWeeklyReportScreen = true },
+                                        onOpenHearingHealth = { showHearingScreen = true },
+                                        onOpenMusicProfile = { showMusicProfileScreen = true },
+                                        onOpenMoments = { showMomentsScreen = true }
+                                    )
+                                }
+
+                                // Hub Sub-Screens (Reachable from Stats & Rhythm Overview)
+                                if (showWeeklyReportScreen) {
+                                    com.tunemind.app.ui.screens.WeeklyReportScreen(
+                                        vm = vm,
+                                        onBack = { showWeeklyReportScreen = false },
+                                        onPlayTrack = ::playAnyTrack
+                                    )
+                                }
+
+                                if (showHearingScreen) {
+                                    com.tunemind.app.ui.screens.HearingInsightsScreen(
+                                        vm = vm,
+                                        onBack = { showHearingScreen = false }
+                                    )
+                                }
+
+                                if (showMusicProfileScreen) {
+                                    com.tunemind.app.ui.screens.MusicProfileScreen(
+                                        vm = vm,
+                                        onBack = { showMusicProfileScreen = false },
+                                        onOpenSettings = { showSettingsScreen = true }
+                                    )
+                                }
+
+                                if (showMomentsScreen) {
+                                    com.tunemind.app.ui.screens.MusicalMomentsScreen(
+                                        vm = vm,
+                                        onBack = { showMomentsScreen = false },
+                                        onPlayTrack = ::playAnyTrack
+                                    )
+                                }
+
+                                // Fullscreen TuneMind Settings Overlay (Highest Overlay Priority)
                                 if (showSettingsScreen) {
                                     com.tunemind.app.ui.screens.SettingsScreen(
                                         vm = vm,
                                         onBack = { showSettingsScreen = false },
                                         onOpenCrossApp = {
                                             showSettingsScreen = false
-                                            coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                            showStatsScreen = true
                                         },
                                         onOpenWeeklyReport = {
                                             showSettingsScreen = false
-                                            coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                            showWeeklyReportScreen = true
                                         }
                                     )
                                 }

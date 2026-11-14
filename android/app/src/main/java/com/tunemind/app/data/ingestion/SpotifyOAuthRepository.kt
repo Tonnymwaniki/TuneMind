@@ -52,32 +52,57 @@ class SpotifyOAuthRepository(context: Context) {
     val tokenManager = SpotifyTokenManager(appContext)
     private val database = TuneMindDatabase.getInstance(appContext)
     private val historyDao: SpotifyListeningHistoryDao = database.spotifyListeningHistoryDao()
+    private val libraryDao: SpotifyLibraryDao = database.spotifyLibraryDao()
     private val eventBufferRepo = EventBufferRepository(database.eventQueueDao())
     private val authService: SpotifyAccountsAuthService = SpotifyApiFactory.accountsAuthService
     private val webApiService: SpotifyWebApiService = SpotifyApiFactory.createWebApiService(tokenManager)
+    private val authManager = SpotifyAuthManager(appContext)
 
-    private val _isConnectedFlow = MutableStateFlow(tokenManager.isAuthenticated())
+    private val _isConnectedFlow = MutableStateFlow(tokenManager.isAuthenticated() || authManager.isAuthenticated())
     val isConnectedFlow: StateFlow<Boolean> = _isConnectedFlow.asStateFlow()
+
+    private val _currentlyPlayingLiveState = MutableStateFlow<SpotifyLiveTrackState?>(null)
+    val currentlyPlayingLiveState: StateFlow<SpotifyLiveTrackState?> = _currentlyPlayingLiveState.asStateFlow()
+
+    private val _needsLibraryScopeUpgrade = MutableStateFlow(
+        (tokenManager.isAuthenticated() || authManager.isAuthenticated()) && !authManager.hasExtendedLibraryScopes()
+    )
+    val needsLibraryScopeUpgrade: StateFlow<Boolean> = _needsLibraryScopeUpgrade.asStateFlow()
+
+    fun hasExtendedLibraryScopes(): Boolean = authManager.hasExtendedLibraryScopes()
+
+    fun refreshScopeStatus() {
+        val authed = tokenManager.isAuthenticated() || authManager.isAuthenticated()
+        _isConnectedFlow.value = authed
+        _needsLibraryScopeUpgrade.value = authed && !authManager.hasExtendedLibraryScopes()
+    }
 
     /**
      * Local-First reactive streams directly from SQLite Room cache.
      * The UI subscribes to these Flows so screens render in < 2ms without waiting on network calls.
      */
-    fun observeLocalRecentlyPlayed(limit: Int = 100): Flow<List<SpotifyListeningHistoryEntity>> =
+    fun observeLocalRecentlyPlayed(limit: Int = 200): Flow<List<SpotifyListeningHistoryEntity>> =
         historyDao.observeRecentHistory(limit)
 
-    fun observeLocalAggregatedTracks(limit: Int = 60): Flow<List<SpotifyTrackAggregate>> =
+    fun observeLocalAggregatedTracks(limit: Int = 100): Flow<List<SpotifyTrackAggregate>> =
         historyDao.observeAggregatedTracks(limit)
+
+    fun observeLikedTracks(limit: Int = 150): Flow<List<SpotifyLikedTrackEntity>> =
+        libraryDao.observeLikedTracks(limit)
+
+    fun observePlaylists(limit: Int = 60): Flow<List<SpotifyPlaylistEntity>> =
+        libraryDao.observePlaylists(limit)
+
+    fun observePodcasts(limit: Int = 100): Flow<List<SpotifyPodcastEntity>> =
+        libraryDao.observePodcasts(limit)
 
     // ========================================================================
     // 1. CHROME CUSTOM TABS OAUTH 2.0 AUTHORIZATION CODE + PKCE INTENT FLOW
     // ========================================================================
 
-    private val authManager = SpotifyAuthManager(appContext)
-
     /**
      * Launches the Spotify OAuth 2.0 Authorization Code flow inside a Custom Chrome Tab.
-     * Requests scopes: `user-read-recently-played user-read-currently-playing user-top-read user-modify-playback-state`.
+     * Requests scopes including library, playlists, and podcast playback positions.
      */
     fun launchAuthorizationFlow(activityOrContext: Context, overrideClientId: String? = null) {
         if (!overrideClientId.isNullOrBlank()) {
@@ -117,10 +142,11 @@ class SpotifyOAuthRepository(context: Context) {
         tokenManager.clearPendingPkceSession()
 
         if (exchanged) {
-            _isConnectedFlow.value = true
+            refreshScopeStatus()
             // Schedule 15-minute periodic WorkManager sync + trigger immediate first sync into Room
             SpotifyRecentlyPlayedSyncWorker.schedulePeriodic15MinSync(appContext)
             syncRecentlyPlayedToLocalRoom()
+            syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = true)
         }
         exchanged
     }
@@ -200,12 +226,16 @@ class SpotifyOAuthRepository(context: Context) {
     // ========================================================================
 
     /**
-     * Fetches the user's recently played tracks and currently playing track from the Spotify Web API
-     * and persists them directly into the local Android Room Database (`track_history_telemetry`,
-     * `spotify_listening_history`, and `event_queue`) while ignoring duplicates (`OnConflictStrategy.IGNORE`).
+     * Fetches the user's recently played tracks and live currently-playing state from Spotify Web API.
+     *
+     * CRITICAL ANTI-DUPLICATE DESIGN:
+     * - Legacy `CURRENTLY_PLAYING` polling rows in Room are purged (`deletePollingDuplicates()`).
+     * - Live currently-playing state updates ONLY [currentlyPlayingLiveState] in memory, never
+     *   polluting `spotify_listening_history` or `event_queue` on every poll.
+     * - Only verified `RECENTLY_PLAYED` completions are stored in `spotify_listening_history`.
      */
     suspend fun syncRecentlyPlayedToLocalRoom(): SpotifyIngestionSyncResult = withContext(Dispatchers.IO) {
-        if (!tokenManager.isAuthenticated()) {
+        if (!tokenManager.isAuthenticated() && !authManager.isAuthenticated()) {
             _isConnectedFlow.value = false
             return@withContext SpotifyIngestionSyncResult.Unauthenticated("Spotify OAuth not yet connected.")
         }
@@ -214,13 +244,15 @@ class SpotifyOAuthRepository(context: Context) {
         if (validToken.isNullOrBlank()) {
             return@withContext SpotifyIngestionSyncResult.Unauthenticated("Access token expired and could not be refreshed.")
         }
-        _isConnectedFlow.value = true
+        refreshScopeStatus()
+
+        // Purge any legacy CURRENTLY_PLAYING poll duplicates from earlier app versions
+        runCatching { historyDao.deletePollingDuplicates() }
 
         val bearerHeader = "Bearer $validToken"
         val nowMs = System.currentTimeMillis()
         val telemetryItemsToInsert = mutableListOf<TrackHistoryTelemetryItem>()
         val entitiesToInsert = mutableListOf<SpotifyListeningHistoryEntity>()
-        var currentlyPlayingEntity: SpotifyListeningHistoryEntity? = null
 
         // A. Fetch GET https://api.spotify.com/v1/me/player/recently-played (up to 50 most recent tracks)
         try {
@@ -237,6 +269,9 @@ class SpotifyOAuthRepository(context: Context) {
                     telemetryItemsToInsert.add(dto.toTrackHistoryTelemetryItem(nowMs))
                     entitiesToInsert.add(dto.toHistoryEntity(nowMs))
                 }
+                if (items.isNotEmpty()) {
+                    historyDao.deleteSyntheticTopTracks()
+                }
                 Log.i(TAG, "Fetched ${items.size} recently-played tracks from Spotify Web API (after=$latestCursorMs)")
             } else if (response.code() in 500..599 || response.code() == 429) {
                 return@withContext SpotifyIngestionSyncResult.TransientFailure(
@@ -252,32 +287,39 @@ class SpotifyOAuthRepository(context: Context) {
             )
         }
 
-        // B. Fetch /v1/me/player/currently-playing
+        // B. Fetch /v1/me/player/currently-playing?additional_types=track,episode
+        // Update ONLY reactive in-memory live state — never write repeated polling rows into play history!
+        var liveHistoryEntity: SpotifyListeningHistoryEntity? = null
         try {
-            val currentResp = webApiService.getCurrentlyPlaying(authHeader = bearerHeader)
+            val currentResp = webApiService.getCurrentlyPlaying(
+                authHeader = bearerHeader,
+                additionalTypes = "track,episode"
+            )
             if (currentResp.isSuccessful && currentResp.code() == 200) {
                 val body = currentResp.body()
+                val liveState = body?.toLiveTrackState(nowMs)
+                _currentlyPlayingLiveState.value = liveState
                 val trackDto = body?.item
-                if (trackDto != null) {
-                    val stamp = if ((body.timestampMs) > 0L) body.timestampMs else nowMs
-                    val entity = trackDto.toHistoryEntity(
+                if (trackDto != null && trackDto.name.isNotBlank()) {
+                    val stamp = if (body.timestampMs > 0L) body.timestampMs else nowMs
+                    liveHistoryEntity = trackDto.toHistoryEntity(
                         playedAtMs = stamp,
-                        ingestionSource = "CURRENTLY_PLAYING",
+                        ingestionSource = "LIVE_SNAPSHOT",
                         contextUri = body.context?.uri
                     )
-                    currentlyPlayingEntity = entity
-                    entitiesToInsert.add(entity)
                 }
+            } else if (currentResp.code() == 204) {
+                _currentlyPlayingLiveState.value = _currentlyPlayingLiveState.value?.copy(isPlaying = false)
             }
         } catch (e: Exception) {
             Log.d(TAG, "Currently-playing fetch note: ${e.message}")
         }
 
-        // C. If local Room cache is still sparse (< 10 tracks), seed from /v1/me/top/tracks
+        // C. If user truly has zero real RECENTLY_PLAYED tracks, seed once from /v1/me/top/tracks
         try {
-            val existingSnapshot = historyDao.getRecentHistorySnapshot(limit = 10)
-            if (existingSnapshot.size + entitiesToInsert.size < 10) {
-                val topResp = webApiService.getTopTracks(authHeader = bearerHeader, timeRange = "short_term", limit = 25)
+            val existingReal = historyDao.getRecentHistorySnapshot(limit = 10)
+            if (existingReal.isEmpty() && entitiesToInsert.isEmpty()) {
+                val topResp = webApiService.getTopTracks(authHeader = bearerHeader, timeRange = "short_term", limit = 20)
                 if (topResp.isSuccessful) {
                     val topItems = topResp.body()?.items.orEmpty()
                     topItems.forEachIndexed { idx, trackDto ->
@@ -295,13 +337,16 @@ class SpotifyOAuthRepository(context: Context) {
             Log.d(TAG, "Top-tracks bootstrap note: ${e.message}")
         }
 
-        // D. Insert into Local-First Room Database while ignoring duplicates (OnConflictStrategy.IGNORE)
+        // D. Insert into Local-First Room Database while ignoring duplicates
         if (telemetryItemsToInsert.isNotEmpty()) {
             historyDao.insertTelemetryItemsIgnoreDuplicates(telemetryItemsToInsert)
         }
+        val recentlyPlayedEntities = entitiesToInsert.filter { it.ingestionSource == "RECENTLY_PLAYED" }
         if (entitiesToInsert.isNotEmpty()) {
             historyDao.insertHistoryIgnoreDuplicates(entitiesToInsert)
-            mirrorIntoEventQueueForUnifiedIntelligence(entitiesToInsert)
+        }
+        if (recentlyPlayedEntities.isNotEmpty()) {
+            mirrorIntoEventQueueForUnifiedIntelligence(recentlyPlayedEntities)
         }
 
         // Keep local history lean (prune records older than 90 days)
@@ -311,17 +356,228 @@ class SpotifyOAuthRepository(context: Context) {
         // E. Push synced Spotify tracks to Live Supabase Taste Genome for long-term intelligence growth
         com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.syncSpotifyHistoryToSupabase(appContext)
 
-        val totalCached = historyDao.getAggregatedTracksSnapshot(limit = 60).size
+        val totalCached = historyDao.getAggregatedTracksSnapshot(limit = 100).size
         return@withContext SpotifyIngestionSyncResult.Success(
-            ingestedRecentlyPlayedCount = entitiesToInsert.size,
-            currentlyPlayingTrack = currentlyPlayingEntity,
+            ingestedRecentlyPlayedCount = recentlyPlayedEntities.size,
+            currentlyPlayingTrack = liveHistoryEntity,
             totalCachedTracks = totalCached
         )
     }
 
     /**
-     * Bridges newly ingested Spotify Web API rows into `event_queue` so all existing
-     * TuneMind screens, Dopamine Capsule, and Claude Sonnet telemetry immediately include them.
+     * Fetches Liked Songs (`/v1/me/tracks`), Playlists (`/v1/me/playlists` + tracks),
+     * and Podcasts (`/v1/me/shows`, `/v1/me/episodes`) into local Room tables.
+     */
+    suspend fun syncFullSpotifyLibraryToLocalRoom(
+        forcePlaylistTracks: Boolean = true
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!tokenManager.isAuthenticated() && !authManager.isAuthenticated()) {
+            return@withContext false
+        }
+        val validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
+        if (validToken.isNullOrBlank()) return@withContext false
+
+        val bearerHeader = "Bearer $validToken"
+        val nowMs = System.currentTimeMillis()
+        var hitPermissionForbidden = false
+
+        // 1. Liked Songs (up to 100 most recently liked)
+        try {
+            val likedEntities = mutableListOf<SpotifyLikedTrackEntity>()
+            val page1 = webApiService.getSavedTracks(authHeader = bearerHeader, limit = 50, offset = 0)
+            if (page1.isSuccessful) {
+                val body1 = page1.body()
+                body1?.items.orEmpty().mapNotNullTo(likedEntities) { it.toLikedTrackEntity(nowMs) }
+                if ((body1?.total ?: 0) > 50) {
+                    val page2 = webApiService.getSavedTracks(authHeader = bearerHeader, limit = 50, offset = 50)
+                    if (page2.isSuccessful) {
+                        page2.body()?.items.orEmpty().mapNotNullTo(likedEntities) { it.toLikedTrackEntity(nowMs) }
+                    }
+                }
+                if (likedEntities.isNotEmpty()) {
+                    libraryDao.clearLikedTracks()
+                    libraryDao.upsertLikedTracks(likedEntities)
+                }
+            } else if (page1.code() == 403 || page1.code() == 401) {
+                hitPermissionForbidden = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Liked tracks sync note: ${e.message}")
+        }
+
+        // 2. Playlists (+ tracks for top 10 playlists)
+        try {
+            val plResp = webApiService.getUserPlaylists(authHeader = bearerHeader, limit = 30, offset = 0)
+            if (plResp.isSuccessful) {
+                val rawPlaylists = plResp.body()?.items.orEmpty()
+                val playlistEntities = mutableListOf<SpotifyPlaylistEntity>()
+                rawPlaylists.forEachIndexed { idx, pDto ->
+                    val tracksList = if (forcePlaylistTracks && idx < 10 && pDto.id.isNotBlank()) {
+                        fetchPlaylistTrackEntries(pDto.id, bearerHeader)
+                    } else {
+                        emptyList()
+                    }
+                    pDto.toPlaylistEntity(tracks = tracksList, nowMs = nowMs)?.let { entity ->
+                        playlistEntities.add(entity)
+                    }
+                }
+                if (playlistEntities.isNotEmpty()) {
+                    libraryDao.upsertPlaylists(playlistEntities)
+                }
+            } else if (plResp.code() == 403 || plResp.code() == 401) {
+                hitPermissionForbidden = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Playlists sync note: ${e.message}")
+        }
+
+        // 3. Podcasts (Saved Shows + Saved / Latest Episodes)
+        try {
+            val podcastEntities = mutableListOf<SpotifyPodcastEntity>()
+            val showsResp = webApiService.getSavedShows(authHeader = bearerHeader, limit = 25)
+            val savedShows = if (showsResp.isSuccessful) showsResp.body()?.items.orEmpty() else emptyList()
+            if (showsResp.code() == 403) hitPermissionForbidden = true
+
+            for (showItem in savedShows) {
+                val show = showItem.show ?: continue
+                if (show.id.isBlank() || show.name.isBlank()) continue
+                podcastEntities.add(
+                    SpotifyPodcastEntity(
+                        itemId = "show_${show.id}",
+                        showId = show.id,
+                        showName = show.name.trim(),
+                        publisher = show.publisher?.trim().orEmpty(),
+                        episodeTitle = "${show.totalEpisodes} episodes",
+                        description = show.description?.trim().orEmpty(),
+                        uri = show.uri.ifBlank { "spotify:show:${show.id}" },
+                        imageUrl = show.images?.firstOrNull()?.url,
+                        durationMs = 0L,
+                        resumePositionMs = 0L,
+                        fullyPlayed = false,
+                        releaseDate = "",
+                        totalEpisodes = show.totalEpisodes,
+                        isShowSummary = true,
+                        addedAtEpochMs = parseSpotifyIsoTimestampMs(showItem.addedAtIso)
+                    )
+                )
+            }
+
+            val epResp = webApiService.getSavedEpisodes(authHeader = bearerHeader, limit = 30)
+            val savedEpisodes = if (epResp.isSuccessful) epResp.body()?.items.orEmpty() else emptyList()
+            for (epItem in savedEpisodes) {
+                val ep = epItem.episode ?: continue
+                if (ep.id.isBlank() || ep.name.isBlank()) continue
+                podcastEntities.add(
+                    SpotifyPodcastEntity(
+                        itemId = "ep_${ep.id}",
+                        showId = ep.show?.id ?: "",
+                        showName = ep.show?.name?.trim()?.ifBlank { "Podcast" } ?: "Podcast",
+                        publisher = ep.show?.publisher?.trim().orEmpty(),
+                        episodeTitle = ep.name.trim(),
+                        description = ep.description?.trim().orEmpty(),
+                        uri = ep.uri.ifBlank { "spotify:episode:${ep.id}" },
+                        imageUrl = ep.images?.firstOrNull()?.url ?: ep.show?.images?.firstOrNull()?.url,
+                        durationMs = ep.durationMs,
+                        resumePositionMs = ep.resumePoint?.resumePositionMs ?: 0L,
+                        fullyPlayed = ep.resumePoint?.fullyPlayed == true,
+                        releaseDate = ep.releaseDate.orEmpty(),
+                        totalEpisodes = ep.show?.totalEpisodes ?: 0,
+                        isShowSummary = false,
+                        addedAtEpochMs = parseSpotifyIsoTimestampMs(epItem.addedAtIso)
+                    )
+                )
+            }
+
+            // If user follows shows but hasn't saved individual episodes, pull latest 4 episodes per top show
+            if (savedEpisodes.isEmpty() && savedShows.isNotEmpty()) {
+                for (showItem in savedShows.take(4)) {
+                    val show = showItem.show ?: continue
+                    if (show.id.isBlank()) continue
+                    try {
+                        val showEpResp = webApiService.getShowEpisodes(showId = show.id, authHeader = bearerHeader, limit = 5)
+                        if (showEpResp.isSuccessful) {
+                            showEpResp.body()?.items.orEmpty().forEach { ep ->
+                                if (ep.id.isNotBlank() && ep.name.isNotBlank()) {
+                                    podcastEntities.add(
+                                        SpotifyPodcastEntity(
+                                            itemId = "ep_${ep.id}",
+                                            showId = show.id,
+                                            showName = show.name.trim(),
+                                            publisher = show.publisher?.trim().orEmpty(),
+                                            episodeTitle = ep.name.trim(),
+                                            description = ep.description?.trim().orEmpty(),
+                                            uri = ep.uri.ifBlank { "spotify:episode:${ep.id}" },
+                                            imageUrl = ep.images?.firstOrNull()?.url ?: show.images?.firstOrNull()?.url,
+                                            durationMs = ep.durationMs,
+                                            resumePositionMs = ep.resumePoint?.resumePositionMs ?: 0L,
+                                            fullyPlayed = ep.resumePoint?.fullyPlayed == true,
+                                            releaseDate = ep.releaseDate.orEmpty(),
+                                            totalEpisodes = show.totalEpisodes,
+                                            isShowSummary = false,
+                                            addedAtEpochMs = nowMs
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (podcastEntities.isNotEmpty()) {
+                libraryDao.clearPodcasts()
+                libraryDao.upsertPodcasts(podcastEntities)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Podcasts sync note: ${e.message}")
+        }
+
+        _needsLibraryScopeUpgrade.value = hitPermissionForbidden || !authManager.hasExtendedLibraryScopes()
+        !hitPermissionForbidden
+    }
+
+    suspend fun loadPlaylistTracksIfNeeded(playlistId: String): List<SpotifyPlaylistTrackEntry> =
+        withContext(Dispatchers.IO) {
+            val validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
+                ?: return@withContext emptyList()
+            val tracks = fetchPlaylistTrackEntries(playlistId, "Bearer $validToken")
+            if (tracks.isNotEmpty()) {
+                libraryDao.updatePlaylistTracks(playlistId, encodePlaylistTracksJson(tracks))
+            }
+            tracks
+        }
+
+    private suspend fun fetchPlaylistTrackEntries(
+        playlistId: String,
+        bearerHeader: String
+    ): List<SpotifyPlaylistTrackEntry> {
+        return try {
+            val resp = webApiService.getPlaylistTracks(playlistId = playlistId, authHeader = bearerHeader, limit = 50, offset = 0)
+            if (!resp.isSuccessful) return emptyList()
+            resp.body()?.items.orEmpty().mapNotNull { item ->
+                val t = item.track ?: return@mapNotNull null
+                if (t.name.isBlank()) return@mapNotNull null
+                val artist = t.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
+                val id = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${artist.lowercase()}" }
+                SpotifyPlaylistTrackEntry(
+                    trackId = id,
+                    title = t.name.trim(),
+                    artist = artist.trim(),
+                    album = t.album?.name?.trim().orEmpty(),
+                    spotifyUri = t.uri.ifBlank { "spotify:track:$id" },
+                    durationMs = t.durationMs,
+                    albumArtUrl = t.album?.images?.firstOrNull()?.url
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchPlaylistTrackEntries error for $playlistId: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Bridges verified RECENTLY_PLAYED Spotify Web API rows into `event_queue`
+     * without adding polling noise.
      */
     private suspend fun mirrorIntoEventQueueForUnifiedIntelligence(
         entities: List<SpotifyListeningHistoryEntity>
@@ -340,7 +596,7 @@ class SpotifyOAuthRepository(context: Context) {
                     trackAlbum = entity.albumName.ifBlank { null },
                     durationMs = entity.durationMs,
                     positionMs = 0L,
-                    playbackStateCode = if (entity.ingestionSource == "CURRENTLY_PLAYING") 3 else 2,
+                    playbackStateCode = 2,
                     playbackSpeed = 1.0f
                 )
                 eventBufferRepo.record(obs)
