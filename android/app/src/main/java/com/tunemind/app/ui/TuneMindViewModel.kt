@@ -1109,6 +1109,10 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun togglePlayback() {
+        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+            com.tunemind.app.provider.TuneMindInAppPlayer.togglePlayback()
+            return
+        }
         com.tunemind.app.service.TuneMindListenerService.instance?.togglePlayback()
     }
 
@@ -1315,6 +1319,10 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
+
+    fun reportPlaybackLaunchResult(result: com.tunemind.app.provider.PlaybackLaunchResult) {
+        _playbackLaunchFeedback.value = result
+    }
 
     fun clearPlaybackLaunchFeedback() {
         _playbackLaunchFeedback.value = null

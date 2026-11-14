@@ -24,6 +24,8 @@ data class AgentToolCallPayload(
     val theme_behavior: String? = null,
     val autonomous_dj_enabled: Boolean? = null,
     val stay_in_tunemind_enabled: Boolean? = null,
+    val strict_no_app_switch_enabled: Boolean? = null,
+    val never_open_external_app: Boolean? = null,
     val target_screen: String? = null,
     val expect_follow_up: Boolean = false,
     val extra_actions: List<AgentToolCallPayload> = emptyList()
@@ -36,7 +38,8 @@ data class OsExecutionCommand(
     val suggested_bpm_target: Int? = null,
     val track_title: String? = null,
     val track_artist: String? = null,
-    val spotify_uri: String? = null
+    val spotify_uri: String? = null,
+    val never_open_external_app: Boolean = false
 )
 
 data class ReasoningResponse(
@@ -106,7 +109,8 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     fun executeBackendCommand(
         response: ReasoningResponse,
         onBeforeLaunch: (() -> Unit)? = null,
-        onFinished: (() -> Unit)? = null
+        onFinished: (() -> Unit)? = null,
+        onLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
     ) {
         Log.d(TAG, "Executing AI Command: ${response.os_execution_command.intent} | Tool: ${response.agent_tool_call?.action} | Query: ${response.os_execution_command.search_query}")
 
@@ -120,7 +124,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
         val textToSpeak = response.voice_agent_tts.ifBlank {
             if (response.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
-                "Playing ${response.os_execution_command.search_query} on Spotify."
+                "Playing ${response.os_execution_command.search_query}."
             } else {
                 "I'm here with you. Tell me what you feel like hearing."
             }
@@ -140,7 +144,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                             searchQuery = response.os_execution_command.search_query,
                             trackTitle = response.os_execution_command.track_title,
                             trackArtist = response.os_execution_command.track_artist,
-                            spotifyUri = response.os_execution_command.spotify_uri
+                            spotifyUri = response.os_execution_command.spotify_uri,
+                            neverOpenExternalApp = response.os_execution_command.never_open_external_app,
+                            onLaunchResult = onLaunchResult
                         )
                         onFinished?.invoke()
                     }
@@ -269,6 +275,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
     fun pauseCurrentMedia() {
         try {
+            com.tunemind.app.provider.TuneMindInAppPlayer.pause()
+        } catch (_: Throwable) {}
+        try {
             com.tunemind.app.provider.SpotifyAppRemoteManager.pause()
         } catch (_: Throwable) {}
         try {
@@ -290,6 +299,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     fun resumeCurrentMedia() {
+        val inAppResumed = runCatching {
+            if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+                com.tunemind.app.provider.TuneMindInAppPlayer.resume()
+            } else false
+        }.getOrDefault(false)
+        if (inAppResumed) {
+            Log.d(TAG, "Resumed native TuneMind In-App Player")
+            return
+        }
         val remoteResumed = runCatching {
             com.tunemind.app.provider.SpotifyAppRemoteManager.resume()
         }.getOrDefault(false)
@@ -374,11 +392,13 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         searchQuery: String,
         trackTitle: String? = null,
         trackArtist: String? = null,
-        spotifyUri: String? = null
+        spotifyUri: String? = null,
+        neverOpenExternalApp: Boolean = false,
+        onLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
     ) {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
-                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri'")
+                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri' neverOpenExternalApp=$neverOpenExternalApp")
 
                 val cleanQuery = searchQuery.trim()
                 val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
@@ -415,15 +435,17 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 )
 
                 mainHandler.post {
-                    com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
+                    val launchRes = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
                         context = context,
                         providerId = if (targetPackage.contains("spotify", ignoreCase = true)) "spotify" else targetPackage,
                         displayName = if (targetPackage.contains("spotify", ignoreCase = true)) "Spotify" else "Target Player",
                         packageName = targetPackage,
                         track = targetTrack,
                         query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
-                        deepLinkUri = canonicalSpotifyUri
+                        deepLinkUri = canonicalSpotifyUri,
+                        neverOpenExternalApp = neverOpenExternalApp
                     )
+                    onLaunchResult?.invoke(launchRes)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to launch player", e)

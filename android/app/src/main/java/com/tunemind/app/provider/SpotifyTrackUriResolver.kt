@@ -1117,4 +1117,45 @@ object SpotifyTrackUriResolver {
             Pair(null, false)
         }
     }
+
+    /**
+     * Fetches the 30-second MP3 preview URL for a `spotify:track:<id>` URI when available,
+     * enabling Option 3 (`TuneMindInAppPlayer`) fallback streaming inside TuneMind.
+     */
+    fun fetchTrackPreviewUrlBlocking(context: Context, spotifyTrackUri: String): String? {
+        val trackId = when {
+            spotifyTrackUri.startsWith("spotify:track:") ->
+                spotifyTrackUri.removePrefix("spotify:track:").trim()
+            spotifyTrackUri.startsWith("https://open.spotify.com/track/") ->
+                spotifyTrackUri.substringAfter("https://open.spotify.com/track/").substringBefore("?").substringBefore("/").trim()
+            Regex("^[A-Za-z0-9]{22}$").matches(spotifyTrackUri.trim()) ->
+                spotifyTrackUri.trim()
+            else -> ""
+        }
+        if (trackId.isBlank()) return null
+        val appContext = context.applicationContext
+        return runBlocking {
+            withTimeoutOrNull(1400L) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val token = getSearchBearerToken(appContext) ?: return@withContext null
+                        val req = Request.Builder()
+                            .url("https://api.spotify.com/v1/tracks/$trackId")
+                            .addHeader("Authorization", "Bearer $token")
+                            .addHeader("Accept", "application/json")
+                            .get()
+                            .build()
+                        httpClient.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) return@withContext null
+                            val raw = resp.body?.string() ?: return@withContext null
+                            val previewUrl = JSONObject(raw).optString("preview_url", "").trim()
+                            previewUrl.takeIf { it.startsWith("http") }
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }
+        }
+    }
 }

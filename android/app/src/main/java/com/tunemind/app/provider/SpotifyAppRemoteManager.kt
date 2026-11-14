@@ -1,12 +1,20 @@
 package com.tunemind.app.provider
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.spotify.android.appremote.api.ConnectionParams
 import com.spotify.android.appremote.api.Connector
 import com.spotify.android.appremote.api.SpotifyAppRemote
+import com.spotify.android.appremote.api.error.AuthenticationFailedException
+import com.spotify.android.appremote.api.error.CouldNotFindSpotifyApp
+import com.spotify.android.appremote.api.error.NotLoggedInException
+import com.spotify.android.appremote.api.error.OfflineModeException
+import com.spotify.android.appremote.api.error.UnsupportedFeatureVersionException
+import com.spotify.android.appremote.api.error.UserNotAuthorizedException
 import com.spotify.protocol.client.Subscription
 import com.spotify.protocol.types.PlayerState
 import com.tunemind.app.data.ingestion.SpotifyAuthManager
@@ -49,13 +57,47 @@ object SpotifyAppRemoteManager {
     @Volatile
     private var lastSilentConnectAttemptMs: Long = 0L
 
+    @Volatile
+    private var activeWatchdogRunnable: Runnable? = null
+
     private val isConnecting = AtomicBoolean(false)
 
     private val _isConnectedFlow = MutableStateFlow(false)
     val isConnectedFlow: StateFlow<Boolean> = _isConnectedFlow.asStateFlow()
 
+    private val _isConnectingFlow = MutableStateFlow(false)
+    val isConnectingFlow: StateFlow<Boolean> = _isConnectingFlow.asStateFlow()
+
     private val _lastConnectionErrorFlow = MutableStateFlow<String?>(null)
     val lastConnectionErrorFlow: StateFlow<String?> = _lastConnectionErrorFlow.asStateFlow()
+
+    private fun findActivity(context: Context): Activity? {
+        var ctx: Context? = context
+        while (ctx is ContextWrapper) {
+            if (ctx is Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return null
+    }
+
+    private fun formatSpotifyRemoteFailure(throwable: Throwable): String {
+        return when (throwable) {
+            is CouldNotFindSpotifyApp ->
+                "Spotify app is not installed on this device."
+            is NotLoggedInException ->
+                "Open Spotify and sign in to your account first, then tap Connect Remote again."
+            is UserNotAuthorizedException ->
+                "Spotify Remote authorization was declined or expired. Tap Connect Remote and tap Agree in Spotify."
+            is AuthenticationFailedException ->
+                "Spotify rejected Remote auth for com.tunemind.app (${throwable.message ?: "check Dashboard SHA-1"}). Verify this build's SHA-1 fingerprint is added in Spotify Developer Dashboard -> Android Packages."
+            is OfflineModeException ->
+                "Spotify is set to Offline Mode. Turn off Offline Mode inside Spotify and retry."
+            is UnsupportedFeatureVersionException ->
+                "Please update the Spotify app from the Play Store to enable App Remote."
+            else ->
+                throwable.message?.takeIf { it.isNotBlank() } ?: throwable.javaClass.simpleName
+        }
+    }
 
     fun isSpotifyInstalled(context: Context): Boolean {
         return try {
@@ -94,8 +136,9 @@ object SpotifyAppRemoteManager {
 
     /**
      * Connects to the Spotify Android app via App Remote IPC.
-     * When [showAuthView] is `false`, connection happens silently without leaving TuneMind
-     * (succeeds automatically once the user has authorized Spotify App Remote once).
+     * When [showAuthView] is `true`, uses the unwrapped [Activity] context so Spotify's official
+     * OAuth consent sheet can always be presented without silent `ApplicationContext` rejection,
+     * and enforces a 7.5-second watchdog timeout so the UI never hangs silently.
      */
     fun connectAsync(
         context: Context,
@@ -107,28 +150,64 @@ object SpotifyAppRemoteManager {
             val msg = "Spotify app is not installed on this device."
             _lastConnectionErrorFlow.value = msg
             _isConnectedFlow.value = false
+            _isConnectingFlow.value = false
+            isConnecting.set(false)
             onComplete?.invoke(false, msg)
             return
         }
 
         if (isConnected()) {
             _isConnectedFlow.value = true
+            _isConnectingFlow.value = false
             _lastConnectionErrorFlow.value = null
+            isConnecting.set(false)
             onComplete?.invoke(true, null)
             return
         }
 
         val now = System.currentTimeMillis()
-        if (!showAuthView && now - lastSilentConnectAttemptMs < 4_000L && isConnecting.get()) {
+        if (!showAuthView && now - lastSilentConnectAttemptMs < 3_500L && isConnecting.get()) {
             onComplete?.invoke(false, "Connection in progress")
             return
         }
         if (!showAuthView) {
             lastSilentConnectAttemptMs = now
+        } else {
+            // Interactive user tap supersedes any stale silent attempt
+            _lastConnectionErrorFlow.value = null
+            activeWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        }
+
+        // CRITICAL: Spotify App Remote AAR requires a real Activity context when showAuthView=true!
+        val connectContext: Context = if (showAuthView) {
+            findActivity(context) ?: appContext
+        } else {
+            appContext
         }
 
         isConnecting.set(true)
+        _isConnectingFlow.value = true
+        val settled = AtomicBoolean(false)
+
+        val watchdog = Runnable {
+            if (settled.compareAndSet(false, true)) {
+                isConnecting.set(false)
+                _isConnectingFlow.value = false
+                _isConnectedFlow.value = false
+                val msg = if (showAuthView) {
+                    "Spotify didn't respond within 7s. Tap 'Wake Spotify' below so Spotify runs in memory, ensure Developer Dashboard includes your build SHA-1 for com.tunemind.app, then tap Connect Remote."
+                } else {
+                    "Spotify Remote service timed out silently in background."
+                }
+                _lastConnectionErrorFlow.value = msg
+                Log.w(TAG, "Spotify App Remote watchdog timeout (showAuthView=$showAuthView)")
+                onComplete?.invoke(false, msg)
+            }
+        }
+        activeWatchdogRunnable = watchdog
+
         mainHandler.post {
+            mainHandler.postDelayed(watchdog, if (showAuthView) 7_500L else 3_200L)
             try {
                 val connectionParams = ConnectionParams.Builder(SpotifyAuthManager.CLIENT_ID)
                     .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
@@ -136,11 +215,14 @@ object SpotifyAppRemoteManager {
                     .build()
 
                 SpotifyAppRemote.connect(
-                    appContext,
+                    connectContext,
                     connectionParams,
                     object : Connector.ConnectionListener {
                         override fun onConnected(remote: SpotifyAppRemote) {
+                            mainHandler.removeCallbacks(watchdog)
+                            settled.set(true)
                             isConnecting.set(false)
+                            _isConnectingFlow.value = false
                             spotifyAppRemote = remote
                             _isConnectedFlow.value = true
                             _lastConnectionErrorFlow.value = null
@@ -150,10 +232,13 @@ object SpotifyAppRemoteManager {
                         }
 
                         override fun onFailure(throwable: Throwable) {
+                            mainHandler.removeCallbacks(watchdog)
+                            settled.set(true)
                             isConnecting.set(false)
+                            _isConnectingFlow.value = false
                             spotifyAppRemote = null
                             _isConnectedFlow.value = false
-                            val msg = throwable.message ?: throwable.javaClass.simpleName
+                            val msg = formatSpotifyRemoteFailure(throwable)
                             _lastConnectionErrorFlow.value = msg
                             Log.w(TAG, "Spotify App Remote connection failed: $msg")
                             onComplete?.invoke(false, msg)
@@ -161,8 +246,11 @@ object SpotifyAppRemoteManager {
                     }
                 )
             } catch (t: Throwable) {
+                mainHandler.removeCallbacks(watchdog)
+                settled.set(true)
                 isConnecting.set(false)
-                val msg = t.message ?: t.javaClass.simpleName
+                _isConnectingFlow.value = false
+                val msg = formatSpotifyRemoteFailure(t)
                 _lastConnectionErrorFlow.value = msg
                 _isConnectedFlow.value = false
                 Log.w(TAG, "Spotify App Remote connect threw exception: $msg")

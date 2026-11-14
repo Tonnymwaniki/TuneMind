@@ -1,6 +1,8 @@
 package com.tunemind.app.ui.screens
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,8 +27,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
@@ -36,6 +43,8 @@ fun SettingsScreen(
     onOpenWeeklyReport: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
     val registry = remember(context) { com.tunemind.app.provider.MusicProviderRegistry.getInstance(context) }
     var selectedProviderId by remember { mutableStateOf(registry.getPreferredProviderId()) }
     var alwaysAsk by remember { mutableStateOf(registry.isAlwaysAskEnabled()) }
@@ -48,14 +57,22 @@ fun SettingsScreen(
 
     val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
     val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
+    val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
+    val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
+    val isConnectingRemote by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectingFlow.collectAsState()
     val appRemoteError by com.tunemind.app.provider.SpotifyAppRemoteManager.lastConnectionErrorFlow.collectAsState()
 
     val spotifyAuthManager = remember(context) { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
-    var isSpotifyAuthorized by remember { mutableStateOf(spotifyAuthManager.isAuthenticated()) }
+    val spotifyOAuthRepo = remember(context) { com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context) }
+    var isSpotifyAuthorized by remember {
+        mutableStateOf(spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated())
+    }
     var hasOverlayPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)) }
-    val isSpotifyInstalled = remember(context) { com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context) }
+    var hasNotificationAccess by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)) }
+    var hasAudioPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)) }
+    var isSpotifyInstalled by remember { mutableStateOf(com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context)) }
 
     var persistentListener by remember { mutableStateOf(true) }
     var fatigueSensitivity by remember { mutableStateOf(0.75f) }
@@ -66,11 +83,46 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
     val colors = TuneMindTheme.colors
 
+    val refreshAllSystemStates: () -> Unit = remember(context) {
+        {
+            com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
+            vm.checkBatteryOptimization(context)
+            isSpotifyAuthorized = spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated()
+            hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
+            hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
+            hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
+            isSpotifyInstalled = com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context)
+            com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()
+            selectedProviderId = registry.getPreferredProviderId()
+            alwaysAsk = registry.isAlwaysAskEnabled()
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted || com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
+        refreshAllSystemStates()
+    }
+
     LaunchedEffect(Unit) {
-        com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
-        vm.checkBatteryOptimization(context)
-        isSpotifyAuthorized = spotifyAuthManager.isAuthenticated()
-        hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
+        refreshAllSystemStates()
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshAllSystemStates()
+                coroutineScope.launch {
+                    delay(350L)
+                    refreshAllSystemStates()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     Column(
@@ -211,7 +263,41 @@ fun SettingsScreen(
 
                 HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
 
-                // Toggle 2: Stay-in-TuneMind Playback
+                // Toggle 2: Option 1 - Strict Never-Leave-TuneMind Mode
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Strict Never-Leave-TuneMind Mode",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (strictNoAppSwitchEnabled) {
+                                "ON (Option 1): Strictly blocks launching Spotify or any external player UI. Plays silently or natively inside TuneMind and reports in-app if remote isn't ready."
+                            } else {
+                                "OFF: Allows silent background playback first, with automatic instant bounce-back when a cold app wake is needed."
+                            },
+                            fontSize = 11.sp,
+                            color = colors.secondaryText,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = strictNoAppSwitchEnabled,
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Toggle 3: Option 2 - Stay-in-TuneMind Smart Remote + Bounce-Back
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -226,9 +312,9 @@ fun SettingsScreen(
                         )
                         Text(
                             text = if (stayInTuneMindEnabled) {
-                                "ON: Streams songs via Spotify App Remote SDK (Free & Premium) + Web API without stranding you in Spotify."
+                                "ON (Option 2): Streams songs via Spotify App Remote (Free & Premium) + Web API, and bounces straight back to TuneMind if external wake occurs."
                             } else {
-                                "OFF: Opens the Spotify app window directly when playing a song."
+                                "OFF: Opens the external music app directly when playing a song."
                             },
                             fontSize = 11.sp,
                             color = colors.secondaryText,
@@ -245,7 +331,41 @@ fun SettingsScreen(
 
                 HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
 
-                // Toggle 3: Background Auto-Intervention (Off by default for consent)
+                // Toggle 4: Option 3 - Built-In TuneMind Native In-App Audio Engine
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                        Text(
+                            text = "Built-In TuneMind In-App Audio Engine",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primaryText
+                        )
+                        Text(
+                            text = if (preferInAppPlayerEnabled) {
+                                "ON (Option 3): Plays matching local phone audio files and instant Spotify catalog previews natively inside TuneMind without touching another app."
+                            } else {
+                                "OFF: Skips built-in native player and routes strictly through external/remote providers."
+                            },
+                            fontSize = 11.sp,
+                            color = colors.secondaryText,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Switch(
+                        checked = preferInAppPlayerEnabled,
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setPreferInAppPlayerEnabled(context, it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Toggle 5: Background Auto-Intervention (Off by default for consent)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -286,7 +406,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
                                 text = "Spotify Remote SDK & Account",
                                 fontSize = 12.sp,
@@ -295,15 +415,20 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = when {
+                                    isConnectingRemote -> "Opening Spotify App Remote handshake — accept if Spotify prompts you..."
                                     appRemoteConnected -> "Connected to Spotify App Remote (Free & Premium silent control active)"
                                     !isSpotifyInstalled -> "Spotify app not detected on device"
-                                    !appRemoteError.isNullOrBlank() -> "App Remote status: ${appRemoteError?.take(60)}"
-                                    isSpotifyAuthorized -> "OAuth connected • Tap Connect Remote once for zero-switch playback"
-                                    else -> "Authorize Spotify so TuneMind controls playback and discovers unheard music"
+                                    isSpotifyAuthorized -> "Spotify OAuth linked • Tap Connect Remote to enable zero-switch playback"
+                                    else -> "Authorize Spotify or connect Remote so TuneMind controls playback inside TuneMind"
                                 },
                                 fontSize = 10.sp,
                                 color = colors.secondaryText
                             )
+                        }
+                        val badgeColor = when {
+                            appRemoteConnected -> DeepObsidianAmber.DecibelSafe
+                            isConnectingRemote -> colors.primaryAccent
+                            else -> colors.primaryAccent
                         }
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -314,13 +439,60 @@ fun SettingsScreen(
                             )
                         ) {
                             Text(
-                                text = if (appRemoteConnected) "LINKED" else "STANDBY",
+                                text = when {
+                                    isConnectingRemote -> "CONNECTING..."
+                                    appRemoteConnected -> "ENABLED"
+                                    else -> "STANDBY"
+                                },
                                 fontSize = 8.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = if (appRemoteConnected) DeepObsidianAmber.DecibelSafe else colors.primaryAccent,
+                                color = badgeColor,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
+                        }
+                    }
+
+                    if (!appRemoteError.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DeepObsidianAmber.Warning.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, DeepObsidianAmber.Warning.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = appRemoteError ?: "",
+                                    fontSize = 11.sp,
+                                    color = DeepObsidianAmber.Warning,
+                                    lineHeight = 15.sp
+                                )
+                                if (isSpotifyInstalled) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            runCatching {
+                                                context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
+                                                    wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(wakeIntent)
+                                                }
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, DeepObsidianAmber.Warning.copy(alpha = 0.6f)),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Wake Spotify App",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DeepObsidianAmber.Warning
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -330,18 +502,35 @@ fun SettingsScreen(
                     ) {
                         if (isSpotifyInstalled) {
                             Button(
+                                enabled = !isConnectingRemote,
                                 onClick = {
                                     com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
                                         context = context,
                                         showAuthView = true
-                                    )
+                                    ) { _, _ ->
+                                        refreshAllSystemStates()
+                                    }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (appRemoteConnected) DeepObsidianAmber.DecibelSafe else colors.primaryAccent
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
+                                if (isConnectingRemote) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(13.dp),
+                                        strokeWidth = 2.dp,
+                                        color = DeepObsidianAmber.AppBackground
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
                                 Text(
-                                    text = if (appRemoteConnected) "Remote Linked" else "Connect Remote",
+                                    text = when {
+                                        isConnectingRemote -> "Connecting..."
+                                        appRemoteConnected -> "Remote Enabled ✓"
+                                        else -> "Connect Remote"
+                                    },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = DeepObsidianAmber.AppBackground
@@ -353,51 +542,104 @@ fun SettingsScreen(
                                 spotifyAuthManager.launchSpotifyAuth(context)
                             },
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.6f)),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSpotifyAuthorized) DeepObsidianAmber.DecibelSafe else colors.primaryAccent.copy(alpha = 0.6f)
+                            ),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = if (isSpotifyAuthorized) "Re-Auth Spotify" else "Link Spotify",
+                                text = if (isSpotifyAuthorized) "Spotify Linked ✓" else "Link Spotify",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = colors.primaryAccent
+                                color = if (isSpotifyAuthorized) DeepObsidianAmber.DecibelSafe else colors.primaryAccent
                             )
                         }
                     }
                 }
 
-                // Display Over Other Apps (SYSTEM_ALERT_WINDOW) helper for instant bounce-back
-                if (!hasOverlayPermission) {
-                    HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(
-                                text = "Return-to-TuneMind Overlay",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.primaryText
-                            )
-                            Text(
-                                text = "Allows Android to return straight into TuneMind if Spotify cold-starts.",
-                                fontSize = 10.sp,
-                                color = colors.secondaryText
-                            )
-                        }
-                        TextButton(
-                            onClick = {
-                                runCatching {
-                                    context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
-                                }
-                            }
-                        ) {
-                            Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.primaryAccent)
+                HorizontalDivider(color = DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+
+                // Always-visible System Permissions Section (live reactive on ON_RESUME)
+                Text(
+                    text = "SYSTEM PERMISSIONS & STAY-IN-APP CONTROLS",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primaryAccent,
+                    letterSpacing = 0.8.sp
+                )
+
+                // Permission 1: Return-to-TuneMind Overlay (SYSTEM_ALERT_WINDOW)
+                SettingsPermissionRow(
+                    title = "Return-to-TuneMind Overlay",
+                    description = if (hasOverlayPermission) {
+                        "Enabled — Android can bounce straight back into TuneMind after cold-starting Spotify."
+                    } else {
+                        "Allows Android to return straight into TuneMind if Spotify cold-starts."
+                    },
+                    isEnabled = hasOverlayPermission,
+                    colors = colors,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
                         }
                     }
-                }
+                )
+
+                // Permission 2: Notification Listener Access
+                SettingsPermissionRow(
+                    title = "Notification Listener Access",
+                    description = if (hasNotificationAccess) {
+                        "Enabled — TuneMind reads active MediaSession track metadata and sends silent play/pause commands."
+                    } else {
+                        "Required to detect active music tracks across apps and control MediaSessions silently."
+                    },
+                    isEnabled = hasNotificationAccess,
+                    colors = colors,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                com.tunemind.app.util.PermissionUtils.getNotificationListenerIntent().apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }
+                    }
+                )
+
+                // Permission 3: Local Audio Files Permission (Option 3 In-App Audio)
+                SettingsPermissionRow(
+                    title = "Local Audio Files Permission",
+                    description = if (hasAudioPermission) {
+                        "Enabled — Built-in In-App Player can play songs stored on your phone without leaving TuneMind."
+                    } else {
+                        "Lets TuneMind's built-in audio player find and play downloaded/local songs directly on-device."
+                    },
+                    isEnabled = hasAudioPermission,
+                    colors = colors,
+                    onClick = {
+                        if (!hasAudioPermission) {
+                            val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                android.Manifest.permission.READ_MEDIA_AUDIO
+                            } else {
+                                android.Manifest.permission.READ_EXTERNAL_STORAGE
+                            }
+                            audioPermissionLauncher.launch(perm)
+                        } else {
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.parse("package:${context.packageName}")
+                                    ).apply {
+                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                )
             }
         }
 
@@ -421,7 +663,11 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Icon(
                             Icons.Outlined.BatteryChargingFull,
                             contentDescription = null,
@@ -449,7 +695,7 @@ fun SettingsScreen(
                         border = BorderStroke(1.dp, if (isBatteryIgnored) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning)
                     ) {
                         Text(
-                            text = if (isBatteryIgnored) "SHIELD ACTIVE" else "RESTRICTED",
+                            text = if (isBatteryIgnored) "ENABLED" else "DISABLED",
                             fontSize = 8.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -459,22 +705,22 @@ fun SettingsScreen(
                     }
                 }
 
-                if (!isBatteryIgnored) {
-                    Button(
-                        onClick = { vm.requestIgnoreBatteryOptimization(context) },
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.Warning),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "Grant Battery Exemption (Allow Background)",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.AppBackground
-                        )
-                    }
+                Button(
+                    onClick = { vm.requestIgnoreBatteryOptimization(context) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isBatteryIgnored) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(14.dp), tint = DeepObsidianAmber.AppBackground)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (isBatteryIgnored) "Battery Exemption Enabled ✓" else "Enable Battery Exemption",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DeepObsidianAmber.AppBackground
+                    )
                 }
             }
         }
@@ -892,3 +1138,85 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
     }
 }
+
+@Composable
+private fun SettingsPermissionRow(
+    title: String,
+    description: String,
+    isEnabled: Boolean,
+    colors: TuneMindThemeColors,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = colors.cardSurface.copy(alpha = 0.7f),
+        border = BorderStroke(
+            1.dp,
+            if (isEnabled) DeepObsidianAmber.DecibelSafe.copy(alpha = 0.45f)
+            else DeepObsidianAmber.Warning.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = title,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primaryText
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isEnabled) DeepObsidianAmber.DecibelSafe.copy(alpha = 0.16f) else DeepObsidianAmber.Warning.copy(alpha = 0.16f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isEnabled) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning
+                        )
+                    ) {
+                        Text(
+                            text = if (isEnabled) "ENABLED" else "DISABLED",
+                            fontSize = 8.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isEnabled) DeepObsidianAmber.DecibelSafe else DeepObsidianAmber.Warning,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = description,
+                    fontSize = 10.sp,
+                    color = colors.secondaryText,
+                    lineHeight = 14.sp
+                )
+            }
+            OutlinedButton(
+                onClick = onClick,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (isEnabled) DeepObsidianAmber.DecibelSafe else colors.primaryAccent
+                ),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = if (isEnabled) "Enabled ✓" else "Enable",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isEnabled) DeepObsidianAmber.DecibelSafe else colors.primaryAccent
+                )
+            }
+        }
+    }
+}
+

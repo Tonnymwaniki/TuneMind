@@ -29,6 +29,7 @@ export interface AgentToolCall {
     | 'SET_THEME_COLOR'
     | 'TOGGLE_AUTONOMOUS_DJ'
     | 'TOGGLE_STAY_IN_TUNEMIND'
+    | 'TOGGLE_STRICT_NO_APP_SWITCH'
     | 'OPEN_SETTINGS'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
@@ -43,6 +44,8 @@ export interface AgentToolCall {
   theme_behavior?: string; // 'ADAPTIVE' | 'STATIC'
   autonomous_dj_enabled?: boolean;
   stay_in_tunemind_enabled?: boolean;
+  strict_no_app_switch_enabled?: boolean;
+  never_open_external_app?: boolean;
   target_screen?: string; // 'DOPAMINE' | 'AGENT' | 'RHYTHM'
   expect_follow_up?: boolean;
   extra_actions?: AgentToolCall[];
@@ -94,6 +97,7 @@ export interface TuneMindTelemetryContext {
     artist: string;
     trackId?: string;
     source?: string;
+    never_open_external_app?: boolean;
   } | null;
   spotify_access_token?: string;
   dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -108,8 +112,12 @@ export interface TuneMindTelemetryContext {
     custom_accent_hex?: string;
     autonomous_dj_enabled?: boolean;
     stay_in_tunemind_enabled?: boolean;
+    strict_no_app_switch_enabled?: boolean;
+    prefer_in_app_player_enabled?: boolean;
+    has_overlay_permission?: boolean;
     spotify_connected?: boolean;
     app_remote_connected?: boolean;
+    inapp_player_active?: boolean;
   };
 }
 
@@ -126,6 +134,7 @@ export interface TuneMindReasoningResponse {
     track_title?: string;
     track_artist?: string;
     spotify_uri?: string;
+    never_open_external_app?: boolean;
     suggested_bpm_target: number;
   };
   database_tags: string[];
@@ -148,7 +157,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private static pendingProposedTracksByUser = new Map<
     string,
-    { title: string; artist: string; trackId?: string; source?: string }
+    { title: string; artist: string; trackId?: string; source?: string; never_open_external_app?: boolean }
   >();
   private static recentDialogueTurnsByUser = new Map<
     string,
@@ -157,7 +166,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static rotationIndex: number = 0;
 
   public static setPendingProposedTrack(
-    track: { title: string; artist: string; trackId?: string; source?: string } | null,
+    track: { title: string; artist: string; trackId?: string; source?: string; never_open_external_app?: boolean } | null,
     userId: string = 'tunemind-default-user'
   ) {
     const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
@@ -565,12 +574,13 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'SET_THEME_COLOR',
                 'TOGGLE_AUTONOMOUS_DJ',
                 'TOGGLE_STAY_IN_TUNEMIND',
+                'TOGGLE_STRICT_NO_APP_SWITCH',
                 'OPEN_SETTINGS',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE'
               ],
               description:
-                'Use ADVISE_ONLY for greetings ("hi tunemind", "how are you"), identity questions, music insights, or open dialogue. Use PROPOSE_TRACK when recommending or finding a song for user approval. Use PLAY_TRACK_NOW ONLY when approving pending_proposed_track or during AUTO_CURATE_NEXT_TRACK. Use SET_THEME_COLOR / SHIFT_ATMOSPHERE / TOGGLE_AUTONOMOUS_DJ / TOGGLE_STAY_IN_TUNEMIND / OPEN_SETTINGS / NAVIGATE_SCREEN / SET_VOLUME_PERCENT to control TuneMind.'
+                'Use ADVISE_ONLY for greetings ("hi tunemind", "how are you"), identity questions, music insights, or open dialogue. Use PROPOSE_TRACK when recommending or finding a song for user approval. Use PLAY_TRACK_NOW ONLY when approving pending_proposed_track or during AUTO_CURATE_NEXT_TRACK. Use SET_THEME_COLOR / SHIFT_ATMOSPHERE / TOGGLE_AUTONOMOUS_DJ / TOGGLE_STAY_IN_TUNEMIND / TOGGLE_STRICT_NO_APP_SWITCH / OPEN_SETTINGS / NAVIGATE_SCREEN / SET_VOLUME_PERCENT to control TuneMind.'
             },
             track_title: {
               type: 'string',
@@ -609,6 +619,14 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
               type: 'boolean',
               description: 'Target boolean for Stay-in-TuneMind playback mode when action is TOGGLE_STAY_IN_TUNEMIND.'
             },
+            strict_no_app_switch_enabled: {
+              type: 'boolean',
+              description: 'Target boolean for Strict Never-Leave-TuneMind Mode when action is TOGGLE_STRICT_NO_APP_SWITCH.'
+            },
+            never_open_external_app: {
+              type: 'boolean',
+              description: 'Set to true whenever the user asks to play a song without opening Spotify or leaving TuneMind, or when app_state.strict_no_app_switch_enabled is true.'
+            },
             target_screen: {
               type: 'string',
               description: 'Target screen ("DOPAMINE" | "AGENT" | "RHYTHM") when action is NAVIGATE_SCREEN.'
@@ -625,6 +643,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                   theme_behavior: { type: 'string' },
                   autonomous_dj_enabled: { type: 'boolean' },
                   stay_in_tunemind_enabled: { type: 'boolean' },
+                  strict_no_app_switch_enabled: { type: 'boolean' },
+                  never_open_external_app: { type: 'boolean' },
                   volume_percent: { type: 'number' },
                   target_screen: { type: 'string' },
                   track_title: { type: 'string' },
@@ -658,17 +678,27 @@ STRICT NEW-SONG DISCOVERY vs. FAVORITES:
 
 TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ:
 - By default, NEVER auto-play a song on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they'd like you to spin it right now.
-- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, and spotify_uri so Spotify plays the exact approved song cleanly.
+- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, and spotify_uri so it plays the exact approved song cleanly.
 - If the user rejects a proposal ("no", "another one", "different vibe"), discover a new track and propose that instead.
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled by the user. Call 'discover_and_recommend_spotify_tracks' to pick a fresh unheard song and call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and expect_follow_up=false.
 
+STAY-IN-TUNEMIND ARCHITECTURE (OPTIONS 1, 2 & 3 — CRITICAL):
+- TuneMind has three playback architectures visible in 'app_state':
+  1. Strict Never-Leave-TuneMind Mode ('strict_no_app_switch_enabled'): NEVER switches away to Spotify or any external player UI. Toggle via action="TOGGLE_STRICT_NO_APP_SWITCH".
+  2. Stay-in-TuneMind Smart Remote & Overlay Bounce-Back ('stay_in_tunemind_enabled' + 'app_remote_connected' + 'has_overlay_permission'): Silent playback via Spotify App Remote SDK / Web API / background MediaSession, plus automatic instant bounce-back into TuneMind if Spotify cold-starts.
+  3. Built-In TuneMind Native In-App Audio Engine ('prefer_in_app_player_enabled' / 'inapp_player_active'): Plays matching local device audio files and instant 30s Spotify catalog previews natively inside TuneMind.
+- WHENEVER the user says "without opening Spotify", "don't open Spotify", "stay in TuneMind", "don't leave TuneMind", or "strict_no_app_switch_enabled" is true:
+  -> Set "never_open_external_app": true!
+  -> NEVER say "I'll open Spotify" or promise to launch an external app! Instead honestly state whether TuneMind will play it natively inside TuneMind or silently via connected Spotify Remote / Web API / background MediaSession—and if neither 'app_remote_connected' nor 'spotify_connected' is true and local/preview audio isn't available, honestly tell them you will keep them inside TuneMind and guide them to Settings -> Connect Remote.
+
 FULL APP-WIDE CONTROL (YOU UNDERSTAND ALL OF TUNEMIND via app_state):
-- Inspect 'app_state' in the telemetry to know the current screen, theme accent hex, theme behavior, Autonomous DJ state, Stay-in-TuneMind state, and Spotify Remote SDK connection!
+- Inspect 'app_state' in the telemetry to know the current screen, theme accent hex, theme behavior, Autonomous DJ state, Stay-in-TuneMind / Strict Mode / In-App Player flags, and Spotify Remote SDK connection!
 - Change accent/theme color anytime the user asks ("make the app emerald green", "switch theme to neon pink", "change color to violet purple", "reset theme to auto adaptive"):
   -> Use action="SET_THEME_COLOR" with custom_accent_hex (e.g. "#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") and optional theme_behavior ("STATIC" or "ADAPTIVE").
 - Shift circadian atmosphere palette -> action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
 - Turn Autonomous End-of-Song DJ on or off -> action="TOGGLE_AUTONOMOUS_DJ" (autonomous_dj_enabled: true/false).
 - Turn Stay-in-TuneMind playback mode on or off -> action="TOGGLE_STAY_IN_TUNEMIND" (stay_in_tunemind_enabled: true/false).
+- Turn Strict Never-Leave-TuneMind Mode on or off -> action="TOGGLE_STRICT_NO_APP_SWITCH" (strict_no_app_switch_enabled: true/false).
 - Open Settings screen -> action="OPEN_SETTINGS".
 - Navigate tabs -> action="NAVIGATE_SCREEN" (target_screen: "DOPAMINE" | "AGENT" | "RHYTHM").
 - Pause / Resume / Skip / Volume / Cooldown Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT".
@@ -1432,6 +1462,12 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       const cleanArtistForSearch = trackArtist ? ClaudeMusicReasoningProvider.sanitizeArtistName(trackArtist) : '';
       const cleanSearchQuery = trackTitle ? `${cleanTitleForSearch} ${cleanArtistForSearch}`.trim() : '';
       const targetPlayer = targetPlayerDefault;
+      const requestedNeverOpenExternal = Boolean(
+        submittedTurnDecision.never_open_external_app === true ||
+        pending?.never_open_external_app === true ||
+        context.app_state?.strict_no_app_switch_enabled === true ||
+        /(?:without\s+(?:opening|leaving|switching|launching|going\s+to)|don'?t\s+(?:open|leave|switch\s+to|launch)\s+(?:spotify|the\s+app|another\s+app)|stay\s+(?:inside|in)\s+tunemind|never\s+(?:open|leave|switch)|in\s*-?\s*app\s*only|keep\s+me\s+(?:inside|in)\s+tunemind)/i.test(userCommandRaw)
+      );
 
       let resolvedIntent: TuneMindReasoningResponse['os_execution_command']['intent'] = 'NONE';
       switch (action) {
@@ -1449,7 +1485,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
                 title: cleanTitleForSearch || trackTitle,
                 artist: cleanArtistForSearch || trackArtist,
                 trackId: spotifyUri || undefined,
-                source: targetPlayer
+                source: targetPlayer,
+                never_open_external_app: requestedNeverOpenExternal
               },
               userId
             );
@@ -1526,6 +1563,10 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           theme_behavior: ea.theme_behavior || undefined,
           autonomous_dj_enabled: typeof ea.autonomous_dj_enabled === 'boolean' ? ea.autonomous_dj_enabled : undefined,
           stay_in_tunemind_enabled: typeof ea.stay_in_tunemind_enabled === 'boolean' ? ea.stay_in_tunemind_enabled : undefined,
+          strict_no_app_switch_enabled:
+            typeof ea.strict_no_app_switch_enabled === 'boolean' ? ea.strict_no_app_switch_enabled : undefined,
+          never_open_external_app:
+            typeof ea.never_open_external_app === 'boolean' ? ea.never_open_external_app : undefined,
           volume_percent: typeof ea.volume_percent === 'number' ? ea.volume_percent : undefined,
           target_screen: ea.target_screen || undefined,
           track_title: ea.track_title || undefined,
@@ -1550,6 +1591,11 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           typeof submittedTurnDecision.stay_in_tunemind_enabled === 'boolean'
             ? submittedTurnDecision.stay_in_tunemind_enabled
             : undefined,
+        strict_no_app_switch_enabled:
+          typeof submittedTurnDecision.strict_no_app_switch_enabled === 'boolean'
+            ? submittedTurnDecision.strict_no_app_switch_enabled
+            : undefined,
+        never_open_external_app: requestedNeverOpenExternal,
         target_screen: submittedTurnDecision.target_screen || undefined,
         expect_follow_up: expectFollowUp,
         extra_actions: extraActions.length > 0 ? extraActions : undefined
@@ -1573,6 +1619,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           track_title: (cleanTitleForSearch || trackTitle) || undefined,
           track_artist: (cleanArtistForSearch || trackArtist) || undefined,
           spotify_uri: spotifyUri || undefined,
+          never_open_external_app: requestedNeverOpenExternal,
           suggested_bpm_target: 108
         },
         database_tags: [providerTag, 'supabase-taste-genome', action.toLowerCase()]
@@ -1925,6 +1972,8 @@ Reason naturally about what the user actually said before choosing an action:
    - Mood palette -> "SHIFT_ATMOSPHERE" ("morning" | "afternoon" | "evening" | "night" | "auto")
    - Autonomous End-of-Song DJ toggle -> "TOGGLE_AUTONOMOUS_DJ" ("autonomous_dj_enabled": true/false)
    - Stay-in-TuneMind toggle -> "TOGGLE_STAY_IN_TUNEMIND" ("stay_in_tunemind_enabled": true/false)
+   - Strict Never-Leave-TuneMind toggle -> "TOGGLE_STRICT_NO_APP_SWITCH" ("strict_no_app_switch_enabled": true/false)
+   - If user says "without opening Spotify" / "don't leave TuneMind" OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true and NEVER say you will open Spotify UI!
    - Settings screen -> "OPEN_SETTINGS"
    - Tabs -> "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM")
    - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
@@ -1935,7 +1984,7 @@ Respond ONLY with a single valid JSON object:
   "voice_agent_tts": "Your natural, warm, unscripted spoken reply (1-3 sentences)",
   "flow_state_analysis": "Short 1-line studio HUD note",
   "calculated_satiety_percentage": 24,
-  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "OPEN_SETTINGS" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
+  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "OPEN_SETTINGS" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
   "spotify_uri": "",
@@ -1945,6 +1994,8 @@ Respond ONLY with a single valid JSON object:
   "theme_behavior": "",
   "autonomous_dj_enabled": false,
   "stay_in_tunemind_enabled": true,
+  "strict_no_app_switch_enabled": false,
+  "never_open_external_app": false,
   "target_screen": "DOPAMINE",
   "extra_actions": [],
   "expect_follow_up": true
@@ -1985,6 +2036,11 @@ Respond ONLY with a single valid JSON object:
     const targetPlayer = context.current_track?.source_player || 'com.spotify.music';
     const userId = SupabaseIntelligenceStore.normalizeUserId(context.user_id, context.user_email);
     const pending = ClaudeMusicReasoningProvider.getPendingProposedTrack(userId);
+    const fallbackNeverOpenExternal = Boolean(
+      pending?.never_open_external_app === true ||
+      context.app_state?.strict_no_app_switch_enabled === true ||
+      /(?:without\s+(?:opening|leaving|switching|launching|going\s+to)|don'?t\s+(?:open|leave|switch\s+to|launch)\s+(?:spotify|the\s+app|another\s+app)|stay\s+(?:inside|in)\s+tunemind|never\s+(?:open|leave|switch)|in\s*-?\s*app\s*only|keep\s+me\s+(?:inside|in)\s+tunemind)/i.test(userCommandRaw)
+    );
 
     // 0. Autonomous End-of-Song DJ Handover ('AUTO_CURATE_NEXT_TRACK')
     if (/^auto_curate_next_track\b/i.test(userCommandLower)) {
@@ -2044,6 +2100,7 @@ Respond ONLY with a single valid JSON object:
           track_artist: cleanArtist,
           spotify_uri: chosen.uri || undefined,
           target_player: targetPlayer,
+          never_open_external_app: fallbackNeverOpenExternal,
           expect_follow_up: false
         },
         os_execution_command: {
@@ -2053,6 +2110,7 @@ Respond ONLY with a single valid JSON object:
           track_title: cleanTitle,
           track_artist: cleanArtist,
           spotify_uri: chosen.uri || undefined,
+          never_open_external_app: fallbackNeverOpenExternal,
           suggested_bpm_target: 108
         },
         database_tags: ['autonomous-end-of-song-dj', 'auto-curated-next-track']
@@ -2107,14 +2165,17 @@ Respond ONLY with a single valid JSON object:
       return {
         calculated_satiety_percentage: 20,
         reasoning_mode: 'DIRECT_EXECUTION',
-        flow_state_analysis: `Approved "${pending.title}" — launching on Spotify.`,
-        voice_agent_tts: `Awesome, playing "${pending.title}"${artistPart} inside TuneMind right now.`,
+        flow_state_analysis: `Approved "${pending.title}" — launching playback.`,
+        voice_agent_tts: fallbackNeverOpenExternal
+          ? `Keeping you right inside TuneMind and playing "${pending.title}"${artistPart}.`
+          : `Awesome, playing "${pending.title}"${artistPart} inside TuneMind right now.`,
         agent_tool_call: {
           action: 'PLAY_TRACK_NOW',
           track_title: pending.title,
           track_artist: pending.artist,
           spotify_uri: pending.trackId || '',
           target_player: pending.source || targetPlayer,
+          never_open_external_app: fallbackNeverOpenExternal,
           expect_follow_up: false
         },
         os_execution_command: {
@@ -2124,6 +2185,7 @@ Respond ONLY with a single valid JSON object:
           track_title: pending.title,
           track_artist: pending.artist,
           spotify_uri: pending.trackId || '',
+          never_open_external_app: fallbackNeverOpenExternal,
           suggested_bpm_target: 108
         },
         database_tags: ['approved-pending-track']
@@ -2231,6 +2293,25 @@ Respond ONLY with a single valid JSON object:
         },
         os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
         database_tags: ['toggle-autonomous-dj']
+      };
+    }
+
+    if (/\b(strict\s+mode|strict\s+never\s+leave|never\s+leave\s+tunemind|never\s+open\s+spotify\s+mode)\b/i.test(userCommandLower)) {
+      const enableStrict = !/\b(off|disable|stop)\b/i.test(userCommandLower);
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: `Strict Never-Leave-TuneMind mode set to ${enableStrict ? 'ON' : 'OFF'}.`,
+        voice_agent_tts: enableStrict
+          ? 'Strict Never-Leave-TuneMind mode is now ON. I will never switch away to Spotify or any external player.'
+          : 'Strict mode is now OFF. Smart remote playback and automatic return remain active.',
+        agent_tool_call: {
+          action: 'TOGGLE_STRICT_NO_APP_SWITCH',
+          strict_no_app_switch_enabled: enableStrict,
+          expect_follow_up: false
+        },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['toggle-strict-no-app-switch']
       };
     }
 
@@ -2514,7 +2595,8 @@ Respond ONLY with a single valid JSON object:
         title: chosen.title,
         artist: chosen.artist,
         trackId: spotifyUri || undefined,
-        source: chosen.source || targetPlayer
+        source: chosen.source || targetPlayer,
+        never_open_external_app: fallbackNeverOpenExternal
       },
       userId
     );
@@ -2534,6 +2616,7 @@ Respond ONLY with a single valid JSON object:
         track_artist: chosen.artist,
         spotify_uri: spotifyUri,
         target_player: chosen.source || targetPlayer,
+        never_open_external_app: fallbackNeverOpenExternal,
         expect_follow_up: true
       },
       os_execution_command: {
@@ -2543,6 +2626,7 @@ Respond ONLY with a single valid JSON object:
         track_title: chosen.title,
         track_artist: chosen.artist,
         spotify_uri: spotifyUri,
+        never_open_external_app: fallbackNeverOpenExternal,
         suggested_bpm_target: 105
       },
       database_tags: ['spotify-discovery-proposal', 'awaiting-approval']

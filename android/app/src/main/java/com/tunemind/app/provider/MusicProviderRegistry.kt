@@ -17,6 +17,7 @@ class MusicProviderRegistry(
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 ) {
     private val staticProviders: List<MusicProvider> = listOf(
+        TuneMindInAppProvider(),
         BoomplayMusicProvider(),
         YouTubeMusicProvider(),
         SpotifyMusicProvider(),
@@ -190,5 +191,98 @@ class MusicProviderRegistry(
                 INSTANCE ?: MusicProviderRegistry(context.applicationContext).also { INSTANCE = it }
             }
         }
+    }
+}
+
+/**
+ * Option 3 — Built-In Native TuneMind In-App Audio Provider.
+ * Plays local device audio or Spotify preview URLs directly inside TuneMind with zero external app switching.
+ */
+class TuneMindInAppProvider : MusicProvider {
+    override val providerId: String = PROVIDER_ID
+    override val displayName: String = "TuneMind In-App Player (Built-In)"
+    override val packageName: String = "com.tunemind.app"
+
+    override val supportedCapabilities: Set<ProviderCapability> = setOf(
+        ProviderCapability.CAN_DEEP_LINK,
+        ProviderCapability.CAN_CONTROL_ACTIVE_SESSION,
+        ProviderCapability.CAN_REPORT_PLAYBACK
+    )
+
+    override fun isInstalled(context: Context): Boolean = true
+
+    override fun resolveTrack(track: RecommendedTrack): TrackMatch {
+        val query = "${track.artist} ${track.title}".trim()
+        return TrackMatch(
+            providerId = providerId,
+            providerDisplayName = displayName,
+            title = track.title,
+            artist = track.artist,
+            providerTrackId = track.providerTrackId,
+            deepLinkUri = track.providerTrackId,
+            webFallbackUrl = null,
+            searchQuery = query,
+            confidence = track.confidence
+        )
+    }
+
+    override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
+        // 1. Try local device audio file first
+        if (TuneMindInAppPlayer.playLocalMatch(context, match.title, match.artist)) {
+            val localUri = TuneMindInAppPlayer.currentUriFlow.value ?: "content://media/external/audio/media"
+            return PlaybackLaunchResult.DirectPlaybackLaunched(
+                providerId = providerId,
+                providerDisplayName = displayName,
+                trackTitle = match.title,
+                destinationUri = localUri,
+                message = "Playing '${match.title}' inside TuneMind's built-in audio engine."
+            )
+        }
+
+        // 2. Try Spotify preview URL natively inside TuneMind
+        val resolvedSpotifyUri = match.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
+            ?: match.deepLinkUri?.takeIf { it.startsWith("spotify:track:") }
+            ?: SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                context = context,
+                cleanTitle = match.title,
+                cleanArtist = match.artist,
+                fullQuery = match.searchQuery
+            )
+
+        if (!resolvedSpotifyUri.isNullOrBlank()) {
+            val previewUrl = SpotifyTrackUriResolver.fetchTrackPreviewUrlBlocking(context, resolvedSpotifyUri)
+            if (!previewUrl.isNullOrBlank() && TuneMindInAppPlayer.playStreamUrl(context, previewUrl, match.title, match.artist)) {
+                return PlaybackLaunchResult.DirectPlaybackLaunched(
+                    providerId = providerId,
+                    providerDisplayName = displayName,
+                    trackTitle = match.title,
+                    destinationUri = previewUrl,
+                    message = "Streaming '${match.title}' (30s preview) inside TuneMind's built-in audio engine."
+                )
+            }
+        }
+
+        // 3. Fallback to silent Spotify App Remote / Web API / MediaSession via MusicPlayerAutoLauncher (respecting strict mode)
+        val rec = RecommendedTrack(
+            id = resolvedSpotifyUri ?: match.title,
+            title = match.title,
+            artist = match.artist,
+            reason = "Selected for in-app / Stay-in-TuneMind playback",
+            confidence = match.confidence
+        )
+        return MusicPlayerAutoLauncher.launchWithAutoPlay(
+            context = context,
+            providerId = SpotifyMusicProvider.PROVIDER_ID,
+            displayName = "Spotify",
+            packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+            track = rec,
+            query = match.searchQuery,
+            deepLinkUri = resolvedSpotifyUri,
+            neverOpenExternalApp = true
+        )
+    }
+
+    companion object {
+        const val PROVIDER_ID = "tunemind_inapp"
     }
 }

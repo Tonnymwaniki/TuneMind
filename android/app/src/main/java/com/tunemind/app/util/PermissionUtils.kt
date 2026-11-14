@@ -32,6 +32,15 @@ object PermissionUtils {
         return Settings.canDrawOverlays(context)
     }
 
+    fun hasAudioStoragePermission(context: Context): Boolean {
+        val perm = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun getOverlayPermissionIntent(context: Context): Intent {
         return Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,

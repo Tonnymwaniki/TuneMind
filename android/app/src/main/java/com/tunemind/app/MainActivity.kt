@@ -140,7 +140,9 @@ open class MainActivity : ComponentActivity() {
 
                     val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
                     val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
+                    val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
                     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
+                    val playbackLaunchFeedback by vm.playbackLaunchFeedback.collectAsState()
                     val spotifyAuthManager = remember { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
 
                     LaunchedEffect(Unit) {
@@ -194,6 +196,11 @@ open class MainActivity : ComponentActivity() {
                                     ?: !com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context)
                                 com.tunemind.app.domain.voice.AgentSettingsStore.setStayInTuneMindEnabled(context, target)
                             }
+                            "TOGGLE_STRICT_NO_APP_SWITCH" -> {
+                                val target = tool.strict_no_app_switch_enabled
+                                    ?: !com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
+                                com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, target)
+                            }
                             "OPEN_SETTINGS" -> {
                                 showSettingsScreen = true
                             }
@@ -239,6 +246,10 @@ open class MainActivity : ComponentActivity() {
                                     put("custom_accent_hex", prefs.customAccentHex ?: "")
                                     put("autonomous_dj_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(context))
                                     put("stay_in_tunemind_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context))
+                                    put("strict_no_app_switch_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context))
+                                    put("prefer_in_app_player_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isPreferInAppPlayerEnabled(context))
+                                    put("has_overlay_permission", PermissionUtils.hasOverlayPermission(context))
+                                    put("inapp_player_active", com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying())
                                     put("spotify_connected", spotifyAuthManager.isAuthenticated())
                                     put("app_remote_connected", com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected())
                                 }
@@ -251,6 +262,9 @@ open class MainActivity : ComponentActivity() {
                                 tool.extra_actions.forEach { extra ->
                                     executeSingleAppToolAction(extra)
                                 }
+                            },
+                            onPlaybackLaunchResult = { launchRes ->
+                                vm.reportPlaybackLaunchResult(launchRes)
                             }
                         )
                     }
@@ -521,6 +535,74 @@ open class MainActivity : ComponentActivity() {
                                         .navigationBarsPadding()
                                         .padding(bottom = 18.dp)
                                 )
+
+                                // Playback Launch / Strict Never-Leave-TuneMind Diagnostic Banner
+                                val currentFeedback = playbackLaunchFeedback
+                                if (!showSettingsScreen && currentFeedback != null &&
+                                    (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed ||
+                                        (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched &&
+                                            currentFeedback.providerId == "tunemind_inapp"))
+                                ) {
+                                    val isFailure = currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed
+                                    LaunchedEffect(currentFeedback) {
+                                        kotlinx.coroutines.delay(if (isFailure) 9500L else 4500L)
+                                        vm.clearPlaybackLaunchFeedback()
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isFailure) Color(0xFF281218) else Color(0xFF102420),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isFailure) Color(0xFFFF5A79).copy(alpha = 0.7f) else adaptiveState.primaryAccent.copy(alpha = 0.65f)
+                                        ),
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .statusBarsPadding()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                                            .fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = currentFeedback.message,
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                lineHeight = 16.sp
+                                            )
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                if (isFailure) {
+                                                    Button(
+                                                        onClick = {
+                                                            vm.clearPlaybackLaunchFeedback()
+                                                            showSettingsScreen = true
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = adaptiveState.primaryAccent),
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Text(
+                                                            "Open Settings",
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color.Black
+                                                        )
+                                                    }
+                                                }
+                                                TextButton(
+                                                    onClick = { vm.clearPlaybackLaunchFeedback() },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Dismiss", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // Fullscreen TuneMind Settings Overlay
                                 if (showSettingsScreen) {

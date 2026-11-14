@@ -44,7 +44,8 @@ data class PendingProposedTrack(
     val title: String,
     val artist: String,
     val trackId: String? = null,
-    val source: String = "com.spotify.music"
+    val source: String = "com.spotify.music",
+    val neverOpenExternalApp: Boolean = false
 )
 
 class AgentVoiceManager(
@@ -56,7 +57,8 @@ class AgentVoiceManager(
     private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState)? = null,
     private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
-    private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null
+    private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
+    private val onPlaybackLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -253,6 +255,13 @@ class AgentVoiceManager(
         if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
         return Regex(
             "\\b(play|spin|put on|queue|recommend|suggest|find me a song|give me a song|play something|play music|another song|different song|next song|bongo|afrobeat|amapiano|r&b|hip hop|chill music|workout music|focus music|study music|capsule|dopamine capsule)\\b"
+        ).containsMatchIn(clean)
+    }
+
+    private fun isNeverLeaveAppPlayRequest(text: String): Boolean {
+        val clean = text.lowercase()
+        return Regex(
+            "\\b(without\\s+(opening|leaving|launching|switching(\\s+to)?)|don'?t\\s+(open|leave|switch\\s+to)|do\\s+not\\s+(open|leave|switch\\s+to)|not\\s+open\\s+spotify|stay\\s+(in|inside)\\s+tunemind|inside\\s+tunemind|play\\s+(it\\s+)?in\\s+tunemind|in\\s*-?app\\s+only|never\\s+open\\s+spotify|no\\s+app\\s+switch)\\b"
         ).containsMatchIn(clean)
     }
 
@@ -472,7 +481,8 @@ class AgentVoiceManager(
         artist: String,
         spotifyUri: String? = null,
         targetPlayer: String = "com.spotify.music",
-        customSpokenLine: String? = null
+        customSpokenLine: String? = null,
+        neverOpenExternalApp: Boolean = false
     ) {
         acquireTemporaryHandoverWakeLock(35_000L)
         isExecutingAutonomousHandover = true
@@ -521,7 +531,8 @@ class AgentVoiceManager(
                 suggested_bpm_target = 108,
                 track_title = cleanTitle,
                 track_artist = cleanArtist,
-                spotify_uri = spotifyUri
+                spotify_uri = spotifyUri,
+                never_open_external_app = neverOpenExternalApp
             )
         )
 
@@ -537,6 +548,21 @@ class AgentVoiceManager(
                     isExecutingAutonomousHandover = false
                     releaseAudioDucking()
                     resumeWakeWordListening()
+                }
+            },
+            onLaunchResult = { launchRes ->
+                mainHandler.post {
+                    onPlaybackLaunchResult?.invoke(launchRes)
+                    if (launchRes is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed) {
+                        _flowAnalysisFlow.value = launchRes.reason
+                        scope.launch {
+                            _transcriptionFlow.emit(launchRes.reason)
+                        }
+                    } else if (launchRes is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched &&
+                        launchRes.providerId == "tunemind_inapp"
+                    ) {
+                        _flowAnalysisFlow.value = launchRes.message
+                    }
                 }
             }
         )
@@ -557,6 +583,16 @@ class AgentVoiceManager(
     private fun startAutonomousEndOfSongMonitor() {
         com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = { snap ->
             evaluatePlaybackSnapshotForEndOfSong(snap)
+        }
+
+        com.tunemind.app.provider.TuneMindInAppPlayer.setOnTrackCompletedListener { doneTitle, doneArtist, pkg ->
+            if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
+                triggerAutonomousEndOfSongHandover(
+                    finishedTitle = doneTitle,
+                    finishedArtist = doneArtist,
+                    targetPlayer = pkg.ifBlank { "com.spotify.music" }
+                )
+            }
         }
 
         com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener { title, artist, _, _, isPlaying, posMs, durMs ->
@@ -1012,7 +1048,8 @@ class AgentVoiceManager(
             title = pending.title,
             artist = pending.artist,
             spotifyUri = pending.trackId,
-            targetPlayer = pending.source.ifBlank { "com.spotify.music" }
+            targetPlayer = pending.source.ifBlank { "com.spotify.music" },
+            neverOpenExternalApp = pending.neverOpenExternalApp
         )
     }
 
@@ -1513,6 +1550,11 @@ class AgentVoiceManager(
         var spokenTts = customProposalSpeechOverride
             ?: explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" }.trim()
 
+        val resolvedNeverOpenExternalApp = isNeverLeaveAppPlayRequest(lastUserTranscript) ||
+            (pendingBeforeTurn?.neverOpenExternalApp == true) ||
+            (toolObj?.optBoolean("never_open_external_app", false) == true) ||
+            (cmdObj?.optBoolean("never_open_external_app", false) == true)
+
         if (isApprovingPending && pendingBeforeTurn != null) {
             effectiveAction = "PLAY_TRACK_NOW"
             effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
@@ -1520,7 +1562,7 @@ class AgentVoiceManager(
             updatePendingProposedTrack(null)
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
             spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
-                ?: "Awesome, playing ${rawTrackTitle}$artistPart on Spotify right now."
+                ?: "Awesome, playing ${rawTrackTitle}$artistPart inside TuneMind right now."
         } else if (wasAwaitingEndOfSongChoice && isTrackProposalOrPlayAttempt && !rawTrackTitle.isNullOrBlank()) {
             // When the user responds to the End-of-Song prompt ("Tell me what song you want next"),
             // immediately play their requested song without requiring a second confirmation!
@@ -1540,7 +1582,8 @@ class AgentVoiceManager(
                     title = rawTrackTitle!!,
                     artist = rawTrackArtist ?: "",
                     trackId = resolvedSpotifyUri,
-                    source = targetPlayerPkg
+                    source = targetPlayerPkg,
+                    neverOpenExternalApp = resolvedNeverOpenExternalApp
                 )
             )
             // Ensure spoken TTS asks the user for approval instead of claiming it is already spinning
@@ -1582,6 +1625,8 @@ class AgentVoiceManager(
                             theme_behavior = item.optString("theme_behavior", "").takeIf { it.isNotBlank() },
                             autonomous_dj_enabled = if (item.has("autonomous_dj_enabled")) item.optBoolean("autonomous_dj_enabled") else null,
                             stay_in_tunemind_enabled = if (item.has("stay_in_tunemind_enabled")) item.optBoolean("stay_in_tunemind_enabled") else null,
+                            strict_no_app_switch_enabled = if (item.has("strict_no_app_switch_enabled")) item.optBoolean("strict_no_app_switch_enabled") else null,
+                            never_open_external_app = if (item.has("never_open_external_app")) item.optBoolean("never_open_external_app") else null,
                             target_screen = item.optString("target_screen", "").takeIf { it.isNotBlank() }
                         )
                     )
@@ -1601,6 +1646,8 @@ class AgentVoiceManager(
             theme_behavior = toolObj?.optString("theme_behavior", "")?.takeIf { it.isNotBlank() },
             autonomous_dj_enabled = if (toolObj != null && toolObj.has("autonomous_dj_enabled")) toolObj.optBoolean("autonomous_dj_enabled") else null,
             stay_in_tunemind_enabled = if (toolObj != null && toolObj.has("stay_in_tunemind_enabled")) toolObj.optBoolean("stay_in_tunemind_enabled") else null,
+            strict_no_app_switch_enabled = if (toolObj != null && toolObj.has("strict_no_app_switch_enabled")) toolObj.optBoolean("strict_no_app_switch_enabled") else null,
+            never_open_external_app = resolvedNeverOpenExternalApp,
             target_screen = toolObj?.optString("target_screen", "")?.takeIf { it.isNotBlank() },
             expect_follow_up = effectiveExpectFollowUp,
             extra_actions = extraActionsList
@@ -1626,7 +1673,8 @@ class AgentVoiceManager(
                 suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
                 track_title = rawTrackTitle,
                 track_artist = rawTrackArtist,
-                spotify_uri = resolvedSpotifyUri
+                spotify_uri = resolvedSpotifyUri,
+                never_open_external_app = resolvedNeverOpenExternalApp
             ),
             voice_agent_audio_base64 = if (effectiveAction == "PROPOSE_TRACK" && rawAction == "PLAY_TRACK_NOW") {
                 // Force Android TTS to speak our rewritten approval question if cloud audio said "Spinning..."
@@ -1700,6 +1748,21 @@ class AgentVoiceManager(
                     } else {
                         releaseAudioDucking()
                         resumeWakeWordListening()
+                    }
+                }
+            },
+            onLaunchResult = { launchRes ->
+                mainHandler.post {
+                    onPlaybackLaunchResult?.invoke(launchRes)
+                    if (launchRes is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed) {
+                        _flowAnalysisFlow.value = launchRes.reason
+                        scope.launch {
+                            _transcriptionFlow.emit(launchRes.reason)
+                        }
+                    } else if (launchRes is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched &&
+                        launchRes.providerId == "tunemind_inapp"
+                    ) {
+                        _flowAnalysisFlow.value = launchRes.message
                     }
                 }
             }
@@ -1933,6 +1996,7 @@ class AgentVoiceManager(
                     put("track_artist", pending.artist)
                     put("spotify_uri", pending.trackId ?: "")
                     put("target_player", pending.source)
+                    put("never_open_external_app", pending.neverOpenExternalApp)
                     put("expect_follow_up", false)
                 })
                 put("os_execution_command", JSONObject().apply {
@@ -1942,6 +2006,7 @@ class AgentVoiceManager(
                     put("track_title", pending.title)
                     put("track_artist", pending.artist)
                     put("spotify_uri", pending.trackId ?: "")
+                    put("never_open_external_app", pending.neverOpenExternalApp)
                 })
             }
         }
@@ -2038,6 +2103,25 @@ class AgentVoiceManager(
                 put("agent_tool_call", JSONObject().apply {
                     put("action", "TOGGLE_AUTONOMOUS_DJ")
                     put("autonomous_dj_enabled", enableDj)
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
+        if (Regex("\\b(strict mode|strict never leave|never leave tunemind|never open spotify mode)\\b").containsMatchIn(lower)) {
+            val enableStrict = !Regex("\\b(off|disable|stop|turn off)\\b").containsMatchIn(lower)
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 22)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", if (enableStrict) "Enabled Strict Never-Leave-TuneMind Mode." else "Disabled Strict Never-Leave-TuneMind Mode.")
+                put("voice_agent_tts", if (enableStrict) "Strict Never-Leave-TuneMind mode is now on. I will never switch away from TuneMind to open Spotify or any external player." else "Strict mode is off. Stay-in-TuneMind smart remote and instant return remain active.")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "TOGGLE_STRICT_NO_APP_SWITCH")
+                    put("strict_no_app_switch_enabled", enableStrict)
                     put("expect_follow_up", false)
                 })
                 put("os_execution_command", JSONObject().apply {
@@ -2732,6 +2816,7 @@ class AgentVoiceManager(
 
     fun destroy() {
         com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = null
+        com.tunemind.app.provider.TuneMindInAppPlayer.setOnTrackCompletedListener(null)
         com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener(null)
         errorResetJob?.cancel()
         stopMicrophoneStream()

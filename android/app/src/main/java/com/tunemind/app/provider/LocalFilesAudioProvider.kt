@@ -43,6 +43,18 @@ class LocalFilesAudioProvider : MusicProvider {
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
         val titleQuery = match.title.trim()
         val artistQuery = match.artist.trim()
+        val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
+
+        // 0. OPTION 3: Native TuneMind In-App Audio Engine (Zero app switching!)
+        if (TuneMindInAppPlayer.playLocalMatch(context, titleQuery, artistQuery)) {
+            return PlaybackLaunchResult.DirectPlaybackLaunched(
+                providerId = providerId,
+                providerDisplayName = "TuneMind In-App Player",
+                trackTitle = match.title,
+                destinationUri = TuneMindInAppPlayer.currentUriFlow.value ?: "tunemind:inapp",
+                message = "Playing '${match.title}' natively inside TuneMind (zero app switch)."
+            )
+        }
 
         // 1. FAST PATH: Active Background MediaSession
         try {
@@ -61,7 +73,14 @@ class LocalFilesAudioProvider : MusicProvider {
             }
         } catch (_: Exception) {}
 
-        // 2. Query MediaStore to locate local audio file on device storage
+        if (strictNoSwitch) {
+            return PlaybackLaunchResult.LaunchFailed(
+                providerId = providerId,
+                reason = "Strict Never-Leave-TuneMind Mode is active, and no matching local audio file was found for '${match.title}' on phone storage."
+            )
+        }
+
+        // 2. Fallback Query MediaStore for an external audio player Activity if Strict Mode is OFF
         try {
             val projection = arrayOf(
                 MediaStore.Audio.Media._ID,
@@ -69,7 +88,6 @@ class LocalFilesAudioProvider : MusicProvider {
                 MediaStore.Audio.Media.ARTIST
             )
 
-            // Search by title match
             val selection = "${MediaStore.Audio.Media.TITLE} LIKE ?"
             val selectionArgs = arrayOf("%$titleQuery%")
 
@@ -102,9 +120,7 @@ class LocalFilesAudioProvider : MusicProvider {
                     )
                 }
             }
-        } catch (_: Exception) {
-            // Permission or cursor exception fallback
-        }
+        } catch (_: Exception) {}
 
         // 3. Fallback: Dispatch universal Android Media Play From Search
         return try {

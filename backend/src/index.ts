@@ -225,6 +225,7 @@ wss.on('connection', async (ws: WebSocket) => {
       artist: string;
       trackId?: string;
       source?: string;
+      never_open_external_app?: boolean;
     } | null;
     spotify_access_token?: string;
     dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -239,8 +240,12 @@ wss.on('connection', async (ws: WebSocket) => {
       custom_accent_hex?: string;
       autonomous_dj_enabled?: boolean;
       stay_in_tunemind_enabled?: boolean;
+      strict_no_app_switch_enabled?: boolean;
+      prefer_in_app_player_enabled?: boolean;
+      has_overlay_permission?: boolean;
       spotify_connected?: boolean;
       app_remote_connected?: boolean;
+      inapp_player_active?: boolean;
     };
   } | null = null;
 
