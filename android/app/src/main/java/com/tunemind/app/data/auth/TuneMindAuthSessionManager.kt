@@ -13,6 +13,7 @@ import com.tunemind.app.data.ingestion.SpotifyAuthManager
 import com.tunemind.app.data.ingestion.SpotifyOAuthRepository
 import com.tunemind.app.data.ingestion.SpotifyRecentlyPlayedSyncWorker
 import com.tunemind.app.data.ingestion.SpotifyTokenResponse
+import com.tunemind.app.domain.network.BackendEndpointManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -108,6 +109,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         _sessionFlow.value = readCurrentSession()
         _savedAccountsFlow.value = readSavedAccounts()
     }
+
+    fun getAccessToken(): String = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: ""
 
     private fun isSpotifyLinkedInternal(): Boolean {
         val oauthRepoAuth = runCatching {
@@ -922,6 +925,25 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     suspend fun deleteProfileAndSignOut(onWipeLocalAppData: suspend () -> Unit) = withContext(Dispatchers.IO) {
         val accessToken = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, null)?.takeIf { it.isNotBlank() }
         val uid = prefs.getString(KEY_USER_ID, null)?.takeIf { it.isNotBlank() }
+
+        // 1. Delete cloud account, intelligence records & auth user via hardened backend endpoint
+        if (accessToken != null) {
+            val baseUrl = BackendEndpointManager.getActiveHttpBaseUrl(appContext).trimEnd('/')
+            if (baseUrl.isNotBlank()) {
+                runCatching {
+                    val backendReq = Request.Builder()
+                        .url("$baseUrl/api/v1/account")
+                        .addHeader("Authorization", "Bearer $accessToken")
+                        .delete()
+                        .build()
+                    httpClient.newCall(backendReq).execute().close()
+                }.onFailure {
+                    Log.w(TAG, "Backend DELETE /api/v1/account fallback triggered", it)
+                }
+            }
+        }
+
+        // 2. Direct Supabase REST profile cleanup fallback
         if (accessToken != null && uid != null && isSupabaseConfigured()) {
             runCatching {
                 val req = Request.Builder()
@@ -933,6 +955,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                 httpClient.newCall(req).execute().close()
             }
         }
+
         onWipeLocalAppData()
         signOutRemoteAndLocal(removeFromSavedRoster = true, disconnectSpotify = true)
     }

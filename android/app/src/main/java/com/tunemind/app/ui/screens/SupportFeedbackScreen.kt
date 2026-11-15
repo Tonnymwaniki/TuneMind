@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.BuildConfig
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
+import com.tunemind.app.domain.network.BackendEndpointManager
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
@@ -53,7 +54,8 @@ fun SupportFeedbackScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val theme = LocalAdaptiveTheme.current
-    val authSession by TuneMindAuthSessionManager.getInstance(context).sessionFlow.collectAsState()
+    val authManager = remember { TuneMindAuthSessionManager.getInstance(context) }
+    val authSession by authManager.sessionFlow.collectAsState()
 
     val neonCyan = Color(0xFF00F0FF)
     val safeGreen = Color(0xFF10B981)
@@ -123,7 +125,7 @@ fun SupportFeedbackScreen(
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trimEnd('/')
+                    val baseUrl = BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
                     val client = OkHttpClient.Builder()
                         .connectTimeout(10, TimeUnit.SECONDS)
                         .readTimeout(12, TimeUnit.SECONDS)
@@ -147,11 +149,12 @@ fun SupportFeedbackScreen(
                         }
                     }
 
+                    val accessToken = authManager.getAccessToken()
                     val reqBuilder = Request.Builder()
                         .url("$baseUrl/api/v1/support/feedback")
                         .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                    if (authSession.supabaseAccessToken.isNotBlank()) {
-                        reqBuilder.header("Authorization", "Bearer ${authSession.supabaseAccessToken}")
+                    if (accessToken.isNotBlank()) {
+                        reqBuilder.header("Authorization", "Bearer $accessToken")
                     }
                     client.newCall(reqBuilder.build()).execute().use { resp ->
                         resp.isSuccessful

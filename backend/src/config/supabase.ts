@@ -59,6 +59,50 @@ export function isSupabaseLive(overrideUrl?: string, overrideKey?: string): bool
   );
 }
 
+let cachedAdminClient: SupabaseClient | null = null;
+let cachedAdminSignature = '';
+
+export function isServiceRoleConfigured(): boolean {
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const activeUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || runtimeSupabaseUrl || '').trim();
+  return (
+    activeUrl.startsWith('https://') &&
+    !activeUrl.includes('placeholder.supabase.co') &&
+    serviceKey.length > 20 &&
+    serviceKey !== 'placeholder-service-role-key'
+  );
+}
+
+export function getSupabaseAdminClient(overrideUrl?: string): SupabaseClient | null {
+  const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const activeUrl = (overrideUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || runtimeSupabaseUrl || '')
+    .trim()
+    .replace(/\/+$/, '');
+
+  if (
+    !activeUrl.startsWith('https://') ||
+    activeUrl.includes('placeholder.supabase.co') ||
+    serviceKey.length <= 20 ||
+    serviceKey === 'placeholder-service-role-key'
+  ) {
+    return null;
+  }
+
+  const sig = `${activeUrl}::${serviceKey.slice(0, 16)}`;
+  if (cachedAdminClient && cachedAdminSignature === sig) {
+    return cachedAdminClient;
+  }
+
+  cachedAdminClient = createClient(activeUrl, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+  cachedAdminSignature = sig;
+  return cachedAdminClient;
+}
+
 export function getLiveSupabaseClient(overrideUrl?: string, overrideKey?: string): SupabaseClient | null {
   updateRuntimeSupabaseConfig(overrideUrl, overrideKey);
   const activeUrl = (overrideUrl || runtimeSupabaseUrl || '').trim().replace(/\/+$/, '');
@@ -86,3 +130,4 @@ export function getLiveSupabaseClient(overrideUrl?: string, overrideKey?: string
   cachedDynamicSignature = sig;
   return cachedDynamicClient;
 }
+

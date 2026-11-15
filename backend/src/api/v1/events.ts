@@ -85,9 +85,18 @@ router.get('/', (req: Request, res: Response) => {
 /**
  * DELETE /api/v1/events
  *
- * Clears stored events.
+ * Clears stored events (restricted to development mode or authenticated requests).
  */
-router.delete('/', (_req: Request, res: Response) => {
+router.delete('/', (req: Request, res: Response) => {
+  const isDev = process.env['NODE_ENV'] === 'development';
+  if (!isDev && !req.authUser) {
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Purging telemetry events requires authentication or development mode.'
+    });
+    return;
+  }
+
   const store = ingestionService.getStore();
   store.clear();
   res.json({ status: 'ok', message: 'All stored telemetry events have been purged.' });

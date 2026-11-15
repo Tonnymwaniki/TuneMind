@@ -454,6 +454,24 @@ export class EventStore {
     this.persistToDisk();
   }
 
+  deleteByUserIds(userIds: string[]): number {
+    const targets = new Set(
+      userIds.map(id => id.trim().toLowerCase()).filter(Boolean)
+    );
+    if (targets.size === 0) return 0;
+
+    const before = EventStore.events.length;
+    EventStore.events = EventStore.events.filter(
+      e => !targets.has((e.user_id || '').trim().toLowerCase())
+    );
+    const removed = before - EventStore.events.length;
+    if (removed > 0) {
+      EventStore.eventIdSet = new Set(EventStore.events.map(e => e.event_id));
+      this.persistToDisk();
+    }
+    return removed;
+  }
+
   getDbPath(): string {
     return this.dbPath;
   }

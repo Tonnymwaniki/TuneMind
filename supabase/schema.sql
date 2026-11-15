@@ -275,41 +275,59 @@ ALTER TABLE public.user_taste_genome
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_taste_genome_user_id_unique
     ON public.user_taste_genome (user_id);
 
--- 5. Enable Row-Level Security & Policies for Mobile + Cloud Sync
+-- 5. Enable Row-Level Security & User-Scoped Policies
 ALTER TABLE public.agent_interventions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.listening_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_taste_genome ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies
-        WHERE schemaname = 'public'
-          AND tablename = 'agent_interventions'
-          AND policyname = 'Allow TuneMind read/write on agent_interventions'
-    ) THEN
-        CREATE POLICY "Allow TuneMind read/write on agent_interventions"
-            ON public.agent_interventions FOR ALL USING (true) WITH CHECK (true);
-    END IF;
+DROP POLICY IF EXISTS "Allow TuneMind read/write on agent_interventions" ON public.agent_interventions;
+DROP POLICY IF EXISTS "Users can manage own agent_interventions" ON public.agent_interventions;
+CREATE POLICY "Users can manage own agent_interventions"
+    ON public.agent_interventions FOR ALL
+    USING (auth.uid()::text = user_id)
+    WITH CHECK (auth.uid()::text = user_id);
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies
-        WHERE schemaname = 'public'
-          AND tablename = 'listening_events'
-          AND policyname = 'Allow TuneMind read/write on listening_events'
-    ) THEN
-        CREATE POLICY "Allow TuneMind read/write on listening_events"
-            ON public.listening_events FOR ALL USING (true) WITH CHECK (true);
-    END IF;
+DROP POLICY IF EXISTS "Allow TuneMind read/write on listening_events" ON public.listening_events;
+DROP POLICY IF EXISTS "Users can manage own listening_events" ON public.listening_events;
+CREATE POLICY "Users can manage own listening_events"
+    ON public.listening_events FOR ALL
+    USING (auth.uid()::text = user_id)
+    WITH CHECK (auth.uid()::text = user_id);
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies
-        WHERE schemaname = 'public'
-          AND tablename = 'user_taste_genome'
-          AND policyname = 'Allow TuneMind read/write on user_taste_genome'
-    ) THEN
-        CREATE POLICY "Allow TuneMind read/write on user_taste_genome"
-            ON public.user_taste_genome FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-END
-$$;
+DROP POLICY IF EXISTS "Allow TuneMind read/write on user_taste_genome" ON public.user_taste_genome;
+DROP POLICY IF EXISTS "Users can manage own user_taste_genome" ON public.user_taste_genome;
+CREATE POLICY "Users can manage own user_taste_genome"
+    ON public.user_taste_genome FOR ALL
+    USING (auth.uid()::text = user_id)
+    WITH CHECK (auth.uid()::text = user_id);
+
+-- 6. User Support & Bug Feedback Reports Table
+CREATE TABLE IF NOT EXISTS public.support_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL DEFAULT 'anonymous',
+    user_email TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'Other',
+    message TEXT NOT NULL,
+    diagnostics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    app_version TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_feedback_created
+    ON public.support_feedback (created_at DESC);
+
+ALTER TABLE public.support_feedback ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can submit support feedback" ON public.support_feedback;
+CREATE POLICY "Users can submit support feedback"
+    ON public.support_feedback FOR INSERT
+    TO authenticated, anon
+    WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can view own support feedback" ON public.support_feedback;
+CREATE POLICY "Users can view own support feedback"
+    ON public.support_feedback FOR SELECT
+    TO authenticated
+    USING (auth.uid()::text = user_id);
+

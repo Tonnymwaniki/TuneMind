@@ -3,6 +3,7 @@ import {
   DiscoveryFeedbackEvent,
   SelfLearningDiscoveryEngine
 } from '../../domain/recommendation/SelfLearningDiscoveryEngine';
+import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
 
@@ -14,10 +15,15 @@ const router = Router();
 router.post('/daily-drop', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
+    const identity = resolveEffectiveUserIdentity(
+      req,
+      body.userId || body.user_id,
+      body.userEmail || body.user_email
+    );
     const engine = new SelfLearningDiscoveryEngine();
     const result = await engine.generateDailyForYouDrop({
-      userId: body.userId || body.user_id,
-      userEmail: body.userEmail || body.user_email,
+      userId: req.authUser ? identity.userId : (body.userId || body.user_id),
+      userEmail: req.authUser ? identity.userEmail : (body.userEmail || body.user_email),
       dropDate: body.dropDate || body.drop_date,
       timeSlot: body.timeSlot || body.time_slot,
       satietyLevel: Number(body.satietyLevel ?? body.satiety_level ?? 38),
@@ -55,7 +61,7 @@ router.post('/feedback', async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const event: DiscoveryFeedbackEvent = {
-      userId: body.userId || body.user_id,
+      userId: req.authUser?.id || body.userId || body.user_id,
       title: String(body.title || ''),
       artist: String(body.artist || ''),
       genre: body.genre,
@@ -98,7 +104,7 @@ router.post('/feedback', async (req: Request, res: Response) => {
  */
 router.get('/insights', async (req: Request, res: Response) => {
   try {
-    const userId = String(req.query.userId || req.query.user_id || '');
+    const userId = req.authUser?.id || String(req.query.userId || req.query.user_id || '');
     const engine = new SelfLearningDiscoveryEngine();
     const insights = await engine.getInsights(userId);
     res.json({

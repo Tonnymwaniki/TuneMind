@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { TelemetryReasoningPoller } from '../../domain/reasoning/TelemetryReasoningPoller';
+import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
 const poller = TelemetryReasoningPoller.getInstance();
@@ -10,7 +11,8 @@ const poller = TelemetryReasoningPoller.getInstance();
  */
 router.get('/latest', async (req: Request, res: Response) => {
   try {
-    const userId = (req.query.userId as string) || 'tunemind-dev';
+    const rawUserId = (req.query.userId as string) || 'tunemind-dev';
+    const userId = req.authUser?.id || rawUserId;
     let report = poller.getLatestReport(userId);
 
     // If no report exists yet, trigger an immediate poll to generate one
@@ -37,7 +39,7 @@ router.get('/latest', async (req: Request, res: Response) => {
  */
 router.get('/reports', (req: Request, res: Response) => {
   try {
-    const userId = req.query.userId as string | undefined;
+    const userId = req.authUser?.id || (req.query.userId as string | undefined);
     const reports = poller.getReportHistory(userId);
     res.json({
       status: 'ok',
@@ -59,7 +61,8 @@ router.get('/reports', (req: Request, res: Response) => {
  */
 router.post('/trigger', async (req: Request, res: Response) => {
   try {
-    const userId = (req.body?.userId as string) || (req.query.userId as string) || 'tunemind-dev';
+    const rawUserId = (req.body?.userId as string) || (req.query.userId as string) || 'tunemind-dev';
+    const userId = req.authUser?.id || rawUserId;
     const report = await poller.pollNow(userId);
 
     res.json({
@@ -122,7 +125,12 @@ async function generateElevenLabsAudio(text: string): Promise<string | null> {
  */
 router.post('/evaluate-satiety', async (req: Request, res: Response) => {
   try {
-    const payload = req.body || {};
+    const payload = { ...(req.body || {}) };
+    if (req.authUser) {
+      const identity = resolveEffectiveUserIdentity(req, payload.user_id, payload.user_email);
+      payload.user_id = identity.userId;
+      payload.user_email = identity.userEmail;
+    }
     const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
     const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.evaluateSatiety(payload);
@@ -242,10 +250,11 @@ router.post('/tag-tracks', async (req: Request, res: Response) => {
 router.post('/satiety-decision', async (req: Request, res: Response) => {
   try {
     const payload = req.body || {};
+    const identity = resolveEffectiveUserIdentity(req, payload.user_id, payload.user_email);
     const { SatietyExecutionEngine } = await import('../../domain/reasoning/SatietyExecutionEngine');
     const engine = new SatietyExecutionEngine();
     const decision = await engine.evaluateLast50Tracks({
-      user_id: payload.user_id,
+      user_id: req.authUser ? identity.userId : payload.user_id,
       circadian_daypart: payload.circadian_daypart,
       current_track: payload.current_track,
       tracks: Array.isArray(payload.tracks) ? payload.tracks : []

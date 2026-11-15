@@ -11,124 +11,21 @@ import './bootstrap';
 import http from 'http';
 import os from 'os';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
-import { AssemblyAI } from 'assemblyai';
-import express from 'express';
-import { requestLogger } from './middleware/requestLogger';
-import eventsRouter from './api/v1/events';
-import analyticsRouter from './api/v1/analytics';
-import reasoningRouter from './api/v1/reasoning';
-import spotifyAuthRouter from './api/v1/spotifyAuth';
-import discoveryRouter from './api/v1/discovery';
+import app from './app';
 import { EventStore } from './domain/events/EventStore';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
-const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const HOST = '0.0.0.0';
-
-// ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '5mb' }));
-app.use(requestLogger);
-
-// ─── Routes ──────────────────────────────────────────────────────────────────
-app.use('/api/v1/events', eventsRouter);
-app.use('/api/v1/analytics', analyticsRouter);
-app.use('/api/v1/reasoning', reasoningRouter);
-app.use('/api/v1/spotify', spotifyAuthRouter);
-app.use('/api/v1/discovery', discoveryRouter);
-
-// Live Supabase Intelligence Sync & Long-Term Growth Endpoints
-app.post('/api/v1/intelligence/sync', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const userId = SupabaseIntelligenceStore.normalizeUserId(body.user_id, body.user_email);
-    const override = {
-      supabaseUrl: body.supabase_url,
-      supabaseKey: body.supabase_anon_key
-    };
-
-    const tracks = Array.isArray(body.tracks) ? body.tracks : [];
-    const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(userId, tracks, {
-      hearingTelemetry: body.hearing_telemetry,
-      vaultTracks: body.vault_tracks,
-      override
-    });
-
-    if (body.intervention && typeof body.intervention === 'object') {
-      await SupabaseIntelligenceStore.recordAgentIntervention(
-        {
-          user_id: userId,
-          trigger_transcript: body.intervention.trigger_transcript || 'app_event',
-          computed_satiety: Number(body.intervention.computed_satiety ?? 24),
-          agent_tts_response: body.intervention.agent_tts_response || '',
-          os_intent: body.intervention.os_intent || body.intervention.action || 'NONE',
-          target_search_query: body.intervention.target_search_query || '',
-          action: body.intervention.action,
-          track_title: body.intervention.track_title,
-          track_artist: body.intervention.track_artist,
-          spotify_uri: body.intervention.spotify_uri,
-          circadian_daypart: body.intervention.circadian_daypart
-        },
-        override
-      );
-    }
-
-    const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, override);
-    res.json({
-      status: 'synced',
-      user_id: userId,
-      synced_tracks_count: syncRes.syncedTracksCount,
-      live_supabase_stored: syncRes.liveSupabaseStored,
-      intelligence_summary: summary
-    });
-  } catch (err: any) {
-    console.error('[IntelligenceSync] Error:', err);
-    res.status(500).json({ error: err?.message || 'Intelligence sync failed' });
-  }
-});
-
-app.get('/api/v1/intelligence/growth', async (req, res) => {
-  try {
-    const userId = SupabaseIntelligenceStore.normalizeUserId(
-      String(req.query.user_id || ''),
-      String(req.query.user_email || '')
-    );
-    const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId);
-    res.json(summary);
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Failed to load intelligence growth summary' });
-  }
-});
-
-app.get('/', (_req, res) => {
-  res.json({
-    status: 'online',
-    service: 'TuneMind Cloud Brain (24/7 Online)',
-    websocket_endpoint: '/ws/stt',
-    health_endpoint: '/health',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    phase: 2,
-    service: 'TuneMind Fullstack Intelligence Platform',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ─── 404 handler for HTTP routes ─────────────────────────────────────────────
-app.use((_req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
 
 // ─── 1. Create the raw HTTP server using the Express app ────────────────────
 const server = http.createServer(app);
 
 // ─── 2. Create the WebSocket server (detached from auto-handling) ────────────
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({
+  noServer: true,
+  maxPayload: 256 * 1024 // 256 KB frame guard
+});
 
 // ─── 3. Intercept the network upgrade request ────────────────────────────────
 server.on('upgrade', (request, socket, head) => {
