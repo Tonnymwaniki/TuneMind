@@ -21,7 +21,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -81,8 +81,9 @@ fun PulseAgentScreen(
     onOrbTapped: () -> Unit,
     onLaunchDopamineCapsule: () -> Unit = {},
     onCycleAtmospherePalette: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    profileInitial: String = "",
     currentTrackPlayCount: Int = 0,
     autonomousDjEnabled: Boolean = false
 ) {
@@ -116,7 +117,7 @@ fun PulseAgentScreen(
                 .padding(top = 10.dp, bottom = 112.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Clean Top Header with Interactive Theme Cycle + Stats & Settings
+            // 1. Clean Top Header with Interactive Theme Cycle + Stats & Profile
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -140,7 +141,7 @@ fun PulseAgentScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(onClick = onCycleAtmospherePalette) {
                         Icon(
@@ -158,13 +159,48 @@ fun PulseAgentScreen(
                             modifier = Modifier.size(22.dp)
                         )
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            imageVector = Icons.Rounded.Settings,
-                            contentDescription = "Settings",
-                            tint = Color.White.copy(alpha = 0.82f),
-                            modifier = Modifier.size(22.dp)
-                        )
+                    IconButton(onClick = onOpenProfile) {
+                        val cleanInitial = profileInitial.trim().take(1).uppercase()
+                        if (cleanInitial.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFF00F0FF).copy(alpha = 0.28f),
+                                                Color(0xFF8A2BE2).copy(alpha = 0.34f)
+                                            )
+                                        )
+                                    )
+                                    .border(1.2.dp, Color(0xFF00F0FF).copy(alpha = 0.72f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = cleanInitial,
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Person,
+                                    contentDescription = "Profile",
+                                    tint = Color(0xFFF8FAFC),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

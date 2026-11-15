@@ -669,7 +669,7 @@ fun RhythmDnaScreen(
                                                             authSession.email.takeIf { it.isNotBlank() }
                                                         ).joinToString(" · ")
                                                     } else {
-                                                        "Using guest session — tap Sign In to save your profile"
+                                                        "Using guest session — open Profile to sign in or switch"
                                                     },
                                                     color = Color.White.copy(alpha = 0.58f),
                                                     fontSize = 12.sp
@@ -677,7 +677,7 @@ fun RhythmDnaScreen(
                                             }
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = if (hasExplicitAccount) "Switch" else "Sign In",
+                                                text = if (hasExplicitAccount) "Profile" else "Sign In",
                                                 color = theme.primaryAccent,
                                                 fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold,

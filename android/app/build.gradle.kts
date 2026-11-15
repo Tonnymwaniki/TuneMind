@@ -13,35 +13,57 @@ if (localPropsFile.exists()) {
         localProps.load(stream)
     }
 }
-val backendBaseUrl: String = localProps.getProperty("TUNEMIND_BASE_URL")
-    ?: (project.findProperty("TUNEMIND_BASE_URL") as? String)
-    ?: System.getenv("TUNEMIND_BASE_URL")
-    ?: "https://tunemind-backend-iudp.onrender.com"
 
-val spotifyClientId: String = localProps.getProperty("SPOTIFY_CLIENT_ID")
-    ?: (project.findProperty("SPOTIFY_CLIENT_ID") as? String)
-    ?: System.getenv("SPOTIFY_CLIENT_ID")
-    ?: "dcfad6acbd594477b0705ecc1e6ace3a"
+val dotEnvProps = Properties()
+val envCandidates = listOf(
+    rootProject.file("../.env.local"),
+    rootProject.file("../.env"),
+    rootProject.file("../env/.env.local"),
+    rootProject.file("../env/.env"),
+    rootProject.file("../backend/.env.local"),
+    rootProject.file("../backend/.env"),
+    rootProject.file(".env.local"),
+    rootProject.file(".env")
+)
+envCandidates.forEach { candidate ->
+    if (candidate.exists() && candidate.isFile) {
+        candidate.forEachLine { rawLine ->
+            val line = rawLine.trim()
+            if (line.isNotEmpty() && !line.startsWith("#") && line.contains("=")) {
+                val eqIdx = line.indexOf('=')
+                val key = line.substring(0, eqIdx).trim().removePrefix("export ").trim()
+                val value = line.substring(eqIdx + 1).trim()
+                    .removeSurrounding("\"")
+                    .removeSurrounding("'")
+                if (key.isNotEmpty() && !dotEnvProps.containsKey(key) && value.isNotBlank()) {
+                    dotEnvProps.setProperty(key, value)
+                }
+            }
+        }
+    }
+}
 
-val spotifyClientSecret: String = localProps.getProperty("SPOTIFY_CLIENT_SECRET")
-    ?: (project.findProperty("SPOTIFY_CLIENT_SECRET") as? String)
-    ?: System.getenv("SPOTIFY_CLIENT_SECRET")
-    ?: "134028eff64c4e2cafa4b1f617463650"
+fun resolveBuildProp(vararg keys: String, default: String = ""): String {
+    for (k in keys) {
+        localProps.getProperty(k)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        dotEnvProps.getProperty(k)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        (project.findProperty(k) as? String)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        System.getenv(k)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+    }
+    return default
+}
 
-val spotifyRedirectUri: String = localProps.getProperty("SPOTIFY_REDIRECT_URI")
-    ?: (project.findProperty("SPOTIFY_REDIRECT_URI") as? String)
-    ?: System.getenv("SPOTIFY_REDIRECT_URI")
-    ?: "tunemind://spotify-auth-callback"
+val backendBaseUrl: String = resolveBuildProp("TUNEMIND_BASE_URL", default = "https://tunemind-backend-iudp.onrender.com")
 
-val supabaseUrl: String = localProps.getProperty("SUPABASE_URL")
-    ?: (project.findProperty("SUPABASE_URL") as? String)
-    ?: System.getenv("SUPABASE_URL")
-    ?: ""
+val spotifyClientId: String = resolveBuildProp("SPOTIFY_CLIENT_ID", default = "dcfad6acbd594477b0705ecc1e6ace3a")
 
-val supabaseAnonKey: String = localProps.getProperty("SUPABASE_ANON_KEY")
-    ?: (project.findProperty("SUPABASE_ANON_KEY") as? String)
-    ?: System.getenv("SUPABASE_ANON_KEY")
-    ?: ""
+val spotifyClientSecret: String = resolveBuildProp("SPOTIFY_CLIENT_SECRET", default = "134028eff64c4e2cafa4b1f617463650")
+
+val spotifyRedirectUri: String = resolveBuildProp("SPOTIFY_REDIRECT_URI", default = "tunemind://spotify-auth-callback")
+
+val supabaseUrl: String = resolveBuildProp("SUPABASE_URL", "VITE_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
+
+val supabaseAnonKey: String = resolveBuildProp("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_KEY")
 
 val keystoreProps = Properties()
 val keystorePropsFile = rootProject.file("keystore.properties")

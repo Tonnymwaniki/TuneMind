@@ -1,10 +1,204 @@
 -- =============================================================================
--- TuneMind Live Supabase Intelligence & Taste Genome Schema (Universal Safe Migration)
+-- TuneMind Profiles, Auth Trigger & Intelligence Schema (Safe Idempotent Migration)
 -- =============================================================================
 -- Safe to run on any existing Supabase database: creates tables if missing AND
 -- adds any missing columns via ALTER TABLE ... ADD COLUMN IF NOT EXISTS before indexing.
 
--- 1. Agent Interventions & Conversational Memory Table
+-- 1. User Account Profiles Table (linked to Supabase auth.users via Google / Email)
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT 'TuneMind Listener',
+    avatar_url TEXT NOT NULL DEFAULT '',
+    primary_provider TEXT NOT NULL DEFAULT 'EMAIL', -- 'GOOGLE' | 'EMAIL'
+    google_connected BOOLEAN NOT NULL DEFAULT FALSE,
+    spotify_connected BOOLEAN NOT NULL DEFAULT FALSE, -- Connected music data source
+    private_session_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    merge_duplicate_plays BOOLEAN NOT NULL DEFAULT TRUE,
+    preferred_target_player TEXT NOT NULL DEFAULT '',
+    taste_archetype TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.profiles
+    ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT 'TuneMind Listener',
+    ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS primary_provider TEXT NOT NULL DEFAULT 'EMAIL',
+    ADD COLUMN IF NOT EXISTS google_connected BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS spotify_connected BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS private_session_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS merge_duplicate_plays BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS preferred_target_player TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS taste_archetype TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_profiles_email
+    ON public.profiles (LOWER(email));
+
+CREATE OR REPLACE FUNCTION public.handle_profiles_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_profiles_updated_at ON public.profiles;
+CREATE TRIGGER on_profiles_updated_at
+    BEFORE UPDATE ON public.profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_profiles_updated_at();
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    provider_raw TEXT;
+    provider_clean TEXT;
+    resolved_name TEXT;
+    resolved_avatar TEXT;
+BEGIN
+    provider_raw := COALESCE(
+        NEW.raw_app_meta_data ->> 'provider',
+        'email'
+    );
+
+    provider_clean := CASE LOWER(provider_raw)
+        WHEN 'google' THEN 'GOOGLE'
+        ELSE 'EMAIL'
+    END;
+
+    resolved_name := COALESCE(
+        NULLIF(TRIM(NEW.raw_user_meta_data ->> 'full_name'), ''),
+        NULLIF(TRIM(NEW.raw_user_meta_data ->> 'name'), ''),
+        NULLIF(SPLIT_PART(COALESCE(NEW.email, ''), '@', 1), ''),
+        'TuneMind Listener'
+    );
+
+    resolved_avatar := COALESCE(
+        NEW.raw_user_meta_data ->> 'avatar_url',
+        NEW.raw_user_meta_data ->> 'picture',
+        ''
+    );
+
+    INSERT INTO public.profiles (
+        id,
+        email,
+        display_name,
+        avatar_url,
+        primary_provider,
+        google_connected
+    )
+    VALUES (
+        NEW.id,
+        COALESCE(NEW.email, ''),
+        resolved_name,
+        resolved_avatar,
+        provider_clean,
+        (provider_clean = 'GOOGLE')
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = CASE WHEN EXCLUDED.email <> '' THEN EXCLUDED.email ELSE public.profiles.email END,
+        display_name = CASE WHEN public.profiles.display_name = 'TuneMind Listener' AND EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE public.profiles.display_name END,
+        avatar_url = CASE WHEN public.profiles.avatar_url = '' AND EXCLUDED.avatar_url <> '' THEN EXCLUDED.avatar_url ELSE public.profiles.avatar_url END,
+        google_connected = public.profiles.google_connected OR EXCLUDED.google_connected;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_new_user();
+
+INSERT INTO public.profiles (
+    id,
+    email,
+    display_name,
+    avatar_url,
+    primary_provider,
+    google_connected
+)
+SELECT
+    u.id,
+    COALESCE(u.email, ''),
+    COALESCE(
+        NULLIF(TRIM(u.raw_user_meta_data ->> 'full_name'), ''),
+        NULLIF(TRIM(u.raw_user_meta_data ->> 'name'), ''),
+        NULLIF(SPLIT_PART(COALESCE(u.email, ''), '@', 1), ''),
+        'TuneMind Listener'
+    ),
+    COALESCE(u.raw_user_meta_data ->> 'avatar_url', u.raw_user_meta_data ->> 'picture', ''),
+    CASE LOWER(COALESCE(u.raw_app_meta_data ->> 'provider', 'email'))
+        WHEN 'google' THEN 'GOOGLE'
+        ELSE 'EMAIL'
+    END,
+    (LOWER(COALESCE(u.raw_app_meta_data ->> 'provider', '')) = 'google')
+FROM auth.users u
+ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'profiles'
+          AND policyname = 'Users can view own profile'
+    ) THEN
+        CREATE POLICY "Users can view own profile"
+            ON public.profiles FOR SELECT
+            TO authenticated
+            USING (auth.uid() = id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'profiles'
+          AND policyname = 'Users can insert own profile'
+    ) THEN
+        CREATE POLICY "Users can insert own profile"
+            ON public.profiles FOR INSERT
+            TO authenticated
+            WITH CHECK (auth.uid() = id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'profiles'
+          AND policyname = 'Users can update own profile'
+    ) THEN
+        CREATE POLICY "Users can update own profile"
+            ON public.profiles FOR UPDATE
+            TO authenticated
+            USING (auth.uid() = id)
+            WITH CHECK (auth.uid() = id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'profiles'
+          AND policyname = 'Users can delete own profile'
+    ) THEN
+        CREATE POLICY "Users can delete own profile"
+            ON public.profiles FOR DELETE
+            TO authenticated
+            USING (auth.uid() = id);
+    END IF;
+END
+$$;
+
+-- 2. Agent Interventions & Conversational Memory Table
 CREATE TABLE IF NOT EXISTS public.agent_interventions (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'tunemind-default-user',
@@ -28,7 +222,7 @@ ALTER TABLE public.agent_interventions
 CREATE INDEX IF NOT EXISTS idx_agent_interventions_user_created
     ON public.agent_interventions (user_id, created_at DESC);
 
--- 2. Synced Spotify & OS Listening Events Table
+-- 3. Synced Spotify & OS Listening Events Table
 CREATE TABLE IF NOT EXISTS public.listening_events (
     event_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'tunemind-default-user',
@@ -56,7 +250,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_events_event_id_unique
 CREATE INDEX IF NOT EXISTS idx_listening_events_user_plays
     ON public.listening_events (user_id, play_count DESC);
 
--- 3. Evolving User Taste Genome Profile Table
+-- 4. Evolving User Taste Genome Profile Table
 CREATE TABLE IF NOT EXISTS public.user_taste_genome (
     user_id TEXT PRIMARY KEY,
     top_tracks_json TEXT NOT NULL DEFAULT '[]',
@@ -81,7 +275,7 @@ ALTER TABLE public.user_taste_genome
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_taste_genome_user_id_unique
     ON public.user_taste_genome (user_id);
 
--- 4. Enable Row-Level Security & Policies for Mobile + Cloud Sync
+-- 5. Enable Row-Level Security & Policies for Mobile + Cloud Sync
 ALTER TABLE public.agent_interventions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.listening_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_taste_genome ENABLE ROW LEVEL SECURITY;

@@ -424,6 +424,25 @@ class TuneMindViewModel : ViewModel() {
             .apply()
     }
 
+    fun syncIdentityFromAuth(name: String, email: String, archetype: String? = null) {
+        val current = _userProfile.value
+        val resolvedName = name.trim().ifBlank { current.name }
+        val resolvedEmail = email.trim().ifBlank { current.email }
+        val resolvedArchetype = archetype?.trim()?.takeIf { it.isNotBlank() } ?: current.archetype
+        _userProfile.value = current.copy(
+            name = resolvedName,
+            email = resolvedEmail,
+            archetype = resolvedArchetype
+        )
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("user_name", resolvedName)
+            .putString("user_email", resolvedEmail)
+            .putString("user_archetype", resolvedArchetype)
+            .apply()
+    }
+
     // System Switchboard: Battery Optimization, Audio Focus, Decibel Safety Guard
     private val _isBatteryOptimizationIgnored = MutableStateFlow<Boolean>(false)
     val isBatteryOptimizationIgnored: StateFlow<Boolean> = _isBatteryOptimizationIgnored.asStateFlow()
@@ -1624,6 +1643,68 @@ class TuneMindViewModel : ViewModel() {
                 prefs.edit().clear().apply()
             }
             refreshRecommendations()
+        }
+    }
+
+    fun buildUserDataExportJson(context: android.content.Context): String {
+        val authSession = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context).sessionFlow.value
+        val profile = _userProfile.value
+        val stats = _listeningStats.value
+        val root = org.json.JSONObject().apply {
+            put("exported_at", java.time.Instant.now().toString())
+            put("app", "TuneMind")
+            put("account", org.json.JSONObject().apply {
+                put("user_id", authSession.userId)
+                put("display_name", authSession.displayName.ifBlank { profile.name })
+                put("email", authSession.email.ifBlank { profile.email })
+                put("provider", authSession.primaryProvider.ifBlank { "GUEST" })
+                put("spotify_data_connected", authSession.isSpotifyConnected)
+                put("archetype", profile.archetype)
+            })
+            put("listening_summary", org.json.JSONObject().apply {
+                put("total_listening_ms", stats.allTimeListeningMs)
+                put("unique_tracks", stats.uniqueTrackCount)
+                put("unique_artists", stats.uniqueArtistCount)
+                put("apps_tracked", stats.appBreakdown.size)
+            })
+            put("taste_anchors", org.json.JSONArray(_userTasteAnchors.value))
+            val historyArr = org.json.JSONArray()
+            _historyState.value.tracks.take(100).forEach { track ->
+                historyArr.put(
+                    org.json.JSONObject().apply {
+                        put("title", track.title)
+                        put("artist", track.artist)
+                        put("plays", track.distinctAppearanceCount)
+                        put("source_package", track.sourcePackage)
+                    }
+                )
+            }
+            put("recent_tracks", historyArr)
+            val vaultArr = org.json.JSONArray()
+            _vaultState.value.forEach { v ->
+                vaultArr.put(
+                    org.json.JSONObject().apply {
+                        put("title", v.title)
+                        put("artist", v.artist)
+                        put("recovery_progress", v.recoveryProgress)
+                    }
+                )
+            }
+            put("dopamine_vault", vaultArr)
+        }
+        return root.toString(2)
+    }
+
+    suspend fun wipeAllLocalUserData(context: android.content.Context) = withContext(Dispatchers.IO) {
+        runCatching { repo?.clear() }
+        _vaultState.value = emptyList()
+        _userTasteAnchors.value = emptyList()
+        runCatching {
+            context.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+            context.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+        }
+        withContext(Dispatchers.Main) {
+            _userProfile.value = loadUserProfile()
         }
     }
 

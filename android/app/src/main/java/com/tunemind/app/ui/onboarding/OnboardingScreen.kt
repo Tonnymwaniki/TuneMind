@@ -188,6 +188,7 @@ private fun AuthLoginStep(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val savedAccounts by authManager.savedAccountsFlow.collectAsState()
 
     var isSignUpMode by remember { mutableStateOf(true) }
     var emailInput by remember { mutableStateOf(session.email) }
@@ -406,7 +407,68 @@ private fun AuthLoginStep(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Button 1: Continue with Google
+                if (savedAccounts.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Saved accounts on this device",
+                            color = Color.White.copy(alpha = 0.56f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        savedAccounts.take(2).forEach { saved ->
+                            Surface(
+                                shape = RoundedCornerShape(28.dp),
+                                color = Color(0xFF00F0FF).copy(alpha = 0.08f),
+                                border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.38f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .clickable {
+                                        scope.launch {
+                                            authManager.switchToAccount(saved)
+                                            onContinue()
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Continue as ${saved.displayName}",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "${saved.email} · ${if (saved.provider == "GOOGLE") "Google" else "Email"}",
+                                            color = Color.White.copy(alpha = 0.58f),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = "Switch",
+                                        color = Color(0xFF00F0FF),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Button 1: Continue with Google (TuneMind Account)
                 Button(
                     onClick = { launchGoogleAccountPicker() },
                     modifier = Modifier
@@ -450,57 +512,14 @@ private fun AuthLoginStep(
                     }
                 }
 
-                // Button 2: Continue with Spotify
-                Button(
-                    onClick = {
-                        authError = null
-                        authManager.launchSpotifyLogin(context)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1DB954),
-                        contentColor = Color(0xFF0D0D0D)
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (session.isSpotifyConnected) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = null,
-                                tint = Color(0xFF0D0D0D),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        } else {
-                            Image(
-                                painter = painterResource(id = R.drawable.ic_spotify_logo),
-                                contentDescription = "Spotify Sign In",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (session.isSpotifyConnected) "Spotify Connected" else "Continue with Spotify",
-                            color = Color(0xFF0D0D0D),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                // Button 3: Continue with Email (Translucent, Secondary)
+                // Button 2: Continue with Email (TuneMind Account)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
                         .clip(RoundedCornerShape(28.dp))
                         .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(28.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(28.dp))
                         .clickable {
                             isSignUpMode = true
                             authError = null
@@ -528,7 +547,50 @@ private fun AuthLoginStep(
                     }
                 }
 
-                if (session.isLoggedIn || session.isSpotifyConnected || session.isGoogleConnected) {
+                // Button 3: Connect Spotify (Pull Music Data Only)
+                Button(
+                    onClick = {
+                        authError = null
+                        authManager.launchSpotifyLogin(context)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1DB954),
+                        contentColor = Color(0xFF0D0D0D)
+                    )
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (session.isSpotifyConnected) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF0D0D0D),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_spotify_logo),
+                                contentDescription = "Spotify Music Sync",
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (session.isSpotifyConnected) "Spotify Music Data Linked" else "Connect Spotify (Music Data)",
+                            color = Color(0xFF0D0D0D),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (session.isGoogleConnected || session.primaryProvider == "EMAIL" || session.isSpotifyConnected) {
                     Button(
                         onClick = onContinue,
                         modifier = Modifier

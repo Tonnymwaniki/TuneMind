@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.ui.AudioFocusBehavior
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
@@ -179,40 +178,6 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 0. Account & Sign-In Card
-            val authSessionManager = remember(context) { TuneMindAuthSessionManager.getInstance(context) }
-            val authSession by authSessionManager.sessionFlow.collectAsState()
-            val hasExplicitAccount = authSession.isGoogleConnected || authSession.email.isNotBlank()
-
-            SoftGlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                accentTint = colors.primaryAccent
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StudioSectionHeader(
-                        title = "Account",
-                        actionLabel = if (hasExplicitAccount) "Switch / Manage" else "Sign In / Register",
-                        onActionClick = onOpenAccountAuth
-                    )
-                    Text(
-                        text = if (hasExplicitAccount) {
-                            listOfNotNull(
-                                authSession.displayName.takeIf { it.isNotBlank() },
-                                authSession.email.takeIf { it.isNotBlank() },
-                                authSession.primaryProvider.takeIf { it.isNotBlank() }
-                            ).joinToString(" · ")
-                        } else {
-                            "Guest session active. Sign in or create an account to save your TuneMind profile."
-                        },
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.70f),
-                        lineHeight = 18.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             // 1. Voice & Playback Card
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -303,7 +268,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Spotify Remote & Account",
+                        text = "Spotify Remote & Music Sync",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color(0xFFF8FAFC)

@@ -150,6 +150,7 @@ open class MainActivity : ComponentActivity() {
                     val coroutineScope = rememberCoroutineScope()
                     var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
                     var showSettingsScreen by remember { mutableStateOf(false) }
+                    var showProfileScreen by remember { mutableStateOf(false) }
                     var showStatsScreen by remember { mutableStateOf(false) }
                     var showWeeklyReportScreen by remember { mutableStateOf(false) }
                     var showHearingScreen by remember { mutableStateOf(false) }
@@ -222,16 +223,19 @@ open class MainActivity : ComponentActivity() {
                                 com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, target)
                             }
                             "OPEN_SETTINGS" -> {
+                                showProfileScreen = true
                                 showSettingsScreen = true
                             }
                             "NAVIGATE_SCREEN" -> {
                                 val screen = tool.target_screen?.uppercase() ?: ""
                                 when {
                                     screen.contains("SETTING") -> {
+                                        showProfileScreen = true
                                         showSettingsScreen = true
                                     }
                                     screen.contains("STAT") || screen.contains("LISTENING_SUMMARY") -> {
                                         showSettingsScreen = false
+                                        showProfileScreen = false
                                         showWeeklyReportScreen = false
                                         showHearingScreen = false
                                         showMusicProfileScreen = false
@@ -246,9 +250,13 @@ open class MainActivity : ComponentActivity() {
                                         showSettingsScreen = false
                                         showHearingScreen = true
                                     }
-                                    screen.contains("PROFILE") || screen.contains("TASTE") -> {
+                                    screen.contains("TASTE") -> {
                                         showSettingsScreen = false
                                         showMusicProfileScreen = true
+                                    }
+                                    screen.contains("PROFILE") || screen.contains("ACCOUNT") -> {
+                                        showSettingsScreen = false
+                                        showProfileScreen = true
                                     }
                                     screen.contains("MOMENT") -> {
                                         showSettingsScreen = false
@@ -256,6 +264,7 @@ open class MainActivity : ComponentActivity() {
                                     }
                                     else -> {
                                         showSettingsScreen = false
+                                        showProfileScreen = false
                                         showStatsScreen = false
                                         showWeeklyReportScreen = false
                                         showHearingScreen = false
@@ -287,6 +296,7 @@ open class MainActivity : ComponentActivity() {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
                                     showSettingsScreen -> "SETTINGS"
+                                    showProfileScreen -> "PROFILE"
                                     showWeeklyReportScreen -> "WEEKLY_REPORT"
                                     showHearingScreen -> "HEARING_HEALTH"
                                     showMusicProfileScreen -> "MUSIC_PROFILE"
@@ -331,9 +341,7 @@ open class MainActivity : ComponentActivity() {
                     val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
                     var hasCompletedLaunchStartFlow by remember { mutableStateOf(authSession.hasCompletedStartFlow) }
-                    val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding ||
-                        authSession.isGoogleConnected ||
-                        authSession.email.isNotBlank()
+                    val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding
 
                     val orchestrator = remember(agentVoiceManager) {
                         AgentOrchestrator(
@@ -350,6 +358,15 @@ open class MainActivity : ComponentActivity() {
                         hasAllPermissions
 
                     LaunchedEffect(isMainAppActive) {
+                        if (!isMainAppActive) {
+                            showSettingsScreen = false
+                            showProfileScreen = false
+                            showMusicProfileScreen = false
+                            showWeeklyReportScreen = false
+                            showHearingScreen = false
+                            showMomentsScreen = false
+                            showStatsScreen = false
+                        }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
                         if (isMainAppActive && spotifyAuthManager.isAuthenticated()) {
                             com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
@@ -463,6 +480,7 @@ open class MainActivity : ComponentActivity() {
                                 }
 
                                 val hasOverlayOpen = showSettingsScreen ||
+                                    showProfileScreen ||
                                     showWeeklyReportScreen ||
                                     showHearingScreen ||
                                     showMusicProfileScreen ||
@@ -472,11 +490,12 @@ open class MainActivity : ComponentActivity() {
                                 androidx.activity.compose.BackHandler(enabled = hasOverlayOpen) {
                                     when {
                                         showSettingsScreen -> showSettingsScreen = false
+                                        showMusicProfileScreen -> showMusicProfileScreen = false
                                         showWeeklyReportScreen -> showWeeklyReportScreen = false
                                         showHearingScreen -> showHearingScreen = false
-                                        showMusicProfileScreen -> showMusicProfileScreen = false
                                         showMomentsScreen -> showMomentsScreen = false
                                         showStatsScreen -> showStatsScreen = false
+                                        showProfileScreen -> showProfileScreen = false
                                     }
                                 }
 
@@ -563,11 +582,16 @@ open class MainActivity : ComponentActivity() {
                                                 onCycleAtmospherePalette = {
                                                     vm.cycleAtmospherePalette()
                                                 },
-                                                onOpenSettings = {
-                                                    showSettingsScreen = true
+                                                onOpenProfile = {
+                                                    showProfileScreen = true
                                                 },
                                                 onOpenStats = {
                                                     showStatsScreen = true
+                                                },
+                                                profileInitial = if (authSession.isGoogleConnected || authSession.email.isNotBlank()) {
+                                                    authSession.displayName
+                                                } else {
+                                                    ""
                                                 },
                                                 currentTrackPlayCount = if (trackTitle != null) {
                                                     vm.resolvePlayCount(
@@ -641,7 +665,7 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },
                                                 onOpenMoments = { showMomentsScreen = true },
                                                 onOpenAccountAuth = {
-                                                    authSessionManager.reopenAccountOnboarding()
+                                                    showProfileScreen = true
                                                 }
                                             )
                                         }
@@ -748,7 +772,23 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
 
-                                // Hub Sub-Screens (Reachable from Stats & Rhythm Overview)
+                                // Fullscreen Profile Screen (Credentials, Switch Accounts, Privacy & Relocated Settings)
+                                if (showProfileScreen) {
+                                    com.tunemind.app.ui.screens.ProfileScreen(
+                                        vm = vm,
+                                        onBack = { showProfileScreen = false },
+                                        onOpenSettings = { showSettingsScreen = true },
+                                        onOpenTasteProfile = { showMusicProfileScreen = true },
+                                        onOpenWeeklyReport = { showWeeklyReportScreen = true },
+                                        onSignedOutToAuth = {
+                                            showSettingsScreen = false
+                                            showProfileScreen = false
+                                            hasCompletedLaunchStartFlow = false
+                                        }
+                                    )
+                                }
+
+                                // Hub Sub-Screens (Reachable from Profile, Stats & Rhythm Overview)
                                 if (showWeeklyReportScreen) {
                                     com.tunemind.app.ui.screens.WeeklyReportScreen(
                                         vm = vm,
@@ -780,13 +820,14 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
 
-                                // Fullscreen TuneMind Settings Overlay (Highest Overlay Priority)
+                                // Fullscreen TuneMind Settings Overlay (Opened from Profile Screen)
                                 if (showSettingsScreen) {
                                     com.tunemind.app.ui.screens.SettingsScreen(
                                         vm = vm,
                                         onBack = { showSettingsScreen = false },
                                         onOpenCrossApp = {
                                             showSettingsScreen = false
+                                            showProfileScreen = false
                                             showStatsScreen = true
                                         },
                                         onOpenWeeklyReport = {
@@ -795,7 +836,7 @@ open class MainActivity : ComponentActivity() {
                                         },
                                         onOpenAccountAuth = {
                                             showSettingsScreen = false
-                                            authSessionManager.reopenAccountOnboarding()
+                                            showProfileScreen = true
                                         }
                                     )
                                 }
