@@ -555,7 +555,7 @@ fun SongProfile(
                                 claudeInsightText = result.getOrNull() ?: "Unable to load track insight right now."
                             }
                         },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(28.dp),
                         border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.45f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -725,7 +725,7 @@ fun SongProfile(
                         onQuarantineSuccess("Returned '${profile.title}' to Fresh rotation.")
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -777,7 +777,7 @@ fun SongProfile(
                         onQuarantineSuccess("Resting '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
                     },
                     border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.55f)),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -804,7 +804,7 @@ fun SongProfile(
                 onDismiss?.invoke()
             },
             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(28.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)

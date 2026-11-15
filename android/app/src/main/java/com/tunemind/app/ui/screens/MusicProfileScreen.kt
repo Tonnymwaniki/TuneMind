@@ -426,7 +426,7 @@ fun MusicProfileScreen(
                         containerColor = Color(0xFFF8FAFC),
                         contentColor = Color(0xFF07090E)
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
@@ -543,7 +543,7 @@ fun MusicProfileScreen(
                         containerColor = Color(0xFFF8FAFC),
                         contentColor = Color(0xFF07090E)
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)

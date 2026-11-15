@@ -257,7 +257,7 @@ fun SpotifyLibrarySection(
                         Button(
                             onClick = onRequestSpotifyAuth,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000)),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(28.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Text(
@@ -479,7 +479,7 @@ fun SpotifyLibrarySection(
                                 ) {
                                     OutlinedButton(
                                         onClick = { onLoadPlaylistTracks(selectedPlaylist.playlistId) },
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(28.dp),
                                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
                                         modifier = Modifier.weight(1f)
                                     ) {
@@ -500,7 +500,7 @@ fun SpotifyLibrarySection(
                                             )
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = spotifyGreen),
-                                        shape = RoundedCornerShape(10.dp),
+                                        shape = RoundedCornerShape(28.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(

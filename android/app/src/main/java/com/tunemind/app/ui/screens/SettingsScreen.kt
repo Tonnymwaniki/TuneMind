@@ -356,12 +356,12 @@ fun SettingsScreen(
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (appRemoteConnected) safeGreen else Color(0xFFF8FAFC),
-                                contentColor = Color(0xFF07090E)
+                                contentColor = Color(0xFF0D0D0D)
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(28.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp)
+                                .height(46.dp)
                         ) {
                             Text(
                                 text = when {
@@ -377,7 +377,7 @@ fun SettingsScreen(
 
                     OutlinedButton(
                         onClick = { spotifyAuthManager.launchSpotifyAuth(context) },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(28.dp),
                         border = BorderStroke(
                             1.dp,
                             when {
@@ -388,7 +388,7 @@ fun SettingsScreen(
                         ),
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(46.dp)
                     ) {
                         Text(
                             text = when {
@@ -763,7 +763,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(28.dp),
                 border = BorderStroke(1.dp, dangerRed.copy(alpha = 0.45f)),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = dangerRed)
             ) {
@@ -815,7 +815,7 @@ fun SettingsScreen(
                         containerColor = dangerRed,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)

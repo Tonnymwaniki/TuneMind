@@ -11,48 +11,48 @@ import androidx.compose.ui.graphics.Color
  */
 object DeepObsidianAmber {
     // ─────────────────────────────────────────────────────────────
-    // 1. CHASSIS & DEPTH FOUNDATION (True Inky Carbon Obsidian)
+    // 1. CHASSIS & DEPTH FOUNDATION (Pitch Black & Dark Indigo)
     // ─────────────────────────────────────────────────────────────
-    val AppBackground         = Color(0xFF0D0F14) // Deep studio chassis black
-    val SecondaryBackground   = Color(0xFF131720) // Sub-layer chassis slate
-    val RecessedBackground    = Color(0xFF090B0E) // Recessed meter & well depth
+    val AppBackground         = Color(0xFF0D0D0D) // Pitch Black canvas
+    val SecondaryBackground   = Color(0xFF1A0B2E) // Dark Indigo gradient depth
+    val RecessedBackground    = Color(0xFF080510) // Recessed well depth
 
     // ─────────────────────────────────────────────────────────────
-    // 2. LAYERED SURFACES (Deep Obsidian Slate with High-Contrast Elevation)
+    // 2. LAYERED SURFACES (Indigo-Tinted Dark Surfaces)
     // ─────────────────────────────────────────────────────────────
-    val CardBackground        = Color(0xFF181C26) // Standard card surface
-    val CardElevated          = Color(0xFF222736) // Interactive elevated deck
-    val SurfaceHighlight      = Color(0xFF2D3548) // Active hover / selected tint
-    val SurfaceBorder         = Color(0xFF38435C) // Hairline metallic chassis border
+    val CardBackground        = Color(0xFF140D24) // Standard card surface
+    val CardElevated          = Color(0xFF1E1338) // Interactive elevated deck
+    val SurfaceHighlight      = Color(0xFF2B1A4E) // Active hover / selected tint
+    val SurfaceBorder         = Color(0xFF3A1F66) // Hairline luminous indigo border
 
     // ─────────────────────────────────────────────────────────────
-    // 3. BRAND SOUL ACCENTS (Locked Signature Deep Obsidian Amber)
+    // 3. BRAND SOUL ACCENTS (Cyan Soundwaves & Electric Purple Neural AI)
     // ─────────────────────────────────────────────────────────────
-    val BrandSoulAmber        = Color(0xFF652814) // The foundational amber soul
-    val PrimaryAccent         = Color(0xFFD48344) // Luminous warm amber
-    val SecondaryAccent       = Color(0xFFE8A65D) // Warm acoustic gold
-    val AccentLight           = Color(0xFFF5B773) // High-exposure amber glow
-    val AccentSoft            = Color(0xFFFBE2C5) // Cream amber highlight
-    val CopperAccent          = Color(0xFF9E4B28) // Burnished copper metallic
+    val BrandSoulAmber        = Color(0xFF1A0B2E) // Deep Dark Indigo anchor
+    val PrimaryAccent         = Color(0xFF00F0FF) // Cyan music soundwaves
+    val SecondaryAccent       = Color(0xFF8A2BE2) // Electric Purple Neural AI
+    val AccentLight           = Color(0xFF67F7FF) // Luminous cyan highlight
+    val AccentSoft            = Color(0xFFD8B4FE) // Soft neural violet tint
+    val CopperAccent          = Color(0xFF8A2BE2) // Electric Purple secondary
 
     // ─────────────────────────────────────────────────────────────
-    // 4. TYPOGRAPHY TOKENS (Crisp Optic Clarity on Carbon Obsidian)
+    // 4. TYPOGRAPHY TOKENS (Crisp Optic Clarity)
     // ─────────────────────────────────────────────────────────────
-    val TextPrimary           = Color(0xFFF5F7FA) // Crisp ivory white (maximum contrast)
-    val TextSecondary         = Color(0xFFB0B7C6) // Cool slate silver
-    val TextMuted             = Color(0xFF758095) // Precision engineering label grey
+    val TextPrimary           = Color(0xFFF8FAFC) // Crisp ivory white
+    val TextSecondary         = Color(0xFFC4B5FD) // Soft indigo silver
+    val TextMuted             = Color(0xFF8B93A7) // Muted slate label grey
     val TextDisabled          = Color(0xFF4A5468) // Subdued indicator
 
     // ─────────────────────────────────────────────────────────────
     // 5. FEATURE DOMAIN ACCENTS (Creative Distinction Across Modules)
     // ─────────────────────────────────────────────────────────────
     // Live Spectrum & Equalizer
-    val EQBassCyan            = Color(0xFF00E5FF) // Sub-bass & low frequencies (20-250Hz)
-    val EQMidAmber            = Color(0xFFE8A65D) // Warm midrange (250-4000Hz)
+    val EQBassCyan            = Color(0xFF00F0FF) // Cyan soundwave glow
+    val EQMidAmber            = Color(0xFF8A2BE2) // Electric purple mids
     val EQHighRose            = Color(0xFFFF5252) // Harmonic highs & transients (4k-16kHz)
 
     // Cooldown Vault (Cryogenic Preservation Aesthetic)
-    val CryoCyan              = Color(0xFF00F0FF) // Chilled liquid cryo blue
+    val CryoCyan              = Color(0xFF00F0FF) // Chilled liquid cryo cyan
     val GlacialBlue           = Color(0xFF4E95FF) // Restorative frozen blue
     val FrostDeep             = Color(0xFF101B2B) // Cryo-chamber well
 
@@ -62,9 +62,9 @@ object DeepObsidianAmber {
     val ThermalWarning        = Color(0xFFFFB74D) // Early repetition advisory
 
     // Acoustic Genome & Neural Intelligence (Continuous AI Brain)
-    val NeuralViolet          = Color(0xFFA855F7) // High-dimensional feature vector
+    val NeuralViolet          = Color(0xFF8A2BE2) // Electric Purple neural circuit
     val ElectricViolet        = Color(0xFF7C3AED) // Deep latent space cluster
-    val GenomeIndigo          = Color(0xFF4F46E5) // Neural memory synapse
+    val GenomeIndigo          = Color(0xFF1A0B2E) // Dark Indigo memory synapse
 
     // Hearing Safety & Decibel Headroom
     val DecibelSafe           = Color(0xFF10B981) // Studio green (<75dB safe level)

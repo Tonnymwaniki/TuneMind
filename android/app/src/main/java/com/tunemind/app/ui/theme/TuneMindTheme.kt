@@ -158,24 +158,24 @@ fun TuneMindTheme(
     )
 
     val colorScheme = darkColorScheme(
-        primary = DeepObsidianAmber.PrimaryAccent,
-        onPrimary = DeepObsidianAmber.AppBackground,
-        primaryContainer = DeepObsidianAmber.CardElevated,
-        onPrimaryContainer = DeepObsidianAmber.TextPrimary,
-        secondary = DeepObsidianAmber.SecondaryAccent,
-        onSecondary = DeepObsidianAmber.AppBackground,
-        secondaryContainer = DeepObsidianAmber.CardBackground,
-        onSecondaryContainer = DeepObsidianAmber.TextPrimary,
-        tertiary = DeepObsidianAmber.CopperAccent,
-        background = DeepObsidianAmber.AppBackground,
-        onBackground = DeepObsidianAmber.TextPrimary,
-        surface = DeepObsidianAmber.CardBackground,
-        onSurface = DeepObsidianAmber.TextPrimary,
-        surfaceVariant = DeepObsidianAmber.CardElevated,
-        onSurfaceVariant = DeepObsidianAmber.TextSecondary,
-        outline = DeepObsidianAmber.SurfaceBorder,
-        outlineVariant = DeepObsidianAmber.SurfaceHighlight,
-        error = DeepObsidianAmber.Error
+        primary = animatedAccentPrimary,
+        onPrimary = animatedBg,
+        primaryContainer = animatedElevated,
+        onPrimaryContainer = animatedTextPrimary,
+        secondary = animatedAccentSecondary,
+        onSecondary = animatedBg,
+        secondaryContainer = animatedCard,
+        onSecondaryContainer = animatedTextPrimary,
+        tertiary = animatedState.copperAccent,
+        background = animatedBg,
+        onBackground = animatedTextPrimary,
+        surface = animatedCard,
+        onSurface = animatedTextPrimary,
+        surfaceVariant = animatedElevated,
+        onSurfaceVariant = animatedTextSecondary,
+        outline = animatedBorder,
+        outlineVariant = animatedHighlight,
+        error = animatedState.error
     )
 
     CompositionLocalProvider(LocalAdaptiveTheme provides animatedState) {

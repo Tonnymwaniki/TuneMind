@@ -320,7 +320,7 @@ fun MusicalMomentsScreen(
                                 )
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(28.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Icon(Icons.Rounded.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))

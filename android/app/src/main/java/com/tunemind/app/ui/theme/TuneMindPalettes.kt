@@ -104,19 +104,19 @@ object TuneMindPalettes {
     val Night = PaletteColors(
         id = "night",
         name = "Synaptic Violet",
-        description = "Deep cosmic indigo-violet with neural purple and cryo-cyan bioluminescence.",
-        primaryBackground = Color(0xFF080516),
-        secondaryBackground = Color(0xFF120B29),
-        cardSurface = Color(0xFF1B113A),
-        elevatedSurface = Color(0xFF261850),
+        description = "Pitch black & dark indigo neural canvas with glowing cyan soundwaves and electric purple AI.",
+        primaryBackground = Color(0xFF0D0D0D),
+        secondaryBackground = Color(0xFF1A0B2E),
+        cardSurface = Color(0xFF140D24),
+        elevatedSurface = Color(0xFF1E1338),
         primaryText = Color(0xFFF8FAFC),
         secondaryText = Color(0xFFD8B4FE),
-        primaryAccent = Color(0xFFA855F7),
-        secondaryAccent = Color(0xFF00E5FF),
-        highlight = Color(0xFFA855F7).copy(alpha = 0.18f),
-        border = Color(0xFF3B2370),
-        recessedBackground = Color(0xFF04020C),
-        copperAccent = Color(0xFFC084FC)
+        primaryAccent = Color(0xFF00F0FF),
+        secondaryAccent = Color(0xFF8A2BE2),
+        highlight = Color(0xFF00F0FF).copy(alpha = 0.18f),
+        border = Color(0xFF3A1F66),
+        recessedBackground = Color(0xFF080510),
+        copperAccent = Color(0xFF8A2BE2)
     )
 
     val AllPalettes = listOf(Morning, Afternoon, Evening, Night)

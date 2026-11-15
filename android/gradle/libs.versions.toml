@@ -20,8 +20,10 @@ media = "1.7.0"
 browser = "1.8.0"
 securityCrypto = "1.1.0-alpha06"
 retrofit = "2.11.0"
+lottie = "6.6.2"
 
 [libraries]
+lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
 # Compose BOM
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }

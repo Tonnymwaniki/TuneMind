@@ -52,6 +52,7 @@ import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.ui.DopamineCapsuleState
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.TuneMindAiIntelligenceLoop
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
@@ -92,8 +93,8 @@ fun PulseAgentScreen(
     val activeAccent by animateColorAsState(
         targetValue = when {
             hasPendingApproval -> Color(0xFF10B981)
-            agentState == AgentState.LISTENING -> Color(0xFF00E5FF)
-            agentState == AgentState.THINKING -> Color(0xFFA855F7)
+            agentState == AgentState.LISTENING -> Color(0xFF00F0FF)
+            agentState == AgentState.THINKING -> Color(0xFF8A2BE2)
             agentState == AgentState.SPEAKING -> Color(0xFFFFB000)
             agentState == AgentState.ERROR -> Color(0xFFF59E0B)
             else -> colors.primaryAccent
@@ -181,7 +182,14 @@ fun PulseAgentScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 3. Living Fluid Sphere Centerpiece
+            // 3. Living Fluid Sphere + Lottie Neural Intelligence Loop Centerpiece
+            val lottieSpeed = when {
+                agentState == AgentState.SPEAKING -> 1.85f
+                agentState == AgentState.THINKING -> 1.65f
+                agentState == AgentState.LISTENING -> 1.45f
+                isMusicPlaying -> 1.25f
+                else -> 0.90f
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -193,6 +201,15 @@ fun PulseAgentScreen(
                     ),
                 contentAlignment = Alignment.Center
             ) {
+                TuneMindAiIntelligenceLoop(
+                    modifier = Modifier.size(276.dp),
+                    speed = lottieSpeed,
+                    alpha = when {
+                        agentState != AgentState.IDLE -> 0.92f
+                        isMusicPlaying -> 0.78f
+                        else -> 0.58f
+                    }
+                )
                 TuneMindLivingOrb(
                     agentState = agentState,
                     isMusicPlaying = isMusicPlaying,
@@ -200,7 +217,7 @@ fun PulseAgentScreen(
                     energy = energy,
                     primaryAccent = activeAccent,
                     secondaryAccent = colors.secondaryAccent,
-                    modifier = Modifier.size(264.dp)
+                    modifier = Modifier.size(252.dp)
                 )
             }
 
@@ -688,10 +705,10 @@ private fun ProposedTrackApprovalCard(
             ) {
                 OutlinedButton(
                     onClick = onReject,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(48.dp)
                 ) {
                     Text(
                         text = "Skip",
@@ -705,12 +722,12 @@ private fun ProposedTrackApprovalCard(
                     onClick = onApprove,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFF8FAFC),
-                        contentColor = Color(0xFF07090E)
+                        contentColor = Color(0xFF0D0D0D)
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .weight(1.4f)
-                        .height(44.dp)
+                        .height(48.dp)
                 ) {
                     Text(
                         text = "Play",
