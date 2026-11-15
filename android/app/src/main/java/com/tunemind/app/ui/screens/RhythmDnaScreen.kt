@@ -36,6 +36,7 @@ import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.domain.audio.AudioDeviceObserver
+import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
 import com.tunemind.app.domain.model.TrackMemoryEntry
@@ -796,7 +797,7 @@ fun RhythmDnaScreen(
                                         subtitle = track.album,
                                         playCount = strictPlays,
                                         isCurrentlyPlaying = isPlaying,
-                                        appLabel = track.primaryAppName,
+                                        appLabel = ListeningPlayDeduplicator.resolveAppDisplayName(track.sourcePackage),
                                         accentColor = activePhase.color,
                                         secondaryAccent = theme.secondaryAccent,
                                         onPlayClick = { onPlayTrack(title, artist, uri, pkg) },
