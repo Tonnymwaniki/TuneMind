@@ -1,6 +1,6 @@
 package com.tunemind.app.ui.components
 
-import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,8 +10,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.AcUnit
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,24 +26,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.model.TrackMemoryEntry
+import com.tunemind.app.domain.recommendation.RecommendationCategory
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.ui.NowPlayingObservation
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.VaultTrack
-import com.tunemind.app.ui.theme.*
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
+import com.tunemind.app.ui.theme.TuneMindTheme
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
-/**
- * Perceptual Auditory Anchor weight for a specific track.
- */
 data class TrackAnchorWeight(
     val name: String,
     val weightPercent: Int,
@@ -45,18 +51,12 @@ data class TrackAnchorWeight(
     val color: Color
 )
 
-/**
- * Historical or projected longitudinal satiety data point.
- */
 data class SatietyTrendPoint(
     val label: String,
     val score: Int,
     val isProjected: Boolean = false
 )
 
-/**
- * Individual playback fatigue record in the track's exposure history.
- */
 data class FatigueHistoryEntry(
     val timestampMs: Long,
     val sessionLabel: String,
@@ -65,18 +65,13 @@ data class FatigueHistoryEntry(
     val isLoopTrigger: Boolean = false
 )
 
-/**
- * Unified data representation for the comprehensive Song Profile Dossier.
- * Ensures every song across Timeline, Home, Fatigue Lab, and Cooldown Vault
- * possesses a detailed neuro-acoustic intelligence profile.
- */
 data class SongProfileData(
     val title: String,
     val artist: String,
     val album: String? = null,
     val sourcePackage: String? = null,
     val appearanceCount: Int = 1,
-    val satietyScore: Int = 30, // 0-100
+    val satietyScore: Int = 30,
     val firstObservedMs: Long? = null,
     val lastObservedMs: Long? = null,
     val estimatedPlaybackMs: Long = 180_000L,
@@ -85,7 +80,7 @@ data class SongProfileData(
     val cooldownDaysRemaining: Float = 0f,
     val trackId: String? = null,
     val emoji: String = "🎧",
-    val vibeTag: String = "Harmonic Focus",
+    val vibeTag: String = "Fresh Flow",
     val anchorWeights: List<TrackAnchorWeight> = emptyList(),
     val satietyTrends: List<SatietyTrendPoint> = emptyList(),
     val fatigueHistory: List<FatigueHistoryEntry> = emptyList()
@@ -107,8 +102,7 @@ data class SongProfileData(
                 lower.contains("rock") || lower.contains("guitar") -> "🎸"
                 else -> {
                     val emojis = listOf("🎧", "⚡", "🌌", "🌊", "🔥", "☕", "🌙", "🎵", "🎷", "🔮", "✨", "💿")
-                    val idx = abs((title + artist).hashCode()) % emojis.size
-                    emojis[idx]
+                    emojis[abs((title + artist).hashCode()) % emojis.size]
                 }
             }
         }
@@ -116,12 +110,12 @@ data class SongProfileData(
         fun pickVibeTag(title: String, artist: String, satiety: Int): String {
             val lower = "$title $artist".lowercase()
             return when {
-                satiety >= 75 -> "Loop Fixation Risk"
-                satiety >= 55 -> "Midday High-Focus Drive"
-                lower.contains("acoustic") || lower.contains("piano") -> "Acoustic Palate Cleanser"
-                lower.contains("ambient") || lower.contains("chill") -> "Circadian Down-Regulation"
-                lower.contains("electronic") || lower.contains("fast") -> "Rhythmic Entrainment"
-                else -> "Harmonic Resonance"
+                satiety >= 75 -> "Heavy Repeat"
+                satiety >= 55 -> "Steady Rotation"
+                lower.contains("acoustic") || lower.contains("piano") -> "Acoustic Reset"
+                lower.contains("ambient") || lower.contains("chill") -> "Calm & Mellow"
+                lower.contains("electronic") || lower.contains("fast") -> "Upbeat Drive"
+                else -> "Fresh Balance"
             }
         }
 
@@ -134,28 +128,28 @@ data class SongProfileData(
 
             return listOf(
                 TrackAnchorWeight(
-                    name = "Harmonic Familiarity",
+                    name = "Familiar Feel",
                     weightPercent = harmonicFamiliarity,
-                    description = "Predictability of chord progressions and tonality",
-                    color = AccentCyan
+                    description = "Comfort of melody and chord structure",
+                    color = Color(0xFF00E5FF)
                 ),
                 TrackAnchorWeight(
-                    name = "Rhythmic Entrainment",
+                    name = "Rhythm & Groove",
                     weightPercent = rhythmicDrive,
-                    description = "BPM synchronization and transient impulse frequency",
-                    color = PrimaryVioletBright
+                    description = "Tempo drive and beat momentum",
+                    color = Color(0xFFA855F7)
                 ),
                 TrackAnchorWeight(
-                    name = "Melodic Novelty",
+                    name = "Novelty & Spark",
                     weightPercent = melodicNovelty,
-                    description = "Remaining cognitive surprise and dopamine responsiveness",
-                    color = if (melodicNovelty > 50) AccentGreen else Color(0xFFF87171)
+                    description = "How fresh this track feels right now",
+                    color = if (melodicNovelty > 50) Color(0xFF10B981) else Color(0xFFFF4D6D)
                 ),
                 TrackAnchorWeight(
-                    name = "Acoustic Density",
+                    name = "Sound Fullness",
                     weightPercent = frequencyDensity,
-                    description = "Spectral richness across high/low auditory bands",
-                    color = AccentAmber
+                    description = "Overall instrumental richness and energy",
+                    color = Color(0xFFFFB000)
                 )
             )
         }
@@ -165,7 +159,7 @@ data class SongProfileData(
             val p1 = (c * 0.35f).toInt()
             val p2 = (c * 0.55f).toInt()
             val p3 = (c * 0.80f).toInt()
-            val projected = minOf(99, (c + 18))
+            val projected = minOf(99, c + 18)
             val vaultRecovered = maxOf(20, (c * 0.40f).toInt())
 
             return listOf(
@@ -173,8 +167,8 @@ data class SongProfileData(
                 SatietyTrendPoint("Day -2", p2),
                 SatietyTrendPoint("Yesterday", p3),
                 SatietyTrendPoint("Now", c),
-                SatietyTrendPoint("+2d Active", projected, isProjected = true),
-                SatietyTrendPoint("+5d Cooldown", vaultRecovered, isProjected = true)
+                SatietyTrendPoint("+2d Repeat", projected, isProjected = true),
+                SatietyTrendPoint("+5d Rested", vaultRecovered, isProjected = true)
             )
         }
 
@@ -190,15 +184,15 @@ data class SongProfileData(
             val count = maxOf(1, playCount)
 
             for (i in 0 until minOf(4, count)) {
-                val offset = (count - 1 - i) * 7_200_000L // 2hr gaps
+                val offset = (count - 1 - i) * 7_200_000L
                 val tMs = now - offset
                 val isLoop = i >= 2 && count >= 3
                 entries.add(
                     FatigueHistoryEntry(
                         timestampMs = tMs,
-                        sessionLabel = if (i == 0) "Most Recent Episode" else "Episode -${i + 1}",
+                        sessionLabel = if (i == 0) "Most Recent Play" else "Earlier Play #${i + 1}",
                         playDurationSec = 175 + (i * 12) % 40,
-                        satietyContribution = if (isLoop) "+0.84 Satiety (Replay loop)" else "+0.42 Satiety",
+                        satietyContribution = if (isLoop) "Heavy replay" else "Normal play",
                         isLoopTrigger = isLoop
                     )
                 )
@@ -240,8 +234,8 @@ data class SongProfileData(
             latestRecentTrack: TrackMemoryEntry? = null,
             isInVault: Boolean = false
         ): SongProfileData {
-            val title = np?.title?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.title ?: "Active Audio Track"
-            val artist = np?.artist?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.artist ?: "Observed Media Session"
+            val title = np?.title?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.title ?: "Active Track"
+            val artist = np?.artist?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.artist ?: "Observed Player"
             val album = np?.album ?: latestRecentTrack?.album
             val sourcePackage = np?.sourcePackage ?: latestRecentTrack?.sourcePackage ?: "com.spotify.music"
             val plays = maxOf(1, latestRecentTrack?.distinctAppearanceCount ?: 1)
@@ -273,7 +267,7 @@ data class SongProfileData(
         fun fromRecommendedTrack(rec: RecommendedTrack, isInVault: Boolean = false): SongProfileData {
             val title = rec.title
             val artist = rec.artist
-            val satiety = 8 // Cleansers have near-zero satiety saturation
+            val satiety = 8
             return SongProfileData(
                 title = title,
                 artist = artist,
@@ -286,7 +280,7 @@ data class SongProfileData(
                 estimatedPlaybackMs = 210_000L,
                 isInVault = isInVault,
                 emoji = pickEmoji(title, artist),
-                vibeTag = "Palate Cleanser / Recovery",
+                vibeTag = "Fresh Pick",
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
                 satietyTrends = generateSatietyTrend(satiety, 1),
                 fatigueHistory = emptyList()
@@ -300,7 +294,7 @@ data class SongProfileData(
             return SongProfileData(
                 title = title,
                 artist = artist,
-                album = "Cooldown Quarantine",
+                album = "Resting Vault",
                 sourcePackage = "com.spotify.music",
                 appearanceCount = 4,
                 satietyScore = satiety,
@@ -312,7 +306,7 @@ data class SongProfileData(
                 cooldownDaysRemaining = vault.cooldownDaysRemaining,
                 trackId = vault.id,
                 emoji = pickEmoji(title, artist),
-                vibeTag = "Quarantined in Vault",
+                vibeTag = "Resting in Vault",
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
                 satietyTrends = generateSatietyTrend(satiety, 4),
                 fatigueHistory = generateFatigueHistory(title, artist, 4, vault.quarantinedAtMs, vault.quarantinedAtMs)
@@ -321,16 +315,6 @@ data class SongProfileData(
     }
 }
 
-/**
- * Reusable full-fidelity SongProfile composable component.
- * Features:
- * 1. High-aesthetic profile emoji & vinyl disc cover art
- * 2. Longitudinal Satiety & Receptivity Radar
- * 3. Auditory Anchor Weights decomposition (Harmonic, Rhythmic, Novelty, Density)
- * 4. Fatigue History Log with replay acceleration velocity
- * 5. Multi-day Satiety Trend curve
- * 6. Cooldown Vault Quarantine control & Spotify player launch
- */
 @Composable
 fun SongProfile(
     profile: SongProfileData,
@@ -339,18 +323,24 @@ fun SongProfile(
     onQuarantineSuccess: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val theme = LocalAdaptiveTheme.current
     val fmt = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
     val isFatigued = profile.satietyScore >= 70
     val isModerate = profile.satietyScore in 40..69
+    val freshnessPercent = (100 - profile.satietyScore).coerceIn(5, 99)
+
+    val safeGreen = Color(0xFF10B981)
+    val warnAmber = Color(0xFFFFB000)
+    val alertRed = Color(0xFFFF4D6D)
 
     val appName = (profile.sourcePackage ?: "com.spotify.music")
         .substringAfterLast(".").replaceFirstChar { it.uppercase() }
 
     val appColor = when {
         profile.sourcePackage?.contains("spotify") == true -> Color(0xFF1DB954)
-        profile.sourcePackage?.contains("youtube") == true -> Color(0xFFEF4444)
+        profile.sourcePackage?.contains("youtube") == true -> Color(0xFFFF0033)
         profile.sourcePackage?.contains("apple") == true -> Color(0xFFFA243C)
-        else -> AccentCyan
+        else -> theme.primaryAccent
     }
 
     var selectedQuarantineDays by remember { mutableStateOf(5f) }
@@ -358,9 +348,9 @@ fun SongProfile(
     val playMinutes = totalSec / 60
     val playSeconds = totalSec % 60
 
-    var geminiDossierText by remember { mutableStateOf<String?>(null) }
-    var isDossierLoading by remember { mutableStateOf(false) }
-    val isGeminiConfigured = remember(context) { com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(context) }
+    var claudeInsightText by remember { mutableStateOf<String?>(null) }
+    var isInsightLoading by remember { mutableStateOf(false) }
+    val isAiAvailable = remember(context) { com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(context) }
     val coroutineScope = rememberCoroutineScope()
 
     Column(
@@ -368,18 +358,18 @@ fun SongProfile(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Badges Row
+        // Top Status Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = DeepObsidianAmber.CardElevated,
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.6f))
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF0C1018),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -390,79 +380,56 @@ fun SongProfile(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(if (profile.isInVault) DeepObsidianAmber.PrimaryAccent else if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.Success)
+                            .background(if (profile.isInVault) warnAmber else if (isFatigued) alertRed else safeGreen)
                     )
                     Text(
-                        text = if (profile.isInVault) "COOLDOWN VAULT" else "NEURO-ACOUSTIC PROFILE",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = if (profile.isInVault) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SecondaryAccent,
-                        letterSpacing = 1.sp
+                        text = if (profile.isInVault) "Resting in Vault" else "Track Profile",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (profile.isInVault) warnAmber else theme.primaryAccent
                     )
                 }
             }
 
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = appColor.copy(alpha = 0.15f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, appColor.copy(alpha = 0.35f))
+                shape = RoundedCornerShape(10.dp),
+                color = appColor.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, appColor.copy(alpha = 0.35f))
             ) {
                 Text(
-                    text = "$appName Verified",
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
+                    text = appName,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = appColor,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                 )
             }
         }
 
-        // Hero Song Identity Card with Vinyl Disc & Profile Emoji Photo
-        Card(
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                if (isFatigued) DeepObsidianAmber.Error.copy(alpha = 0.45f) else DeepObsidianAmber.SurfaceBorder
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        // Hero Song Identity Card
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Vinyl Disc Artwork with Stylized Emoji Avatar Photo
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(18.dp))
                         .background(
                             Brush.radialGradient(
                                 colors = when {
-                                    profile.isInVault -> listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CardElevated)
-                                    isFatigued -> listOf(DeepObsidianAmber.Error, DeepObsidianAmber.CardElevated)
-                                    isModerate -> listOf(DeepObsidianAmber.CopperAccent, DeepObsidianAmber.CardBackground)
-                                    else -> listOf(DeepObsidianAmber.Success, DeepObsidianAmber.CardElevated)
+                                    profile.isInVault -> listOf(warnAmber.copy(alpha = 0.35f), Color(0xFF0C1018))
+                                    isFatigued -> listOf(alertRed.copy(alpha = 0.35f), Color(0xFF0C1018))
+                                    else -> listOf(theme.primaryAccent.copy(alpha = 0.32f), Color(0xFF0C1018))
                                 }
                             )
                         )
-                        .border(
-                            2.dp,
-                            Brush.linearGradient(listOf(DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.6f), DeepObsidianAmber.CopperAccent.copy(alpha = 0.4f))),
-                            RoundedCornerShape(20.dp)
-                        ),
+                        .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(18.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Profile Emoji Photo Badge
-                    Text(
-                        text = profile.emoji,
-                        fontSize = 38.sp
-                    )
+                    Text(text = profile.emoji, fontSize = 32.sp)
                 }
 
                 Column(
@@ -471,28 +438,30 @@ fun SongProfile(
                 ) {
                     Text(
                         text = profile.title,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = DeepObsidianAmber.TextPrimary,
-                        lineHeight = 24.sp
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        lineHeight = 22.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = profile.artist,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = DeepObsidianAmber.TextSecondary
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.68f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = DeepObsidianAmber.RecessedBackground,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder.copy(alpha = 0.5f))
+                        shape = RoundedCornerShape(8.dp),
+                        color = theme.primaryAccent.copy(alpha = 0.12f)
                     ) {
                         Text(
                             text = profile.vibeTag,
                             fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium,
-                            color = DeepObsidianAmber.AccentSoft,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.primaryAccent,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -500,17 +469,9 @@ fun SongProfile(
             }
         }
 
-        // Satiety & Receptivity Radar Deck
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+        // Freshness Card
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -518,18 +479,18 @@ fun SongProfile(
                 ) {
                     Column {
                         Text(
-                            text = "ACOUSTIC SATIETY SCORE",
+                            text = "FRESHNESS SCORE",
                             fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            color = AccentCyan
+                            color = theme.primaryAccent,
+                            letterSpacing = 1.2.sp
                         )
                         Text(
                             text = when {
-                                profile.isInVault -> "Resting in Cooldown Vault"
-                                isFatigued -> "Acoustic Burnout Risk"
-                                isModerate -> "Optimal Appreciation Window"
-                                else -> "Maximum Dopamine Potency"
+                                profile.isInVault -> "Resting in Vault"
+                                isFatigued -> "Ready for a short break"
+                                isModerate -> "Balanced rotation"
+                                else -> "Feels crisp & new"
                             },
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -538,83 +499,72 @@ fun SongProfile(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isFatigued) DeepObsidianAmber.Error.copy(alpha = 0.2f) else DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.PrimaryAccent
-                        )
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isFatigued) alertRed.copy(alpha = 0.16f) else safeGreen.copy(alpha = 0.16f)
                     ) {
                         Text(
-                            text = "${profile.satietyScore}% Satiety",
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Monospace,
+                            text = "$freshnessPercent% Fresh",
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isFatigued) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            color = if (isFatigued) alertRed else safeGreen,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                         )
                     }
                 }
 
                 LinearProgressIndicator(
-                    progress = { (profile.satietyScore / 100f).coerceIn(0f, 1f) },
+                    progress = { (freshnessPercent / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(8.dp)
+                        .height(7.dp)
                         .clip(CircleShape),
                     color = when {
-                        profile.isInVault -> DeepObsidianAmber.PrimaryAccent
-                        isFatigued -> DeepObsidianAmber.Error
-                        isModerate -> DeepObsidianAmber.CopperAccent
-                        else -> DeepObsidianAmber.Success
+                        profile.isInVault -> warnAmber
+                        isFatigued -> alertRed
+                        isModerate -> theme.secondaryAccent
+                        else -> safeGreen
                     },
-                    trackColor = DeepObsidianAmber.RecessedBackground
+                    trackColor = Color.White.copy(alpha = 0.08f)
                 )
 
                 Text(
                     text = when {
-                        profile.isInVault -> "Dopamine receptors regenerating via exponential decay (e^-0.18t). Cooldown: ${(profile.recoveryProgress * 100).toInt()}% restored."
-                        isFatigued -> "Excessive replay cadence detected (+0.84 satiety/play). Suppress exposure for 3-5 days to avoid irreversible song fatigue."
-                        isModerate -> "High musical enjoyment phase. Auditory receptors show steady, non-saturating adaptation."
-                        else -> "Pristine novelty state with near 100% auditory receptor potency. Full dynamic impact."
+                        profile.isInVault -> "Cooling down so it hits like new again (${(profile.recoveryProgress * 100).toInt()}% recovered)."
+                        isFatigued -> "Played frequently recently. Resting it for 3–5 days keeps it exciting."
+                        isModerate -> "Good rotation balance — still enjoyable without burnout."
+                        else -> "High freshness with plenty of room in your daily flow."
                     },
-                    fontSize = 11.sp,
-                    color = DeepObsidianAmber.TextSecondary,
-                    lineHeight = 16.sp
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.68f),
+                    lineHeight = 17.sp
                 )
             }
         }
 
-        // Gemini AI Neuro-Acoustic Reasoning Dossier
-        if (isGeminiConfigured) {
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Claude AI Track Insight
+        if (isAiAvailable) {
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(18.dp))
                             Text(
-                                text = "NEURO-ACOUSTIC PROFILE DOSSIER",
+                                text = "CLAUDE TRACK INSIGHT",
                                 fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent,
+                                color = theme.primaryAccent,
                                 letterSpacing = 1.sp
                             )
                         }
 
-                        if (geminiDossierText != null) {
+                        if (claudeInsightText != null) {
                             IconButton(
                                 onClick = {
-                                    isDossierLoading = true
+                                    isInsightLoading = true
                                     coroutineScope.launch {
                                         val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
                                             context = context,
@@ -623,37 +573,37 @@ fun SongProfile(
                                             playCount = profile.appearanceCount,
                                             satietyPercent = profile.satietyScore
                                         )
-                                        isDossierLoading = false
-                                        geminiDossierText = result.getOrNull()
+                                        isInsightLoading = false
+                                        claudeInsightText = result.getOrNull()
                                     }
                                 },
                                 modifier = Modifier.size(24.dp)
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Regenerate", tint = DeepObsidianAmber.TextSecondary, modifier = Modifier.size(14.dp))
+                                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(15.dp))
                             }
                         }
                     }
 
-                    if (isDossierLoading) {
+                    if (isInsightLoading) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            modifier = Modifier.padding(vertical = 6.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = DeepObsidianAmber.PrimaryAccent, strokeWidth = 2.dp)
-                            Text("Analyzing acoustic perception & dopamine dynamics...", fontSize = 11.sp, color = DeepObsidianAmber.TextSecondary)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = theme.primaryAccent, strokeWidth = 2.dp)
+                            Text("Asking Claude why this track fits your flow…", fontSize = 12.sp, color = Color.White.copy(alpha = 0.68f))
                         }
-                    } else if (geminiDossierText != null) {
+                    } else if (claudeInsightText != null) {
                         Text(
-                            text = geminiDossierText ?: "",
+                            text = claudeInsightText ?: "",
                             fontSize = 12.sp,
-                            color = DeepObsidianAmber.TextPrimary,
+                            color = Color.White.copy(alpha = 0.88f),
                             lineHeight = 18.sp
                         )
                     } else {
                         Button(
                             onClick = {
-                                isDossierLoading = true
+                                isInsightLoading = true
                                 coroutineScope.launch {
                                     val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
                                         context = context,
@@ -662,53 +612,44 @@ fun SongProfile(
                                         playCount = profile.appearanceCount,
                                         satietyPercent = profile.satietyScore
                                     )
-                                    isDossierLoading = false
-                                    geminiDossierText = result.getOrNull() ?: "Unable to complete AI synthesis. Check connection."
+                                    isInsightLoading = false
+                                    claudeInsightText = result.getOrNull() ?: "Unable to reach TuneMind AI right now."
                                 }
                             },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Synthesize Acoustic Profile Dossier", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Get Claude Track Insight", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }
             }
         }
 
-        // Auditory Anchor Weights Breakdown
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+        // Sound Feel Breakdown
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Outlined.Psychology, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Psychology, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(18.dp))
                         Text(
-                            text = "AUDITORY ANCHOR WEIGHTS",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
+                            text = "Sound Breakdown",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent
+                            color = Color.White
                         )
                     }
                     Text(
-                        text = "Perceptual Decomposition",
-                        fontSize = 10.sp,
-                        color = DeepObsidianAmber.TextSecondary
+                        text = "Vibe Balance",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.56f)
                     )
                 }
 
@@ -723,14 +664,13 @@ fun SongProfile(
                                 text = anchor.name,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = DeepObsidianAmber.TextPrimary
+                                color = Color.White
                             )
                             Text(
                                 text = "${anchor.weightPercent}%",
                                 fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.AccentLight
+                                color = anchor.color
                             )
                         }
 
@@ -740,61 +680,53 @@ fun SongProfile(
                                 .fillMaxWidth()
                                 .height(5.dp)
                                 .clip(CircleShape),
-                            color = DeepObsidianAmber.PrimaryAccent,
-                            trackColor = DeepObsidianAmber.RecessedBackground
+                            color = anchor.color,
+                            trackColor = Color.White.copy(alpha = 0.08f)
                         )
 
                         Text(
                             text = anchor.description,
-                            fontSize = 10.sp,
-                            color = DeepObsidianAmber.TextSecondary
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.58f)
                         )
                     }
                 }
             }
         }
 
-        // Satiety Trends Over Time (Multi-Day Trajectory)
+        // Freshness Trajectory
         if (profile.satietyTrends.isNotEmpty()) {
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Outlined.TrendingUp, contentDescription = null, tint = DeepObsidianAmber.SecondaryAccent, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.TrendingUp, contentDescription = null, tint = theme.secondaryAccent, modifier = Modifier.size(18.dp))
                             Text(
-                                text = "SATIETY TREND TRAJECTORY",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
+                                text = "Rotation Trajectory",
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.SecondaryAccent
+                                color = Color.White
                             )
                         }
                         Text(
-                            text = "Historical & Projected",
-                            fontSize = 10.sp,
-                            color = DeepObsidianAmber.TextSecondary
+                            text = "Past & Projected",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.56f)
                         )
                     }
 
-                    // Bar Chart Visualization
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
-                            .background(DeepObsidianAmber.RecessedBackground, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .height(106.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF06080F))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.Bottom
                     ) {
@@ -807,32 +739,26 @@ fun SongProfile(
                                 Text(
                                     text = "${pt.score}%",
                                     fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (pt.isProjected) DeepObsidianAmber.TextMuted else if (pt.score >= 70) DeepObsidianAmber.Error else DeepObsidianAmber.AccentSoft
+                                    color = if (pt.isProjected) Color.White.copy(alpha = 0.50f) else if (pt.score >= 70) alertRed else theme.primaryAccent
                                 )
-
                                 Box(
                                     modifier = Modifier
-                                        .width(16.dp)
-                                        .height((pt.score * 0.65f).dp)
+                                        .width(14.dp)
+                                        .height((pt.score * 0.58f).dp)
                                         .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                         .background(
-                                            if (pt.isProjected) {
-                                                Brush.verticalGradient(listOf(DeepObsidianAmber.SurfaceBorder, DeepObsidianAmber.RecessedBackground))
-                                            } else if (pt.score >= 70) {
-                                                Brush.verticalGradient(listOf(DeepObsidianAmber.Error, DeepObsidianAmber.CardElevated))
-                                            } else {
-                                                Brush.verticalGradient(listOf(DeepObsidianAmber.PrimaryAccent, DeepObsidianAmber.CopperAccent))
+                                            when {
+                                                pt.isProjected -> Color.White.copy(alpha = 0.16f)
+                                                pt.score >= 70 -> alertRed
+                                                else -> theme.primaryAccent
                                             }
                                         )
                                 )
-
                                 Text(
                                     text = pt.label,
                                     fontSize = 8.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = if (pt.isProjected) DeepObsidianAmber.TextMuted else DeepObsidianAmber.TextPrimary,
+                                    color = if (pt.isProjected) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.85f),
                                     maxLines = 1
                                 )
                             }
@@ -842,275 +768,174 @@ fun SongProfile(
             }
         }
 
-        // Fatigue History Log (Playback Sessions)
-        if (profile.fatigueHistory.isNotEmpty()) {
-            Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardBackground),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Outlined.History, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(18.dp))
-                            Text(
-                                text = "FATIGUE EXPOSURE LOG",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = DeepObsidianAmber.PrimaryAccent
-                            )
-                        }
-                        Text(
-                            text = "${profile.fatigueHistory.size} Episodes Captured",
-                            fontSize = 10.sp,
-                            color = DeepObsidianAmber.TextSecondary
-                        )
-                    }
-
-                    profile.fatigueHistory.forEach { entry ->
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = DeepObsidianAmber.RecessedBackground,
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (entry.isLoopTrigger) DeepObsidianAmber.Error.copy(alpha = 0.45f) else DeepObsidianAmber.SurfaceBorder
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = entry.sessionLabel,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = DeepObsidianAmber.TextPrimary
-                                    )
-                                    Text(
-                                        text = fmt.format(Date(entry.timestampMs)),
-                                        fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = DeepObsidianAmber.TextSecondary
-                                    )
-                                }
-
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "${entry.playDurationSec}s Playback",
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = DeepObsidianAmber.SecondaryAccent
-                                    )
-                                    Text(
-                                        text = entry.satietyContribution,
-                                        fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (entry.isLoopTrigger) DeepObsidianAmber.Error else DeepObsidianAmber.Success
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Longitudinal Metrics Summary Grid
+        // Play Summary Cards
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("TOTAL OBSERVED PLAYS", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
-                    Text("${profile.appearanceCount} Times", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.TextPrimary)
-                    Text(if (profile.appearanceCount >= 3) "Loop Density High" else "Cadence Balanced", fontSize = 10.sp, color = if (profile.appearanceCount >= 3) DeepObsidianAmber.Warning else DeepObsidianAmber.Success)
+            SoftGlassCard(modifier = Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Verified Plays", fontSize = 11.sp, color = Color.White.copy(alpha = 0.58f))
+                    Text("${profile.appearanceCount}x", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(
+                        text = if (profile.appearanceCount >= 3) "Frequent replay" else "Light rotation",
+                        fontSize = 10.sp,
+                        color = if (profile.appearanceCount >= 3) warnAmber else safeGreen
+                    )
                 }
             }
 
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("TOTAL AUDITORY EXPOSURE", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = DeepObsidianAmber.TextSecondary)
-                    Text("${playMinutes}m ${playSeconds}s", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DeepObsidianAmber.AccentLight)
-                    Text("Aggregated Time", fontSize = 10.sp, color = DeepObsidianAmber.TextSecondary)
+            SoftGlassCard(modifier = Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Listening Time", fontSize = 11.sp, color = Color.White.copy(alpha = 0.58f))
+                    Text("${playMinutes}m ${playSeconds}s", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = theme.primaryAccent)
+                    Text("Observed total", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
                 }
             }
         }
 
-        // Quarantine / Vault Action Deck
-        if (profile.isInVault) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.PrimaryAccent),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Recent Play Log
+        if (profile.fatigueHistory.isNotEmpty()) {
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Rounded.History, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(17.dp))
+                        Text("Recent Plays", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    profile.fatigueHistory.forEach { entry ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(entry.sessionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                                Text(fmt.format(Date(entry.timestampMs)), fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
+                            }
+                            Text(
+                                text = entry.satietyContribution,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (entry.isLoopTrigger) alertRed else safeGreen
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Vault Action Card
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            if (profile.isInVault) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "ACTIVE RECEPTOR RESTORATION",
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent
-                        )
-                        Text(
-                            "${profile.cooldownDaysRemaining}d remaining",
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            color = DeepObsidianAmber.PrimaryAccent
-                        )
+                        Text("Resting in Vault", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = warnAmber)
+                        Text("${profile.cooldownDaysRemaining}d left", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = warnAmber)
                     }
-
                     Button(
                         onClick = {
                             profile.trackId?.let { vm.restoreFromVault(it) }
                             onDismiss?.invoke()
-                            onQuarantineSuccess("Released '${profile.title}' from Cooldown Vault.")
+                            onQuarantineSuccess("Returned '${profile.title}' to Fresh rotation.")
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
+                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Release Back to Active Rotation", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Return to Fresh Rotation", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
-            }
-        } else {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = DeepObsidianAmber.CardElevated),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.SurfaceBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Rest Track in Vault", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     Text(
-                        text = "PREVENT AUDITORY BURNOUT",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        color = DeepObsidianAmber.PrimaryAccent
+                        text = "Pause this track from active picks for a few days so it feels brand new later.",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.65f)
                     )
-                    Text(
-                        text = "Quarantine this track in your Cooldown Vault to reset neurological receptivity and avoid permanent listener burnout.",
-                        fontSize = 11.sp,
-                        color = DeepObsidianAmber.TextSecondary,
-                        lineHeight = 16.sp
-                    )
-
-                    // Quarantine Duration Buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(3f to "3 Days", 5f to "5 Days", 7f to "7 Days").forEach { (days, label) ->
                             val isSelected = selectedQuarantineDays == days
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) DeepObsidianAmber.PrimaryAccent.copy(alpha = 0.25f) else DeepObsidianAmber.RecessedBackground,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.SurfaceBorder
-                                ),
+                            Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) theme.primaryAccent.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.10f),
+                                        RoundedCornerShape(10.dp)
+                                    )
                                     .clickable { selectedQuarantineDays = days }
+                                    .padding(vertical = 8.dp)
                             ) {
                                 Text(
                                     text = label,
                                     fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) DeepObsidianAmber.PrimaryAccent else DeepObsidianAmber.TextSecondary,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp)
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.72f),
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
                     }
-
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             vm.quarantineTrack(profile.title, profile.artist, selectedQuarantineDays)
                             onDismiss?.invoke()
-                            onQuarantineSuccess("Quarantined '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
+                            onQuarantineSuccess("Resting '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.CardBackground),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, DeepObsidianAmber.CopperAccent),
+                        border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.60f)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = DeepObsidianAmber.PrimaryAccent, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.AcUnit, contentDescription = null, tint = warnAmber, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Quarantine to Cooldown Vault", color = DeepObsidianAmber.PrimaryAccent, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Rest in Cooldown Vault", color = warnAmber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             }
         }
 
-        // Direct Playback Launcher
         Button(
             onClick = {
-                val fakeRec = RecommendedTrack(
+                val rec = RecommendedTrack(
                     id = "rec-${System.currentTimeMillis()}",
                     title = profile.title,
                     artist = profile.artist,
                     album = profile.album,
-                    category = com.tunemind.app.domain.recommendation.RecommendationCategory.PALATE_CLEANSER,
-                    reason = "Direct playback launch from Song Profile: ${profile.vibeTag}",
+                    category = RecommendationCategory.PALATE_CLEANSER,
+                    reason = profile.vibeTag,
                     confidence = 0.95f
                 )
-                vm.playRecommendation(context, fakeRec)
+                vm.playRecommendation(context, rec)
                 onDismiss?.invoke()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = DeepObsidianAmber.PrimaryAccent, contentColor = DeepObsidianAmber.AppBackground),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
         ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DeepObsidianAmber.AppBackground, modifier = Modifier.size(18.dp))
+            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Open & Play in $appName", color = DeepObsidianAmber.AppBackground, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("Play in $appName", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
     }
 }
 
-/**
- * Bottom Sheet modal host for SongProfile.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongProfileSheet(

@@ -38,6 +38,9 @@ class TuneMindListenerService : NotificationListenerService() {
                 it.start()
             }
             observer = MediaSessionObserver(this, serviceScope) { observation ->
+                if (com.tunemind.app.domain.voice.AgentSettingsStore.isPrivateSessionEnabled(this@TuneMindListenerService)) {
+                    return@MediaSessionObserver
+                }
                 repository.record(observation)
                 serviceScope.launch {
                     try {

@@ -113,6 +113,26 @@ fun RhythmDnaScreen(
     var selectedPhaseIndex by remember { mutableStateOf(livePhaseIndex) }
     val activePhase = phases[selectedPhaseIndex]
 
+    val phaseActivityMap = remember(cleanPlayHistory) {
+        val counts = IntArray(4)
+        val durationsMs = LongArray(4)
+        val cal = Calendar.getInstance()
+        for (ev in cleanPlayHistory) {
+            cal.timeInMillis = ev.playedAtMs
+            val hr = cal.get(Calendar.HOUR_OF_DAY)
+            val idx = when (hr) {
+                in 6..11 -> 0
+                in 12..16 -> 1
+                in 17..21 -> 2
+                else -> 3
+            }
+            counts[idx]++
+            durationsMs[idx] += ev.listenedMs.coerceAtLeast(0L)
+        }
+        (0..3).associateWith { idx -> counts[idx] to ((durationsMs[idx] / 60_000L).toInt()) }
+    }
+    val (activePhasePlays, activePhaseMins) = phaseActivityMap[selectedPhaseIndex] ?: (0 to 0)
+
     var activeSyncTrack by remember { mutableStateOf<TrackMemoryEntry?>(null) }
     var showServerDialog by remember { mutableStateOf(false) }
     var serverUrlInput by remember {
@@ -855,13 +875,21 @@ fun RhythmDnaScreen(
                                                 )
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
-                                                    text = "${activePhase.targetBpm} BPM",
+                                                    text = if (activePhasePlays > 0) {
+                                                        "$activePhasePlays plays"
+                                                    } else {
+                                                        "${activePhase.targetBpm} BPM"
+                                                    },
                                                     color = Color.White,
-                                                    fontSize = 23.sp,
+                                                    fontSize = 22.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Text(
-                                                    text = "${activePhase.hoursLabel} • $dbValue dB",
+                                                    text = if (activePhasePlays > 0) {
+                                                        "${activePhaseMins}m • $dbValue dB"
+                                                    } else {
+                                                        "${activePhase.hoursLabel} • $dbValue dB"
+                                                    },
                                                     color = Color.White.copy(alpha = 0.62f),
                                                     fontSize = 11.sp
                                                 )
@@ -1038,44 +1066,65 @@ fun RhythmDnaScreen(
                                             )
                                         }
 
-                                        val playerOptions = listOf(
-                                            "com.spotify.music" to "Spotify",
-                                            "com.google.android.apps.youtube.music" to "YouTube Music",
-                                            "com.apple.android.music" to "Apple Music"
-                                        )
+                                        val registry = remember(context) {
+                                            com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+                                        }
+                                        val installedProviders = remember(registry) {
+                                            registry.getInstalledProviders()
+                                        }
+                                        var preferredProviderId by remember(registry) {
+                                            mutableStateOf(registry.getPreferredProviderId())
+                                        }
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            playerOptions.forEach { (pkg, label) ->
-                                                val isSelected = selectedTargetPlayer == pkg
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .defaultMinSize(minHeight = 42.dp)
-                                                        .clip(RoundedCornerShape(14.dp))
-                                                        .background(
-                                                            if (isSelected) theme.primaryAccent.copy(alpha = 0.18f)
-                                                            else Color.White.copy(alpha = 0.04f)
+                                        installedProviders.chunked(2).forEach { rowProviders ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                rowProviders.forEach { provider ->
+                                                    val isSelected = preferredProviderId == provider.providerId ||
+                                                        (provider.packageName != "*" && selectedTargetPlayer == provider.packageName)
+                                                    val shortName = when (provider.providerId) {
+                                                        "local_files" -> "Local Audio"
+                                                        "tunemind_inapp" -> "TuneMind Player"
+                                                        else -> provider.displayName
+                                                    }
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .defaultMinSize(minHeight = 42.dp)
+                                                            .clip(RoundedCornerShape(14.dp))
+                                                            .background(
+                                                                if (isSelected) theme.primaryAccent.copy(alpha = 0.18f)
+                                                                else Color.White.copy(alpha = 0.04f)
+                                                            )
+                                                            .border(
+                                                                width = 1.dp,
+                                                                color = if (isSelected) theme.primaryAccent.copy(alpha = 0.55f)
+                                                                else Color.White.copy(alpha = 0.08f),
+                                                                shape = RoundedCornerShape(14.dp)
+                                                            )
+                                                            .bouncyClickable {
+                                                                preferredProviderId = provider.providerId
+                                                                registry.setPreferredProviderId(provider.providerId)
+                                                                val pkg = provider.packageName.takeIf { it != "*" } ?: provider.providerId
+                                                                onSelectTargetPlayer(pkg)
+                                                            }
+                                                            .padding(vertical = 10.dp, horizontal = 8.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = shortName,
+                                                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.62f),
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
-                                                        .border(
-                                                            width = 1.dp,
-                                                            color = if (isSelected) theme.primaryAccent.copy(alpha = 0.55f)
-                                                            else Color.White.copy(alpha = 0.08f),
-                                                            shape = RoundedCornerShape(14.dp)
-                                                        )
-                                                        .bouncyClickable { onSelectTargetPlayer(pkg) }
-                                                        .padding(vertical = 10.dp, horizontal = 6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1
-                                                    )
+                                                    }
+                                                }
+                                                if (rowProviders.size == 1) {
+                                                    Spacer(modifier = Modifier.weight(1f))
                                                 }
                                             }
                                         }

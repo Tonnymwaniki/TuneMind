@@ -18,6 +18,7 @@ import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
 import spotifyAuthRouter from './api/v1/spotifyAuth';
+import discoveryRouter from './api/v1/discovery';
 import { EventStore } from './domain/events/EventStore';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
@@ -34,6 +35,7 @@ app.use('/api/v1/events', eventsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/reasoning', reasoningRouter);
 app.use('/api/v1/spotify', spotifyAuthRouter);
+app.use('/api/v1/discovery', discoveryRouter);
 
 // Live Supabase Intelligence Sync & Long-Term Growth Endpoints
 app.post('/api/v1/intelligence/sync', async (req, res) => {

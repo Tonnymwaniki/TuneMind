@@ -83,10 +83,10 @@ fun SettingsScreen(
     var hasAudioPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)) }
     var isSpotifyInstalled by remember { mutableStateOf(com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context)) }
 
-    var fatigueSensitivity by remember { mutableStateOf(0.75f) }
-    var chronoReceptivity by remember { mutableStateOf(true) }
-    var cloakingSession by remember { mutableStateOf(false) }
-    var deduplicateLogs by remember { mutableStateOf(true) }
+    val fatigueSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
+    val chronoReceptivity by com.tunemind.app.domain.voice.AgentSettingsStore.lateNightComfortEnabled.collectAsState()
+    val cloakingSession by com.tunemind.app.domain.voice.AgentSettingsStore.privateSessionEnabled.collectAsState()
+    val deduplicateLogs by com.tunemind.app.domain.voice.AgentSettingsStore.mergeDuplicatePlaysEnabled.collectAsState()
 
     val scrollState = rememberScrollState()
     val colors = TuneMindTheme.colors
@@ -946,7 +946,10 @@ fun SettingsScreen(
 
                     Slider(
                         value = fatigueSensitivity,
-                        onValueChange = { fatigueSensitivity = it },
+                        valueRange = 0.2f..1.0f,
+                        onValueChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setRepetitionSensitivity(context, it)
+                        },
                         colors = SliderDefaults.colors(
                             thumbColor = colors.primaryAccent,
                             activeTrackColor = colors.primaryAccent,
@@ -967,18 +970,30 @@ fun SettingsScreen(
 
                     SettingsSwitchRow(
                         title = "Late-Night Comfort",
-                        description = "Favors warmer, softer tracks after 10:00 PM",
+                        description = if (chronoReceptivity) {
+                            "Active: Favors warmer, softer tracks after 10:00 PM"
+                        } else {
+                            "Off: Uses standard energy discovery at all hours"
+                        },
                         checked = chronoReceptivity,
-                        onCheckedChange = { chronoReceptivity = it }
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setLateNightComfortEnabled(context, it)
+                        }
                     )
 
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
                     SettingsSwitchRow(
                         title = "Private Session",
-                        description = "Pause listening tracking temporarily",
+                        description = if (cloakingSession) {
+                            "Active: Listening tracking and history recording are paused"
+                        } else {
+                            "Pause listening tracking temporarily"
+                        },
                         checked = cloakingSession,
-                        onCheckedChange = { cloakingSession = it }
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setPrivateSessionEnabled(context, it)
+                        }
                     )
 
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
@@ -987,7 +1002,9 @@ fun SettingsScreen(
                         title = "Merge Duplicate Plays",
                         description = "Combine identical tracks played across Spotify and other apps",
                         checked = deduplicateLogs,
-                        onCheckedChange = { deduplicateLogs = it }
+                        onCheckedChange = {
+                            com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
+                        }
                     )
                 }
             }

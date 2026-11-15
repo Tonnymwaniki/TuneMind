@@ -186,7 +186,9 @@ object ListeningPlayDeduplicator {
         nowPlayingArtist: String?,
         nowPlayingSourcePkg: String?,
         isMusicPlayingNow: Boolean,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        mergeDuplicatePlays: Boolean = true,
+        repetitionSensitivity: Float = 0.75f
     ): DeduplicatedListeningSnapshot {
         // 1. Reconstruct genuine plays from raw MediaSession observations (ignoring mirrored spotify_web_api_ingestion rows & browser clutter)
         val filteredObs = rawObservations
@@ -308,10 +310,10 @@ object ListeningPlayDeduplicator {
 
         val mergedEvents = mutableListOf<UnifiedPlayEvent>()
 
-        // Collapse any duplicate Spotify RECENTLY_PLAYED items that fall within 4 mins of the same track
+        // Collapse any duplicate Spotify RECENTLY_PLAYED items that fall within 4 mins when mergeDuplicatePlays is enabled
         for (row in verifiedSpotifyRows) {
             val key = canonicalTrackKey(row.trackTitle, row.artistName)
-            val alreadyNear = mergedEvents.any { existing ->
+            val alreadyNear = mergeDuplicatePlays && mergedEvents.any { existing ->
                 existing.sourcePackage == "com.spotify.music" &&
                     isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.trackTitle, row.artistName, row.spotifyUri) &&
                     kotlin.math.abs(existing.playedAtMs - row.playedAtEpochMs) <= MERGE_WINDOW_MS
@@ -363,11 +365,13 @@ object ListeningPlayDeduplicator {
 
         // Merge local device plays without double counting any Spotify play already synced within ±4 minutes
         for (localEvent in localPlayEvents) {
-            val matchingIdx = mergedEvents.indexOfFirst { existing ->
-                existing.sourcePackage == localEvent.sourcePackage &&
-                    isSameTrack(existing.title, existing.artist, existing.spotifyUri, localEvent.title, localEvent.artist, localEvent.spotifyUri) &&
-                    kotlin.math.abs(existing.playedAtMs - localEvent.playedAtMs) <= MERGE_WINDOW_MS
-            }
+            val matchingIdx = if (mergeDuplicatePlays) {
+                mergedEvents.indexOfFirst { existing ->
+                    existing.sourcePackage == localEvent.sourcePackage &&
+                        isSameTrack(existing.title, existing.artist, existing.spotifyUri, localEvent.title, localEvent.artist, localEvent.spotifyUri) &&
+                        kotlin.math.abs(existing.playedAtMs - localEvent.playedAtMs) <= MERGE_WINDOW_MS
+                }
+            } else -1
             if (matchingIdx >= 0) {
                 val existing = mergedEvents[matchingIdx]
                 mergedEvents[matchingIdx] = existing.copy(
@@ -424,11 +428,19 @@ object ListeningPlayDeduplicator {
             .filter { !it.albumArtUrl.isNullOrBlank() }
             .associate { canonicalTrackKey(it.trackTitle, it.artistName) to it.albumArtUrl }
 
+        val sensitivity = repetitionSensitivity.coerceIn(0.2f, 1.0f)
+        val satietyPerPlay = (12f + sensitivity * 12f).toInt().coerceIn(13, 25)
+        val coolingPlayThreshold = when {
+            sensitivity >= 0.85f -> 3
+            sensitivity >= 0.50f -> 4
+            else -> 6
+        }
+
         val groupedByTrack = finalTimeline.groupBy { it.trackKey }
         val unifiedTracks = groupedByTrack.map { (key, events) ->
             val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
             val plays = events.size.coerceAtLeast(1)
-            val satiety = minOf(94, plays * 19)
+            val satiety = minOf(94, plays * satietyPerPlay)
             val freshness = (100 - satiety).coerceIn(12, 98)
             val bestUri = events.firstNotNullOfOrNull { it.spotifyUri }
             val bestAlbum = events.firstNotNullOfOrNull { it.album }
@@ -452,7 +464,7 @@ object ListeningPlayDeduplicator {
                 firstPlayedAtMs = events.minOf { it.playedAtMs },
                 lastPlayedAtMs = latest.playedAtMs,
                 freshnessPercent = freshness,
-                isCoolingDown = plays >= 4 || freshness < 45,
+                isCoolingDown = plays >= coolingPlayThreshold || freshness < 45,
                 sourcesUsed = events.map { it.sourcePackage }.toSet()
             )
         }.sortedByDescending { it.lastPlayedAtMs }

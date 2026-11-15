@@ -21,6 +21,12 @@ interface AiRecommendationDao {
     @Query("SELECT * FROM ai_recommendation_crate WHERE timeSlotKey = :slotKey AND isDismissed = 0 ORDER BY recommendedAtMs DESC LIMIT :limit")
     fun observeByTimeSlot(slotKey: String, limit: Int = 20): Flow<List<AiRecommendationEntity>>
 
+    @Query("SELECT * FROM ai_recommendation_crate WHERE dropDateKey = :dateKey AND isDismissed = 0 ORDER BY isWildcard ASC, matchScorePercent DESC")
+    suspend fun getByDropDateSnapshot(dateKey: String): List<AiRecommendationEntity>
+
+    @Query("SELECT * FROM ai_recommendation_crate WHERE dropDateKey != '' AND dropDateKey < :todayDateKey ORDER BY recommendedAtMs DESC LIMIT :limit")
+    suspend fun getPreviousDropsForEvaluation(todayDateKey: String, limit: Int = 24): List<AiRecommendationEntity>
+
     @Query("SELECT DISTINCT title FROM ai_recommendation_crate")
     suspend fun getAllKnownTitles(): List<String>
 
@@ -39,8 +45,29 @@ interface AiRecommendationDao {
     @Query("UPDATE ai_recommendation_crate SET isSaved = :saved, lastInteractedAtMs = :now WHERE id = :id")
     suspend fun updateSaved(id: String, saved: Boolean, now: Long = System.currentTimeMillis())
 
-    @Query("UPDATE ai_recommendation_crate SET wasPlayed = 1, playCount = playCount + 1, lastInteractedAtMs = :now WHERE id = :id")
-    suspend fun markPlayed(id: String, now: Long = System.currentTimeMillis())
+    @Query("UPDATE ai_recommendation_crate SET wasPlayed = 1, playCount = playCount + 1, avgVolumeUsedRatio = CASE WHEN :volumeRatio > 0 THEN :volumeRatio ELSE avgVolumeUsedRatio END, lastInteractedAtMs = :now WHERE id = :id")
+    suspend fun markPlayed(id: String, volumeRatio: Float = 0f, now: Long = System.currentTimeMillis())
+
+    @Query(
+        """
+        UPDATE ai_recommendation_crate
+        SET listenedDurationMs = CASE WHEN :listenedMs > listenedDurationMs THEN :listenedMs ELSE listenedDurationMs END,
+            trackDurationMs = CASE WHEN :durationMs > 0 THEN :durationMs ELSE trackDurationMs END,
+            avgVolumeUsedRatio = CASE WHEN :volumeRatio > 0 THEN :volumeRatio ELSE avgVolumeUsedRatio END,
+            completedListenCount = completedListenCount + CASE WHEN :isCompleted = 1 THEN 1 ELSE 0 END,
+            wasPlayed = 1,
+            lastInteractedAtMs = :now
+        WHERE id = :id
+        """
+    )
+    suspend fun recordListeningOutcome(
+        id: String,
+        listenedMs: Long,
+        durationMs: Long,
+        volumeRatio: Float,
+        isCompleted: Int,
+        now: Long = System.currentTimeMillis()
+    )
 
     @Query("UPDATE ai_recommendation_crate SET isDismissed = 1, lastInteractedAtMs = :now WHERE id = :id")
     suspend fun dismiss(id: String, now: Long = System.currentTimeMillis())

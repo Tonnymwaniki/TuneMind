@@ -41,6 +41,7 @@ import com.tunemind.app.domain.study.StudyEntity
  *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
  *   10 — Spotify TrackHistoryTelemetryItem table (track_history_telemetry).
  *   11 — Spotify Library tables (spotify_liked_tracks, spotify_playlists, spotify_podcasts).
+ *   12 — Self-Learning Daily For You columns on ai_recommendation_crate (dropDateKey, genreTag, outcome telemetry).
  */
 @Database(
     entities = [
@@ -59,7 +60,7 @@ import com.tunemind.app.domain.study.StudyEntity
         SpotifyPlaylistEntity::class,
         SpotifyPodcastEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -98,7 +99,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
-                        MIGRATION_10_11
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -419,6 +421,21 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_podcasts_added_at_epoch_ms ON spotify_podcasts(added_at_epoch_ms DESC)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_podcasts_show_id ON spotify_podcasts(show_id)")
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN genreTag TEXT NOT NULL DEFAULT 'Discovery'")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN dropDateKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN matchScorePercent INTEGER NOT NULL DEFAULT 92")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN avgVolumeUsedRatio REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN listenedDurationMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN trackDurationMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN isWildcard INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN spotifyUri TEXT")
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN previewUrl TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_dropDateKey ON ai_recommendation_crate(dropDateKey)")
             }
         }
     }

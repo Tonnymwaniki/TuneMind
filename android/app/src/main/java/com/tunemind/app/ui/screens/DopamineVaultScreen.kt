@@ -69,12 +69,19 @@ fun DopamineVaultScreen(
     onRefreshForYou: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
+    val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Cooling Down, 2 = For You
     var activeSyncSong by remember { mutableStateOf<DopamineSongItem?>(null) }
 
-    val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount) {
+    val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount, repetitionSensitivity) {
         val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
+        val satietyPerPlay = (12f + repetitionSensitivity.coerceIn(0.2f, 1.0f) * 12f).toInt().coerceIn(13, 25)
+        val coolingPlayThreshold = when {
+            repetitionSensitivity >= 0.85f -> 3
+            repetitionSensitivity >= 0.50f -> 4
+            else -> 6
+        }
 
         for (v in vaultTracks) {
             val key = "${v.title.trim().lowercase()}|${v.artist.trim().lowercase()}"
@@ -105,9 +112,9 @@ fun DopamineVaultScreen(
             val uri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
             val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
                 ?: maxOf(1, t.distinctAppearanceCount)
-            val satiety = minOf(94, plays * 19)
+            val satiety = minOf(94, plays * satietyPerPlay)
             val freshness = (100 - satiety).coerceIn(12, 98)
-            val cooling = plays >= 4 || freshness < 45
+            val cooling = plays >= coolingPlayThreshold || freshness < 45
 
             list.add(
                 DopamineSongItem(

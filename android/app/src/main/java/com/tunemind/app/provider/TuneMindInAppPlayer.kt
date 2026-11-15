@@ -70,6 +70,12 @@ object TuneMindInAppPlayer {
     private var currentDurationMs: Long = 0L
     @Volatile
     private var appPackageName: String = "com.tunemind.app"
+    @Volatile
+    private var loopEnabled: Boolean = false
+    @Volatile
+    private var loopStartMs: Long = 0L
+    @Volatile
+    private var loopEndMs: Long = 0L
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -78,9 +84,12 @@ object TuneMindInAppPlayer {
                 runCatching {
                     val pos = mp.currentPosition.toLong().coerceAtLeast(0L)
                     val dur = mp.duration.toLong().coerceAtLeast(currentDurationMs)
+                    if (loopEnabled && loopEndMs > loopStartMs && pos >= loopEndMs) {
+                        mp.seekTo(loopStartMs.toInt())
+                    }
                     publishSnapshot(isPlaying = true, positionMs = pos, durationMs = dur)
                 }
-                mainHandler.postDelayed(this, 900L)
+                mainHandler.postDelayed(this, 600L)
             }
         }
     }
@@ -380,7 +389,30 @@ object TuneMindInAppPlayer {
         return if (isPlaying()) pause() else resume()
     }
 
+    fun seekTo(positionMs: Long): Boolean {
+        val mp = mediaPlayer ?: return false
+        return try {
+            val target = positionMs.coerceAtLeast(0L).toInt()
+            mp.seekTo(target)
+            publishSnapshot(
+                isPlaying = _isPlayingFlow.value,
+                positionMs = target.toLong(),
+                durationMs = currentDurationMs
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun setClipLoop(startMs: Long, endMs: Long, enabled: Boolean) {
+        loopStartMs = startMs.coerceAtLeast(0L)
+        loopEndMs = maxOf(loopStartMs + 5_000L, endMs)
+        loopEnabled = enabled
+    }
+
     fun stop() {
+        loopEnabled = false
         stopInternal(resetTrackMeta = true)
     }
 

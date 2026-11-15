@@ -484,6 +484,18 @@ object SpotifyAppRemoteManager {
         }
     }
 
+    fun seekTo(positionMs: Long): Boolean {
+        val remote = spotifyAppRemote ?: return false
+        return try {
+            if (!isConnected()) return false
+            val targetMs = positionMs.coerceAtLeast(0L)
+            mainHandler.post { runCatching { remote.playerApi.seekTo(targetMs) } }
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun disconnect() {
         connectionGeneration.incrementAndGet()
         activeWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }

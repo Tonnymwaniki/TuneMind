@@ -962,10 +962,19 @@ class TuneMindViewModel : ViewModel() {
                 combine(
                     obsFlow,
                     spotifyHistoryFlow,
-                    _spotifyLiveState
-                ) { rows, spotifyHistory, liveSpotify ->
-                    Triple(rows, spotifyHistory, liveSpotify)
-                }.collect { (rows, spotifyHistory, liveSpotify) ->
+                    _spotifyLiveState,
+                    com.tunemind.app.domain.voice.AgentSettingsStore.mergeDuplicatePlaysEnabled,
+                    com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity
+                ) { rows, spotifyHistory, liveSpotify, mergeDuplicates, repetitionSensitivity ->
+                    listOf(rows, spotifyHistory, liveSpotify, mergeDuplicates, repetitionSensitivity)
+                }.collect { values ->
+                    @Suppress("UNCHECKED_CAST")
+                    val rows = values[0] as List<PlaybackObservation>
+                    @Suppress("UNCHECKED_CAST")
+                    val spotifyHistory = values[1] as List<com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity>
+                    val liveSpotify = values[2] as com.tunemind.app.data.ingestion.SpotifyLiveTrackState?
+                    val mergeDuplicates = values[3] as Boolean
+                    val repetitionSensitivity = values[4] as Float
                     val memory: ListeningMemory
                     val coverage: CoverageAssessment
                     val deviceObs = rows.filter { it.observerSessionId != "spotify_web_api_ingestion" }
@@ -1033,7 +1042,9 @@ class TuneMindViewModel : ViewModel() {
                             nowPlayingTitle = nowPlayingObs?.title,
                             nowPlayingArtist = nowPlayingObs?.artist,
                             nowPlayingSourcePkg = nowPlayingObs?.sourcePackage,
-                            isMusicPlayingNow = nowPlayingObs?.isPlaying == true
+                            isMusicPlayingNow = nowPlayingObs?.isPlaying == true,
+                            mergeDuplicatePlays = mergeDuplicates,
+                            repetitionSensitivity = repetitionSensitivity
                         )
                     }
 
@@ -1292,11 +1303,7 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    private fun defaultSeedVault(): List<VaultTrack> = listOf(
-        VaultTrack("v-1", "Electric Dreams", "The Wanderers", System.currentTimeMillis() - 86_400_000L * 2, 7f, 5.0f, 0.28f, 88),
-        VaultTrack("v-2", "Better Days", "Juno Vale", System.currentTimeMillis() - 86_400_000L * 4, 7f, 3.0f, 0.57f, 82),
-        VaultTrack("v-3", "Starlight Echoes", "Aura Nova", System.currentTimeMillis() - 86_400_000L * 6, 7f, 1.0f, 0.85f, 92)
-    )
+    private fun defaultSeedVault(): List<VaultTrack> = emptyList()
 
     private fun saveVaultToPrefs(items: List<VaultTrack>) {
         val ctx = AppHolder.context ?: return
@@ -1529,7 +1536,7 @@ class TuneMindViewModel : ViewModel() {
         )
         _recommendations.value = baseline
 
-        // If Gemini is active, asynchronously elevate with real reasoning
+        // Elevate asynchronously with Claude backend reasoning
         if (ctx != null && com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)) {
             viewModelScope.launch {
                 val aiRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateReasonedRecommendations(
@@ -1541,6 +1548,18 @@ class TuneMindViewModel : ViewModel() {
                 if (!aiRecs.isNullOrEmpty()) {
                     _recommendations.value = aiRecs
                 }
+            }
+        }
+    }
+
+    fun configureAndSeekMomentPlayback(startMs: Long, endMs: Long, loopEnabled: Boolean) {
+        com.tunemind.app.provider.TuneMindInAppPlayer.setClipLoop(startMs, endMs, loopEnabled)
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(900L)
+            if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+                com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(startMs)
+            } else if (com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()) {
+                com.tunemind.app.provider.SpotifyAppRemoteManager.seekTo(startMs)
             }
         }
     }
@@ -1636,12 +1655,21 @@ class TuneMindViewModel : ViewModel() {
                     )
                 }
 
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                val lateNightActive = com.tunemind.app.domain.voice.AgentSettingsStore.isLateNightComfortEnabled(ctx) &&
+                    (hour >= 22 || hour < 6)
+                val effectiveTimeLabel = if (lateNightActive) {
+                    "${currentTimeSlot.label} (Warm & soft late-night comfort)"
+                } else {
+                    currentTimeSlot.label
+                }
+
                 val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
                     context = ctx,
                     recentTracks = _historyState.value.tracks,
                     vaultTracks = _vaultState.value,
                     timeSlotKey = currentTimeSlot.name,
-                    timeSlotLabel = currentTimeSlot.label,
+                    timeSlotLabel = effectiveTimeLabel,
                     satietyPercent = satiety,
                     preferredProviderId = prefProvider,
                     userTasteAnchors = _userTasteAnchors.value,
