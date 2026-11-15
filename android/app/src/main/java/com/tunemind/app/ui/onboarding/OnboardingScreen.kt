@@ -68,6 +68,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun OnboardingScreen(
     onComplete: () -> Unit,
+    onOpenLegal: (Int) -> Unit = {},
     viewModel: OnboardingViewModel = viewModel()
 ) {
     val currentStep by viewModel.currentStep.collectAsState()
@@ -127,6 +128,7 @@ fun OnboardingScreen(
                     AuthLoginStep(
                         session = session,
                         authManager = authManager,
+                        onOpenLegal = onOpenLegal,
                         onContinue = { viewModel.proceedFromAuthToPermissions() }
                     )
                 }
@@ -182,6 +184,7 @@ fun OnboardingScreen(
 private fun AuthLoginStep(
     session: TuneMindUserSession,
     authManager: TuneMindAuthSessionManager,
+    onOpenLegal: (Int) -> Unit = {},
     onContinue: () -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
@@ -611,29 +614,63 @@ private fun AuthLoginStep(
                 }
             }
 
-            // Bottom-most Log In Action
-            Row(
-                modifier = Modifier
-                    .padding(top = 8.dp, bottom = 18.dp)
-                    .clickable {
+            // Bottom-most Log In Action & Subtle Legal Link
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.clickable {
                         isSignUpMode = false
                         authError = null
                         showEmailSheet = true
                     },
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Already have an account? ",
-                    color = Color.White.copy(alpha = 0.56f),
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = "Log In",
-                    color = Color(0xFF00F0FF),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Already have an account? ",
+                        color = Color.White.copy(alpha = 0.56f),
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "Log In",
+                        color = Color(0xFF00F0FF),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Terms of Use",
+                        color = Color.White.copy(alpha = 0.44f),
+                        fontSize = 11.5.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenLegal(1) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = " · ",
+                        color = Color.White.copy(alpha = 0.36f),
+                        fontSize = 11.5.sp
+                    )
+                    Text(
+                        text = "Privacy Policy",
+                        color = Color.White.copy(alpha = 0.44f),
+                        fontSize = 11.5.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenLegal(0) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }

@@ -19,9 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -83,6 +85,9 @@ fun PulseAgentScreen(
     onCycleAtmospherePalette: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
+    onOpenNowPlaying: () -> Unit = {},
+    onOpenAgentGuide: () -> Unit = {},
     profileInitial: String = "",
     currentTrackPlayCount: Int = 0,
     autonomousDjEnabled: Boolean = false
@@ -141,8 +146,16 @@ fun PulseAgentScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "Search Music",
+                            tint = Color.White.copy(alpha = 0.86f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                     IconButton(onClick = onCycleAtmospherePalette) {
                         Icon(
                             imageVector = Icons.Rounded.Palette,
@@ -324,17 +337,41 @@ fun PulseAgentScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, activeAccent.copy(alpha = 0.28f), RoundedCornerShape(28.dp))
+                        .clickable { onOpenAgentGuide() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.HelpOutline,
+                        contentDescription = null,
+                        tint = activeAccent,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "What can I say?",
+                        color = Color.White.copy(alpha = 0.84f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 6. Tactile Now-Playing Card
+            // 6. Tactile Now-Playing Card (Tap to expand Now Playing & Up Next Queue)
             NowPlayingCard(
                 trackTitle = currentTrackName,
                 artistName = artistName,
                 isMusicPlaying = isMusicPlaying,
                 playCount = currentTrackPlayCount,
-                accentColor = activeAccent
+                accentColor = activeAccent,
+                onClick = onOpenNowPlaying
             )
         }
     }
@@ -782,10 +819,14 @@ private fun NowPlayingCard(
     artistName: String?,
     isMusicPlaying: Boolean,
     playCount: Int,
-    accentColor: Color
+    accentColor: Color,
+    onClick: () -> Unit = {}
 ) {
     SoftGlassCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onClick() },
         accentTint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
         cornerRadius = 18.dp,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
@@ -837,6 +878,13 @@ private fun NowPlayingCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = "Open Now Playing",
+                tint = Color.White.copy(alpha = 0.45f),
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

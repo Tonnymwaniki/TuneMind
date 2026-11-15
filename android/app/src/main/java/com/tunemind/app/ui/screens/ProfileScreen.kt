@@ -56,6 +56,9 @@ fun ProfileScreen(
     onOpenSettings: () -> Unit,
     onOpenTasteProfile: () -> Unit,
     onOpenWeeklyReport: () -> Unit,
+    onOpenNotifications: () -> Unit = {},
+    onOpenSupport: () -> Unit = {},
+    onOpenLegal: (Int) -> Unit = {},
     onSignedOutToAuth: () -> Unit
 ) {
     val context = LocalContext.current
@@ -683,6 +686,43 @@ fun ProfileScreen(
                                 }
                             }
                         }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 4b. Notifications, Support & Legal
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Alerts, Help & Legal")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
+
+                    ProfileNavRow(
+                        icon = Icons.Rounded.NotificationsNone,
+                        iconTint = neonCyan,
+                        title = "Notifications & Alerts",
+                        subtitle = "Vault comeback alerts, hearing warnings & alert categories",
+                        onClick = onOpenNotifications
+                    )
+                    StudioHairlineDivider()
+
+                    ProfileNavRow(
+                        icon = Icons.Rounded.HelpOutline,
+                        iconTint = warnAmber,
+                        title = "Help, Troubleshooting & Feedback",
+                        subtitle = "Spotify wake steps, battery tips & bug reports",
+                        onClick = onOpenSupport
+                    )
+                    StudioHairlineDivider()
+
+                    ProfileNavRow(
+                        icon = Icons.Rounded.Policy,
+                        iconTint = Color(0xFFA855F7),
+                        title = "Privacy Policy, Terms & About",
+                        subtitle = "Permissions transparency, legal terms & app version",
+                        onClick = { onOpenLegal(0) }
                     )
                 }
             }

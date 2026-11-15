@@ -64,6 +64,12 @@ object TuneMindInAppPlayer {
     private val _currentUriFlow = MutableStateFlow<String?>(null)
     val currentUriFlow: StateFlow<String?> = _currentUriFlow.asStateFlow()
 
+    private val _positionMsFlow = MutableStateFlow(0L)
+    val positionMsFlow: StateFlow<Long> = _positionMsFlow.asStateFlow()
+
+    private val _durationMsFlow = MutableStateFlow(0L)
+    val durationMsFlow: StateFlow<Long> = _durationMsFlow.asStateFlow()
+
     @Volatile
     private var currentAlbumName: String? = null
     @Volatile
@@ -186,6 +192,65 @@ object TuneMindInAppPlayer {
         } catch (e: Exception) {
             Log.d(TAG, "Local audio search notice: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Queries local device music files from MediaStore for universal search & playback.
+     */
+    fun queryLocalAudioLibrary(
+        context: Context,
+        query: String = "",
+        limit: Int = 80
+    ): List<LocalAudioMatch> {
+        if (!PermissionUtils.hasAudioStoragePermission(context)) return emptyList()
+        val cleanQuery = query.trim().lowercase()
+        return try {
+            val projection = arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.DURATION
+            )
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+            val cursor = context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+            ) ?: return emptyList()
+
+            val results = mutableListOf<LocalAudioMatch>()
+            cursor.use { c ->
+                val idIdx = c.getColumnIndex(MediaStore.Audio.Media._ID)
+                val titleIdx = c.getColumnIndex(MediaStore.Audio.Media.TITLE)
+                val artistIdx = c.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+                val albumIdx = c.getColumnIndex(MediaStore.Audio.Media.ALBUM)
+                val durIdx = c.getColumnIndex(MediaStore.Audio.Media.DURATION)
+
+                while (c.moveToNext() && results.size < limit) {
+                    if (idIdx == -1 || titleIdx == -1) continue
+                    val fileTitle = c.getString(titleIdx)?.trim().orEmpty()
+                    if (fileTitle.isBlank()) continue
+                    val fileArtist = if (artistIdx != -1) c.getString(artistIdx)?.trim().orEmpty() else ""
+                    val fileAlbum = if (albumIdx != -1) c.getString(albumIdx)?.trim().orEmpty() else ""
+                    val durMs = if (durIdx != -1) c.getLong(durIdx).coerceAtLeast(0L) else 0L
+
+                    if (cleanQuery.isNotEmpty()) {
+                        val hay = "$fileTitle $fileArtist $fileAlbum".lowercase()
+                        if (!hay.contains(cleanQuery)) continue
+                    }
+
+                    val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, c.getLong(idIdx))
+                    results.add(LocalAudioMatch(uri, fileTitle, fileArtist, fileAlbum, durMs))
+                }
+            }
+            results
+        } catch (e: Exception) {
+            Log.d(TAG, "queryLocalAudioLibrary notice: ${e.message}")
+            emptyList()
         }
     }
 
@@ -436,10 +501,14 @@ object TuneMindInAppPlayer {
             _currentUriFlow.value = null
             currentAlbumName = null
             currentDurationMs = 0L
+            _positionMsFlow.value = 0L
+            _durationMsFlow.value = 0L
         }
     }
 
     private fun publishSnapshot(isPlaying: Boolean, positionMs: Long, durationMs: Long) {
+        _positionMsFlow.value = positionMs.coerceAtLeast(0L)
+        _durationMsFlow.value = durationMs.coerceAtLeast(0L)
         val title = _currentTitleFlow.value?.takeIf { it.isNotBlank() } ?: return
         val artist = _currentArtistFlow.value.orEmpty()
         val snap = ActivePlaybackSnapshot(

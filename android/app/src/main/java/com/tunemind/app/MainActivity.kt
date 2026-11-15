@@ -156,6 +156,13 @@ open class MainActivity : ComponentActivity() {
                     var showHearingScreen by remember { mutableStateOf(false) }
                     var showMusicProfileScreen by remember { mutableStateOf(false) }
                     var showMomentsScreen by remember { mutableStateOf(false) }
+                    var showSearchScreen by remember { mutableStateOf(false) }
+                    var showNowPlayingScreen by remember { mutableStateOf(false) }
+                    var showLegalScreen by remember { mutableStateOf(false) }
+                    var legalInitialTab by remember { mutableStateOf(0) }
+                    var showSupportScreen by remember { mutableStateOf(false) }
+                    var showNotificationsScreen by remember { mutableStateOf(false) }
+                    var showAgentGuideSheet by remember { mutableStateOf(false) }
                     var currentPagerPage by remember { mutableStateOf(1) }
                     var showLaunchSplash by remember { mutableStateOf(true) }
 
@@ -233,6 +240,27 @@ open class MainActivity : ComponentActivity() {
                                         showProfileScreen = true
                                         showSettingsScreen = true
                                     }
+                                    screen.contains("SEARCH") || screen.contains("FIND") -> {
+                                        showSettingsScreen = false
+                                        showSearchScreen = true
+                                    }
+                                    screen.contains("NOW_PLAYING") || screen.contains("PLAYER") || screen.contains("QUEUE") -> {
+                                        showNowPlayingScreen = true
+                                    }
+                                    screen.contains("NOTIF") || screen.contains("ALERT") -> {
+                                        showSettingsScreen = false
+                                        showProfileScreen = true
+                                        showNotificationsScreen = true
+                                    }
+                                    screen.contains("SUPPORT") || screen.contains("HELP") || screen.contains("FEEDBACK") -> {
+                                        showSettingsScreen = false
+                                        showProfileScreen = true
+                                        showSupportScreen = true
+                                    }
+                                    screen.contains("LEGAL") || screen.contains("PRIVACY") || screen.contains("TERM") -> {
+                                        legalInitialTab = if (screen.contains("TERM")) 1 else 0
+                                        showLegalScreen = true
+                                    }
                                     screen.contains("STAT") || screen.contains("LISTENING_SUMMARY") -> {
                                         showSettingsScreen = false
                                         showProfileScreen = false
@@ -270,6 +298,11 @@ open class MainActivity : ComponentActivity() {
                                         showHearingScreen = false
                                         showMusicProfileScreen = false
                                         showMomentsScreen = false
+                                        showSearchScreen = false
+                                        showNowPlayingScreen = false
+                                        showNotificationsScreen = false
+                                        showSupportScreen = false
+                                        showLegalScreen = false
                                         requestedScreenPage = when {
                                             screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
                                             screen.contains("RHYTHM") || screen.contains("DNA") || screen.contains("SPOTIFY") || screen.contains("HISTORY") -> 2
@@ -295,8 +328,13 @@ open class MainActivity : ComponentActivity() {
                             getAppState = {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
+                                    showLegalScreen -> "LEGAL"
+                                    showSupportScreen -> "SUPPORT"
+                                    showNotificationsScreen -> "NOTIFICATIONS"
                                     showSettingsScreen -> "SETTINGS"
                                     showProfileScreen -> "PROFILE"
+                                    showSearchScreen -> "SEARCH"
+                                    showNowPlayingScreen -> "NOW_PLAYING"
                                     showWeeklyReportScreen -> "WEEKLY_REPORT"
                                     showHearingScreen -> "HEARING_HEALTH"
                                     showMusicProfileScreen -> "MUSIC_PROFILE"
@@ -366,6 +404,11 @@ open class MainActivity : ComponentActivity() {
                             showHearingScreen = false
                             showMomentsScreen = false
                             showStatsScreen = false
+                            showSearchScreen = false
+                            showNowPlayingScreen = false
+                            showNotificationsScreen = false
+                            showSupportScreen = false
+                            showAgentGuideSheet = false
                         }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
                         if (isMainAppActive && spotifyAuthManager.isAuthenticated()) {
@@ -436,14 +479,29 @@ open class MainActivity : ComponentActivity() {
                                 .background(adaptiveState.primaryBackground)
                         ) {
                             if (!isMainAppActive) {
-                                OnboardingScreen(
-                                    onComplete = {
-                                        hasCompletedLaunchStartFlow = true
-                                        authSessionManager.markAccountOnboardingCompleted()
-                                        authSessionManager.markStartFlowCompleted()
-                                        hasAllPermissions = true
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    OnboardingScreen(
+                                        onComplete = {
+                                            hasCompletedLaunchStartFlow = true
+                                            authSessionManager.markAccountOnboardingCompleted()
+                                            authSessionManager.markStartFlowCompleted()
+                                            hasAllPermissions = true
+                                        },
+                                        onOpenLegal = { tab ->
+                                            legalInitialTab = tab
+                                            showLegalScreen = true
+                                        }
+                                    )
+                                    if (showLegalScreen) {
+                                        androidx.activity.compose.BackHandler {
+                                            showLegalScreen = false
+                                        }
+                                        com.tunemind.app.ui.screens.LegalAboutScreen(
+                                            initialTab = legalInitialTab,
+                                            onBack = { showLegalScreen = false }
+                                        )
                                     }
-                                )
+                                }
                             } else {
                                 // 3-Screen Horizontal Pager: 0 = DOPAMINE, 1 = TUNEMIND (Center), 2 = RHYTHM
                                 val pagerState = rememberPagerState(
@@ -479,22 +537,34 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
 
-                                val hasOverlayOpen = showSettingsScreen ||
+                                val hasOverlayOpen = showLegalScreen ||
+                                    showSupportScreen ||
+                                    showNotificationsScreen ||
+                                    showSettingsScreen ||
                                     showProfileScreen ||
                                     showWeeklyReportScreen ||
                                     showHearingScreen ||
                                     showMusicProfileScreen ||
                                     showMomentsScreen ||
-                                    showStatsScreen
+                                    showStatsScreen ||
+                                    showSearchScreen ||
+                                    showNowPlayingScreen ||
+                                    showAgentGuideSheet
 
                                 androidx.activity.compose.BackHandler(enabled = hasOverlayOpen) {
                                     when {
+                                        showAgentGuideSheet -> showAgentGuideSheet = false
+                                        showLegalScreen -> showLegalScreen = false
+                                        showSupportScreen -> showSupportScreen = false
+                                        showNotificationsScreen -> showNotificationsScreen = false
                                         showSettingsScreen -> showSettingsScreen = false
                                         showMusicProfileScreen -> showMusicProfileScreen = false
                                         showWeeklyReportScreen -> showWeeklyReportScreen = false
                                         showHearingScreen -> showHearingScreen = false
                                         showMomentsScreen -> showMomentsScreen = false
                                         showStatsScreen -> showStatsScreen = false
+                                        showNowPlayingScreen -> showNowPlayingScreen = false
+                                        showSearchScreen -> showSearchScreen = false
                                         showProfileScreen -> showProfileScreen = false
                                     }
                                 }
@@ -587,6 +657,15 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onOpenStats = {
                                                     showStatsScreen = true
+                                                },
+                                                onOpenSearch = {
+                                                    showSearchScreen = true
+                                                },
+                                                onOpenNowPlaying = {
+                                                    showNowPlayingScreen = true
+                                                },
+                                                onOpenAgentGuide = {
+                                                    showAgentGuideSheet = true
                                                 },
                                                 profileInitial = if (authSession.isGoogleConnected || authSession.email.isNotBlank()) {
                                                     authSession.displayName
@@ -759,6 +838,68 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
 
+                                // Network Connectivity Offline Banner
+                                com.tunemind.app.ui.components.NetworkConnectivityBanner(
+                                    modifier = Modifier.align(Alignment.TopCenter),
+                                    onRetrySync = {
+                                        if (spotifyAuthManager.isAuthenticated()) {
+                                            vm.refreshSpotifyLibrary(forcePlaylistTracks = false)
+                                        }
+                                    }
+                                )
+
+                                // Fullscreen Search Overlay
+                                if (showSearchScreen) {
+                                    com.tunemind.app.ui.screens.SearchScreen(
+                                        vm = vm,
+                                        selectedTargetPlayer = selectedTargetPlayer,
+                                        onBack = { showSearchScreen = false },
+                                        onPlayTrack = ::playAnyTrack,
+                                        onAskAgentAboutTrack = { title, artist, freshness, spotifyUri ->
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(1)
+                                                agentVoiceManager.askAgentAboutTrack(
+                                                    title = title,
+                                                    artist = artist,
+                                                    freshnessPercent = freshness,
+                                                    spotifyUri = spotifyUri,
+                                                    targetPlayer = selectedTargetPlayer
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+
+                                // Expanded Now Playing & Up Next Queue Screen
+                                if (showNowPlayingScreen) {
+                                    com.tunemind.app.ui.screens.NowPlayingSheet(
+                                        vm = vm,
+                                        selectedTargetPlayer = selectedTargetPlayer,
+                                        dopamineCapsule = dopamineCapsule,
+                                        pendingProposedTrack = pendingProposedTrack,
+                                        onBack = { showNowPlayingScreen = false },
+                                        onApproveProposedTrack = {
+                                            agentVoiceManager.approvePendingProposedTrack()
+                                        },
+                                        onRejectProposedTrack = {
+                                            agentVoiceManager.rejectPendingProposedTrack()
+                                        },
+                                        onPlayTrack = ::playAnyTrack,
+                                        onAskAgentAboutCurrent = { title, artist ->
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(1)
+                                                agentVoiceManager.askAgentAboutTrack(
+                                                    title = title,
+                                                    artist = artist,
+                                                    freshnessPercent = 80,
+                                                    spotifyUri = spotifyLiveState?.spotifyUri,
+                                                    targetPlayer = selectedTargetPlayer
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+
                                 // Fullscreen Cross-App Listening Stats Overlay
                                 if (showStatsScreen) {
                                     com.tunemind.app.ui.screens.StatsScreen(
@@ -780,6 +921,12 @@ open class MainActivity : ComponentActivity() {
                                         onOpenSettings = { showSettingsScreen = true },
                                         onOpenTasteProfile = { showMusicProfileScreen = true },
                                         onOpenWeeklyReport = { showWeeklyReportScreen = true },
+                                        onOpenNotifications = { showNotificationsScreen = true },
+                                        onOpenSupport = { showSupportScreen = true },
+                                        onOpenLegal = { tab ->
+                                            legalInitialTab = tab
+                                            showLegalScreen = true
+                                        },
                                         onSignedOutToAuth = {
                                             showSettingsScreen = false
                                             showProfileScreen = false
@@ -820,6 +967,21 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
 
+                                // Notifications & Activity Center
+                                if (showNotificationsScreen) {
+                                    com.tunemind.app.ui.screens.NotificationsScreen(
+                                        vm = vm,
+                                        onBack = { showNotificationsScreen = false },
+                                        onOpenVault = {
+                                            showProfileScreen = false
+                                            requestedScreenPage = 0
+                                        },
+                                        onOpenHearing = { showHearingScreen = true },
+                                        onOpenWeeklyReport = { showWeeklyReportScreen = true },
+                                        onOpenSettings = { showSettingsScreen = true }
+                                    )
+                                }
+
                                 // Fullscreen TuneMind Settings Overlay (Opened from Profile Screen)
                                 if (showSettingsScreen) {
                                     com.tunemind.app.ui.screens.SettingsScreen(
@@ -837,6 +999,52 @@ open class MainActivity : ComponentActivity() {
                                         onOpenAccountAuth = {
                                             showSettingsScreen = false
                                             showProfileScreen = true
+                                        },
+                                        onOpenSupport = { showSupportScreen = true },
+                                        onOpenLegal = { tab ->
+                                            legalInitialTab = tab
+                                            showLegalScreen = true
+                                        }
+                                    )
+                                }
+
+                                // Help, Troubleshooting & Bug Report Screen
+                                if (showSupportScreen) {
+                                    com.tunemind.app.ui.screens.SupportFeedbackScreen(
+                                        vm = vm,
+                                        onBack = { showSupportScreen = false },
+                                        onOpenSettings = {
+                                            showSupportScreen = false
+                                            showSettingsScreen = true
+                                        },
+                                        onOpenLegal = {
+                                            legalInitialTab = 0
+                                            showLegalScreen = true
+                                        }
+                                    )
+                                }
+
+                                // Privacy Policy, Terms & About Screen
+                                if (showLegalScreen) {
+                                    com.tunemind.app.ui.screens.LegalAboutScreen(
+                                        initialTab = legalInitialTab,
+                                        onBack = { showLegalScreen = false },
+                                        onOpenSupport = {
+                                            showLegalScreen = false
+                                            showSupportScreen = true
+                                        }
+                                    )
+                                }
+
+                                // Interactive Voice Commands & Capability Guide Sheet
+                                if (showAgentGuideSheet) {
+                                    com.tunemind.app.ui.components.AgentGuideSheet(
+                                        onDismiss = { showAgentGuideSheet = false },
+                                        onRunPrompt = { prompt ->
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(1)
+                                                agentVoiceManager.processFinalTranscriptWithFallback(prompt)
+                                            }
                                         }
                                     )
                                 }

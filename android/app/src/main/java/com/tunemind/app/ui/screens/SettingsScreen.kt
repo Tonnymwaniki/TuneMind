@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,7 +44,9 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenCrossApp: () -> Unit,
     onOpenWeeklyReport: () -> Unit,
-    onOpenAccountAuth: () -> Unit = {}
+    onOpenAccountAuth: () -> Unit = {},
+    onOpenSupport: () -> Unit = {},
+    onOpenLegal: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -717,6 +720,48 @@ fun SettingsScreen(
                     com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
                 }
             )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 6b. Help & Legal Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Help & Legal")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenSupport() }
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Help & Send Feedback", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text("Troubleshooting guides & bug report form", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.45f))
+                    }
+                    StudioHairlineDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenLegal(0) }
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Privacy Policy, Terms & About", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text("Version, permissions disclosure & open-source notices", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.45f))
+                    }
                 }
             }
 
