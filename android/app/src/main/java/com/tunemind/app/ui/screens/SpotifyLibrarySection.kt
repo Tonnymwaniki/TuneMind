@@ -2,7 +2,7 @@ package com.tunemind.app.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,12 +34,14 @@ import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.StudioHairlineDivider
+import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.bouncyClickable
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 /**
- * Embedded Spotify Library tab inside Rhythm:
+ * Embedded Spotify Library tab inside Flow:
  * Shows Liked Songs, Playlists (with drill-down), Podcasts (Shows + Episodes), and Live Spotify State.
  */
 @Composable
@@ -80,26 +81,18 @@ fun SpotifyLibrarySection(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(bottom = 110.dp)
     ) {
-        // 1. Live Spotify Playback Banner (when track or podcast episode is playing)
+        // 1. Live Spotify Playback Hero (only when active)
         if (liveState != null) {
             item(key = "sp_live_card") {
                 val progressFrac = if (liveState.durationMs > 0L) {
                     (liveState.progressMs.toFloat() / liveState.durationMs.toFloat()).coerceIn(0f, 1f)
                 } else 0f
                 val livePlayCount = resolvePlayCount(liveState.title, liveState.artistOrShow, liveState.spotifyUri)
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = spotifyGreen.copy(alpha = 0.12f),
-                    border = BorderStroke(1.2.dp, spotifyGreen.copy(alpha = 0.55f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -129,33 +122,26 @@ fun SpotifyLibrarySection(
                                         else -> "Paused on Spotify"
                                     },
                                     color = spotifyGreen,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
 
                             if (livePlayCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(spotifyGreen.copy(alpha = 0.20f))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = "$livePlayCount ${if (livePlayCount == 1) "play" else "plays"}",
-                                        color = spotifyGreen,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                Text(
+                                    text = "$livePlayCount ${if (livePlayCount == 1) "play" else "plays"}",
+                                    color = spotifyGreen,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
 
                         Column {
                             Text(
                                 text = liveState.title,
-                                color = Color.White,
-                                fontSize = 15.sp,
+                                color = Color(0xFFF8FAFC),
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -164,10 +150,10 @@ fun SpotifyLibrarySection(
                                 text = buildString {
                                     append(liveState.artistOrShow)
                                     if (liveState.albumOrSubtitle.isNotBlank()) {
-                                        append(" • ${liveState.albumOrSubtitle}")
+                                        append(" · ${liveState.albumOrSubtitle}")
                                     }
                                 },
-                                color = Color.White.copy(alpha = 0.68f),
+                                color = Color.White.copy(alpha = 0.60f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -179,10 +165,10 @@ fun SpotifyLibrarySection(
                                 progress = { progressFrac },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(4.dp)
+                                    .height(3.dp)
                                     .clip(RoundedCornerShape(2.dp)),
                                 color = spotifyGreen,
-                                trackColor = Color.White.copy(alpha = 0.12f)
+                                trackColor = Color.White.copy(alpha = 0.10f)
                             )
                         }
                     }
@@ -190,115 +176,103 @@ fun SpotifyLibrarySection(
             }
         }
 
-        // 2. Sync Header + Permission Upgrade Prompt if needed
+        // 2. Open Library Header + Sub-tabs
         item(key = "sp_library_header") {
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Spotify Library",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "${likedTracks.size} Liked · ${playlists.size} Playlists · ${podcastShows.size} Shows",
+                            color = Color.White.copy(alpha = 0.56f),
+                            fontSize = 12.sp
+                        )
+                    }
+
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(spotifyGreen)
+                            .bouncyClickable {
+                                if (isSpotifyConnected) onRefreshLibrary()
+                                else onRequestSpotifyAuth()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Spotify Library",
-                                color = spotifyGreen,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.Black
                             )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        Text(
+                            text = when {
+                                isSyncing -> "Syncing…"
+                                isSpotifyConnected -> "Sync"
+                                else -> "Connect"
+                            },
+                            color = Color.Black,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                if (!isSpotifyConnected || needsScopeUpgrade) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (!isSpotifyConnected) {
+                                "Connect Spotify to sync your Liked Songs, Playlists, and Podcasts into TuneMind."
+                            } else {
+                                "Update Spotify permissions once so TuneMind can load your Liked Songs, Playlists, and Podcasts."
+                            },
+                            color = Color(0xFFFFB000),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                        Button(
+                            onClick = onRequestSpotifyAuth,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000)),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
                             Text(
-                                text = "${likedTracks.size} Liked • ${playlists.size} Playlists • ${podcastShows.size} Shows",
-                                color = Color.White,
-                                fontSize = 13.sp,
+                                text = if (!isSpotifyConnected) "Connect Spotify" else "Update Spotify Permissions",
+                                color = Color.Black,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(spotifyGreen)
-                                .bouncyClickable {
-                                    if (isSpotifyConnected) onRefreshLibrary()
-                                    else onRequestSpotifyAuth()
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            if (isSyncing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(13.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.Black
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                            Text(
-                                text = when {
-                                    isSyncing -> "Syncing…"
-                                    isSpotifyConnected -> "Sync"
-                                    else -> "Connect"
-                                },
-                                color = Color.Black,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
                     }
+                }
 
-                    if (!isSpotifyConnected || needsScopeUpgrade) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFFFFB000).copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, Color(0xFFFFB000).copy(alpha = 0.42f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = if (!isSpotifyConnected) {
-                                        "Connect Spotify to sync your Liked Songs, Playlists, and Podcasts into TuneMind."
-                                    } else {
-                                        "Update Spotify permissions once so TuneMind can load your Liked Songs, Playlists, and Podcasts."
-                                    },
-                                    color = Color.White.copy(alpha = 0.90f),
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
-                                Button(
-                                    onClick = onRequestSpotifyAuth,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000)),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = if (!isSpotifyConnected) "Connect Spotify" else "Update Spotify Permissions",
-                                        color = Color.Black,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 3 Sub-Tabs: Liked Songs | Playlists | Podcasts
+                // Underline Sub-Tabs: Liked | Playlists | Podcasts
+                Column {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
                         val tabs = listOf(
                             "Liked (${likedTracks.size})",
@@ -307,34 +281,34 @@ fun SpotifyLibrarySection(
                         )
                         tabs.forEachIndexed { idx, label ->
                             val selected = subTab == idx
-                            Box(
-                                contentAlignment = Alignment.Center,
+                            Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) spotifyGreen.copy(alpha = 0.20f) else Color.Transparent)
-                                    .border(
-                                        1.dp,
-                                        if (selected) spotifyGreen.copy(alpha = 0.48f) else Color.Transparent,
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .bouncyClickable {
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
                                         subTab = idx
                                         if (idx != 1) selectedPlaylistId = null
                                     }
-                                    .padding(vertical = 8.dp, horizontal = 4.dp)
+                                    .padding(vertical = 4.dp)
                             ) {
                                 Text(
                                     text = label,
-                                    color = if (selected) spotifyGreen else Color.White.copy(alpha = 0.62f),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (selected) spotifyGreen else Color.White.copy(alpha = 0.54f),
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(36.dp)
+                                        .height(2.dp)
+                                        .background(if (selected) spotifyGreen else Color.Transparent)
                                 )
                             }
                         }
                     }
+                    StudioHairlineDivider()
                 }
             }
         }
@@ -344,7 +318,7 @@ fun SpotifyLibrarySection(
             0 -> {
                 if (likedTracks.isEmpty()) {
                     item(key = "sp_liked_empty") {
-                        LibraryEmptyCard(
+                        LibraryEmptyBlock(
                             title = "No Liked Songs synced yet",
                             subtitle = if (isSpotifyConnected) "Tap Sync above to pull your saved tracks from Spotify."
                             else "Connect Spotify to view your Liked Songs and live play counts."
@@ -364,7 +338,7 @@ fun SpotifyLibrarySection(
                             subtitle = listOfNotNull(
                                 item.albumName.takeIf { it.isNotBlank() },
                                 durLabel.takeIf { it.isNotBlank() }
-                            ).joinToString(" • ").ifBlank { null },
+                            ).joinToString(" · ").ifBlank { null },
                             playCount = plays,
                             showUnplayedLabel = true,
                             isCurrentlyPlaying = isPlaying,
@@ -387,32 +361,34 @@ fun SpotifyLibrarySection(
                     val displayedSongCount = maxOf(selectedPlaylist.trackCount, playlistTracks.size)
 
                     item(key = "pl_back_header") {
-                        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF0E131D),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.08f))
-                                        .bouncyClickable { selectedPlaylistId = null }
+                                        .size(38.dp)
+                                        .clickable { selectedPlaylistId = null }
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.ArrowBack,
-                                        contentDescription = "Back to Playlists",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ArrowBack,
+                                            contentDescription = "Back to Playlists",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = selectedPlaylist.name,
-                                        color = Color.White,
-                                        fontSize = 15.sp,
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -425,11 +401,11 @@ fun SpotifyLibrarySection(
                                                 else -> append("Playlist")
                                             }
                                             if (selectedPlaylist.ownerName.isNotBlank()) {
-                                                append(" • ${selectedPlaylist.ownerName}")
+                                                append(" · ${selectedPlaylist.ownerName}")
                                             }
                                         },
                                         color = spotifyGreen,
-                                        fontSize = 11.sp
+                                        fontSize = 12.sp
                                     )
                                 }
                                 if (isLoadingThisPlaylist) {
@@ -440,6 +416,7 @@ fun SpotifyLibrarySection(
                                     )
                                 }
                             }
+                            StudioHairlineDivider()
                         }
                     }
 
@@ -457,7 +434,7 @@ fun SpotifyLibrarySection(
                                 subtitle = listOfNotNull(
                                     tr.album.takeIf { it.isNotBlank() },
                                     durLabel.takeIf { it.isNotBlank() }
-                                ).joinToString(" • ").ifBlank { null },
+                                ).joinToString(" · ").ifBlank { null },
                                 playCount = plays,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = isPlaying,
@@ -470,98 +447,94 @@ fun SpotifyLibrarySection(
                         }
                     } else if (isLoadingThisPlaylist || !isLoadedThisPlaylist) {
                         item(key = "pl_tracks_loading") {
-                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.2.dp,
-                                        color = spotifyGreen
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.2.dp,
+                                    color = spotifyGreen
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Loading songs from Spotify…",
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Loading songs from Spotify…",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = "Fetching playlist items for ${selectedPlaylist.name}",
-                                            color = Color.White.copy(alpha = 0.62f),
-                                            fontSize = 11.sp
-                                        )
-                                    }
+                                    Text(
+                                        text = "Fetching playlist items for ${selectedPlaylist.name}",
+                                        color = Color.White.copy(alpha = 0.58f),
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
                         }
                     } else {
                         item(key = "pl_tracks_empty_or_error") {
-                            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = if (!playlistError.isNullOrBlank()) {
+                                        "Could not load playlist songs"
+                                    } else {
+                                        "No songs returned for this playlist"
+                                    },
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = playlistError
+                                        ?: "This playlist appears empty or Spotify omitted its tracks for this account.",
+                                    color = Color.White.copy(alpha = 0.64f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text = if (!playlistError.isNullOrBlank()) {
-                                            "Could not load playlist songs"
-                                        } else {
-                                            "No songs returned for this playlist"
-                                        },
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = playlistError
-                                            ?: "This playlist appears empty or Spotify omitted its tracks for this account.",
-                                        color = Color.White.copy(alpha = 0.72f),
-                                        fontSize = 12.sp,
-                                        lineHeight = 17.sp
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    OutlinedButton(
+                                        onClick = { onLoadPlaylistTracks(selectedPlaylist.playlistId) },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        OutlinedButton(
-                                            onClick = { onLoadPlaylistTracks(selectedPlaylist.playlistId) },
-                                            shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(
-                                                text = "Retry",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                        Text(
+                                            text = "Retry",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            onPlayTrack(
+                                                selectedPlaylist.name,
+                                                selectedPlaylist.ownerName.ifBlank { "Spotify Playlist" },
+                                                selectedPlaylist.uri,
+                                                "com.spotify.music"
                                             )
-                                        }
-                                        Button(
-                                            onClick = {
-                                                onPlayTrack(
-                                                    selectedPlaylist.name,
-                                                    selectedPlaylist.ownerName.ifBlank { "Spotify Playlist" },
-                                                    selectedPlaylist.uri,
-                                                    "com.spotify.music"
-                                                )
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = spotifyGreen),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(
-                                                text = "Play Playlist",
-                                                color = Color.Black,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = spotifyGreen),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = "Play Playlist",
+                                            color = Color.Black,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
                                     }
                                 }
                             }
@@ -569,7 +542,7 @@ fun SpotifyLibrarySection(
                     }
                 } else if (playlists.isEmpty()) {
                     item(key = "sp_playlists_empty") {
-                        LibraryEmptyCard(
+                        LibraryEmptyBlock(
                             title = "No Playlists synced yet",
                             subtitle = "Tap Sync above to fetch your personal Spotify playlists."
                         )
@@ -590,31 +563,24 @@ fun SpotifyLibrarySection(
                         val hasPlayingTrack = previewTracks.any {
                             isTrackCurrentlyPlaying(it.title, it.artist, it.spotifyUri)
                         }
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (hasPlayingTrack) spotifyGreen.copy(alpha = 0.12f) else Color(0xFF0C1018).copy(alpha = 0.92f),
-                            border = BorderStroke(
-                                1.dp,
-                                if (hasPlayingTrack) spotifyGreen.copy(alpha = 0.58f) else Color.White.copy(alpha = 0.08f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .bouncyClickable { selectedPlaylistId = pl.playlistId }
-                        ) {
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(14.dp),
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (hasPlayingTrack) spotifyGreen.copy(alpha = 0.08f) else Color.Transparent)
+                                    .bouncyClickable { selectedPlaylistId = pl.playlistId }
+                                    .padding(horizontal = 4.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(spotifyGreen.copy(alpha = 0.16f))
-                                        .border(1.dp, spotifyGreen.copy(alpha = 0.36f), RoundedCornerShape(14.dp))
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(spotifyGreen.copy(alpha = 0.14f))
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.QueueMusic,
@@ -627,8 +593,8 @@ fun SpotifyLibrarySection(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = pl.name,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
+                                        color = if (hasPlayingTrack) spotifyGreen else Color(0xFFF8FAFC),
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -636,31 +602,24 @@ fun SpotifyLibrarySection(
                                     Text(
                                         text = buildString {
                                             append(countLabel)
-                                            if (pl.ownerName.isNotBlank()) append(" • ${pl.ownerName}")
+                                            if (pl.ownerName.isNotBlank()) append(" · ${pl.ownerName}")
+                                            if (hasPlayingTrack) append(" · Playing")
                                         },
-                                        color = Color.White.copy(alpha = 0.62f),
+                                        color = Color.White.copy(alpha = 0.56f),
                                         fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    if (hasPlayingTrack) {
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = "Playing now",
-                                            color = spotifyGreen,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
                                 }
 
                                 Icon(
                                     imageVector = Icons.Rounded.ChevronRight,
                                     contentDescription = "Open Playlist",
-                                    tint = Color.White.copy(alpha = 0.65f),
+                                    tint = Color.White.copy(alpha = 0.45f),
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
+                            StudioHairlineDivider(modifier = Modifier.padding(start = 60.dp))
                         }
                     }
                 }
@@ -669,7 +628,7 @@ fun SpotifyLibrarySection(
             else -> {
                 if (podcasts.isEmpty()) {
                     item(key = "sp_podcasts_empty") {
-                        LibraryEmptyCard(
+                        LibraryEmptyBlock(
                             title = "No Podcasts synced yet",
                             subtitle = "Follow shows or save podcast episodes on Spotify, then tap Sync."
                         )
@@ -677,49 +636,39 @@ fun SpotifyLibrarySection(
                 } else {
                     if (podcastShows.isNotEmpty()) {
                         item(key = "pod_shows_header") {
-                            Text(
-                                text = "Following Shows (${podcastShows.size})",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            StudioSectionHeader(title = "Following Shows (${podcastShows.size})")
                         }
                         items(
                             items = podcastShows,
                             key = { "show_${it.itemId}" }
                         ) { show ->
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = Color(0xFF0C1018).copy(alpha = 0.92f),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
+                                        .padding(vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Box(
                                         contentAlignment = Alignment.Center,
                                         modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(theme.secondaryAccent.copy(alpha = 0.16f))
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(theme.secondaryAccent.copy(alpha = 0.14f))
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Podcasts,
                                             contentDescription = null,
                                             tint = theme.secondaryAccent,
-                                            modifier = Modifier.size(22.dp)
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = show.showName,
-                                            color = Color.White,
-                                            fontSize = 14.sp,
+                                            color = Color(0xFFF8FAFC),
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -728,29 +677,27 @@ fun SpotifyLibrarySection(
                                             text = buildString {
                                                 if (show.publisher.isNotBlank()) append(show.publisher)
                                                 if (show.totalEpisodes > 0) {
-                                                    if (isNotEmpty()) append(" • ")
+                                                    if (isNotEmpty()) append(" · ")
                                                     append("${show.totalEpisodes} episodes")
                                                 }
                                             }.ifBlank { "Podcast Show" },
-                                            color = Color.White.copy(alpha = 0.62f),
+                                            color = Color.White.copy(alpha = 0.56f),
                                             fontSize = 12.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
+                                StudioHairlineDivider(modifier = Modifier.padding(start = 54.dp))
                             }
                         }
                     }
 
                     if (podcastEpisodes.isNotEmpty()) {
                         item(key = "pod_episodes_header") {
-                            Text(
-                                text = "Recent & Saved Episodes",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 4.dp)
+                            StudioSectionHeader(
+                                title = "Recent & Saved Episodes",
+                                modifier = Modifier.padding(top = 6.dp)
                             )
                         }
                         items(
@@ -764,21 +711,16 @@ fun SpotifyLibrarySection(
                             } else 0f
                             val remainingMins = ((ep.durationMs - ep.resumePositionMs).coerceAtLeast(0L) / 60_000L)
 
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isPlaying) spotifyGreen.copy(alpha = 0.12f) else Color(0xFF0C1018).copy(alpha = 0.92f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isPlaying) spotifyGreen.copy(alpha = 0.60f) else Color.White.copy(alpha = 0.08f)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .bouncyClickable {
-                                        onPlayTrack(ep.episodeTitle, ep.showName, ep.uri.ifBlank { null }, "com.spotify.music")
-                                    }
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Column(
-                                    modifier = Modifier.padding(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isPlaying) spotifyGreen.copy(alpha = 0.08f) else Color.Transparent)
+                                        .bouncyClickable {
+                                            onPlayTrack(ep.episodeTitle, ep.showName, ep.uri.ifBlank { null }, "com.spotify.music")
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 12.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Row(
@@ -791,7 +733,7 @@ fun SpotifyLibrarySection(
                                             modifier = Modifier
                                                 .size(44.dp)
                                                 .clip(CircleShape)
-                                                .background((if (isPlaying) spotifyGreen else theme.primaryAccent).copy(alpha = 0.16f))
+                                                .background((if (isPlaying) spotifyGreen else theme.primaryAccent).copy(alpha = 0.14f))
                                         ) {
                                             if (isPlaying) {
                                                 AnimatedEqualizerBars(
@@ -811,16 +753,16 @@ fun SpotifyLibrarySection(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = ep.episodeTitle,
-                                                color = Color.White,
+                                                color = if (isPlaying) spotifyGreen else Color(0xFFF8FAFC),
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                text = "${ep.showName} • ${durMins}m${if (ep.releaseDate.isNotBlank()) " • ${ep.releaseDate}" else ""}",
-                                                color = Color.White.copy(alpha = 0.62f),
-                                                fontSize = 11.sp,
+                                                text = "${ep.showName} · ${durMins}m${if (ep.releaseDate.isNotBlank()) " · ${ep.releaseDate}" else ""}",
+                                                color = Color.White.copy(alpha = 0.58f),
+                                                fontSize = 12.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -837,7 +779,7 @@ fun SpotifyLibrarySection(
                                                 progress = { if (ep.fullyPlayed) 1f else resumeFrac },
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .height(4.dp)
+                                                    .height(3.dp)
                                                     .clip(RoundedCornerShape(2.dp)),
                                                 color = if (isPlaying) spotifyGreen else theme.primaryAccent,
                                                 trackColor = Color.White.copy(alpha = 0.08f)
@@ -848,13 +790,14 @@ fun SpotifyLibrarySection(
                                                     ep.fullyPlayed -> "Played"
                                                     else -> "${remainingMins}m left"
                                                 },
-                                                color = if (isPlaying) spotifyGreen else Color.White.copy(alpha = 0.64f),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                color = if (isPlaying) spotifyGreen else Color.White.copy(alpha = 0.60f),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                     }
                                 }
+                                StudioHairlineDivider()
                             }
                         }
                     }
@@ -865,31 +808,29 @@ fun SpotifyLibrarySection(
 }
 
 @Composable
-private fun LibraryEmptyCard(
+private fun LibraryEmptyBlock(
     title: String,
     subtitle: String
 ) {
-    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = subtitle,
-                color = Color.White.copy(alpha = 0.62f),
-                fontSize = 12.sp,
-                lineHeight = 17.sp
-            )
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = title,
+            color = Color(0xFFF8FAFC),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = subtitle,
+            color = Color.White.copy(alpha = 0.58f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
     }
 }
 

@@ -1,18 +1,18 @@
 package com.tunemind.app.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.MusicNote
@@ -25,14 +25,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.StudioHairlineDivider
+import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MusicProfileScreen(
     vm: TuneMindViewModel,
@@ -54,16 +57,28 @@ fun MusicProfileScreen(
     var showAddAnchorDialog by remember { mutableStateOf(false) }
     var newAnchorText by remember { mutableStateOf("") }
 
+    val sheetFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = Color(0xFFF8FAFC),
+        unfocusedTextColor = Color(0xFFF8FAFC),
+        focusedContainerColor = Color(0xFF07090E),
+        unfocusedContainerColor = Color(0xFF07090E),
+        focusedBorderColor = theme.primaryAccent,
+        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+        focusedLabelColor = theme.primaryAccent,
+        unfocusedLabelColor = Color.White.copy(alpha = 0.56f),
+        cursorColor = theme.primaryAccent
+    )
+
     StudioAmbientBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            // Top Bar with Back + Settings
+            // Top Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -71,65 +86,37 @@ fun MusicProfileScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFF0C1018).copy(alpha = 0.92f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable { onBack() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Column {
-                        Text(
-                            text = "TASTE PROFILE",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.primaryAccent,
-                            letterSpacing = 1.4.sp
-                        )
-                        Text(
-                            text = "Your Sound Identity",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFFF8FAFC)
                         )
                     }
+                    Text(
+                        text = "Taste Profile",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC)
+                    )
                 }
 
-                Surface(
-                    shape = CircleShape,
-                    color = Color(0xFF0C1018).copy(alpha = 0.92f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clickable { onOpenSettings() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.Settings,
-                            contentDescription = "Settings",
-                            tint = Color.White.copy(alpha = 0.88f),
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = Color.White.copy(alpha = 0.80f)
+                    )
                 }
             }
 
-            // Profile Identity Card
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 1. Primary Hero Card (only SoftGlassCard on this screen)
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -137,8 +124,8 @@ fun MusicProfileScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(60.dp)
-                                .clip(RoundedCornerShape(18.dp))
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(
                                     Brush.linearGradient(
                                         listOf(theme.primaryAccent, theme.secondaryAccent)
@@ -148,9 +135,9 @@ fun MusicProfileScreen(
                         ) {
                             Text(
                                 text = userProfile.name.take(1).uppercase().ifEmpty { "T" },
-                                fontSize = 24.sp,
+                                fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF05060A)
+                                color = Color(0xFF07090E)
                             )
                         }
 
@@ -164,7 +151,7 @@ fun MusicProfileScreen(
                                     text = userProfile.name,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = Color(0xFFF8FAFC)
                                 )
                                 IconButton(
                                     onClick = {
@@ -172,7 +159,7 @@ fun MusicProfileScreen(
                                         editArchetype = userProfile.archetype
                                         showEditProfileDialog = true
                                     },
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Edit,
@@ -184,275 +171,249 @@ fun MusicProfileScreen(
                             }
                             Text(
                                 text = userProfile.archetype,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = theme.primaryAccent
                             )
                             Text(
                                 text = userProfile.archetypeDescription,
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.62f),
-                                lineHeight = 16.sp
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.60f),
+                                lineHeight = 17.sp
                             )
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ProfileStatTile("Listened", monitoredHours, theme.primaryAccent, Modifier.weight(1f))
-                        ProfileStatTile("Music Apps", "${stats.appBreakdown.size.coerceAtLeast(1)}", theme.secondaryAccent, Modifier.weight(1f))
-                        ProfileStatTile("Match Score", "$confidencePct%", Color(0xFF10B981), Modifier.weight(1f))
-                    }
-                }
-            }
+                    StudioHairlineDivider()
 
-            // Switchboard Settings Link
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF0C1018).copy(alpha = 0.92f),
-                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.28f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenSettings() }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(theme.primaryAccent.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Settings,
-                                contentDescription = null,
-                                tint = theme.primaryAccent,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Playback & Voice Settings",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Stay-in-TuneMind, Spotify Remote & permissions",
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.60f)
-                            )
-                        }
-                    }
-                    Icon(
-                        imageVector = Icons.Rounded.ArrowForward,
-                        contentDescription = "Open Settings",
-                        tint = theme.primaryAccent,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-
-            // Editable Favorite Genres & Artists
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Favorite Genres & Artists",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Guides what TuneMind suggests in For You & voice picks",
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.60f)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                newAnchorText = ""
-                                showAddAnchorDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = theme.primaryAccent.copy(alpha = 0.18f),
-                                contentColor = theme.primaryAccent
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        tasteAnchors.forEach { anchor ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color.White.copy(alpha = 0.05f),
-                                border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.35f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = anchor,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Color.White
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Remove $anchor",
-                                        tint = Color.White.copy(alpha = 0.56f),
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clickable { vm.removeTasteAnchor(anchor) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Listening Habits Summary
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Listening Habits",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text("Fresh vs Repeat", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-                            Text("${stats.discoveryRatePercent}% Fresh", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Completion", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-                            Text("${stats.completionRatePercent}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.primaryAccent)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Peak Time", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-                            Text(stats.peakWindowLabel.substringBefore(" "), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.secondaryAccent)
-                        }
+                        ProfileStatColumn("Listened", monitoredHours, theme.primaryAccent)
+                        ProfileStatColumn("Apps", "${stats.appBreakdown.size.coerceAtLeast(1)}", theme.secondaryAccent)
+                        ProfileStatColumn("Match", "$confidencePct%", Color(0xFF10B981))
                     }
                 }
             }
 
-            // Connected Music Apps
-            if (stats.appBreakdown.isNotEmpty()) {
-                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // Settings link row
+            StudioHairlineDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenSettings() }
+                    .padding(vertical = 15.dp, horizontal = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = null,
+                        tint = theme.primaryAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
                         Text(
-                            text = "Observed Music Apps",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            text = "Playback & Voice Settings",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFF8FAFC)
                         )
-                        stats.appBreakdown.forEach { app ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.MusicNote,
-                                        contentDescription = null,
-                                        tint = resolveAppAccentColor(app.packageName, theme.primaryAccent),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Text(
-                                        text = app.displayName,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Color.White
-                                    )
-                                }
-                                Text(
-                                    text = "${app.playCount} plays • ${formatListeningDuration(app.listeningMs)}",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF10B981)
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Spotify Remote, players & permissions",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.56f)
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = "Open Settings",
+                    tint = Color.White.copy(alpha = 0.40f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            StudioHairlineDivider()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Favorite Genres & Artists
+            StudioSectionHeader(
+                title = "Favorite Genres & Artists",
+                actionLabel = "+ Add",
+                onActionClick = {
+                    newAnchorText = ""
+                    showAddAnchorDialog = true
+                }
+            )
+            Text(
+                text = "Guides your For You picks and voice suggestions.",
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.56f),
+                modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+            )
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                tasteAnchors.forEach { anchor ->
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0E131D))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                            .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = anchor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFF8FAFC)
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Remove $anchor",
+                            tint = Color.White.copy(alpha = 0.52f),
+                            modifier = Modifier
+                                .size(15.dp)
+                                .clickable { vm.removeTasteAnchor(anchor) }
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+            StudioHairlineDivider()
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Listening Habits
+            StudioSectionHeader(title = "Listening Habits")
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                ProfileStatColumn("Fresh Balance", "${stats.discoveryRatePercent}% Fresh", Color(0xFF10B981))
+                ProfileStatColumn("Completion", "${stats.completionRatePercent}%", theme.primaryAccent)
+                ProfileStatColumn("Peak Time", stats.peakWindowLabel.substringBefore(" "), theme.secondaryAccent)
+            }
+
+            if (stats.appBreakdown.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                StudioHairlineDivider()
+                Spacer(modifier = Modifier.height(20.dp))
+
+                StudioSectionHeader(title = "Observed Music Apps")
+                Spacer(modifier = Modifier.height(8.dp))
+                StudioHairlineDivider()
+
+                stats.appBreakdown.forEach { app ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = resolveAppAccentColor(app.packageName, theme.primaryAccent),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = app.displayName,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFF8FAFC)
+                            )
+                        }
+                        Text(
+                            text = "${app.playCount} plays · ${formatListeningDuration(app.listeningMs)}",
+                            fontSize = 13.sp,
+                            color = Color.White.copy(alpha = 0.62f)
+                        )
+                    }
+                    StudioHairlineDivider()
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
         }
     }
 
+    // Native Full-Width Edit Profile Bottom Sheet
     if (showEditProfileDialog) {
-        AlertDialog(
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
             onDismissRequest = { showEditProfileDialog = false },
-            title = { Text("Edit Profile", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = editName,
-                        onValueChange = { editName = it },
-                        label = { Text("Display Name") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = theme.primaryAccent,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-                        )
-                    )
-                    OutlinedTextField(
-                        value = editArchetype,
-                        onValueChange = { editArchetype = it },
-                        label = { Text("Listening Style") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = theme.primaryAccent,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-                        )
-                    )
-                }
-            },
-            confirmButton = {
+            sheetState = sheetState,
+            containerColor = Color(0xFF0E131D),
+            contentColor = Color(0xFFF8FAFC),
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "Edit Profile",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC)
+                )
+
+                OutlinedTextField(
+                    value = editName,
+                    onValueChange = { editName = it },
+                    label = { Text("Display Name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = sheetFieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = editArchetype,
+                    onValueChange = { editArchetype = it },
+                    label = { Text("Listening Style") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (editName.isNotBlank() && editArchetype.isNotBlank()) {
+                                vm.updateUserProfile(editName.trim(), editArchetype.trim())
+                                showEditProfileDialog = false
+                            }
+                        }
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = sheetFieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Button(
                     onClick = {
                         if (editName.isNotBlank() && editArchetype.isNotBlank()) {
@@ -460,47 +421,116 @@ fun MusicProfileScreen(
                             showEditProfileDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+                    enabled = editName.isNotBlank() && editArchetype.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF8FAFC),
+                        contentColor = Color(0xFF07090E)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
                 ) {
-                    Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Save Changes", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditProfileDialog = false }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.65f))
-                }
-            },
-            containerColor = Color(0xFF10131C),
-            shape = RoundedCornerShape(18.dp)
-        )
+            }
+        }
     }
 
+    // Native Full-Width Add Genre or Artist Bottom Sheet
     if (showAddAnchorDialog) {
-        AlertDialog(
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val quickSuggestions = listOf(
+            "Afrobeats", "Lo-Fi", "R&B", "Synthwave", "Indie Pop", "Jazz", "Amapiano", "Hip-Hop"
+        ).filter { suggestion -> tasteAnchors.none { it.equals(suggestion, ignoreCase = true) } }
+
+        ModalBottomSheet(
             onDismissRequest = { showAddAnchorDialog = false },
-            title = { Text("Add Genre or Artist", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            sheetState = sheetState,
+            containerColor = Color(0xFF0E131D),
+            contentColor = Color(0xFFF8FAFC),
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Enter a genre, mood, or favorite artist (for example: Afrobeats, Burna Boy, Lo-Fi, Synthwave):",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.68f)
+                        text = "Add Genre or Artist",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC)
                     )
-                    OutlinedTextField(
-                        value = newAnchorText,
-                        onValueChange = { newAnchorText = it },
-                        label = { Text("Genre or Artist") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = theme.primaryAccent,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-                        )
+                    Text(
+                        text = "Tap a suggestion or type an artist, genre, or mood you want more of.",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.62f),
+                        lineHeight = 18.sp
                     )
                 }
-            },
-            confirmButton = {
+
+                OutlinedTextField(
+                    value = newAnchorText,
+                    onValueChange = { newAnchorText = it },
+                    label = { Text("Genre, mood, or artist") },
+                    placeholder = { Text("e.g., Burna Boy, Soul, Acoustic", color = Color.White.copy(alpha = 0.34f)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (newAnchorText.isNotBlank()) {
+                                vm.addTasteAnchor(newAnchorText.trim())
+                                showAddAnchorDialog = false
+                            }
+                        }
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = sheetFieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (quickSuggestions.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        quickSuggestions.forEach { item ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF07090E))
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        vm.addTasteAnchor(item)
+                                        showAddAnchorDialog = false
+                                    }
+                                    .padding(horizontal = 11.dp, vertical = 7.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = null,
+                                    tint = theme.primaryAccent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = item,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFFF8FAFC),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Button(
                     onClick = {
                         if (newAnchorText.isNotBlank()) {
@@ -508,38 +538,40 @@ fun MusicProfileScreen(
                             showAddAnchorDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent)
+                    enabled = newAnchorText.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF8FAFC),
+                        contentColor = Color(0xFF07090E)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
                 ) {
-                    Text("Add", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Add to Taste", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddAnchorDialog = false }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.65f))
-                }
-            },
-            containerColor = Color(0xFF10131C),
-            shape = RoundedCornerShape(18.dp)
-        )
+            }
+        }
     }
 }
 
 @Composable
-private fun ProfileStatTile(
+private fun ProfileStatColumn(
     label: String,
     value: String,
-    accent: Color,
-    modifier: Modifier = Modifier
+    accent: Color
 ) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
-            .padding(vertical = 8.dp, horizontal = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = accent)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = value,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = accent
+        )
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = Color.White.copy(alpha = 0.56f)
+        )
     }
 }

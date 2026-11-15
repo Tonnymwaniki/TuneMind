@@ -1,55 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Outer Acoustic Ring Split (Cyan + Amber) -->
+    <!-- Background soundwave ribbon passing behind the T stem (warm amber -> mint) -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M29,52 A25,25 0 0,1 69,32"
-        android:strokeColor="#FF00E5FF"
+        android:pathData="M24,60 C31,60 34,47 41,47 C47,47 49,54 54,54"
         android:strokeLineCap="round"
-        android:strokeWidth="3.2" />
+        android:strokeLineJoin="round"
+        android:strokeWidth="4.4">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:endX="54"
+                android:endY="54"
+                android:startX="24"
+                android:startY="60"
+                android:type="linear">
+                <item android:color="#FFFFB000" android:offset="0.0" />
+                <item android:color="#FF34D399" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Primary crisp white geometric T monogram -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M34,37 H74"
+        android:strokeColor="#FFF8FAFC"
+        android:strokeLineCap="round"
+        android:strokeWidth="6.2" />
 
     <path
         android:fillColor="#00000000"
-        android:pathData="M79,56 A25,25 0 0,1 39,76"
-        android:strokeColor="#FFFFB000"
+        android:pathData="M54,37 V73"
+        android:strokeColor="#FFF8FAFC"
         android:strokeLineCap="round"
-        android:strokeWidth="3.2" />
+        android:strokeWidth="6.2" />
 
-    <!-- Subtle full acoustic circle -->
+    <!-- Foreground soundwave ribbon weaving smoothly in front of the T stem -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M54,28 A26,26 0 1,1 53.99,28 Z"
-        android:strokeAlpha="0.22"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.2" />
-
-    <!-- Chromatic echo T layers -->
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M39.5,41.5 H64.5 M52,41.5 V67.5"
-        android:strokeAlpha="0.80"
-        android:strokeColor="#FF00E5FF"
+        android:pathData="M54,54 C59,54 61,63 67,63 C74,63 77,49 84,49"
         android:strokeLineCap="round"
-        android:strokeWidth="5.2" />
-
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M43.5,42.5 H68.5 M56,42.5 V68.5"
-        android:strokeAlpha="0.80"
-        android:strokeColor="#FFFFB000"
-        android:strokeLineCap="round"
-        android:strokeWidth="5.2" />
-
-    <!-- Primary White TuneMind T Monogram -->
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M41.5,42 H66.5 M54,42 V68"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round"
-        android:strokeWidth="5.4" />
+        android:strokeLineJoin="round"
+        android:strokeWidth="4.4">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:endX="84"
+                android:endY="49"
+                android:startX="54"
+                android:startY="54"
+                android:type="linear">
+                <item android:color="#FF34D399" android:offset="0.0" />
+                <item android:color="#FF10B981" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

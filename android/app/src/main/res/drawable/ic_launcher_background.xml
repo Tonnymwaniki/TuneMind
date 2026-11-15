@@ -10,12 +10,12 @@
         <aapt:attr name="android:fillColor">
             <gradient
                 android:centerX="54"
-                android:centerY="54"
-                android:gradientRadius="68"
+                android:centerY="48"
+                android:gradientRadius="76"
                 android:type="radial">
-                <item android:color="#FF121626" android:offset="0.0" />
-                <item android:color="#FF07090F" android:offset="0.6" />
-                <item android:color="#FF040508" android:offset="1.0" />
+                <item android:color="#FF131824" android:offset="0.0" />
+                <item android:color="#FF090C12" android:offset="0.65" />
+                <item android:color="#FF07090E" android:offset="1.0" />
             </gradient>
         </aapt:attr>
     </path>

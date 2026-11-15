@@ -1,27 +1,46 @@
 package com.tunemind.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.voice.AgentState
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
+/**
+ * Clean fixed bottom tab bar (3 destinations) with minimal icon + 1-word label.
+ * Replaces multi-border floating pill docks and decorative colored dots.
+ */
 @Composable
 fun FloatingGlassDock(
     currentPage: Int,
@@ -31,25 +50,12 @@ fun FloatingGlassDock(
     modifier: Modifier = Modifier
 ) {
     val theme = LocalAdaptiveTheme.current
-    val dockShape = RoundedCornerShape(30.dp)
-    val isAgentActive = agentState != AgentState.IDLE
-
-    val infiniteTransition = rememberInfiniteTransition(label = "DockPulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "DockPulseAlpha"
-    )
 
     val agentAccentColor = when (agentState) {
         AgentState.LISTENING -> Color(0xFF00E5FF)
         AgentState.THINKING -> Color(0xFFA855F7)
         AgentState.SPEAKING -> Color(0xFFFFB000)
-        AgentState.ERROR -> Color(0xFFFF2A55)
+        AgentState.ERROR -> Color(0xFFFF4D6D)
         AgentState.IDLE -> theme.primaryAccent
     }
 
@@ -61,69 +67,42 @@ fun FloatingGlassDock(
         AgentState.IDLE -> "TuneMind"
     }
 
-    val dockTop = lerp(Color(0xFF121622), theme.elevatedSurface, 0.25f).copy(alpha = 0.94f)
-    val dockBottom = Color(0xFF07090F).copy(alpha = 0.97f)
-
-    Box(
+    Column(
         modifier = modifier
-            .height(58.dp)
-            .widthIn(min = 296.dp, max = 344.dp)
-            .clip(dockShape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(dockTop, dockBottom)
-                )
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        theme.primaryAccent.copy(alpha = 0.28f),
-                        agentAccentColor.copy(alpha = if (isAgentActive) 0.68f else 0.36f),
-                        theme.secondaryAccent.copy(alpha = 0.26f)
-                    )
-                ),
-                shape = dockShape
-            )
-            .padding(horizontal = 6.dp, vertical = 6.dp)
+            .fillMaxWidth()
+            .background(Color(0xFF090C13).copy(alpha = 0.96f))
+            .navigationBarsPadding()
     ) {
+        HorizontalDivider(thickness = 1.dp, color = Color.White.copy(alpha = 0.07f))
         Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // TAB 0: DOPAMINE
-            DockPillItem(
-                label = "Dopamine",
+            BottomDockTab(
+                label = "Fresh",
+                icon = Icons.Rounded.Bolt,
                 isSelected = currentPage == 0,
                 activeColor = theme.primaryAccent,
-                badgeDotColor = if (freshTrackCount > 0) Color(0xFF10B981) else null,
-                isCenterOrb = false,
-                orbPulseAlpha = 1f,
                 onClick = { onSelectPage(0) },
                 modifier = Modifier.weight(1f)
             )
-
-            // TAB 1: CENTER TUNEMIND LIVING SPHERE
-            DockPillItem(
+            BottomDockTab(
                 label = centerLabel,
+                icon = Icons.Rounded.GraphicEq,
                 isSelected = currentPage == 1,
                 activeColor = agentAccentColor,
-                badgeDotColor = agentAccentColor,
-                isCenterOrb = true,
-                orbPulseAlpha = if (isAgentActive) pulseAlpha else 0.9f,
                 onClick = { onSelectPage(1) },
-                modifier = Modifier.weight(1.08f)
+                modifier = Modifier.weight(1f)
             )
-
-            // TAB 2: RHYTHM
-            DockPillItem(
-                label = "Rhythm",
+            BottomDockTab(
+                label = "Flow",
+                icon = Icons.Rounded.LibraryMusic,
                 isSelected = currentPage == 2,
                 activeColor = theme.secondaryAccent,
-                badgeDotColor = null,
-                isCenterOrb = false,
-                orbPulseAlpha = 1f,
                 onClick = { onSelectPage(2) },
                 modifier = Modifier.weight(1f)
             )
@@ -132,74 +111,45 @@ fun FloatingGlassDock(
 }
 
 @Composable
-private fun DockPillItem(
+private fun BottomDockTab(
     label: String,
+    icon: ImageVector,
     isSelected: Boolean,
     activeColor: Color,
-    badgeDotColor: Color?,
-    isCenterOrb: Boolean,
-    orbPulseAlpha: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pillShape = RoundedCornerShape(24.dp)
-    val bgColor by animateColorAsState(
-        targetValue = if (isSelected) activeColor.copy(alpha = 0.18f) else Color.Transparent,
-        animationSpec = tween(250),
-        label = "DockTabBg"
-    )
-    val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.60f),
-        animationSpec = tween(250),
-        label = "DockTabText"
+    val contentColor by animateColorAsState(
+        targetValue = if (isSelected) activeColor else Color.White.copy(alpha = 0.48f),
+        animationSpec = tween(180),
+        label = "tabColor"
     )
 
-    Box(
-        contentAlignment = Alignment.Center,
+    Column(
         modifier = modifier
-            .fillMaxHeight()
-            .defaultMinSize(minWidth = 48.dp, minHeight = 46.dp)
-            .clip(pillShape)
-            .background(bgColor)
-            .then(
-                if (isSelected) {
-                    Modifier.border(1.dp, activeColor.copy(alpha = 0.45f), pillShape)
-                } else {
-                    Modifier
-                }
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
             )
-            .bouncyClickable { onClick() }
-            .padding(horizontal = 8.dp)
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (isCenterOrb) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(activeColor.copy(alpha = orbPulseAlpha))
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-            } else if (badgeDotColor != null) {
-                Box(
-                    modifier = Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(badgeDotColor)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-            }
-
-            Text(
-                text = label,
-                color = textColor,
-                fontSize = 12.sp,
-                fontWeight = if (isSelected || isCenterOrb) FontWeight.SemiBold else FontWeight.Medium,
-                maxLines = 1
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = contentColor,
+            modifier = Modifier.size(21.dp)
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = label,
+            color = contentColor,
+            fontSize = 11.sp,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1
+        )
     }
 }

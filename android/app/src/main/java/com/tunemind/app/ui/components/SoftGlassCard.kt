@@ -2,51 +2,94 @@ package com.tunemind.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
+/**
+ * Calm single-elevation surface reserved for primary hero blocks (max 1 per screen).
+ * Uses a restrained #0E131D surface with a clean 1dp hairline border.
+ */
 @Composable
 fun SoftGlassCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val theme = LocalAdaptiveTheme.current
-    val squircleShape = RoundedCornerShape(24.dp)
-
-    // Deep obsidian translucent glass lightly tinted by the active theme's card & accent hues
-    val topGlass = lerp(Color(0xFF10131C), theme.cardSurface, 0.24f).copy(alpha = 0.86f)
-    val bottomGlass = lerp(Color(0xFF080A10), theme.secondaryBackground, 0.20f).copy(alpha = 0.92f)
+    val shape = RoundedCornerShape(18.dp)
 
     Box(
         modifier = modifier
-            .clip(squircleShape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(topGlass, bottomGlass)
-                )
-            )
+            .clip(shape)
+            .background(Color(0xFF0E131D))
             .border(
                 width = 1.dp,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        theme.primaryAccent.copy(alpha = 0.24f),
-                        Color.White.copy(alpha = 0.08f),
-                        theme.secondaryAccent.copy(alpha = 0.12f)
-                    )
-                ),
-                shape = squircleShape
+                color = Color.White.copy(alpha = 0.07f),
+                shape = shape
             )
             .padding(18.dp)
     ) {
         content()
+    }
+}
+
+@Composable
+fun StudioHairlineDivider(
+    modifier: Modifier = Modifier
+) {
+    HorizontalDivider(
+        modifier = modifier,
+        thickness = 1.dp,
+        color = Color.White.copy(alpha = 0.06f)
+    )
+}
+
+@Composable
+fun StudioSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onActionClick: (() -> Unit)? = null
+) {
+    val theme = LocalAdaptiveTheme.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = Color(0xFFF8FAFC),
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (!actionLabel.isNullOrBlank() && onActionClick != null) {
+            Text(
+                text = actionLabel,
+                color = theme.primaryAccent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onActionClick() }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
     }
 }

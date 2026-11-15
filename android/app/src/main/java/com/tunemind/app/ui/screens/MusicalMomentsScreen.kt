@@ -33,6 +33,8 @@ import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.StudioHairlineDivider
+import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.bouncyClickable
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
@@ -88,7 +90,7 @@ fun MusicalMomentsScreen(
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             // Top Bar
             Row(
@@ -102,10 +104,10 @@ fun MusicalMomentsScreen(
                 ) {
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF0C1018).copy(alpha = 0.92f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                        color = Color(0xFF0E131D),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clickable { onBack() }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -118,41 +120,24 @@ fun MusicalMomentsScreen(
                         }
                     }
 
-                    Column {
-                        Text(
-                            text = "SOUND MOMENTS",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFFB000),
-                            letterSpacing = 1.4.sp
-                        )
-                        Text(
-                            text = "Saved Highlights",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF0E121B).copy(alpha = 0.90f))
-                        .border(1.dp, Color(0xFFFFB000).copy(alpha = 0.35f), RoundedCornerShape(50))
-                        .padding(horizontal = 11.dp, vertical = 6.dp)
-                ) {
                     Text(
-                        text = "${confirmed.size} Saved",
-                        color = Color(0xFFFFB000),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = "Saved Highlights",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC)
                     )
                 }
+
+                Text(
+                    text = "${confirmed.size} saved",
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
 
-            // Current Track Strip
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            // Current Track Strip (Open Canvas)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -161,8 +146,8 @@ fun MusicalMomentsScreen(
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(theme.primaryAccent.copy(alpha = 0.16f)),
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.primaryAccent.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -176,57 +161,54 @@ fun MusicalMomentsScreen(
                         Text(
                             text = if (nowPlaying?.isPlaying == true) "Playing Now" else "Selected Track",
                             fontSize = 11.sp,
-                            color = if (nowPlaying?.isPlaying == true) Color(0xFF10B981) else Color.White.copy(alpha = 0.56f),
+                            color = if (nowPlaying?.isPlaying == true) Color(0xFF10B981) else Color.White.copy(alpha = 0.54f),
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = "$currentTrackTitle — $currentTrackArtist",
-                            fontSize = 13.sp,
+                            text = "$currentTrackTitle · $currentTrackArtist",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
+                            color = Color(0xFFF8FAFC),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     if (nowPlaying != null && nowPlaying.positionMs > 0L) {
-                        Box(
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(theme.primaryAccent.copy(alpha = 0.16f))
-                                .border(1.dp, theme.primaryAccent.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .bouncyClickable {
                                     val pos = nowPlaying.positionMs.coerceIn(0L, totalTrackDurationMs - 10_000L)
                                     activeScrubStartMs = pos
                                     activeScrubEndMs = minOf(totalTrackDurationMs, pos + 30_000L)
                                 }
-                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.MyLocation,
-                                    contentDescription = "Mark Current Time",
-                                    tint = theme.primaryAccent,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = formatDuration(nowPlaying.positionMs),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = theme.primaryAccent
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Rounded.MyLocation,
+                                contentDescription = "Mark Current Time",
+                                tint = theme.primaryAccent,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = formatDuration(nowPlaying.positionMs),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = theme.primaryAccent
+                            )
                         }
                     }
                 }
+                StudioHairlineDivider()
             }
 
-            // Moment Selector Card with real RangeSlider
+            // Single Hero Card: Waveform Clip Window
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -234,13 +216,13 @@ fun MusicalMomentsScreen(
                     ) {
                         Text(
                             text = "Clip Window",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFF8FAFC)
                         )
                         Text(
                             text = "${formatDuration(activeScrubStartMs)} – ${formatDuration(activeScrubEndMs)}",
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = theme.primaryAccent
                         )
@@ -258,10 +240,9 @@ fun MusicalMomentsScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(94.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF06080F))
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                            .height(88.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF07090E))
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         Row(
@@ -280,7 +261,7 @@ fun MusicalMomentsScreen(
                                 Box(
                                     modifier = Modifier
                                         .width(3.dp)
-                                        .height((height * 0.74f).dp)
+                                        .height((height * 0.70f).dp)
                                         .clip(RoundedCornerShape(2.dp))
                                         .background(barColor)
                                 )
@@ -309,9 +290,9 @@ fun MusicalMomentsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("00:00", fontSize = 10.sp, color = Color.White.copy(alpha = 0.48f))
-                        Text("Drag handles to trim clip", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-                        Text(formatDuration(totalTrackDurationMs), fontSize = 10.sp, color = Color.White.copy(alpha = 0.48f))
+                        Text("00:00", fontSize = 11.sp, color = Color.White.copy(alpha = 0.48f))
+                        Text("Drag handles to trim clip", fontSize = 11.sp, color = Color.White.copy(alpha = 0.56f))
+                        Text(formatDuration(totalTrackDurationMs), fontSize = 11.sp, color = Color.White.copy(alpha = 0.48f))
                     }
 
                     Row(
@@ -322,7 +303,7 @@ fun MusicalMomentsScreen(
                         Text(
                             text = "${clipDurationSec}s highlight selected",
                             fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.68f)
+                            color = Color.White.copy(alpha = 0.64f)
                         )
 
                         Button(
@@ -340,14 +321,14 @@ fun MusicalMomentsScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
                             shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             Icon(Icons.Rounded.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(5.dp))
                             Text(
                                 text = "Save Moment",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = Color.Black
                             )
                         }
@@ -355,86 +336,46 @@ fun MusicalMomentsScreen(
                 }
             }
 
-            // Saved Moments List
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Saved Moments",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (isLoopActive) theme.primaryAccent.copy(alpha = 0.18f)
-                            else Color.White.copy(alpha = 0.06f)
-                        )
-                        .border(
-                            1.dp,
-                            if (isLoopActive) theme.primaryAccent.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.10f),
-                            RoundedCornerShape(10.dp)
-                        )
-                        .bouncyClickable {
-                            AgentSettingsStore.setLoopMomentsEnabled(context, !isLoopActive)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Repeat,
-                        contentDescription = null,
-                        tint = if (isLoopActive) theme.primaryAccent else Color.White.copy(alpha = 0.65f),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = if (isLoopActive) "Loop Clip On" else "Loop Clip Off",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isLoopActive) theme.primaryAccent else Color.White.copy(alpha = 0.65f)
-                    )
-                }
-            }
+            // Saved Moments List (Hairline rows)
+            StudioSectionHeader(
+                title = "Saved Moments",
+                actionLabel = if (isLoopActive) "Loop On" else "Loop Off",
+                onActionClick = { AgentSettingsStore.setLoopMomentsEnabled(context, !isLoopActive) }
+            )
 
             if (confirmed.isEmpty()) {
-                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.BookmarkBorder,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.56f),
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Text(
-                            text = "No saved moments yet",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Drag the clip range above and tap Save Moment while listening.",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.62f)
-                        )
-                    }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.BookmarkBorder,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.48f),
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text(
+                        text = "No saved moments yet",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF8FAFC)
+                    )
+                    Text(
+                        text = "Drag the clip range above and tap Save Moment while listening.",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.58f)
+                    )
                 }
             } else {
-                confirmed.forEach { moment ->
-                    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    confirmed.forEach { moment ->
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -445,10 +386,9 @@ fun MusicalMomentsScreen(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(42.dp)
+                                        .size(44.dp)
                                         .clip(CircleShape)
-                                        .background(theme.primaryAccent.copy(alpha = 0.16f))
-                                        .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), CircleShape)
+                                        .background(theme.primaryAccent.copy(alpha = 0.14f))
                                         .bouncyClickable {
                                             onPlayTrack(
                                                 moment.trackTitle,
@@ -475,24 +415,37 @@ fun MusicalMomentsScreen(
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
                                         text = moment.customName ?: moment.trackTitle,
-                                        fontSize = 14.sp,
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color.White,
+                                        color = Color(0xFFF8FAFC),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "${moment.trackTitle} • ${moment.trackArtist}",
+                                        text = "${moment.trackTitle} · ${moment.trackArtist}",
                                         fontSize = 12.sp,
-                                        color = Color.White.copy(alpha = 0.64f),
+                                        color = Color.White.copy(alpha = 0.58f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Text(
-                                        text = "${formatDuration(moment.startPositionMs)} – ${formatDuration(moment.endPositionMs)} (${moment.preferredPlaybackDurationMs / 1000}s)",
-                                        fontSize = 11.sp,
-                                        color = theme.primaryAccent
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "${formatDuration(moment.startPositionMs)} – ${formatDuration(moment.endPositionMs)} (${moment.preferredPlaybackDurationMs / 1000}s)",
+                                            fontSize = 11.sp,
+                                            color = theme.primaryAccent
+                                        )
+                                        if (isLoopActive) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Repeat,
+                                                contentDescription = null,
+                                                tint = theme.primaryAccent,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
@@ -500,11 +453,12 @@ fun MusicalMomentsScreen(
                                 Icon(
                                     imageVector = Icons.Rounded.DeleteOutline,
                                     contentDescription = "Delete",
-                                    tint = Color.White.copy(alpha = 0.60f),
+                                    tint = Color.White.copy(alpha = 0.56f),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
+                        StudioHairlineDivider()
                     }
                 }
             }

@@ -2,23 +2,18 @@ package com.tunemind.app.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -27,6 +22,8 @@ import androidx.compose.ui.unit.sp
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.StudioHairlineDivider
+import com.tunemind.app.ui.components.TuneMindLogoMark
 import com.tunemind.app.ui.theme.*
 
 @Composable
@@ -50,200 +47,125 @@ fun PersonalOnboardingDialog(
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 24.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalAlignment = Alignment.Start
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "TuneMind Setup",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.primaryAccent
-                )
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF0C1018)
-                ) {
-                    Text(
-                        text = "Step 1 of 1",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.65f),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            TuneMindLogoMark(size = 48.dp, showContainer = false, animatedWave = false)
 
-            Box(
-                modifier = Modifier
-                    .size(160.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                colors.primaryAccent.copy(alpha = 0.24f),
-                                Color(0xFF0C1018),
-                                Color(0xFF05060A)
-                            )
-                        )
-                    )
-                    .border(1.5.dp, colors.primaryAccent.copy(alpha = 0.45f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(colors.primaryAccent.copy(alpha = 0.16f))
-                        .border(1.dp, colors.primaryAccent.copy(alpha = 0.45f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Rounded.GraphicEq,
-                        contentDescription = null,
-                        tint = colors.primaryAccent,
-                        modifier = Modifier.size(34.dp)
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Choose Your Music Player",
-                    fontSize = 20.sp,
+                    text = "Choose Your Music App",
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = Color(0xFFF8FAFC)
                 )
                 Text(
-                    text = "TuneMind tracks freshness across your music apps and helps keep every playlist feeling new.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.68f),
-                    lineHeight = 19.sp
+                    text = "TuneMind tracks what plays across your music apps and keeps playlists fresh.",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.64f),
+                    lineHeight = 20.sp
                 )
             }
 
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "Primary Music App",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.72f)
+                    text = "Primary music app",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.56f),
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
-
+                StudioHairlineDivider()
                 installedProviders.forEach { provider ->
                     val isSelected = provider.providerId == selectedProviderId
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) colors.primaryAccent.copy(alpha = 0.14f) else Color(0xFF0C1018),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) colors.primaryAccent else Color.White.copy(alpha = 0.08f)
-                        ),
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable {
                                 selectedProviderId = provider.providerId
                                 vm.setPreferredProviderId(context, provider.providerId)
                             }
+                            .padding(vertical = 15.dp, horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = provider.displayName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                        Text(
+                            text = provider.displayName,
+                            fontSize = 16.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isSelected) colors.primaryAccent else Color(0xFFF8FAFC)
+                        )
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Selected",
+                                tint = colors.primaryAccent,
+                                modifier = Modifier.size(20.dp)
                             )
-                            if (isSelected) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = colors.primaryAccent.copy(alpha = 0.2f)
-                                ) {
-                                    Text(
-                                        text = "Selected",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colors.primaryAccent,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
                         }
                     }
+                    StudioHairlineDivider()
                 }
             }
 
             if (!hasNotificationAccess) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF0C1018),
-                    border = BorderStroke(1.dp, colors.secondaryAccent.copy(alpha = 0.45f)),
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Music Detection",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF8FAFC)
+                    )
+                    Text(
+                        text = "Allow Notification Access so TuneMind can follow along with your playing tracks.",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.64f),
+                        lineHeight = 19.sp
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text(
-                            text = "Notification Access Needed",
-                            fontSize = 12.sp,
+                            text = "Allow Notification Access",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = colors.secondaryAccent
+                            color = colors.primaryAccent
                         )
-                        Text(
-                            text = "Enable Notification Access so TuneMind can see what song is playing without leaving the app.",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.68f)
-                        )
-                        Button(
-                            onClick = {
-                                val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                context.startActivity(intent)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.secondaryAccent),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "Enable Notification Access",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF05060A)
-                            )
-                        }
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.weight(1f, fill = true))
 
             Button(
                 onClick = {
                     vm.completeOnboarding(context, selectedProviderId)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primaryAccent),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFF8FAFC),
+                    contentColor = Color(0xFF07090E)
+                ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(52.dp)
             ) {
                 Text(
-                    text = "Get Started",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF05060A)
+                    text = "Done",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }

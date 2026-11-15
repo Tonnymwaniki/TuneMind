@@ -8,13 +8,23 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -74,12 +84,8 @@ fun AnimatedEqualizerBars(
 }
 
 /**
- * Redesigned unified dark-studio track card used consistently across Dopamine Vault,
- * Rhythm History, Cross-App Stats, Spotify Library, and Weekly Recap.
- *
- * Enforces:
- * - Accurate verified play count badge everywhere the track appears
- * - Live "Playing" indicator & equalizer whenever [isCurrentlyPlaying] is true
+ * Clean open-canvas track list row with hairline separator and unboxed middot metadata.
+ * Eliminates heavy per-song card boxes and pill clutter.
  */
 @Composable
 fun TuneMindTrackCard(
@@ -109,234 +115,119 @@ fun TuneMindTrackCard(
         else -> accentColor
     }
 
-    val cardShape = RoundedCornerShape(22.dp)
-    val baseModifier = modifier
-        .fillMaxWidth()
-        .clip(cardShape)
-        .background(
-            if (isCurrentlyPlaying) liveGreen.copy(alpha = 0.13f)
-            else Color(0xFF0C1018).copy(alpha = 0.92f)
-        )
-        .border(
-            width = if (isCurrentlyPlaying) 1.3.dp else 1.dp,
-            color = if (isCurrentlyPlaying) liveGreen.copy(alpha = 0.62f)
-            else Color.White.copy(alpha = 0.08f),
-            shape = cardShape
-        )
-        .let { mod ->
-            if (onCardClick != null) mod.bouncyClickable { onCardClick() } else mod
-        }
-        .padding(horizontal = 14.dp, vertical = 12.dp)
+    val playSummary = when {
+        playCount > 0 -> "$playCount ${if (playCount == 1) "play" else "plays"}"
+        showUnplayedLabel -> "New"
+        else -> null
+    }
+    val freshnessSummary = freshnessPercent?.let {
+        if (isCoolingDown) "Resting" else "${it}% fresh"
+    }
 
-    Row(
-        modifier = baseModifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        if (leadingIndex != null) {
-            Text(
-                text = "$leadingIndex",
-                color = if (isCurrentlyPlaying) liveGreen else Color.White.copy(alpha = 0.44f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.widthIn(min = 18.dp)
-            )
-        }
+    val metadataLine = listOfNotNull(
+        artist.ifBlank { "Unknown Artist" },
+        subtitle?.takeIf { it.isNotBlank() },
+        playSummary,
+        freshnessSummary,
+        appLabel?.takeIf { it.isNotBlank() }
+    ).joinToString(" · ")
 
-        // Play / Live Equalizer Button (with optional freshness arc)
-        Box(
-            contentAlignment = Alignment.Center,
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .bouncyClickable { onPlayClick() }
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (isCurrentlyPlaying) liveGreen.copy(alpha = 0.08f) else Color.Transparent)
+                .clickable { (onCardClick ?: onPlayClick).invoke() }
+                .padding(horizontal = 4.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                drawCircle(color = effectiveAccent.copy(alpha = if (isCurrentlyPlaying) 0.22f else 0.14f))
-                if (freshnessPercent != null) {
-                    drawArc(
-                        color = effectiveAccent.copy(alpha = 0.22f),
-                        startAngle = -90f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
-                    )
-                    drawArc(
-                        color = effectiveAccent,
-                        startAngle = -90f,
-                        sweepAngle = 360f * (freshnessPercent.coerceIn(5, 100) / 100f),
-                        useCenter = false,
-                        style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
-                    )
-                } else {
-                    drawCircle(
-                        color = effectiveAccent.copy(alpha = if (isCurrentlyPlaying) 0.72f else 0.34f),
-                        style = Stroke(width = 1.4.dp.toPx())
-                    )
-                }
-            }
-
-            if (isCurrentlyPlaying) {
-                AnimatedEqualizerBars(
-                    color = liveGreen,
-                    modifier = Modifier.size(18.dp, 15.dp)
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = "Play $title",
-                    tint = effectiveAccent,
-                    modifier = Modifier.size(21.dp)
+            if (leadingIndex != null) {
+                Text(
+                    text = "$leadingIndex",
+                    color = if (isCurrentlyPlaying) liveGreen else Color.White.copy(alpha = 0.44f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.widthIn(min = 20.dp)
                 )
             }
-        }
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = buildString {
-                    append(artist.ifBlank { "Unknown Artist" })
-                    if (!subtitle.isNullOrBlank()) {
-                        append(" • ")
-                        append(subtitle)
-                    }
-                },
-                color = Color.White.copy(alpha = 0.64f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Strict Play Count + Live Playing + App Source / Freshness Badges
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (isCurrentlyPlaying) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(liveGreen.copy(alpha = 0.22f))
-                            .border(1.dp, liveGreen.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.GraphicEq,
-                            contentDescription = null,
-                            tint = liveGreen,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = "Playing",
-                            color = liveGreen,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                // Authoritative Play Count Badge across all screens
-                val playText = when {
-                    playCount > 0 -> "$playCount ${if (playCount == 1) "play" else "plays"}"
-                    showUnplayedLabel -> "Unplayed"
-                    else -> null
-                }
-                if (playText != null) {
-                    val countColor = when {
-                        playCount >= 5 -> coolingAmber
-                        playCount > 0 -> effectiveAccent
-                        else -> Color.White.copy(alpha = 0.54f)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (playCount > 0) countColor.copy(alpha = 0.14f)
-                                else Color.White.copy(alpha = 0.06f)
-                            )
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = playText,
-                            color = countColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                if (freshnessPercent != null) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = if (isCoolingDown) "Cooling" else "${freshnessPercent}% Fresh",
-                            color = if (isCoolingDown) coolingAmber else Color.White.copy(alpha = 0.78f),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                if (!appLabel.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = appLabel,
-                            color = Color.White.copy(alpha = 0.72f),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-
-        if (onSyncClick != null) {
-            NeuralSonicActionButton(
-                accentColor = effectiveAccent,
-                secondaryColor = secondaryAccent,
-                onClick = onSyncClick
-            )
-        } else {
+            // 44dp touch-safe play / equalizer circle
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(effectiveAccent.copy(alpha = 0.16f))
-                    .border(1.dp, effectiveAccent.copy(alpha = 0.42f), RoundedCornerShape(12.dp))
+                    .size(44.dp)
+                    .clip(CircleShape)
                     .bouncyClickable { onPlayClick() }
-                    .padding(horizontal = 11.dp, vertical = 7.dp)
             ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(color = effectiveAccent.copy(alpha = if (isCurrentlyPlaying) 0.18f else 0.10f))
+                    if (freshnessPercent != null) {
+                        drawArc(
+                            color = effectiveAccent.copy(alpha = 0.18f),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                        drawArc(
+                            color = effectiveAccent,
+                            startAngle = -90f,
+                            sweepAngle = 360f * (freshnessPercent.coerceIn(5, 100) / 100f),
+                            useCenter = false,
+                            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                }
+
+                if (isCurrentlyPlaying) {
+                    AnimatedEqualizerBars(
+                        color = liveGreen,
+                        modifier = Modifier.size(16.dp, 14.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = "Play $title",
+                        tint = effectiveAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (isCurrentlyPlaying) "Active" else "Play",
-                    color = effectiveAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    text = title,
+                    color = if (isCurrentlyPlaying) liveGreen else Color(0xFFF8FAFC),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = metadataLine,
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (onSyncClick != null) {
+                NeuralSonicActionButton(
+                    accentColor = effectiveAccent,
+                    secondaryColor = secondaryAccent,
+                    onClick = onSyncClick
                 )
             }
         }
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = if (leadingIndex != null) 88.dp else 60.dp),
+            thickness = 1.dp,
+            color = Color.White.copy(alpha = 0.06f)
+        )
     }
 }

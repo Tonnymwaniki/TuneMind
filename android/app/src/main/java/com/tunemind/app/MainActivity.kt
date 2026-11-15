@@ -330,7 +330,7 @@ open class MainActivity : ComponentActivity() {
                     val agentSatiety by agentVoiceManager.agentSatietyFlow.collectAsState()
                     val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
-                    var hasCompletedLaunchStartFlow by remember { mutableStateOf(false) }
+                    var hasCompletedLaunchStartFlow by remember { mutableStateOf(authSession.hasCompletedStartFlow) }
 
                     val orchestrator = remember(agentVoiceManager) {
                         AgentOrchestrator(
@@ -410,7 +410,7 @@ open class MainActivity : ComponentActivity() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xFF05060A))
+                                .background(Color(0xFF07090E))
                         ) {
                             if (!isMainAppActive) {
                                 OnboardingScreen(
@@ -476,7 +476,7 @@ open class MainActivity : ComponentActivity() {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color(0xFF05060A))
+                                        .background(Color(0xFF07090E))
                                 ) {
                                 HorizontalPager(
                                     state = pagerState,
@@ -655,8 +655,6 @@ open class MainActivity : ComponentActivity() {
                                     },
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
-                                        .navigationBarsPadding()
-                                        .padding(bottom = 18.dp)
                                 )
 
                                 // Playback Launch / Strict Never-Leave-TuneMind Diagnostic Banner

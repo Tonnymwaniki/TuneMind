@@ -4,21 +4,15 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.Headphones
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,12 +26,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.tunemind.app.ui.AudioFocusBehavior
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.StudioHairlineDivider
+import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     vm: TuneMindViewModel,
@@ -52,7 +50,7 @@ fun SettingsScreen(
     var selectedProviderId by remember { mutableStateOf(registry.getPreferredProviderId()) }
     var alwaysAsk by remember { mutableStateOf(registry.isAlwaysAskEnabled()) }
     val providers = remember { registry.getInstalledProviders() }
-    var showResetDialog by remember { mutableStateOf(false) }
+    var showResetSheet by remember { mutableStateOf(false) }
 
     val isBatteryIgnored by vm.isBatteryOptimizationIgnored.collectAsState()
     val audioFocusBehavior by vm.audioFocusBehavior.collectAsState()
@@ -90,10 +88,9 @@ fun SettingsScreen(
 
     val scrollState = rememberScrollState()
     val colors = TuneMindTheme.colors
-    val cardBg = Color(0xFF0C1018).copy(alpha = 0.92f)
-    val subCardBg = Color(0xFF121722)
     val safeGreen = Color(0xFF10B981)
     val warnAmber = Color(0xFFFFB000)
+    val dangerRed = Color(0xFFFF4D6D)
 
     val refreshAllSystemStates: () -> Unit = remember(context) {
         {
@@ -152,912 +149,627 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .navigationBarsPadding()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             // Top Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = cardBg,
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable { onBack() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    Column {
-                        Text(
-                            text = "Settings",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Playback, voice & permissions",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.60f)
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = if (appRemoteConnected) safeGreen.copy(alpha = 0.14f) else colors.primaryAccent.copy(alpha = 0.12f),
-                    border = BorderStroke(
-                        1.dp,
-                        if (appRemoteConnected) safeGreen.copy(alpha = 0.45f) else colors.primaryAccent.copy(alpha = 0.35f)
-                    )
-                ) {
-                    Text(
-                        text = if (appRemoteConnected) "Remote Connected" else "On Demand",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (appRemoteConnected) safeGreen else colors.primaryAccent,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFFF8FAFC)
                     )
                 }
-            }
-
-            // 1. Voice & Playback Controls
-            Text(
-                text = "Voice & Playback",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
-            )
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    SettingsSwitchRow(
-                        title = "Hands-Free DJ",
-                        description = if (autonomousDjEnabled) {
-                            "Asks what to play next when a song ends or queues a fresh pick."
-                        } else {
-                            "Off: TuneMind stays quiet until you speak or tap."
-                        },
-                        checked = autonomousDjEnabled,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setAutonomousDjEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Never Leave TuneMind",
-                        description = if (strictNoAppSwitchEnabled) {
-                            "Always keeps playback inside TuneMind and blocks switching to external apps."
-                        } else {
-                            "Off: Plays in the background when supported and returns if an app opens."
-                        },
-                        checked = strictNoAppSwitchEnabled,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Stay in TuneMind",
-                        description = if (stayInTuneMindEnabled) {
-                            "Controls Spotify silently via Remote and bounces straight back if needed."
-                        } else {
-                            "Off: Opens your music app directly when starting playback."
-                        },
-                        checked = stayInTuneMindEnabled,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setStayInTuneMindEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Built-In Audio Player",
-                        description = if (preferInAppPlayerEnabled) {
-                            "Plays local audio files and previews directly inside TuneMind."
-                        } else {
-                            "Off: Always routes playback to your chosen music app."
-                        },
-                        checked = preferInAppPlayerEnabled,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setPreferInAppPlayerEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Auto-Switch Overplayed Songs",
-                        description = if (backgroundAutoPlayEnabled) {
-                            "Automatically transitions away when a track hits heavy repetition."
-                        } else {
-                            "Recommended off: You approve every track change."
-                        },
-                        checked = backgroundAutoPlayEnabled,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setBackgroundAutoPlayEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    // Spotify Remote & Account Card
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(
-                                    text = "Spotify Remote & Account",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = when {
-                                        isConnectingRemote -> "Connecting to Spotify Remote — approve prompt if asked…"
-                                        appRemoteConnected && isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade ->
-                                            "Connected for silent playback plus Liked Songs, Playlists & Podcasts."
-                                        appRemoteConnected ->
-                                            "Connected for silent Free & Premium playback control."
-                                        !isSpotifyInstalled -> "Spotify app not found on this device."
-                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
-                                            "Spotify linked — update permissions to sync Liked Songs, Playlists & Podcasts."
-                                        isSpotifyAuthorized ->
-                                            "Spotify linked with Likes, Playlists & Podcasts — tap Connect Remote for in-app control."
-                                        else -> "Link Spotify or connect Remote to control music without switching apps."
-                                    },
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.64f),
-                                    lineHeight = 15.sp
-                                )
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (appRemoteConnected) safeGreen.copy(alpha = 0.16f) else colors.primaryAccent.copy(alpha = 0.12f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (appRemoteConnected) safeGreen.copy(alpha = 0.55f) else colors.primaryAccent.copy(alpha = 0.40f)
-                                )
-                            ) {
-                                Text(
-                                    text = when {
-                                        isConnectingRemote -> "Connecting"
-                                        appRemoteConnected -> "Enabled"
-                                        else -> "Standby"
-                                    },
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (appRemoteConnected) safeGreen else colors.primaryAccent,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
-                        }
-
-                        if (appRemoteConnected) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = safeGreen.copy(alpha = 0.14f),
-                                border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.50f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Check,
-                                        contentDescription = null,
-                                        tint = safeGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = appRemoteSuccessMsg ?: "Spotify Remote is active. Songs can start quietly without opening Spotify.",
-                                        fontSize = 11.sp,
-                                        color = safeGreen,
-                                        lineHeight = 16.sp,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        } else if (!appRemoteError.isNullOrBlank()) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = warnAmber.copy(alpha = 0.12f),
-                                border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.45f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = appRemoteError ?: "",
-                                        fontSize = 11.sp,
-                                        color = warnAmber,
-                                        lineHeight = 16.sp
-                                    )
-
-                                    if (isSpotifyInstalled) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                awaitingSpotifyWakeReturn = true
-                                                runCatching {
-                                                    context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
-                                                        wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        context.startActivity(wakeIntent)
-                                                    }
-                                                }
-                                            },
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.6f)),
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                text = "Wake Spotify",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = warnAmber
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (isSpotifyInstalled) {
-                                Button(
-                                    enabled = !isConnectingRemote,
-                                    onClick = {
-                                        com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
-                                            context = context,
-                                            showAuthView = true
-                                        ) { _, _ ->
-                                            refreshAllSystemStates()
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (appRemoteConnected) safeGreen else colors.primaryAccent
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    if (isConnectingRemote) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(13.dp),
-                                            strokeWidth = 2.dp,
-                                            color = Color(0xFF05060A)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                    }
-                                    Text(
-                                        text = when {
-                                            isConnectingRemote -> "Connecting…"
-                                            appRemoteConnected -> "Remote Enabled"
-                                            else -> "Connect Remote"
-                                        },
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF05060A)
-                                    )
-                                }
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    spotifyAuthManager.launchSpotifyAuth(context)
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(
-                                    1.dp,
-                                    when {
-                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
-                                        isSpotifyAuthorized -> safeGreen
-                                        else -> colors.primaryAccent.copy(alpha = 0.55f)
-                                    }
-                                ),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = when {
-                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
-                                            "Update Spotify Permissions"
-                                        isSpotifyAuthorized -> "Spotify Linked"
-                                        else -> "Link Spotify"
-                                    },
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = when {
-                                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
-                                        isSpotifyAuthorized -> safeGreen
-                                        else -> colors.primaryAccent
-                                    }
-                                )
-                            }
-                        }
-
-                        if (isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade) {
-                            Text(
-                                text = "Library access active: Likes, Playlists & Podcasts",
-                                fontSize = 11.sp,
-                                color = safeGreen.copy(alpha = 0.90f),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 2. Permissions Section
-            Text(
-                text = "Permissions",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
-            )
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    SettingsPermissionRow(
-                        title = "Return to TuneMind",
-                        description = if (hasOverlayPermission) {
-                            "Enabled — TuneMind can return to focus if another player opens."
-                        } else {
-                            "Lets TuneMind bring you back automatically after starting a track."
-                        },
-                        isEnabled = hasOverlayPermission,
-                        colors = colors,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
-                            }
-                        }
-                    )
-
-                    SettingsPermissionRow(
-                        title = "Music Detection",
-                        description = if (hasNotificationAccess) {
-                            "Enabled — Reads live now-playing info and controls playback cleanly."
-                        } else {
-                            "Detects what song is playing across your music apps."
-                        },
-                        isEnabled = hasNotificationAccess,
-                        colors = colors,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    com.tunemind.app.util.PermissionUtils.getNotificationListenerIntent().apply {
-                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                )
-                            }
-                        }
-                    )
-
-                    SettingsPermissionRow(
-                        title = "Local Audio Library",
-                        description = if (hasAudioPermission) {
-                            "Enabled — Built-in player can play downloaded tracks from your device."
-                        } else {
-                            "Lets the built-in player find music saved on your phone."
-                        },
-                        isEnabled = hasAudioPermission,
-                        colors = colors,
-                        onClick = {
-                            if (!hasAudioPermission) {
-                                val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    android.Manifest.permission.READ_MEDIA_AUDIO
-                                } else {
-                                    android.Manifest.permission.READ_EXTERNAL_STORAGE
-                                }
-                                audioPermissionLauncher.launch(perm)
-                            } else {
-                                runCatching {
-                                    context.startActivity(
-                                        android.content.Intent(
-                                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                            android.net.Uri.parse("package:${context.packageName}")
-                                        ).apply {
-                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-
-            // 3. Background & Battery
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(
-                    1.dp,
-                    if (isBatteryIgnored) safeGreen.copy(alpha = 0.40f)
-                    else warnAmber.copy(alpha = 0.45f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f).padding(end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                Icons.Rounded.BatteryChargingFull,
-                                contentDescription = null,
-                                tint = if (isBatteryIgnored) safeGreen else warnAmber,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Unrestricted Background",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = if (isBatteryIgnored) "Keeps music tracking active in the background"
-                                    else "Battery saver may pause background tracking",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.64f)
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isBatteryIgnored) safeGreen.copy(alpha = 0.16f) else warnAmber.copy(alpha = 0.16f),
-                            border = BorderStroke(1.dp, if (isBatteryIgnored) safeGreen else warnAmber)
-                        ) {
-                            Text(
-                                text = if (isBatteryIgnored) "Enabled" else "Off",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isBatteryIgnored) safeGreen else warnAmber,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { vm.requestIgnoreBatteryOptimization(context) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isBatteryIgnored) safeGreen else warnAmber
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Rounded.Security, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF05060A))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = if (isBatteryIgnored) "Background Unrestricted" else "Allow Unrestricted Background",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF05060A)
-                        )
-                    }
-                }
-            }
-
-            // 4. Hearing Protection & Audio Focus
-            Text(
-                text = "Audio & Hearing",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
-            )
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Rounded.Headphones, contentDescription = null, tint = safeGreen, modifier = Modifier.size(19.dp))
-                            Column {
-                                Text(
-                                    text = "Safe Listening Alerts",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = "WHO 85 dB daily exposure reminder",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.62f)
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = isDecibelSafetyEnabled,
-                            onCheckedChange = { vm.setDecibelSafetyAlertEnabled(it) }
-                        )
-                    }
-
-                    Text(
-                        text = "Alerts you before extended high-volume headphone sessions exceed recommended daily listening limits.",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.62f),
-                        lineHeight = 16.sp
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = colors.primaryAccent, modifier = Modifier.size(18.dp))
-                        Text(
-                            text = "Audio Interruptions",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.DUCK) colors.primaryAccent.copy(alpha = 0.14f) else subCardBg,
-                        border = BorderStroke(1.dp, if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.DUCK) colors.primaryAccent else Color.White.copy(alpha = 0.08f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            RadioButton(
-                                selected = audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.DUCK,
-                                onClick = { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.DUCK) },
-                                colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
-                            )
-                            Column {
-                                Text("Lower volume briefly", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                Text("Softens music during alerts, then brings it back up", fontSize = 11.sp, color = Color.White.copy(alpha = 0.60f))
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.PAUSE) colors.primaryAccent.copy(alpha = 0.14f) else subCardBg,
-                        border = BorderStroke(1.dp, if (audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.PAUSE) colors.primaryAccent else Color.White.copy(alpha = 0.08f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            RadioButton(
-                                selected = audioFocusBehavior == com.tunemind.app.ui.AudioFocusBehavior.PAUSE,
-                                onClick = { vm.setAudioFocusBehavior(com.tunemind.app.ui.AudioFocusBehavior.PAUSE) },
-                                colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
-                            )
-                            Column {
-                                Text("Pause playback", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                Text("Pauses music completely until notifications finish", fontSize = 11.sp, color = Color.White.copy(alpha = 0.60f))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 5. Theme & Appearance
-            AdaptiveAtmosphereSection(vm = vm)
-
-            // 6. Default Music Player
-            Text("Default Music Player", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = subCardBg,
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Always Ask Before Playing",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = "Choose which player to use each time",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.62f)
-                                )
-                            }
-                            Switch(
-                                checked = alwaysAsk,
-                                onCheckedChange = {
-                                    alwaysAsk = it
-                                    vm.setAlwaysAskEnabled(context, it)
-                                }
-                            )
-                        }
-                    }
-
-                    providers.forEach { provider ->
-                        val isSelected = provider.providerId == selectedProviderId
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) colors.primaryAccent.copy(alpha = 0.14f) else subCardBg,
-                            border = BorderStroke(1.dp, if (isSelected) colors.primaryAccent else Color.White.copy(alpha = 0.08f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedProviderId = provider.providerId
-                                    vm.setPreferredProviderId(context, provider.providerId)
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = {
-                                        selectedProviderId = provider.providerId
-                                        vm.setPreferredProviderId(context, provider.providerId)
-                                    },
-                                    colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
-                                )
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(
-                                            text = provider.displayName,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Color.White
-                                        )
-                                        val isInstalled = provider.isInstalled(context)
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (isInstalled) safeGreen.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f)
-                                        ) {
-                                            Text(
-                                                text = if (isInstalled) "Installed" else "Web",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (isInstalled) safeGreen else Color.White.copy(alpha = 0.55f),
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-
-                                    val capDesc = if (provider.supportedCapabilities.contains(com.tunemind.app.provider.ProviderCapability.CAN_DEEP_LINK)) {
-                                        "Supports direct track playback"
-                                    } else {
-                                        "Opens search in player"
-                                    }
-                                    Text(text = capDesc, fontSize = 11.sp, color = Color.White.copy(alpha = 0.58f))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 7. Track Variety & Privacy
-            Text("Freshness & Privacy", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = cardBg,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Repetition Sensitivity", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
-                        Text("${(fatigueSensitivity * 100).toInt()}%", fontSize = 12.sp, color = colors.primaryAccent, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    Slider(
-                        value = fatigueSensitivity,
-                        valueRange = 0.2f..1.0f,
-                        onValueChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setRepetitionSensitivity(context, it)
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = colors.primaryAccent,
-                            activeTrackColor = colors.primaryAccent,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.14f)
-                        )
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Relaxed", fontSize = 10.sp, color = Color.White.copy(alpha = 0.52f))
-                        Text("Balanced", fontSize = 10.sp, color = Color.White.copy(alpha = 0.52f))
-                        Text("Strict", fontSize = 10.sp, color = Color.White.copy(alpha = 0.52f))
-                    }
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Late-Night Comfort",
-                        description = if (chronoReceptivity) {
-                            "Active: Favors warmer, softer tracks after 10:00 PM"
-                        } else {
-                            "Off: Uses standard energy discovery at all hours"
-                        },
-                        checked = chronoReceptivity,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setLateNightComfortEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Private Session",
-                        description = if (cloakingSession) {
-                            "Active: Listening tracking and history recording are paused"
-                        } else {
-                            "Pause listening tracking temporarily"
-                        },
-                        checked = cloakingSession,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setPrivateSessionEnabled(context, it)
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-                    SettingsSwitchRow(
-                        title = "Merge Duplicate Plays",
-                        description = "Combine identical tracks played across Spotify and other apps",
-                        checked = deduplicateLogs,
-                        onCheckedChange = {
-                            com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
-                        }
-                    )
-                }
-            }
-
-            // 8. Reset Profile
-            Button(
-                onClick = { showResetDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1A0D12),
-                    contentColor = Color(0xFFFF4D6D)
-                ),
-                border = BorderStroke(1.dp, Color(0xFFFF4D6D).copy(alpha = 0.45f))
-            ) {
-                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Reset Listening Data", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
-
-            if (showResetDialog) {
-                AlertDialog(
-                    onDismissRequest = { showResetDialog = false },
-                    title = { Text("Reset Listening Data?", color = Color.White, fontWeight = FontWeight.Bold) },
-                    text = {
-                        Text(
-                            "This clears your local listening history, freshness scores, and resting vault tracks so TuneMind starts fresh.",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.72f)
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showResetDialog = false
-                                vm.resetListeningProfile()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4D6D), contentColor = Color.White)
-                        ) {
-                            Text("Reset")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showResetDialog = false }) {
-                            Text("Cancel", color = Color.White.copy(alpha = 0.65f))
-                        }
-                    },
-                    containerColor = Color(0xFF10131C),
-                    shape = RoundedCornerShape(18.dp)
+                Text(
+                    text = "Settings",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC)
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 1. Voice & Playback
+            StudioSectionHeader(title = "Voice & Playback")
+            Spacer(modifier = Modifier.height(6.dp))
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Hands-Free DJ",
+                description = if (autonomousDjEnabled) {
+                    "Asks what to play next when a song finishes."
+                } else {
+                    "Off: TuneMind stays quiet until you speak or tap."
+                },
+                checked = autonomousDjEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setAutonomousDjEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Never Leave TuneMind",
+                description = if (strictNoAppSwitchEnabled) {
+                    "Keeps playback inside TuneMind and blocks switching to other apps."
+                } else {
+                    "Off: Plays in the background and returns when supported."
+                },
+                checked = strictNoAppSwitchEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Stay in TuneMind",
+                description = if (stayInTuneMindEnabled) {
+                    "Controls Spotify quietly in the background."
+                } else {
+                    "Off: Opens your music app directly when starting a track."
+                },
+                checked = stayInTuneMindEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setStayInTuneMindEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Built-In Audio Player",
+                description = if (preferInAppPlayerEnabled) {
+                    "Plays local files and previews directly in TuneMind."
+                } else {
+                    "Off: Routes playback to your selected music app."
+                },
+                checked = preferInAppPlayerEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setPreferInAppPlayerEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Auto-Switch Overplayed Songs",
+                description = if (backgroundAutoPlayEnabled) {
+                    "Automatically switches away when a song gets overplayed."
+                } else {
+                    "Recommended off: You approve every track change."
+                },
+                checked = backgroundAutoPlayEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setBackgroundAutoPlayEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            // Spotify Remote & Account inline block
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Spotify Remote & Account",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFF8FAFC)
+                    )
+                    Text(
+                        text = when {
+                            isConnectingRemote -> "Connecting…"
+                            appRemoteConnected -> "Connected"
+                            else -> "Standby"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (appRemoteConnected) safeGreen else Color.White.copy(alpha = 0.56f)
+                    )
+                }
+
+                Text(
+                    text = when {
+                        isConnectingRemote -> "Connecting to Spotify Remote — approve the prompt if asked."
+                        appRemoteConnected && isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade ->
+                            appRemoteSuccessMsg ?: "Silent playback control and full Spotify library sync are active."
+                        appRemoteConnected -> "Silent Spotify playback control is active."
+                        !isSpotifyInstalled -> "Spotify app not found on this device."
+                        !appRemoteError.isNullOrBlank() -> appRemoteError!!
+                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
+                            "Spotify linked — update permissions to sync Liked Songs, Playlists & Podcasts."
+                        isSpotifyAuthorized ->
+                            "Spotify library linked — connect Remote for in-app playback control."
+                        else -> "Link Spotify or connect Remote to control music without switching apps."
+                    },
+                    fontSize = 12.sp,
+                    color = if (!appRemoteError.isNullOrBlank() && !appRemoteConnected) warnAmber else Color.White.copy(alpha = 0.60f),
+                    lineHeight = 17.sp
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (isSpotifyInstalled) {
+                        Button(
+                            enabled = !isConnectingRemote,
+                            onClick = {
+                                com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
+                                    context = context,
+                                    showAuthView = true
+                                ) { _, _ ->
+                                    refreshAllSystemStates()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (appRemoteConnected) safeGreen else Color(0xFFF8FAFC),
+                                contentColor = Color(0xFF07090E)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    isConnectingRemote -> "Connecting…"
+                                    appRemoteConnected -> "Remote Active"
+                                    else -> "Connect Remote"
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { spotifyAuthManager.launchSpotifyAuth(context) },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            when {
+                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
+                                isSpotifyAuthorized -> safeGreen.copy(alpha = 0.65f)
+                                else -> Color.White.copy(alpha = 0.22f)
+                            }
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Text(
+                            text = when {
+                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> "Update Access"
+                                isSpotifyAuthorized -> "Spotify Linked"
+                                else -> "Link Spotify"
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = when {
+                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
+                                isSpotifyAuthorized -> safeGreen
+                                else -> Color(0xFFF8FAFC)
+                            }
+                        )
+                    }
+                }
+
+                if (!appRemoteConnected && !appRemoteError.isNullOrBlank() && isSpotifyInstalled) {
+                    Text(
+                        text = "Open Spotify to wake it up →",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = warnAmber,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                awaitingSpotifyWakeReturn = true
+                                runCatching {
+                                    context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
+                                        wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(wakeIntent)
+                                    }
+                                }
+                            }
+                            .padding(vertical = 4.dp)
+                    )
+                }
+            }
+            StudioHairlineDivider()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 2. Permissions
+            StudioSectionHeader(title = "Permissions")
+            Spacer(modifier = Modifier.height(6.dp))
+            StudioHairlineDivider()
+
+            SettingsPermissionRow(
+                title = "Return to TuneMind",
+                description = if (hasOverlayPermission) {
+                    "Can return automatically when another music app opens."
+                } else {
+                    "Lets TuneMind bring you back after starting playback."
+                },
+                isEnabled = hasOverlayPermission,
+                colors = colors,
+                onClick = {
+                    runCatching {
+                        context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
+                    }
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsPermissionRow(
+                title = "Music Detection",
+                description = if (hasNotificationAccess) {
+                    "Reads what song is playing across your music apps."
+                } else {
+                    "Needed to track plays and freshness automatically."
+                },
+                isEnabled = hasNotificationAccess,
+                colors = colors,
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            com.tunemind.app.util.PermissionUtils.getNotificationListenerIntent().apply {
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        )
+                    }
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsPermissionRow(
+                title = "Local Audio Library",
+                description = if (hasAudioPermission) {
+                    "Built-in player can play songs saved on your phone."
+                } else {
+                    "Lets the built-in player find local audio files."
+                },
+                isEnabled = hasAudioPermission,
+                colors = colors,
+                onClick = {
+                    if (!hasAudioPermission) {
+                        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            android.Manifest.permission.READ_MEDIA_AUDIO
+                        } else {
+                            android.Manifest.permission.READ_EXTERNAL_STORAGE
+                        }
+                        audioPermissionLauncher.launch(perm)
+                    } else {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.parse("package:${context.packageName}")
+                                ).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsPermissionRow(
+                title = "Unrestricted Background",
+                description = if (isBatteryIgnored) {
+                    "Keeps background sync and tracking running smoothly."
+                } else {
+                    "Allow unrestricted battery so tracking does not pause."
+                },
+                isEnabled = isBatteryIgnored,
+                colors = colors,
+                onClick = { vm.requestIgnoreBatteryOptimization(context) }
+            )
+            StudioHairlineDivider()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 3. Audio & Hearing
+            StudioSectionHeader(title = "Audio & Hearing")
+            Spacer(modifier = Modifier.height(6.dp))
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Safe Listening Alerts",
+                description = "Alerts you before extended high-volume headphone listening passes daily guidelines.",
+                checked = isDecibelSafetyEnabled,
+                onCheckedChange = { vm.setDecibelSafetyAlertEnabled(it) }
+            )
+            StudioHairlineDivider()
+
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                Text(
+                    text = "When alerts interrupt music",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.56f),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.setAudioFocusBehavior(AudioFocusBehavior.DUCK) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RadioButton(
+                        selected = audioFocusBehavior == AudioFocusBehavior.DUCK,
+                        onClick = { vm.setAudioFocusBehavior(AudioFocusBehavior.DUCK) },
+                        colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
+                    )
+                    Column {
+                        Text("Lower volume briefly", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                        Text("Softens music during alerts, then restores it", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.setAudioFocusBehavior(AudioFocusBehavior.PAUSE) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RadioButton(
+                        selected = audioFocusBehavior == AudioFocusBehavior.PAUSE,
+                        onClick = { vm.setAudioFocusBehavior(AudioFocusBehavior.PAUSE) },
+                        colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
+                    )
+                    Column {
+                        Text("Pause playback", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                        Text("Pauses music completely until notifications finish", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                    }
+                }
+            }
+            StudioHairlineDivider()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 4. Appearance
+            AdaptiveAtmosphereSection(vm = vm)
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 5. Default Music Player
+            StudioSectionHeader(title = "Default Music Player")
+            Spacer(modifier = Modifier.height(6.dp))
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Always Ask Before Playing",
+                description = "Choose which player to use each time",
+                checked = alwaysAsk,
+                onCheckedChange = {
+                    alwaysAsk = it
+                    vm.setAlwaysAskEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            providers.forEach { provider ->
+                val isSelected = provider.providerId == selectedProviderId
+                val isInstalled = provider.isInstalled(context)
+                val capDesc = if (provider.supportedCapabilities.contains(com.tunemind.app.provider.ProviderCapability.CAN_DEEP_LINK)) {
+                    "Direct track playback"
+                } else {
+                    "Opens track search"
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedProviderId = provider.providerId
+                            vm.setPreferredProviderId(context, provider.providerId)
+                        }
+                        .padding(vertical = 12.dp, horizontal = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = {
+                            selectedProviderId = provider.providerId
+                            vm.setPreferredProviderId(context, provider.providerId)
+                        },
+                        colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = provider.displayName,
+                            fontSize = 15.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = Color(0xFFF8FAFC)
+                        )
+                        Text(
+                            text = "$capDesc · ${if (isInstalled) "Installed" else "Web"}",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.56f)
+                        )
+                    }
+                }
+                StudioHairlineDivider()
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 6. Freshness & Privacy
+            StudioSectionHeader(title = "Freshness & Privacy")
+            Spacer(modifier = Modifier.height(6.dp))
+            StudioHairlineDivider()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Repetition Sensitivity",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFF8FAFC)
+                    )
+                    Text(
+                        "${(fatigueSensitivity * 100).toInt()}%",
+                        fontSize = 13.sp,
+                        color = colors.primaryAccent,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Slider(
+                    value = fatigueSensitivity,
+                    valueRange = 0.2f..1.0f,
+                    onValueChange = {
+                        com.tunemind.app.domain.voice.AgentSettingsStore.setRepetitionSensitivity(context, it)
+                    },
+                    colors = SliderDefaults.colors(
+                        thumbColor = colors.primaryAccent,
+                        activeTrackColor = colors.primaryAccent,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.14f)
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Relaxed", fontSize = 11.sp, color = Color.White.copy(alpha = 0.50f))
+                    Text("Balanced", fontSize = 11.sp, color = Color.White.copy(alpha = 0.50f))
+                    Text("Strict", fontSize = 11.sp, color = Color.White.copy(alpha = 0.50f))
+                }
+            }
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Late-Night Comfort",
+                description = "Favors warmer, softer tracks after 10:00 PM.",
+                checked = chronoReceptivity,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setLateNightComfortEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Private Session",
+                description = "Temporarily pauses listening tracking and history logging.",
+                checked = cloakingSession,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setPrivateSessionEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Merge Duplicate Plays",
+                description = "Combines identical songs played across Spotify and other players.",
+                checked = deduplicateLogs,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 7. Reset Listening Data
+            OutlinedButton(
+                onClick = { showResetSheet = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, dangerRed.copy(alpha = 0.45f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = dangerRed)
+            ) {
+                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Reset Listening Data", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(Modifier.height(28.dp))
+        }
+    }
+
+    if (showResetSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showResetSheet = false },
+            sheetState = sheetState,
+            containerColor = Color(0xFF0E131D),
+            contentColor = Color(0xFFF8FAFC),
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "Reset Listening Data?",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC)
+                )
+                Text(
+                    text = "This clears your local listening history, freshness scores, and resting vault tracks so TuneMind starts fresh.",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.66f),
+                    lineHeight = 20.sp
+                )
+                StudioHairlineDivider()
+                Button(
+                    onClick = {
+                        showResetSheet = false
+                        vm.resetListeningProfile()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = dangerRed,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    Text("Reset Everything", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(
+                    onClick = { showResetSheet = false },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.64f), fontSize = 14.sp)
+                }
+            }
         }
     }
 }
@@ -1070,22 +782,26 @@ private fun SettingsSwitchRow(
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 14.dp, horizontal = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(end = 14.dp)) {
             Text(
                 text = title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFFF8FAFC)
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = description,
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.62f),
-                lineHeight = 15.sp
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.56f),
+                lineHeight = 17.sp
             )
         }
         Switch(
@@ -1104,81 +820,56 @@ private fun SettingsPermissionRow(
     onClick: () -> Unit
 ) {
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF121722),
-        border = BorderStroke(
-            1.dp,
-            if (isEnabled) safeGreen.copy(alpha = 0.40f)
-            else warnAmber.copy(alpha = 0.35f)
-        ),
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 14.dp, horizontal = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = title,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isEnabled) safeGreen.copy(alpha = 0.16f) else warnAmber.copy(alpha = 0.16f)
-                    ) {
-                        Text(
-                            text = if (isEnabled) "Enabled" else "Off",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isEnabled) safeGreen else warnAmber,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = description,
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.62f),
-                    lineHeight = 15.sp
-                )
-            }
-            OutlinedButton(
-                onClick = onClick,
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(
-                    1.dp,
-                    if (isEnabled) safeGreen else colors.primaryAccent
-                ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFFF8FAFC)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = description,
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.56f),
+                lineHeight = 17.sp
+            )
+        }
+
+        if (isEnabled) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (isEnabled) {
-                    Icon(
-                        imageVector = Icons.Rounded.Check,
-                        contentDescription = null,
-                        tint = safeGreen,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = safeGreen,
+                    modifier = Modifier.size(16.dp)
+                )
                 Text(
-                    text = if (isEnabled) "Enabled" else "Enable",
-                    fontSize = 11.sp,
+                    text = "Allowed",
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isEnabled) safeGreen else colors.primaryAccent
+                    color = safeGreen
                 )
             }
+        } else {
+            Text(
+                text = "Allow",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.primaryAccent
+            )
         }
     }
 }

@@ -15,9 +15,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +36,6 @@ import com.tunemind.app.ui.NowPlayingObservation
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.VaultTrack
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
-import com.tunemind.app.ui.theme.TuneMindTheme
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
@@ -357,251 +354,149 @@ fun SongProfile(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Top Status Row
+        // Hero Track Identity + Freshness Summary
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF0C1018),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.radialGradient(
+                            colors = when {
+                                profile.isInVault -> listOf(warnAmber.copy(alpha = 0.30f), Color(0xFF07090E))
+                                isFatigued -> listOf(alertRed.copy(alpha = 0.30f), Color(0xFF07090E))
+                                else -> listOf(theme.primaryAccent.copy(alpha = 0.28f), Color(0xFF07090E))
+                            }
+                        )
+                    ),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(if (profile.isInVault) warnAmber else if (isFatigued) alertRed else safeGreen)
-                    )
-                    Text(
-                        text = if (profile.isInVault) "Resting in Vault" else "Track Profile",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (profile.isInVault) warnAmber else theme.primaryAccent
-                    )
-                }
+                Text(text = profile.emoji, fontSize = 28.sp)
             }
 
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = appColor.copy(alpha = 0.14f),
-                border = BorderStroke(1.dp, appColor.copy(alpha = 0.35f))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Text(
-                    text = appName,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    text = profile.title,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC),
+                    lineHeight = 22.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${profile.artist} · $appName",
+                    fontSize = 13.sp,
                     color = appColor,
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${if (profile.isInVault) "Resting in Vault" else profile.vibeTag} · ${profile.appearanceCount}x plays · ${playMinutes}m ${playSeconds}s",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.56f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        // Hero Song Identity Card
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+        StudioHairlineDivider()
+
+        // Freshness Progress Section
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            Brush.radialGradient(
-                                colors = when {
-                                    profile.isInVault -> listOf(warnAmber.copy(alpha = 0.35f), Color(0xFF0C1018))
-                                    isFatigued -> listOf(alertRed.copy(alpha = 0.35f), Color(0xFF0C1018))
-                                    else -> listOf(theme.primaryAccent.copy(alpha = 0.32f), Color(0xFF0C1018))
-                                }
-                            )
-                        )
-                        .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(18.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = profile.emoji, fontSize = 32.sp)
-                }
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = profile.title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        lineHeight = 22.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = profile.artist,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.68f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = theme.primaryAccent.copy(alpha = 0.12f)
-                    ) {
-                        Text(
-                            text = profile.vibeTag,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = theme.primaryAccent,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
+                Text(
+                    text = when {
+                        profile.isInVault -> "Resting in Vault"
+                        isFatigued -> "Ready for a short break"
+                        isModerate -> "Balanced rotation"
+                        else -> "Feels crisp & new"
+                    },
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFF8FAFC)
+                )
+                Text(
+                    text = "$freshnessPercent% fresh",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isFatigued) alertRed else safeGreen
+                )
             }
+
+            LinearProgressIndicator(
+                progress = { (freshnessPercent / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(CircleShape),
+                color = when {
+                    profile.isInVault -> warnAmber
+                    isFatigued -> alertRed
+                    isModerate -> theme.secondaryAccent
+                    else -> safeGreen
+                },
+                trackColor = Color.White.copy(alpha = 0.08f)
+            )
+
+            Text(
+                text = when {
+                    profile.isInVault -> "Cooling down so it hits like new again (${(profile.recoveryProgress * 100).toInt()}% recovered)."
+                    isFatigued -> "Played frequently recently. Resting it for 3–5 days keeps it exciting."
+                    isModerate -> "Good rotation balance — still enjoyable without burnout."
+                    else -> "High freshness with plenty of room in your daily flow."
+                },
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.62f),
+                lineHeight = 17.sp
+            )
         }
 
-        // Freshness Card
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+        StudioHairlineDivider()
+
+        // Track Insight (Claude API behind backend)
+        if (isAiAvailable) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "FRESHNESS SCORE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.primaryAccent,
-                            letterSpacing = 1.2.sp
-                        )
-                        Text(
-                            text = when {
-                                profile.isInVault -> "Resting in Vault"
-                                isFatigued -> "Ready for a short break"
-                                isModerate -> "Balanced rotation"
-                                else -> "Feels crisp & new"
-                            },
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isFatigued) alertRed.copy(alpha = 0.16f) else safeGreen.copy(alpha = 0.16f)
-                    ) {
-                        Text(
-                            text = "$freshnessPercent% Fresh",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isFatigued) alertRed else safeGreen,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                LinearProgressIndicator(
-                    progress = { (freshnessPercent / 100f).coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(7.dp)
-                        .clip(CircleShape),
-                    color = when {
-                        profile.isInVault -> warnAmber
-                        isFatigued -> alertRed
-                        isModerate -> theme.secondaryAccent
-                        else -> safeGreen
-                    },
-                    trackColor = Color.White.copy(alpha = 0.08f)
-                )
-
-                Text(
-                    text = when {
-                        profile.isInVault -> "Cooling down so it hits like new again (${(profile.recoveryProgress * 100).toInt()}% recovered)."
-                        isFatigued -> "Played frequently recently. Resting it for 3–5 days keeps it exciting."
-                        isModerate -> "Good rotation balance — still enjoyable without burnout."
-                        else -> "High freshness with plenty of room in your daily flow."
-                    },
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.68f),
-                    lineHeight = 17.sp
-                )
-            }
-        }
-
-        // Claude AI Track Insight
-        if (isAiAvailable) {
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(18.dp))
-                            Text(
-                                text = "CLAUDE TRACK INSIGHT",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = theme.primaryAccent,
-                                letterSpacing = 1.sp
-                            )
-                        }
-
-                        if (claudeInsightText != null) {
-                            IconButton(
-                                onClick = {
-                                    isInsightLoading = true
-                                    coroutineScope.launch {
-                                        val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
-                                            context = context,
-                                            title = profile.title,
-                                            artist = profile.artist,
-                                            playCount = profile.appearanceCount,
-                                            satietyPercent = profile.satietyScore
-                                        )
-                                        isInsightLoading = false
-                                        claudeInsightText = result.getOrNull()
-                                    }
-                                },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh", tint = Color.White.copy(alpha = 0.65f), modifier = Modifier.size(15.dp))
-                            }
-                        }
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = theme.primaryAccent,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Text(
+                            text = "Track Insight",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFF8FAFC)
+                        )
                     }
 
-                    if (isInsightLoading) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.padding(vertical = 6.dp)
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = theme.primaryAccent, strokeWidth = 2.dp)
-                            Text("Asking Claude why this track fits your flow…", fontSize = 12.sp, color = Color.White.copy(alpha = 0.68f))
-                        }
-                    } else if (claudeInsightText != null) {
-                        Text(
-                            text = claudeInsightText ?: "",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.88f),
-                            lineHeight = 18.sp
-                        )
-                    } else {
-                        Button(
+                    if (claudeInsightText != null) {
+                        IconButton(
                             onClick = {
                                 isInsightLoading = true
                                 coroutineScope.launch {
@@ -613,296 +508,283 @@ fun SongProfile(
                                         satietyPercent = profile.satietyScore
                                     )
                                     isInsightLoading = false
-                                    claudeInsightText = result.getOrNull() ?: "Unable to reach TuneMind AI right now."
+                                    claudeInsightText = result.getOrNull()
                                 }
                             },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Get Claude Track Insight", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Refresh",
+                                tint = Color.White.copy(alpha = 0.60f),
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
+                    }
+                }
+
+                if (isInsightLoading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = theme.primaryAccent, strokeWidth = 2.dp)
+                        Text("Getting track notes…", fontSize = 13.sp, color = Color.White.copy(alpha = 0.62f))
+                    }
+                } else if (claudeInsightText != null) {
+                    Text(
+                        text = claudeInsightText ?: "",
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.84f),
+                        lineHeight = 19.sp
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            isInsightLoading = true
+                            coroutineScope.launch {
+                                val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
+                                    context = context,
+                                    title = profile.title,
+                                    artist = profile.artist,
+                                    playCount = profile.appearanceCount,
+                                    satietyPercent = profile.satietyScore
+                                )
+                                isInsightLoading = false
+                                claudeInsightText = result.getOrNull() ?: "Unable to load track insight right now."
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, theme.primaryAccent.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Load Track Insight", color = theme.primaryAccent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     }
                 }
             }
+            StudioHairlineDivider()
         }
 
-        // Sound Feel Breakdown
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.Psychology, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(18.dp))
+        // Sound Breakdown (Hairline bars)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = "Sound Breakdown",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFFF8FAFC)
+            )
+
+            profile.anchorWeights.forEach { anchor ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Sound Breakdown",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            text = anchor.name,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFF8FAFC)
+                        )
+                        Text(
+                            text = "${anchor.weightPercent}%",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = anchor.color
                         )
                     }
-                    Text(
-                        text = "Vibe Balance",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.56f)
+
+                    LinearProgressIndicator(
+                        progress = { (anchor.weightPercent / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(CircleShape),
+                        color = anchor.color,
+                        trackColor = Color.White.copy(alpha = 0.08f)
                     )
-                }
 
-                profile.anchorWeights.forEach { anchor ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = anchor.name,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "${anchor.weightPercent}%",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = anchor.color
-                            )
-                        }
-
-                        LinearProgressIndicator(
-                            progress = { (anchor.weightPercent / 100f).coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(5.dp)
-                                .clip(CircleShape),
-                            color = anchor.color,
-                            trackColor = Color.White.copy(alpha = 0.08f)
-                        )
-
-                        Text(
-                            text = anchor.description,
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.58f)
-                        )
-                    }
+                    Text(
+                        text = anchor.description,
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.54f)
+                    )
                 }
             }
         }
 
         // Freshness Trajectory
         if (profile.satietyTrends.isNotEmpty()) {
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Rounded.TrendingUp, contentDescription = null, tint = theme.secondaryAccent, modifier = Modifier.size(18.dp))
+            StudioHairlineDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Rotation Trajectory",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFF8FAFC)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF07090E))
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    profile.satietyTrends.forEach { pt ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text(
-                                text = "Rotation Trajectory",
-                                fontSize = 14.sp,
+                                text = "${pt.score}%",
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = if (pt.isProjected) Color.White.copy(alpha = 0.50f) else if (pt.score >= 70) alertRed else theme.primaryAccent
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(14.dp)
+                                    .height((pt.score * 0.52f).dp)
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(
+                                        when {
+                                            pt.isProjected -> Color.White.copy(alpha = 0.16f)
+                                            pt.score >= 70 -> alertRed
+                                            else -> theme.primaryAccent
+                                        }
+                                    )
+                            )
+                            Text(
+                                text = pt.label,
+                                fontSize = 8.sp,
+                                color = if (pt.isProjected) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.85f),
+                                maxLines = 1
                             )
                         }
-                        Text(
-                            text = "Past & Projected",
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.56f)
-                        )
                     }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(106.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF06080F))
-                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        profile.satietyTrends.forEach { pt ->
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "${pt.score}%",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (pt.isProjected) Color.White.copy(alpha = 0.50f) else if (pt.score >= 70) alertRed else theme.primaryAccent
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .width(14.dp)
-                                        .height((pt.score * 0.58f).dp)
-                                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                        .background(
-                                            when {
-                                                pt.isProjected -> Color.White.copy(alpha = 0.16f)
-                                                pt.score >= 70 -> alertRed
-                                                else -> theme.primaryAccent
-                                            }
-                                        )
-                                )
-                                Text(
-                                    text = pt.label,
-                                    fontSize = 8.sp,
-                                    color = if (pt.isProjected) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.85f),
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Play Summary Cards
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            SoftGlassCard(modifier = Modifier.weight(1f)) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Verified Plays", fontSize = 11.sp, color = Color.White.copy(alpha = 0.58f))
-                    Text("${profile.appearanceCount}x", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(
-                        text = if (profile.appearanceCount >= 3) "Frequent replay" else "Light rotation",
-                        fontSize = 10.sp,
-                        color = if (profile.appearanceCount >= 3) warnAmber else safeGreen
-                    )
-                }
-            }
-
-            SoftGlassCard(modifier = Modifier.weight(1f)) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Listening Time", fontSize = 11.sp, color = Color.White.copy(alpha = 0.58f))
-                    Text("${playMinutes}m ${playSeconds}s", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = theme.primaryAccent)
-                    Text("Observed total", fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
                 }
             }
         }
 
         // Recent Play Log
         if (profile.fatigueHistory.isNotEmpty()) {
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Rounded.History, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(17.dp))
-                        Text("Recent Plays", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    profile.fatigueHistory.forEach { entry ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color.White.copy(alpha = 0.04f))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(entry.sessionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                                Text(fmt.format(Date(entry.timestampMs)), fontSize = 10.sp, color = Color.White.copy(alpha = 0.56f))
-                            }
-                            Text(
-                                text = entry.satietyContribution,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (entry.isLoopTrigger) alertRed else safeGreen
-                            )
+            StudioHairlineDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.History, contentDescription = null, tint = theme.primaryAccent, modifier = Modifier.size(16.dp))
+                    Text("Recent Plays", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF8FAFC))
+                }
+                profile.fatigueHistory.forEach { entry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(entry.sessionLabel, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text(fmt.format(Date(entry.timestampMs)), fontSize = 11.sp, color = Color.White.copy(alpha = 0.54f))
                         }
+                        Text(
+                            text = entry.satietyContribution,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (entry.isLoopTrigger) alertRed else safeGreen
+                        )
                     }
                 }
             }
         }
 
-        // Vault Action Card
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-            if (profile.isInVault) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Resting in Vault", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = warnAmber)
-                        Text("${profile.cooldownDaysRemaining}d left", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = warnAmber)
-                    }
-                    Button(
-                        onClick = {
-                            profile.trackId?.let { vm.restoreFromVault(it) }
-                            onDismiss?.invoke()
-                            onQuarantineSuccess("Returned '${profile.title}' to Fresh rotation.")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Return to Fresh Rotation", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
+        StudioHairlineDivider()
+
+        // Vault Action Section
+        if (profile.isInVault) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Resting in Vault", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = warnAmber)
+                    Text("${profile.cooldownDaysRemaining}d left", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = warnAmber)
                 }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Rest Track in Vault", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(
-                        text = "Pause this track from active picks for a few days so it feels brand new later.",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.65f)
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(3f to "3 Days", 5f to "5 Days", 7f to "7 Days").forEach { (days, label) ->
-                            val isSelected = selectedQuarantineDays == days
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) theme.primaryAccent.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.04f))
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.10f),
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { selectedQuarantineDays = days }
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.72f),
-                                    textAlign = TextAlign.Center
+                Button(
+                    onClick = {
+                        profile.trackId?.let { vm.restoreFromVault(it) }
+                        onDismiss?.invoke()
+                        onQuarantineSuccess("Returned '${profile.title}' to Fresh rotation.")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Return to Fresh Rotation", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Rest Track in Vault", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFF8FAFC))
+                Text(
+                    text = "Pause this track from active picks for a few days so it feels brand new later.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.60f)
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(3f to "3 Days", 5f to "5 Days", 7f to "7 Days").forEach { (days, label) ->
+                        val isSelected = selectedQuarantineDays == days
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) theme.primaryAccent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                .border(
+                                    1.dp,
+                                    if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.10f),
+                                    RoundedCornerShape(10.dp)
                                 )
-                            }
+                                .clickable { selectedQuarantineDays = days }
+                                .padding(vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isSelected) theme.primaryAccent else Color.White.copy(alpha = 0.72f),
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
-                    OutlinedButton(
-                        onClick = {
-                            vm.quarantineTrack(profile.title, profile.artist, selectedQuarantineDays)
-                            onDismiss?.invoke()
-                            onQuarantineSuccess("Resting '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
-                        },
-                        border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.60f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Rounded.AcUnit, contentDescription = null, tint = warnAmber, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Rest in Cooldown Vault", color = warnAmber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        vm.quarantineTrack(profile.title, profile.artist, selectedQuarantineDays)
+                        onDismiss?.invoke()
+                        onQuarantineSuccess("Resting '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
+                    },
+                    border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.55f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.Rounded.AcUnit, contentDescription = null, tint = warnAmber, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Rest in Cooldown Vault", color = warnAmber, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 }
             }
         }
@@ -922,14 +804,14 @@ fun SongProfile(
                 onDismiss?.invoke()
             },
             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
             Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Play in $appName", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("Play in $appName", fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
 
         Spacer(Modifier.height(16.dp))
@@ -946,16 +828,15 @@ fun SongProfileSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = TuneMindTheme.colors.cardSurface,
-        tonalElevation = 8.dp,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = Color(0xFF0E131D),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         dragHandle = {
             Surface(
-                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                color = TuneMindTheme.colors.border,
+                modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                color = Color.White.copy(alpha = 0.20f),
                 shape = CircleShape
             ) {
-                Box(Modifier.size(width = 40.dp, height = 4.dp))
+                Box(Modifier.size(width = 36.dp, height = 4.dp))
             }
         }
     ) {

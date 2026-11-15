@@ -119,11 +119,7 @@ class AudioDeviceObserver(
 
         val (typeLabel, _) = classifyDevice(device)
         val connType = resolveConnectionType(device.type)
-        val name = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            device.address?.takeIf { it.isNotBlank() } ?: device.productName.toString()
-        } else {
-            device.productName.toString()
-        }
+        val name = resolveFriendlyDeviceName(device, typeLabel)
 
         scope.launch {
             try {
@@ -223,7 +219,7 @@ class AudioDeviceObserver(
                     Pair("Hearing Aid Transducer", "HEARING_AID")
                 }
                 AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> {
-                    Pair("Phone Loudspeaker", "BUILTIN_SPEAKER")
+                    Pair("Phone Speaker", "BUILTIN_SPEAKER")
                 }
                 else -> {
                     Pair("Audio Output", "AUDIO_OUTPUT")
@@ -231,16 +227,37 @@ class AudioDeviceObserver(
             }
         }
 
+        fun resolveFriendlyDeviceName(device: AudioDeviceInfo, fallbackLabel: String): String {
+            return when (device.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone Speaker"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
+                AudioDeviceInfo.TYPE_USB_HEADSET,
+                AudioDeviceInfo.TYPE_USB_DEVICE -> {
+                    val raw = device.productName?.toString()?.trim().orEmpty()
+                    if (raw.isBlank() || raw.equals(Build.MODEL, ignoreCase = true)) fallbackLabel else raw
+                }
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                26 -> {
+                    val raw = device.productName?.toString()?.trim().orEmpty()
+                    if (raw.isBlank() || raw.equals(Build.MODEL, ignoreCase = true)) fallbackLabel else raw
+                }
+                else -> fallbackLabel
+            }
+        }
+
         fun resolveDeviceTypeName(type: Int): String {
             return when (type) {
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
-                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Earphones (Headset)"
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth Earbuds / Audio"
+                AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Earphones"
+                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth Audio"
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Headset"
                 AudioDeviceInfo.TYPE_USB_HEADSET -> "USB-C Earphones"
-                AudioDeviceInfo.TYPE_USB_DEVICE -> "USB Audio Device"
-                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone Loudspeaker"
-                26 -> "BLE Audio Earbuds"
+                AudioDeviceInfo.TYPE_USB_DEVICE -> "USB Audio"
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone Speaker"
+                26 -> "Wireless Earbuds"
                 else -> "Audio Output"
             }
         }
@@ -302,25 +319,21 @@ class AudioDeviceObserver(
             if (preferred == null) {
                 val estimatedDb = 44f + (volRatio * 38f)
                 return AudioDeviceSnapshot(
-                    deviceType = "Phone Loudspeaker",
+                    deviceType = "Phone Speaker",
                     transducerCategory = "BUILTIN_SPEAKER",
-                    productName = "Built-in Speaker",
+                    productName = "Phone Speaker",
                     connectionType = "BUILTIN_SPEAKER",
                     volumeIndex = currentVol,
                     maxVolume = maxVol,
                     estimatedDb = estimatedDb,
                     headroomDb = (85f - estimatedDb),
                     sampleRate = 48000,
-                    acousticCouplingDescription = "Ambient open dispersion • Safe from inner ear stereocilia directivity"
+                    acousticCouplingDescription = "Open speaker audio at comfortable listening distance"
                 )
             }
 
             val (typeLabel, transducerCategory) = classifyDevice(preferred)
-            val productName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                preferred.address?.takeIf { it.isNotBlank() } ?: preferred.productName.toString()
-            } else {
-                preferred.productName.toString()
-            }.takeIf { it.isNotBlank() } ?: typeLabel
+            val productName = resolveFriendlyDeviceName(preferred, typeLabel)
 
             val sampleRate = preferred.sampleRates.firstOrNull() ?: 48000
             val estimatedDb = calculateCalibratedDb(transducerCategory, volRatio)
