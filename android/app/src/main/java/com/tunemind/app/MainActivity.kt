@@ -107,6 +107,8 @@ open class MainActivity : ComponentActivity() {
                     val loadedPlaylistIds by vm.loadedPlaylistIds.collectAsState()
                     val playlistTrackErrors by vm.playlistTrackErrors.collectAsState()
                     val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
+                    val forYouLearningState by vm.forYouLearningState.collectAsState()
+                    val isDiscovering by vm.isDiscovering.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -610,6 +612,8 @@ open class MainActivity : ComponentActivity() {
                                                     vm.cycleAtmospherePalette()
                                                 },
                                                 forYouPicks = aiDiscoveryCrate,
+                                                learningState = forYouLearningState,
+                                                isDiscovering = isDiscovering,
                                                 resolvePlayCount = { title, artist, uri ->
                                                     vm.resolvePlayCount(title, artist, uri)
                                                 },
@@ -618,6 +622,23 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onRefreshForYou = {
                                                     vm.triggerChronoDiscovery(forceRefresh = true)
+                                                },
+                                                onSaveForYou = { rec, saved ->
+                                                    vm.toggleSaveRecommendation(rec.id, saved)
+                                                },
+                                                onDismissForYou = { rec ->
+                                                    vm.dismissAiRecommendation(rec.id)
+                                                },
+                                                onPlayForYouTrack = { rec ->
+                                                    vm.markRecommendationPlayed(rec.id)
+                                                    playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                },
+                                                onPreviewForYouTrack = { rec ->
+                                                    val previewed = vm.previewAiRecommendation(context, rec)
+                                                    if (!previewed) {
+                                                        vm.markRecommendationPlayed(rec.id)
+                                                        playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                    }
                                                 }
                                             )
                                         }

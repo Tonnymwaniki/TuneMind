@@ -357,6 +357,20 @@ class TuneMindViewModel : ViewModel() {
     private val _dismissedRecCount = MutableStateFlow(0)
     val dismissedRecCount: StateFlow<Int> = _dismissedRecCount.asStateFlow()
 
+    private val _forYouLearningState = MutableStateFlow(loadInitialForYouLearningState())
+    val forYouLearningState: StateFlow<com.tunemind.app.domain.ai.ForYouLearningSummary> = _forYouLearningState.asStateFlow()
+
+    private fun loadInitialForYouLearningState(): com.tunemind.app.domain.ai.ForYouLearningSummary {
+        val ctx = AppHolder.context
+        return if (ctx != null) {
+            com.tunemind.app.domain.ai.GeminiReasoningEngine.getSavedLearningSummary(ctx)
+        } else {
+            com.tunemind.app.domain.ai.ForYouLearningSummary(
+                dropDateKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+            )
+        }
+    }
+
     // Personal Taste Genome & Explicit Anchors (e.g. Afrobeats, Hip-Hop, Burna Boy, Drake)
     private val _userTasteAnchors = MutableStateFlow<List<String>>(loadTasteAnchorsFromPrefs())
     val userTasteAnchors: StateFlow<List<String>> = _userTasteAnchors.asStateFlow()
@@ -924,16 +938,22 @@ class TuneMindViewModel : ViewModel() {
         recomputeAdaptiveTheme()
         triggerChronoDiscovery(forceRefresh = false)
 
-        // 60-second periodic time-period transition watcher & auto-changing chrono discovery
+        // 60-second periodic watcher: auto-rotates For You AI discovery at 12:00 PM local time and tracks daypart shifts
         viewModelScope.launch {
             var lastObservedSlot = currentTimeSlot
+            var lastObservedNoonCycle = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
             while (true) {
                 kotlinx.coroutines.delay(60_000L)
                 val currentSlot = currentTimeSlot
-                if (currentSlot != lastObservedSlot) {
+                val currentNoonCycle = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+                if (currentNoonCycle != lastObservedNoonCycle) {
+                    lastObservedNoonCycle = currentNoonCycle
                     lastObservedSlot = currentSlot
                     recomputeAdaptiveTheme()
                     triggerChronoDiscovery(forceRefresh = true)
+                } else if (currentSlot != lastObservedSlot) {
+                    lastObservedSlot = currentSlot
+                    recomputeAdaptiveTheme()
                 } else {
                     recomputeAdaptiveTheme()
                 }
@@ -1167,11 +1187,13 @@ class TuneMindViewModel : ViewModel() {
 
                     refreshRecommendations()
 
-                    // If real tracks are observed and the crate was uncalibrated or empty, auto-calibrate
+                    // If real tracks are observed and today's 12:00 PM drop is missing or uncalibrated, auto-calibrate
                     val observedArtists = recent.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct()
                     if (observedArtists.isNotEmpty()) {
+                        val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
                         val currentCrate = _aiDiscoveryCrate.value
-                        val needsCalibration = currentCrate.isEmpty() || currentCrate.any {
+                        val hasTodayNoonDrop = currentCrate.any { it.dropDateKey == todayNoonKey && !it.isDismissed }
+                        val needsCalibration = currentCrate.isEmpty() || !hasTodayNoonDrop || currentCrate.any {
                             it.telemetryBasisSummary.contains("Emerging") || it.telemetryBasisSummary.contains("Daypart:")
                         }
                         if (needsCalibration && !_isDiscovering.value) {
@@ -1709,8 +1731,9 @@ class TuneMindViewModel : ViewModel() {
     }
 
     /**
-     * Triggers Chrono-Receptive AI Discovery for current daypart & telemetry growth.
-     * When [forceRefresh] is true, generates a fresh Neuro-Pulse even if crate has recommendations.
+     * Triggers Self-Learning AI Discovery tuned to the user's 12:00 PM local-timezone cycle.
+     * When [forceRefresh] is true or today's 12:00 PM cycle has not been generated yet,
+     * evaluates previous drop outcomes and fetches 2 unheard picks per genre + 3 Global Wildcards.
      */
     fun triggerChronoDiscovery(forceRefresh: Boolean = false) {
         val ctx = AppHolder.context ?: return
@@ -1718,8 +1741,11 @@ class TuneMindViewModel : ViewModel() {
             try {
                 if (_isDiscovering.value) return@launch
 
-                val existingForSlot = _aiDiscoveryCrate.value.filter { it.timeSlotKey == currentTimeSlot.name && !it.isDismissed }
-                if (!forceRefresh && existingForSlot.isNotEmpty()) {
+                val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+                val existingForCycle = _aiDiscoveryCrate.value.filter {
+                    it.dropDateKey == todayNoonKey && !it.isDismissed
+                }
+                if (!forceRefresh && existingForCycle.isNotEmpty()) {
                     return@launch
                 }
 
@@ -1727,15 +1753,27 @@ class TuneMindViewModel : ViewModel() {
                 val prefProvider = getPreferredProviderId(ctx)
                 val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
                 val satiety = minOf(95, maxOf(18, currentPlays * 22))
+                val authSession = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value
 
-                val (allKnownTitles, playedSignals, dismissedSignals) = withContext(Dispatchers.IO) {
-                    Triple(
-                        aiRecDao?.getAllKnownTitles() ?: emptyList(),
+                val (allKnownTitles, playedSignals, dismissedSignals, previousOutcomes) = withContext(Dispatchers.IO) {
+                    val knownFromCrate = aiRecDao?.getAllKnownTitles() ?: emptyList()
+                    val likedTitles = _spotifyLikedTracks.value.map { it.trackTitle }
+                    val historyTitles = _historyState.value.tracks.mapNotNull { it.title }
+                    val vaultTitles = _vaultState.value.map { it.title }
+                    val combinedExclusions = if (forceRefresh) {
+                        (likedTitles + historyTitles + vaultTitles).distinct()
+                    } else {
+                        (knownFromCrate + likedTitles + historyTitles + vaultTitles).distinct()
+                    }
+                    DataQuad(
+                        combinedExclusions,
                         aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
-                        aiRecDao?.getDismissedSignals() ?: emptyList()
+                        aiRecDao?.getDismissedSignals() ?: emptyList(),
+                        aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 24) ?: emptyList()
                     )
                 }
 
+                val avgVolume = resolveCurrentVolumeRatio(ctx)
                 val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                 val lateNightActive = com.tunemind.app.domain.voice.AgentSettingsStore.isLateNightComfortEnabled(ctx) &&
                     (hour >= 22 || hour < 6)
@@ -1757,7 +1795,14 @@ class TuneMindViewModel : ViewModel() {
                     nowPlayingArtist = _homeState.value.nowPlaying?.artist,
                     excludeTitles = allKnownTitles,
                     playedSignals = playedSignals,
-                    dismissedSignals = dismissedSignals
+                    dismissedSignals = dismissedSignals,
+                    userId = authSession.userId,
+                    userEmail = authSession.email,
+                    avgVolumeRatio = avgVolume,
+                    yesterdayOutcomes = previousOutcomes,
+                    onLearningSummaryUpdated = { summary ->
+                        _forYouLearningState.value = summary
+                    }
                 )
 
                 if (newRecs.isNotEmpty()) {
@@ -1777,10 +1822,42 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
+    private data class DataQuad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+    private fun resolveCurrentVolumeRatio(context: android.content.Context): Float? {
+        val recentAvg = _hearingInsightsState.value.recentVolumeObs
+            .take(10)
+            .map { it.volumeRatio }
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?.toFloat()
+        if (recentAvg != null && recentAvg > 0.02f) return recentAvg.coerceIn(0.05f, 1.0f)
+
+        return runCatching {
+            val audioMgr = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            val cur = audioMgr?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) ?: 0
+            val max = audioMgr?.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) ?: 15
+            if (max > 0) (cur.toFloat() / max.toFloat()).coerceIn(0.05f, 1.0f) else null
+        }.getOrNull()
+    }
+
     fun toggleSaveRecommendation(id: String, isSaved: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 aiRecDao?.updateSaved(id, isSaved)
+                val ctx = AppHolder.context ?: return@launch
+                val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
+                val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                    context = ctx,
+                    userId = userId,
+                    item = item,
+                    outcome = if (isSaved) "SAVED" else "SKIPPED",
+                    volumeRatio = resolveCurrentVolumeRatio(ctx)
+                )
+                if (updated != null) {
+                    _forYouLearningState.value = updated
+                }
             } catch (t: Throwable) {
                 android.util.Log.e("TuneMindVM", "toggleSaveRecommendation error: ${t.message}", t)
             }
@@ -1790,7 +1867,25 @@ class TuneMindViewModel : ViewModel() {
     fun markRecommendationPlayed(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                aiRecDao?.markPlayed(id)
+                val ctx = AppHolder.context
+                val volRatio = ctx?.let { resolveCurrentVolumeRatio(it) } ?: 0f
+                aiRecDao?.markPlayed(id, volRatio)
+                if (ctx != null) {
+                    val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                    val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
+                    val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                        context = ctx,
+                        userId = userId,
+                        item = item,
+                        outcome = "PLAYED",
+                        listenedMs = 30_000L,
+                        durationMs = item.trackDurationMs.takeIf { it > 0L } ?: 180_000L,
+                        volumeRatio = volRatio.takeIf { it > 0f }
+                    )
+                    if (updated != null) {
+                        _forYouLearningState.value = updated
+                    }
+                }
             } catch (t: Throwable) {
                 android.util.Log.e("TuneMindVM", "markRecommendationPlayed error: ${t.message}", t)
             }
@@ -1801,6 +1896,19 @@ class TuneMindViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 aiRecDao?.dismiss(id)
+                val ctx = AppHolder.context ?: return@launch
+                val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
+                val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                    context = ctx,
+                    userId = userId,
+                    item = item,
+                    outcome = "DISMISSED",
+                    volumeRatio = resolveCurrentVolumeRatio(ctx)
+                )
+                if (updated != null) {
+                    _forYouLearningState.value = updated
+                }
             } catch (t: Throwable) {
                 android.util.Log.e("TuneMindVM", "dismiss error: ${t.message}", t)
             }
@@ -1827,6 +1935,27 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
+    fun previewAiRecommendation(
+        context: android.content.Context,
+        item: com.tunemind.app.domain.recommendation.AiRecommendationEntity
+    ): Boolean {
+        val url = item.previewUrl?.trim()
+        if (!url.isNullOrBlank() && url.startsWith("http")) {
+            val started = com.tunemind.app.provider.TuneMindInAppPlayer.playStreamUrl(
+                context = context,
+                streamUrl = url,
+                title = item.title,
+                artist = item.artist,
+                album = item.album
+            )
+            if (started) {
+                markRecommendationPlayed(item.id)
+                return true
+            }
+        }
+        return false
+    }
+
     fun playAiRecommendation(
         context: android.content.Context,
         item: com.tunemind.app.domain.recommendation.AiRecommendationEntity,
@@ -1836,7 +1965,7 @@ class TuneMindViewModel : ViewModel() {
         val recCategory = when (item.category) {
             "PALATE_CLEANSER" -> com.tunemind.app.domain.recommendation.RecommendationCategory.PALATE_CLEANSER
             "CHRONO_RESTORE" -> com.tunemind.app.domain.recommendation.RecommendationCategory.COOLDOWN_RESTORED
-            "SONIC_NOVELTY" -> com.tunemind.app.domain.recommendation.RecommendationCategory.EXPLORATION_DISCOVERY
+            "SONIC_NOVELTY", "NOVEL_EXPLORATION" -> com.tunemind.app.domain.recommendation.RecommendationCategory.EXPLORATION_DISCOVERY
             else -> com.tunemind.app.domain.recommendation.RecommendationCategory.FAMILIAR_RECEPTIVE
         }
         val track = com.tunemind.app.domain.recommendation.RecommendedTrack(

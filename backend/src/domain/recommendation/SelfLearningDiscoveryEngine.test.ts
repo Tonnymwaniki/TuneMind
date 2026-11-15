@@ -42,11 +42,12 @@ describe('SelfLearningDiscoveryEngine', () => {
     expect(model.positiveOutcomes).toBe(1);
   });
 
-  it('allocates 2 songs per detected genre + 2 global wildcards and excludes already-heard tracks', async () => {
+  it('allocates 2 songs per detected genre + 3 global wildcards from completely different genres and excludes already-heard tracks', async () => {
     const engine = new SelfLearningDiscoveryEngine();
     const res = await engine.generateDailyForYouDrop({
       userId: `alloc-user-${Date.now()}`,
-      dropDate: '2026-11-14',
+      dropDate: '2026-11-15@12PM',
+      timezone: 'Africa/Nairobi',
       timeSlot: 'Evening',
       avgVolumeRatio: 0.78,
       recentTracks: [
@@ -58,12 +59,28 @@ describe('SelfLearningDiscoveryEngine', () => {
     });
 
     expect(res.status).toBe('ok');
-    expect(res.recommendations.length).toBeGreaterThanOrEqual(8);
     expect(res.genreAllocation.every((g) => g.slots === 2)).toBe(true);
+    const activeGenres = new Set(res.genreAllocation.map((g) => g.genre.toLowerCase()));
+
+    const wildcards = res.recommendations.filter((r) => r.isWildcard);
+    expect(wildcards.length).toBe(3);
+    for (const w of wildcards) {
+      expect(activeGenres.has(w.genre.toLowerCase())).toBe(false);
+    }
+
     const titles = res.recommendations.map((r) => r.title.toLowerCase());
     expect(titles).not.toContain('kese (dance)');
     expect(titles).not.toContain('huwezi jua');
     expect(titles).not.toContain('humble.');
-    expect(res.recommendations.some((r) => r.isWildcard)).toBe(true);
+    expect(res.learningSummary.intelligenceScorePercent).toBeGreaterThanOrEqual(34);
+    expect(res.learningSummary.learnedTraits.length).toBeGreaterThan(0);
+  });
+
+  it('computes 12:00 PM local-timezone daily drop cycle keys accurately', () => {
+    const sampleUtc = new Date('2026-11-15T08:30:00.000Z'); // 11:30 AM EAT (before 12 PM)
+    expect(SelfLearningDiscoveryEngine.getNoonDropCycleKey('Africa/Nairobi', undefined, sampleUtc)).toBe('2026-11-14@12PM');
+
+    const afterNoonUtc = new Date('2026-11-15T09:05:00.000Z'); // 12:05 PM EAT (after 12 PM)
+    expect(SelfLearningDiscoveryEngine.getNoonDropCycleKey('Africa/Nairobi', undefined, afterNoonUtc)).toBe('2026-11-15@12PM');
   });
 });

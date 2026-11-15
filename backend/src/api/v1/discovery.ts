@@ -25,6 +25,8 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       userId: req.authUser ? identity.userId : (body.userId || body.user_id),
       userEmail: req.authUser ? identity.userEmail : (body.userEmail || body.user_email),
       dropDate: body.dropDate || body.drop_date,
+      timezone: body.timezone,
+      localHour: typeof body.localHour === 'number' ? body.localHour : undefined,
       timeSlot: body.timeSlot || body.time_slot,
       satietyLevel: Number(body.satietyLevel ?? body.satiety_level ?? 38),
       preferredProvider: body.preferredProvider || body.preferred_provider,
@@ -35,6 +37,7 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
         ? body.genreDistribution
         : undefined,
       recentTracks: Array.isArray(body.recentTracks) ? body.recentTracks : [],
+      vaultTracks: Array.isArray(body.vaultTracks) ? body.vaultTracks : [],
       excludeTitles: Array.isArray(body.excludeTitles) ? body.excludeTitles : [],
       yesterdayOutcomes: Array.isArray(body.yesterdayOutcomes) ? body.yesterdayOutcomes : [],
       playedFeedback: Array.isArray(body.playedFeedback) ? body.playedFeedback : [],

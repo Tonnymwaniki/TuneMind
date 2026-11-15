@@ -2,10 +2,13 @@ package com.tunemind.app.domain.ai
 
 import android.content.Context
 import com.tunemind.app.BuildConfig
+import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.domain.execution.OsExecutionCommand
 import com.tunemind.app.domain.execution.ReasoningResponse
 import com.tunemind.app.domain.execution.TuneMindExecutionEngine
 import com.tunemind.app.domain.model.TrackMemoryEntry
+import com.tunemind.app.domain.network.BackendEndpointManager
+import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.domain.recommendation.RecommendationCategory
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.ui.NowPlayingObservation
@@ -19,7 +22,132 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
+import kotlin.math.roundToInt
+
+data class ForYouLearningSummary(
+    val intelligenceScorePercent: Int = 42,
+    val evolutionStage: String = "STAGE_1_CALIBRATING",
+    val evolutionLabel: String = "Stage 1 · Calibrating Your Taste",
+    val learningIterations: Int = 0,
+    val evaluatedOutcomes: Int = 0,
+    val hitRatePercent: Int = 70,
+    val risingGenres: List<String> = emptyList(),
+    val coolingGenres: List<String> = emptyList(),
+    val avgVolumePercent: Int = 62,
+    val learnedTraits: List<String> = emptyList(),
+    val narrative: String = "AI learns from every track you play, save, preview, or skip and refreshes picks daily at 12:00 PM.",
+    val isAiGenerated: Boolean = true,
+    val modelUsed: String = "Claude Reasoning + Neural Bandit",
+    val dropDateKey: String = "",
+    val nextRefreshLocalLabel: String = "12:00 PM local time",
+    val lastUpdatedMs: Long = System.currentTimeMillis()
+) {
+    fun toJsonString(): String {
+        return JSONObject().apply {
+            put("intelligenceScorePercent", intelligenceScorePercent)
+            put("evolutionStage", evolutionStage)
+            put("evolutionLabel", evolutionLabel)
+            put("learningIterations", learningIterations)
+            put("evaluatedOutcomes", evaluatedOutcomes)
+            put("hitRatePercent", hitRatePercent)
+            put("risingGenres", JSONArray(risingGenres))
+            put("coolingGenres", JSONArray(coolingGenres))
+            put("avgVolumePercent", avgVolumePercent)
+            put("learnedTraits", JSONArray(learnedTraits))
+            put("narrative", narrative)
+            put("isAiGenerated", isAiGenerated)
+            put("modelUsed", modelUsed)
+            put("dropDateKey", dropDateKey)
+            put("nextRefreshLocalLabel", nextRefreshLocalLabel)
+            put("lastUpdatedMs", lastUpdatedMs)
+        }.toString()
+    }
+
+    companion object {
+        fun fromJsonString(raw: String): ForYouLearningSummary? {
+            return try {
+                val obj = JSONObject(raw)
+                val risingArr = obj.optJSONArray("risingGenres")
+                val coolingArr = obj.optJSONArray("coolingGenres")
+                val traitsArr = obj.optJSONArray("learnedTraits")
+                ForYouLearningSummary(
+                    intelligenceScorePercent = obj.optInt("intelligenceScorePercent", 42).coerceIn(10, 99),
+                    evolutionStage = obj.optString("evolutionStage", "STAGE_1_CALIBRATING"),
+                    evolutionLabel = obj.optString("evolutionLabel", "Stage 1 · Calibrating Your Taste"),
+                    learningIterations = obj.optInt("learningIterations", 0),
+                    evaluatedOutcomes = obj.optInt("evaluatedOutcomes", 0),
+                    hitRatePercent = obj.optInt("hitRatePercent", 70).coerceIn(0, 100),
+                    risingGenres = List(risingArr?.length() ?: 0) { idx -> risingArr!!.optString(idx) }.filter { it.isNotBlank() },
+                    coolingGenres = List(coolingArr?.length() ?: 0) { idx -> coolingArr!!.optString(idx) }.filter { it.isNotBlank() },
+                    avgVolumePercent = obj.optInt("avgVolumePercent", 62).coerceIn(5, 100),
+                    learnedTraits = List(traitsArr?.length() ?: 0) { idx -> traitsArr!!.optString(idx) }.filter { it.isNotBlank() },
+                    narrative = obj.optString("narrative", ""),
+                    isAiGenerated = obj.optBoolean("isAiGenerated", true),
+                    modelUsed = obj.optString("modelUsed", "Claude Reasoning + Neural Bandit"),
+                    dropDateKey = obj.optString("dropDateKey", ""),
+                    nextRefreshLocalLabel = obj.optString("nextRefreshLocalLabel", "12:00 PM local time"),
+                    lastUpdatedMs = obj.optLong("lastUpdatedMs", System.currentTimeMillis())
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+}
+
+/**
+ * Manages the exact 12:00 PM (Noon) daily drop cycle based on the user's device local timezone.
+ * Before 12:00 PM local time, returns `<yesterday>@12PM`.
+ * At or after 12:00 PM local time, rotates cleanly to `<today>@12PM`.
+ */
+object NoonDropSchedule {
+    fun getNoonCycleKey(calendar: Calendar = Calendar.getInstance()): String {
+        val copy = (calendar.clone() as Calendar)
+        val hour = copy.get(Calendar.HOUR_OF_DAY)
+        if (hour < 12) {
+            copy.add(Calendar.DAY_OF_YEAR, -1)
+        }
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = copy.timeZone
+        }
+        return "${fmt.format(copy.time)}@12PM"
+    }
+
+    fun millisUntilNextNoon(nowMs: Long = System.currentTimeMillis()): Long {
+        val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
+        val nextNoon = (cal.clone() as Calendar).apply {
+            if (get(Calendar.HOUR_OF_DAY) >= 12) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+            set(Calendar.HOUR_OF_DAY, 12)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        return (nextNoon.timeInMillis - nowMs).coerceAtLeast(60_000L)
+    }
+
+    fun formatCountdownToNoon(nowMs: Long = System.currentTimeMillis()): String {
+        val remainingMs = millisUntilNextNoon(nowMs)
+        val totalMins = (remainingMs / 60_000L).coerceAtLeast(1L)
+        val hours = totalMins / 60L
+        val mins = totalMins % 60L
+        return if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+    }
+
+    fun getLocalTimeZoneShortLabel(): String {
+        return runCatching {
+            TimeZone.getDefault().getDisplayName(false, TimeZone.SHORT, Locale.getDefault())
+                ?.takeIf { it.isNotBlank() }
+                ?: TimeZone.getDefault().id
+        }.getOrDefault("Local")
+    }
+}
 
 /**
  * Cognitive Reasoning Engine powered exclusively by the TuneMind Backend
@@ -32,6 +160,8 @@ object GeminiReasoningEngine {
 
     private const val PREFS_REPORT = "tunemind_telemetry_reasoning_prefs"
     private const val KEY_LATEST_REPORT = "latest_reasoning_report_json"
+    private const val PREFS_FOR_YOU = "tunemind_foryou_prefs"
+    private const val KEY_LEARNING_SUMMARY = "latest_foryou_learning_summary_json"
 
     fun getApiKey(@Suppress("UNUSED_PARAMETER") context: Context): String = ""
 
@@ -40,18 +170,48 @@ object GeminiReasoningEngine {
     }
 
     fun isConfigured(@Suppress("UNUSED_PARAMETER") context: Context): Boolean {
-        return BuildConfig.TUNEMIND_BASE_URL.trim().isNotBlank()
+        return BuildConfig.TUNEMIND_BASE_URL.trim().isNotBlank() ||
+            BackendEndpointManager.RENDER_PRODUCTION_URL.isNotBlank()
+    }
+
+    private fun resolveActiveBackendUrl(context: Context): String {
+        val preferred = BackendEndpointManager.getActiveHttpBaseUrl(context).trim().trimEnd('/')
+        if (preferred.isNotBlank()) return preferred
+        return BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+    }
+
+    fun saveLearningSummary(context: Context, summary: ForYouLearningSummary) {
+        try {
+            context.applicationContext.getSharedPreferences(PREFS_FOR_YOU, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LEARNING_SUMMARY, summary.toJsonString())
+                .apply()
+        } catch (_: Exception) {}
+    }
+
+    fun getSavedLearningSummary(context: Context): ForYouLearningSummary {
+        return try {
+            val raw = context.applicationContext.getSharedPreferences(PREFS_FOR_YOU, Context.MODE_PRIVATE)
+                .getString(KEY_LEARNING_SUMMARY, null)
+            if (!raw.isNullOrBlank()) {
+                ForYouLearningSummary.fromJsonString(raw) ?: ForYouLearningSummary(dropDateKey = NoonDropSchedule.getNoonCycleKey())
+            } else {
+                ForYouLearningSummary(dropDateKey = NoonDropSchedule.getNoonCycleKey())
+            }
+        } catch (_: Exception) {
+            ForYouLearningSummary(dropDateKey = NoonDropSchedule.getNoonCycleKey())
+        }
     }
 
     /**
      * Checks whether the paid Claude reasoning backend is online and configured.
      */
     suspend fun testConnection(
-        @Suppress("UNUSED_PARAMETER") context: Context,
+        context: Context,
         @Suppress("UNUSED_PARAMETER") candidateKey: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+            val baseUrl = resolveActiveBackendUrl(context)
             if (baseUrl.isBlank()) {
                 return@withContext Result.failure(IllegalStateException("Backend URL is not configured."))
             }
@@ -86,9 +246,7 @@ object GeminiReasoningEngine {
     suspend fun callBackendAnalyze(payload: JSONObject): Result<JSONObject> = withContext(Dispatchers.IO) {
         try {
             val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
-            if (baseUrl.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("No backend URL configured in BuildConfig.TUNEMIND_BASE_URL"))
-            }
+                .ifBlank { BackendEndpointManager.RENDER_PRODUCTION_URL }
             val url = URL("$baseUrl/api/v1/reasoning/analyze")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -125,9 +283,9 @@ object GeminiReasoningEngine {
         telemetryContext: JSONObject
     ): Result<ReasoningResponse> = withContext(Dispatchers.IO) {
         try {
-            val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+            val baseUrl = resolveActiveBackendUrl(context)
             if (baseUrl.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("No backend URL configured in BuildConfig.TUNEMIND_BASE_URL"))
+                return@withContext Result.failure(IllegalStateException("No backend URL configured"))
             }
             val url = URL("$baseUrl/api/v1/reasoning/evaluate-satiety")
             val conn = url.openConnection() as HttpURLConnection
@@ -360,12 +518,42 @@ object GeminiReasoningEngine {
         Result.success(fallbackDossier)
     }
 
+    private fun parseLearningSummaryJson(
+        root: JSONObject,
+        dropDateKey: String
+    ): ForYouLearningSummary? {
+        val ls = root.optJSONObject("learningSummary") ?: return null
+        val risingArr = ls.optJSONArray("risingGenres")
+        val coolingArr = ls.optJSONArray("coolingGenres")
+        val traitsArr = ls.optJSONArray("learnedTraits")
+        return ForYouLearningSummary(
+            intelligenceScorePercent = ls.optInt("intelligenceScorePercent", 45).coerceIn(10, 99),
+            evolutionStage = ls.optString("evolutionStage", "STAGE_1_CALIBRATING"),
+            evolutionLabel = ls.optString("evolutionLabel", "Stage 1 · Calibrating Your Taste"),
+            learningIterations = ls.optInt("learningIterations", 0),
+            evaluatedOutcomes = ls.optInt("evaluatedOutcomes", 0),
+            hitRatePercent = ls.optInt("hitRatePercent", 70).coerceIn(0, 100),
+            risingGenres = List(risingArr?.length() ?: 0) { idx -> risingArr!!.optString(idx) }.filter { it.isNotBlank() },
+            coolingGenres = List(coolingArr?.length() ?: 0) { idx -> coolingArr!!.optString(idx) }.filter { it.isNotBlank() },
+            avgVolumePercent = ls.optInt("avgVolumePercent", 62).coerceIn(5, 100),
+            learnedTraits = List(traitsArr?.length() ?: 0) { idx -> traitsArr!!.optString(idx) }.filter { it.isNotBlank() },
+            narrative = ls.optString("narrative", ""),
+            isAiGenerated = root.optBoolean("isAiGenerated", true),
+            modelUsed = root.optString("modelUsed", "Claude Reasoning + Neural Bandit"),
+            dropDateKey = root.optString("dropDate", dropDateKey).ifBlank { dropDateKey },
+            nextRefreshLocalLabel = root.optString("nextRefreshLocalLabel", "12:00 PM local time"),
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+    }
+
     /**
-     * Generates persistent Chrono-Receptive AI recommendations via backend Claude (`/api/v1/reasoning/discovery`),
-     * with genre-aware adaptive baseline fallback when offline.
+     * Generates the 12:00 PM Self-Learning AI Daily Drop (`POST /api/v1/discovery/daily-drop`):
+     * - Auto-rotates strictly on the user's local 12:00 PM cycle key.
+     * - Delivers 2 unheard songs per active genre + 3 Global Wildcards from non-overlapping genres.
+     * - Feeds back previous drop outcomes, volume ratio, & cross-app listening so the bandit + Claude evolve daily.
      */
     suspend fun generateChronoCrateRecommendations(
-        @Suppress("UNUSED_PARAMETER") context: Context,
+        context: Context,
         recentTracks: List<TrackMemoryEntry>,
         vaultTracks: List<VaultTrack>,
         timeSlotKey: String,
@@ -376,21 +564,38 @@ object GeminiReasoningEngine {
         nowPlayingArtist: String? = null,
         excludeTitles: List<String> = emptyList(),
         playedSignals: List<String> = emptyList(),
-        dismissedSignals: List<String> = emptyList()
-    ): List<com.tunemind.app.domain.recommendation.AiRecommendationEntity> = withContext(Dispatchers.IO) {
+        dismissedSignals: List<String> = emptyList(),
+        userId: String = "",
+        userEmail: String = "",
+        avgVolumeRatio: Float? = null,
+        yesterdayOutcomes: List<AiRecommendationEntity> = emptyList(),
+        onLearningSummaryUpdated: ((ForYouLearningSummary) -> Unit)? = null
+    ): List<AiRecommendationEntity> = withContext(Dispatchers.IO) {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
             .filter { it.isNotBlank() }
             .distinct()
         val allArtists = (userTasteAnchors + observedArtists).distinct().filter { it.isNotBlank() }
-        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Bongo Flava, Afrobeats, Hip-Hop, R&B, Pop" }
+        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Afrobeats, Hip-Hop, R&B, Pop" }
+        val calendar = Calendar.getInstance()
+        val noonCycleKey = NoonDropSchedule.getNoonCycleKey(calendar)
+        val timezoneId = calendar.timeZone.id ?: TimeZone.getDefault().id
+        val localHour = calendar.get(Calendar.HOUR_OF_DAY)
 
         val payload = JSONObject().apply {
+            if (userId.isNotBlank()) put("userId", userId)
+            if (userEmail.isNotBlank()) put("userEmail", userEmail)
+            put("dropDate", noonCycleKey)
+            put("timezone", timezoneId)
+            put("localHour", localHour)
             put("timeSlot", timeSlotLabel)
             put("satietyLevel", satietyPercent)
             put("preferredProvider", preferredProviderId)
+            if (avgVolumeRatio != null && avgVolumeRatio > 0f) {
+                put("avgVolumeRatio", avgVolumeRatio.toDouble().coerceIn(0.05, 1.0))
+            }
 
             val artistsArray = JSONArray()
-            allArtists.take(8).forEach { artistsArray.put(it) }
+            allArtists.take(10).forEach { artistsArray.put(it) }
             put("topArtists", artistsArray)
 
             val anchorsArray = JSONArray()
@@ -398,24 +603,26 @@ object GeminiReasoningEngine {
             put("userTasteAnchors", anchorsArray)
 
             val excludeArray = JSONArray()
-            excludeTitles.take(60).forEach { excludeArray.put(it) }
+            excludeTitles.distinct().take(120).forEach { excludeArray.put(it) }
             put("excludeTitles", excludeArray)
 
             val playedArray = JSONArray()
-            playedSignals.take(12).forEach { playedArray.put(it) }
+            playedSignals.take(15).forEach { playedArray.put(it) }
             put("playedFeedback", playedArray)
 
             val dismissedArray = JSONArray()
-            dismissedSignals.take(12).forEach { dismissedArray.put(it) }
+            dismissedSignals.take(15).forEach { dismissedArray.put(it) }
             put("dismissedFeedback", dismissedArray)
 
             val tracksArray = JSONArray()
-            recentTracks.take(8).forEach { t ->
+            recentTracks.take(16).forEach { t ->
                 tracksArray.put(JSONObject().apply {
                     put("title", t.title)
                     put("artist", t.artist)
-                    put("plays", t.distinctAppearanceCount)
+                    put("playCount", maxOf(1, t.distinctAppearanceCount))
+                    put("plays", maxOf(1, t.distinctAppearanceCount))
                     put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                    put("sourceApp", t.sourcePackage ?: "Spotify")
                 })
             }
             put("recentTracks", tracksArray)
@@ -425,22 +632,53 @@ object GeminiReasoningEngine {
                 vaultArray.put(JSONObject().apply {
                     put("title", v.title)
                     put("artist", v.artist)
+                    put("cooldownDaysRemaining", v.cooldownDaysRemaining.toInt())
                 })
             }
             put("vaultTracks", vaultArray)
+
+            val outcomesArray = JSONArray()
+            yesterdayOutcomes.take(24).forEach { prev ->
+                val inferredOutcome = when {
+                    prev.isDismissed -> "DISMISSED"
+                    prev.completedListenCount > 0 -> "COMPLETED"
+                    prev.isSaved -> "SAVED"
+                    prev.wasPlayed -> "PLAYED"
+                    else -> "IGNORED"
+                }
+                outcomesArray.put(JSONObject().apply {
+                    put("title", prev.title)
+                    put("artist", prev.artist)
+                    put("genre", prev.genreTag)
+                    put("subTier", prev.subTier)
+                    put("outcome", inferredOutcome)
+                    put("listenedMs", prev.listenedDurationMs)
+                    put("durationMs", prev.trackDurationMs)
+                    if (prev.avgVolumeUsedRatio > 0f) {
+                        put("volumeRatio", prev.avgVolumeUsedRatio.toDouble())
+                    }
+                    put("timeSlot", prev.timeSlotLabel)
+                    put("dropDate", prev.dropDateKey)
+                })
+            }
+            put("yesterdayOutcomes", outcomesArray)
         }
 
-        // Route via backend paid Claude (/api/v1/reasoning/discovery)
-        val backendUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
+        // Route via backend SelfLearningDiscoveryEngine (/api/v1/discovery/daily-drop)
+        val backendUrl = resolveActiveBackendUrl(context)
         if (backendUrl.isNotBlank()) {
             try {
-                val url = URL("$backendUrl/api/v1/reasoning/discovery")
+                val url = URL("$backendUrl/api/v1/discovery/daily-drop")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 conn.setRequestProperty("Accept", "application/json")
-                conn.connectTimeout = 12_000
-                conn.readTimeout = 24_000
+                val token = runCatching { TuneMindAuthSessionManager.getInstance(context).getAccessToken() }.getOrDefault("")
+                if (token.isNotBlank()) {
+                    conn.setRequestProperty("Authorization", "Bearer $token")
+                }
+                conn.connectTimeout = 14_000
+                conn.readTimeout = 28_000
                 conn.doOutput = true
 
                 OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
@@ -451,33 +689,54 @@ object GeminiReasoningEngine {
                 if (conn.responseCode in 200..299) {
                     val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
                     val root = JSONObject(text)
+                    val parsedSummary = parseLearningSummaryJson(root, noonCycleKey)
+                    if (parsedSummary != null) {
+                        saveLearningSummary(context, parsedSummary)
+                        onLearningSummaryUpdated?.invoke(parsedSummary)
+                    }
+
                     val recsArray = root.optJSONArray("recommendations")
                     if (recsArray != null && recsArray.length() > 0) {
-                        val list = mutableListOf<com.tunemind.app.domain.recommendation.AiRecommendationEntity>()
+                        val list = mutableListOf<AiRecommendationEntity>()
                         val seenKeys = mutableSetOf<String>()
+                        val nowMs = System.currentTimeMillis()
                         for (i in 0 until recsArray.length()) {
                             val item = recsArray.getJSONObject(i)
-                            val title = item.optString("title", "Discovery Track").trim()
-                            val artist = item.optString("artist", "Featured Artist").trim()
+                            val title = item.optString("title", "").trim()
+                            val artist = item.optString("artist", "").trim()
                             val key = "${title.lowercase()}_${artist.lowercase()}"
-                            if (title.isBlank() || seenKeys.contains(key)) continue
+                            if (title.isBlank() || artist.isBlank() || seenKeys.contains(key)) continue
                             seenKeys.add(key)
 
+                            val genreTag = item.optString("genre", "Discovery").trim().ifBlank { "Discovery" }
+                            val subTier = item.optString("subTier", "GENRE_PICK").trim().ifBlank { "GENRE_PICK" }
+                            val isWildcard = item.optBoolean("isWildcard", subTier == "GLOBAL_WILDCARD")
+                            val confidence = item.optDouble("confidence", 0.91).toFloat().coerceIn(0.65f, 0.99f)
+                            val mlScoreRaw = item.optDouble("mlScore", confidence.toDouble())
+                            val matchPercent = (mlScoreRaw * 100.0).roundToInt().coerceIn(72, 99)
+                            val previewUrl = item.optString("previewUrl", "").trim().takeIf { it.startsWith("http") }
+
                             list.add(
-                                com.tunemind.app.domain.recommendation.AiRecommendationEntity(
-                                    id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(title, artist),
+                                AiRecommendationEntity(
+                                    id = AiRecommendationEntity.createDeterministicId(title, artist),
                                     title = title,
                                     artist = artist,
-                                    album = item.optString("album", null),
-                                    category = item.optString("category", "DOPAMINE_FLOW"),
-                                    subTier = item.optString("subTier", if (i < 4) "CORE_DOPAMINE" else if (i < 7) "DEEP_CUT" else if (i < 9) "PALATE_CLEANSER" else "SONIC_FRONTIER"),
-                                    reason = item.optString("reason", "Curated for your $timeSlotLabel dopamine state based on your listening pattern."),
-                                    confidence = item.optDouble("confidence", 0.94).toFloat(),
+                                    album = item.optString("album", "").trim().takeIf { it.isNotBlank() },
+                                    category = item.optString("category", if (isWildcard) "NOVEL_EXPLORATION" else "DOPAMINE_FLOW"),
+                                    subTier = if (isWildcard) "GLOBAL_WILDCARD" else subTier,
+                                    reason = item.optString("reason", "Predicted for your $timeSlotLabel mood."),
+                                    confidence = confidence,
                                     timeSlotKey = timeSlotKey,
                                     timeSlotLabel = timeSlotLabel,
-                                    recommendedAtMs = System.currentTimeMillis(),
+                                    recommendedAtMs = nowMs - i, // Keep backend ML ordering deterministic in DESC queries
                                     suggestedProviderId = preferredProviderId,
-                                    telemetryBasisSummary = "Demonstrated Rotation: $artistsSummary"
+                                    telemetryBasisSummary = "Demonstrated Rotation: $artistsSummary",
+                                    genreTag = genreTag,
+                                    dropDateKey = noonCycleKey,
+                                    matchScorePercent = matchPercent,
+                                    isWildcard = isWildcard,
+                                    previewUrl = previewUrl,
+                                    trackDurationMs = item.optLong("durationMs", 0L)
                                 )
                             )
                         }
@@ -487,89 +746,158 @@ object GeminiReasoningEngine {
             } catch (_: Exception) {}
         }
 
-        // Offline genre-aware baseline fallback
+        // Offline genre-aware baseline fallback (still preserves 2-per-genre + 3 non-overlapping Global Wildcards)
         val lower = artistsSummary.lowercase()
         val isBongo = lower.contains("bongo") || lower.contains("mbosso") || lower.contains("diamond") || lower.contains("platnumz") || lower.contains("harmonize") || lower.contains("rayvanny") || lower.contains("zuchu") || lower.contains("marioo") || lower.contains("kiba") || lower.contains("kusah") || lower.contains("jux") || lower.contains("otile") || lower.contains("nandy") || lower.contains("swahili") || lower.contains("east africa")
         val isAfro = lower.contains("afro") || lower.contains("amapiano") || lower.contains("burna") || lower.contains("wizkid") || lower.contains("rema") || lower.contains("asake") || lower.contains("tems")
         val isHipHop = lower.contains("hip") || lower.contains("rap") || lower.contains("drake") || lower.contains("kendrick") || lower.contains("cole") || lower.contains("travis")
 
-        data class FallbackTrack(val title: String, val artist: String, val reason: String, val category: String, val subTier: String)
+        data class FallbackTrack(
+            val title: String,
+            val artist: String,
+            val genre: String,
+            val reason: String,
+            val category: String,
+            val subTier: String,
+            val isWildcard: Boolean = false,
+            val matchPercent: Int = 92
+        )
 
-        val fullLibrary = if (isBongo) {
-            listOf(
-                FallbackTrack("Huwezi Jua", "Mbosso", "Soulful Bongo Flava acoustic chords deliver immediate emotional entrainment.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Mi Amor", "Marioo & Jovial", "Tender Swahili vocal harmonies and sweet acoustic rhythm clear cognitive auditory fatigue.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Komasava", "Diamond Platnumz", "High-energy Afro-Bongo groove and infectious tempo boost midday dopamine alertness.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Sukari", "Zuchu", "Playful taarab-infused acoustic cadence and bright melodic hooks provide sustained joy.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Amepotea", "Mbosso", "Introspective acoustic ballad highlighting rich Swahili lyricism and melancholy strings.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Enjoy", "Jux & Diamond Platnumz", "Effortless Afro-Bongo bounce with smooth vocal trade-offs maintaining flow state.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Single Again", "Harmonize", "Melodic guitar progression and relatable emotional phrasing tailored for chrono-recovery.", "CHRONO_RESTORE", "DEEP_CUT"),
-                FallbackTrack("Dah!", "Nandy", "Airy, gentle vocal production resets acoustic receptor saturation effortlessly.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Inatosha", "Marioo", "Warm mid-tempo guitar arpeggios soothe high-frequency auditory fatigue.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Kelebe", "Rayvanny & Innoss'B", "Congolese Rumba meets Bongo Flava fusion expands your listening horizon.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
+        val genrePicks = when {
+            isBongo -> listOf(
+                FallbackTrack("Huwezi Jua", "Mbosso", "Bongo Flava", "Soulful Bongo Flava chords match your melodic cadence cleanly.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
+                FallbackTrack("Mi Amor", "Marioo & Jovial", "Bongo Flava", "Warm Swahili vocal harmonies lift receptor freshness immediately.", "DOPAMINE_FLOW", "GENRE_PICK", false, 93),
+                FallbackTrack("Lonely At The Top", "Asake", "Afrobeats", "Acoustic log drums bridge your East-West groove seamlessly.", "DOPAMINE_FLOW", "GENRE_PICK", false, 91),
+                FallbackTrack("Free Mind", "Tems", "Afrobeats", "Spacious guitar phrasing rests overstimulated ears cleanly.", "PALATE_CLEANSER", "GENRE_PICK", false, 89)
             )
-        } else if (isAfro) {
-            listOf(
-                FallbackTrack("Last Last", "Burna Boy", "Syncopated groove triggers instantaneous dopamine entrainment.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Calm Down", "Rema", "Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Lonely At The Top", "Asake", "Acoustic log drum undertones deliver supreme cognitive comfort.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Rush", "Ayra Starr", "Punchy percussion and magnetic hook provide sustained listening pleasure.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Soweto", "Victony & Tempoe", "Subtle flute hooks and delicate rhythmic pacing keep listening receptors active.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Ku Lo Sa", "Oxlade", "Intricate falsetto and warm percussion create an expansive acoustic space.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Essence", "Wizkid & Tems", "Smooth duet harmonies induce effortless calm and flow.", "CHRONO_RESTORE", "DEEP_CUT"),
-                FallbackTrack("Free Mind", "Tems", "Intimate acoustic guitar chords and raw vocal dynamics clear auditory habituation.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Understand", "Omah Lay", "Gentle mid-tempo bounce allows ear rest between high-energy sessions.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Mnike", "Tyler ICU & Tumelo.za", "Deep Amapiano percussion patterns introduce sonic novelty.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
+            isAfro -> listOf(
+                FallbackTrack("Soweto", "Victony & Tempoe", "Afrobeats", "Crisp flute motifs and syncopated bounce keep focus sharp.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
+                FallbackTrack("Ku Lo Sa", "Oxlade", "Afrobeats", "Silk falsetto and warm percussion extend groove longevity.", "DOPAMINE_FLOW", "GENRE_PICK", false, 93),
+                FallbackTrack("Snooze", "SZA", "R&B", "Velvet harmonies ease afternoon fatigue while keeping warmth.", "CHRONO_RESTORE", "GENRE_PICK", false, 91),
+                FallbackTrack("Bad Habit", "Steve Lacy", "R&B", "Warm guitar phrasing keeps unfamiliar rotation lively.", "PALATE_CLEANSER", "GENRE_PICK", false, 89)
             )
-        } else if (isHipHop) {
-            listOf(
-                FallbackTrack("Middle Child", "J. Cole", "Crisp horn fanfare and punchy 808 cadence stimulate focus.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("First Person Shooter", "Drake & J. Cole", "Dynamic beat switch maintains intense cognitive engagement.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("HUMBLE.", "Kendrick Lamar", "Piano motif and crisp bass structure provide immediate alertness.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("SICKO MODE", "Travis Scott", "Layered tempo shift creates rich auditory immersion.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("family ties", "Baby Keem & Kendrick Lamar", "Dynamic brass modulation expands your listening horizon.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Surround Sound", "JID & 21 Savage", "Soul sample flips into high-precision technical cadence.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("a lot", "21 Savage & J. Cole", "Soulful backing vocal loop balances temporal energy.", "CHRONO_RESTORE", "DEEP_CUT"),
-                FallbackTrack("PRIDE.", "Kendrick Lamar", "Relaxed vocal pacing provides ear fatigue relief.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("LOVE.", "Kendrick Lamar & Zacari", "Minimalist production resets auditory saturation.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Redrum", "21 Savage", "Classic vocal chop fused with contemporary rhythm.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
+            isHipHop -> listOf(
+                FallbackTrack("Surround Sound", "JID & 21 Savage", "Hip-Hop", "Soul sample flips into surgical cadence fit high-focus windows.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
+                FallbackTrack("a lot", "21 Savage & J. Cole", "Hip-Hop", "Soulful loop balances crisp vocal clarity cleanly.", "DOPAMINE_FLOW", "GENRE_PICK", false, 92),
+                FallbackTrack("Pink + White", "Frank Ocean", "R&B", "Stripped piano chords reset sensory repetition effortlessly.", "PALATE_CLEANSER", "GENRE_PICK", false, 90),
+                FallbackTrack("Ku Lo Sa", "Oxlade", "Afrobeats", "Warm syncopation adds uplifting melodic relief.", "NOVEL_EXPLORATION", "GENRE_PICK", false, 88)
             )
-        } else {
-            listOf(
-                FallbackTrack("Blinding Lights", "The Weeknd", "Driving synth progression and steady groove deliver peak engagement.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Kill Bill", "SZA", "Bouncy bassline and crisp vocal hooks trigger sustained listening pleasure.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Levitating", "Dua Lipa", "Upbeat rhythm and energetic tempo lift daily energy.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("As It Was", "Harry Styles", "Bright chimes and driving drum beat elevate focus.", "DOPAMINE_FLOW", "CORE_DOPAMINE"),
-                FallbackTrack("Snooze", "SZA", "Velvety chord progressions harmonize with calm sessions.", "CHRONO_RESTORE", "DEEP_CUT"),
-                FallbackTrack("Bad Habit", "Steve Lacy", "Warm guitar hooks and harmonies keep rotation fresh.", "NOVEL_EXPLORATION", "DEEP_CUT"),
-                FallbackTrack("Stay", "The Kid LAROI & Justin Bieber", "Upbeat tempo and bright harmonic cadence boost alertness.", "CHRONO_RESTORE", "DEEP_CUT"),
-                FallbackTrack("Redbone", "Childish Gambino", "Warm bassline and falsetto reset compressed ear fatigue.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Pink + White", "Frank Ocean", "Stripped piano and acoustic guitar reset sensory saturation.", "PALATE_CLEANSER", "PALATE_CLEANSER"),
-                FallbackTrack("Dead Man Walking", "Brent Faiyaz", "Rich strings and measured cadence deliver temporal balance.", "NOVEL_EXPLORATION", "SONIC_FRONTIER")
+            else -> listOf(
+                FallbackTrack("Snooze", "SZA", "R&B", "Velvety chord progressions match balanced circadian listening.", "DOPAMINE_FLOW", "GENRE_PICK", false, 94),
+                FallbackTrack("Bad Habit", "Steve Lacy", "R&B", "Warm guitar groove sparks freshness without ear fatigue.", "DOPAMINE_FLOW", "GENRE_PICK", false, 92),
+                FallbackTrack("Calm Down", "Rema", "Afrobeats", "Smooth melodic hooks sustain effortless engagement.", "DOPAMINE_FLOW", "GENRE_PICK", false, 90),
+                FallbackTrack("Levitating", "Dua Lipa", "Pop", "Crisp four-on-the-floor energy refreshes midday momentum.", "CHRONO_RESTORE", "GENRE_PICK", false, 88)
             )
         }
 
-        val excludedSet = excludeTitles.map { it.lowercase().trim() }.toSet()
-        val nonExcluded = fullLibrary.filter { !excludedSet.contains(it.title.lowercase()) }
-        val finalTracks = (if (nonExcluded.size >= 4) nonExcluded else fullLibrary).take(10)
+        // 3 Global Wildcards strictly outside the user's primary genres
+        val activeGenreNames = genrePicks.map { it.genre.lowercase() }.toSet()
+        val wildcardCandidates = listOf(
+            FallbackTrack("Black Satin", "Yussef Dayes", "Nu-Jazz & Neo-Soul", "Live London percussion meets hypnotic Rhodes chords — a fresh sonic leap outside your normal lanes.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 84),
+            FallbackTrack("From The Start", "Laufey", "Bossa Nova & MPB", "Light acoustic bossa sway resets heavy bass saturation with airy warmth.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 82),
+            FallbackTrack("Delilah (pull me out of this)", "Fred again..", "Electronic & Afro House", "Euphoric chopped vocals over warm house chords widen your rhythmic palette.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 81),
+            FallbackTrack("Mambote", "Fally Ipupa", "Afro-Francophone", "Silky Congolese rumba guitars bridge effortlessly from warm melodic tastes.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 83)
+        ).filter { !activeGenreNames.contains(it.genre.lowercase()) }.take(3)
 
-        finalTracks.map { item ->
-            com.tunemind.app.domain.recommendation.AiRecommendationEntity(
-                id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(item.title, item.artist),
+        val excludedSet = excludeTitles.map { it.lowercase().trim() }.toSet()
+        val combined = (genrePicks + wildcardCandidates).filter { !excludedSet.contains(it.title.lowercase()) }
+            .ifEmpty { genrePicks + wildcardCandidates }
+
+        val offlineSummary = getSavedLearningSummary(context).copy(
+            dropDateKey = noonCycleKey,
+            isAiGenerated = false,
+            modelUsed = "TuneMind Offline Taste Model",
+            nextRefreshLocalLabel = "12:00 PM ${NoonDropSchedule.getLocalTimeZoneShortLabel()}",
+            lastUpdatedMs = System.currentTimeMillis()
+        )
+        saveLearningSummary(context, offlineSummary)
+        onLearningSummaryUpdated?.invoke(offlineSummary)
+
+        val nowMs = System.currentTimeMillis()
+        combined.mapIndexed { idx, item ->
+            AiRecommendationEntity(
+                id = AiRecommendationEntity.createDeterministicId(item.title, item.artist),
                 title = item.title,
                 artist = item.artist,
                 album = null,
                 category = item.category,
                 subTier = item.subTier,
                 reason = item.reason,
-                confidence = 0.95f,
+                confidence = (item.matchPercent / 100f).coerceIn(0.75f, 0.98f),
                 timeSlotKey = timeSlotKey,
                 timeSlotLabel = timeSlotLabel,
-                recommendedAtMs = System.currentTimeMillis(),
+                recommendedAtMs = nowMs - idx,
                 suggestedProviderId = preferredProviderId,
-                telemetryBasisSummary = "Demonstrated Rotation: $artistsSummary"
+                telemetryBasisSummary = "Demonstrated Rotation: $artistsSummary",
+                genreTag = item.genre,
+                dropDateKey = noonCycleKey,
+                matchScorePercent = item.matchPercent,
+                isWildcard = item.isWildcard
             )
         }
+    }
+
+    /**
+     * Records real-time recommendation feedback (`PLAYED`, `COMPLETED`, `SAVED`, `SKIPPED`, `DISMISSED`)
+     * to POST /api/v1/discovery/feedback so the Bayesian bandit + EMA taste weights evolve immediately.
+     */
+    suspend fun sendDiscoveryFeedback(
+        context: Context,
+        userId: String,
+        item: AiRecommendationEntity,
+        outcome: String,
+        listenedMs: Long = 0L,
+        durationMs: Long = item.trackDurationMs,
+        volumeRatio: Float? = null,
+        timeSlot: String = item.timeSlotLabel
+    ): ForYouLearningSummary? = withContext(Dispatchers.IO) {
+        val baseUrl = resolveActiveBackendUrl(context)
+        if (baseUrl.isBlank()) return@withContext null
+        try {
+            val payload = JSONObject().apply {
+                if (userId.isNotBlank()) put("userId", userId)
+                put("title", item.title)
+                put("artist", item.artist)
+                put("genre", item.genreTag)
+                put("subTier", item.subTier)
+                put("outcome", outcome)
+                put("listenedMs", listenedMs.coerceAtLeast(0L))
+                put("durationMs", durationMs.coerceAtLeast(0L))
+                if (volumeRatio != null && volumeRatio > 0f) {
+                    put("volumeRatio", volumeRatio.toDouble().coerceIn(0.05, 1.0))
+                }
+                put("timeSlot", timeSlot)
+                put("dropDate", item.dropDateKey.ifBlank { NoonDropSchedule.getNoonCycleKey() })
+            }
+            val url = URL("$baseUrl/api/v1/discovery/feedback")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("Accept", "application/json")
+            val token = runCatching { TuneMindAuthSessionManager.getInstance(context).getAccessToken() }.getOrDefault("")
+            if (token.isNotBlank()) {
+                conn.setRequestProperty("Authorization", "Bearer $token")
+            }
+            conn.connectTimeout = 8_000
+            conn.readTimeout = 12_000
+            conn.doOutput = true
+
+            OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
+                writer.write(payload.toString())
+                writer.flush()
+            }
+
+            if (conn.responseCode in 200..299) {
+                val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
+                val root = JSONObject(text)
+                val updated = parseLearningSummaryJson(root, NoonDropSchedule.getNoonCycleKey())
+                if (updated != null) {
+                    saveLearningSummary(context, updated)
+                }
+                return@withContext updated
+            }
+        } catch (_: Exception) {}
+        null
     }
 
     fun saveLatestReport(context: Context, report: ReasoningReport) {

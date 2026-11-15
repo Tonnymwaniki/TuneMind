@@ -14,15 +14,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -92,7 +97,8 @@ fun SoftGlassCard(
  */
 data class MagicalTabItem(
     val label: String,
-    val accent: Color? = null
+    val accent: Color? = null,
+    val isAiHighlighted: Boolean = false
 )
 
 @Composable
@@ -184,8 +190,15 @@ fun MagicalSegmentedTabs(
         ) {
             tabs.forEachIndexed { idx, tab ->
                 val isSelected = idx == safeIndex
+                val aiCyan = Color(0xFF38BDF8)
+                val aiViolet = Color(0xFFA855F7)
+                val tabAccent = tab.accent ?: theme.primaryAccent
                 val textColor by animateColorAsState(
-                    targetValue = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.56f),
+                    targetValue = when {
+                        isSelected -> Color(0xFFF8FAFC)
+                        tab.isAiHighlighted -> aiCyan.copy(alpha = 0.92f)
+                        else -> Color.White.copy(alpha = 0.56f)
+                    },
                     animationSpec = tween(180),
                     label = "tab_label_color_$idx"
                 )
@@ -194,6 +207,31 @@ fun MagicalSegmentedTabs(
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(pillShape)
+                        .then(
+                            if (tab.isAiHighlighted && !isSelected) {
+                                Modifier
+                                    .background(
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(
+                                                aiCyan.copy(alpha = 0.14f),
+                                                aiViolet.copy(alpha = 0.14f)
+                                            )
+                                        )
+                                    )
+                                    .border(
+                                        width = 0.8.dp,
+                                        brush = Brush.horizontalGradient(
+                                            colors = listOf(
+                                                aiCyan.copy(alpha = 0.48f),
+                                                aiViolet.copy(alpha = 0.42f)
+                                            )
+                                        ),
+                                        shape = pillShape
+                                    )
+                            } else {
+                                Modifier
+                            }
+                        )
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -202,14 +240,28 @@ fun MagicalSegmentedTabs(
                         .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = tab.label,
-                        color = textColor,
-                        fontSize = 12.5.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (tab.isAiHighlighted) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = "AI Powered",
+                                tint = if (isSelected) Color(0xFF67E8F9) else tabAccent,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = tab.label,
+                            color = textColor,
+                            fontSize = 12.5.sp,
+                            fontWeight = if (isSelected || tab.isAiHighlighted) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }

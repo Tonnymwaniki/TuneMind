@@ -72,10 +72,20 @@ export interface UserTasteModel {
   updatedAtMs: number;
 }
 
+export type EvolutionStage =
+  | 'STAGE_1_CALIBRATING'
+  | 'STAGE_2_PATTERN_LOCK'
+  | 'STAGE_3_DEEP_TASTE_SYNC'
+  | 'STAGE_4_PREDICTIVE_ORACLE';
+
 export interface LearningSummary {
   learningIterations: number;
   evaluatedOutcomes: number;
   hitRatePercent: number;
+  intelligenceScorePercent: number;
+  evolutionStage: EvolutionStage;
+  evolutionLabel: string;
+  learnedTraits: string[];
   risingGenres: string[];
   coolingGenres: string[];
   avgVolumePercent: number;
@@ -102,6 +112,8 @@ export interface DailyDropRequest {
   userId?: string;
   userEmail?: string;
   dropDate?: string;
+  timezone?: string;
+  localHour?: number;
   timeSlot?: string;
   satietyLevel?: number;
   preferredProvider?: string;
@@ -110,6 +122,7 @@ export interface DailyDropRequest {
   userTasteAnchors?: string[];
   genreDistribution?: Record<string, number>;
   recentTracks?: CrossAppTrackSignal[];
+  vaultTracks?: Array<{ title?: string; artist?: string; cooldownDaysRemaining?: number }>;
   excludeTitles?: string[];
   yesterdayOutcomes?: DiscoveryFeedbackEvent[];
   playedFeedback?: string[];
@@ -121,8 +134,10 @@ export interface DailyDropRequest {
 export interface DailyDropResponse {
   status: 'ok';
   dropDate: string;
+  nextRefreshLocalLabel: string;
   isAiGenerated: boolean;
   modelUsed: string;
+  wildcardCount: number;
   learningSummary: LearningSummary;
   genreAllocation: Array<{ genre: string; slots: number; score: number }>;
   recommendations: ScoredDiscoveryTrack[];
@@ -141,7 +156,10 @@ const ARTIST_GENRE_HINTS: Array<{ keywords: string[]; genre: string }> = [
   { keywords: ['burnaboy', 'popcaan', 'vibes kartel', 'shenseea', 'koffee', 'chronixx', 'bob marley', 'sean paul', 'alkaline'], genre: 'Dancehall & Reggae' },
   { keywords: ['fally ipupa', 'koffi olomide', 'innoss', 'ferre gola', 'dadju', 'aya nakamura', 'maitre gims', 'tayc'], genre: 'Afro-Francophone' },
   { keywords: ['bad bunny', 'karol g', 'feid', 'rauw alejandro', 'rosalia', 'anitta'], genre: 'Latin & Urbano' },
-  { keywords: ['fred again', 'kaytranada', 'disclosure', 'calvin harris', 'rufus du sol', 'black coffee'], genre: 'Electronic & Afro House' }
+  { keywords: ['black coffee', 'fred again', 'kaytranada', 'disclosure', 'calvin harris', 'rufus du sol', 'peggy gou'], genre: 'Electronic & Afro House' },
+  { keywords: ['yussef dayes', 'robert glasper', 'kamasi washington', 'alfa mist', 'ezra collective', 'badbadnotgood'], genre: 'Nu-Jazz & Neo-Soul' },
+  { keywords: ['ana frango', 'seu jorge', 'joao gilberto', 'tim maia', 'gilberto gil', 'marisa monte'], genre: 'Bossa Nova & MPB' },
+  { keywords: ['khruangbin', 'men i trust', 'tame impala', 'faye webster', 'mac demarco', 'mitski'], genre: 'Alternative Indie' }
 ];
 
 const CURATED_GLOBAL_DISCOVERY_BANK: Array<ScoredDiscoveryTrack> = [
@@ -182,19 +200,24 @@ const CURATED_GLOBAL_DISCOVERY_BANK: Array<ScoredDiscoveryTrack> = [
   { title: 'Firm Foundation (He Won\'t)', artist: 'Maverick City Music', album: 'The Maverick Way', genre: 'Gospel', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Expansive uplifting harmonies that restore calm clarity.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
   { title: 'Olorun Agbaye', artist: 'Nathaniel Bassey', album: 'Hallelujah Again', genre: 'Gospel', category: 'PALATE_CLEANSER', subTier: 'GENRE_PICK', reason: 'Resonant horn and choir swells for deep reflective listening.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
 
-  // Global Frontier Wildcards (worldwide sounds)
-  { title: 'N\'y Pense Plus', artist: 'Tayc', album: 'Fleur Froide', genre: 'Afro-Francophone', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Parisian Afro-lovin grooves merging silky French vocals with warm African percussion.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
-  { title: 'Morena', artist: 'Kaytranada & Kali Uchis', album: 'TIMELESS', genre: 'Electronic & Afro House', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Montreal-Colombian bounce bridging R&B warmth and crisp dancefloor syncopation.', confidence: 0.92, mlScore: 0.92, isWildcard: true },
-  { title: 'DtMF', artist: 'Bad Bunny', album: 'DeBÍ TiRAR MáS FOToS', genre: 'Latin & Urbano', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Nostalgic Puerto Rican plena rhythms meeting modern bass weight.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
-  { title: 'Blooming', artist: 'Koffee', album: 'Gifted', genre: 'Dancehall & Reggae', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Sun-soaked Jamaican acoustic groove for an instant sonic reset.', confidence: 0.90, mlScore: 0.90, isWildcard: true },
-  { title: 'You\'ve Got It', artist: 'Vedo', album: 'For You', genre: 'R&B', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Late-night slow-jam minimalism tuned for mellow headphones focus.', confidence: 0.89, mlScore: 0.89, isWildcard: true },
-  { title: 'Drive Me Crazy', artist: 'Black Coffee & Msaki', album: 'Subconsciously', genre: 'Electronic & Afro House', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'World Discovery: Deep South African house atmosphere crafted for long flow sessions.', confidence: 0.92, mlScore: 0.92, isWildcard: true }
+  // Global Frontier Wildcards (distinct non-overlapping global scenes)
+  { title: 'N\'y Pense Plus', artist: 'Tayc', album: 'Fleur Froide', genre: 'Afro-Francophone', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Parisian Afro-lovin grooves merging silky French vocals with warm percussive swing.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
+  { title: 'Morena', artist: 'Kaytranada & Kali Uchis', album: 'TIMELESS', genre: 'Electronic & Afro House', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Montreal-Colombian bounce bridging warm basslines and crisp electronic syncopation.', confidence: 0.92, mlScore: 0.92, isWildcard: true },
+  { title: 'DtMF', artist: 'Bad Bunny', album: 'DeBÍ TiRAR MáS FOToS', genre: 'Latin & Urbano', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Nostalgic Puerto Rican plena rhythms meeting modern low-end punch.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
+  { title: 'Blooming', artist: 'Koffee', album: 'Gifted', genre: 'Dancehall & Reggae', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Sun-soaked Jamaican acoustic groove designed for an instant sonic reset.', confidence: 0.90, mlScore: 0.90, isWildcard: true },
+  { title: 'Black Classical Music', artist: 'Yussef Dayes', album: 'Black Classical Music', genre: 'Nu-Jazz & Neo-Soul', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Live London breakbeat drums and shimmering Rhodes chords matching your rhythmic focus.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
+  { title: 'Time (You and I)', artist: 'Khruangbin', album: 'Mordechai', genre: 'Alternative Indie', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Hypnotic Thai-funk guitars and laid-back bass pocket for zero-fatigue flow.', confidence: 0.90, mlScore: 0.90, isWildcard: true },
+  { title: 'Drive Me Crazy', artist: 'Black Coffee & Msaki', album: 'Subconsciously', genre: 'Electronic & Afro House', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Deep South African house atmosphere crafted for expansive late sessions.', confidence: 0.92, mlScore: 0.92, isWildcard: true },
+  { title: 'Amiga da Minha Mulher', artist: 'Seu Jorge', album: 'Músicas para Churrasco', genre: 'Bossa Nova & MPB', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Brazilian samba-soul brass and warm acoustic bounce to refresh your ear.', confidence: 0.89, mlScore: 0.89, isWildcard: true }
 ];
 
 export class SelfLearningDiscoveryEngine {
   private static storePath = path.join(os.tmpdir(), 'tunemind-ml-taste-store.json');
   private static memoryCache: Map<string, UserTasteModel> = new Map();
   private static loadedDisk = false;
+  private static discoveredClaudeModels: string[] | null = null;
+  private static lastClaudeDiscoveryMs = 0;
+  private static cachedWorkingClaudeModel: string | null = null;
   private anthropic: Anthropic | null = null;
 
   constructor() {
@@ -211,6 +234,56 @@ export class SelfLearningDiscoveryEngine {
 
   public static getTodayDateKey(now = new Date()): string {
     return now.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Computes the 12:00 PM (Noon) local-timezone cycle key:
+   * - Before 12:00 PM local time -> yesterday's YYYY-MM-DD@12PM drop remains active
+   * - At or after 12:00 PM local time -> today's YYYY-MM-DD@12PM drop is active
+   */
+  public static getNoonDropCycleKey(
+    timezone?: string,
+    localHourOverride?: number,
+    now = new Date()
+  ): string {
+    let year = now.getUTCFullYear();
+    let month = now.getUTCMonth() + 1;
+    let day = now.getUTCDate();
+    let hour = now.getUTCHours();
+
+    if (timezone && timezone.trim().length > 0) {
+      try {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone.trim(),
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          hour12: false
+        }).formatToParts(now);
+        const map: Record<string, string> = {};
+        for (const p of parts) {
+          map[p.type] = p.value;
+        }
+        year = parseInt(map.year || String(year), 10);
+        month = parseInt(map.month || String(month), 10);
+        day = parseInt(map.day || String(day), 10);
+        const parsedHour = parseInt(map.hour || String(hour), 10);
+        hour = parsedHour === 24 ? 0 : parsedHour;
+      } catch {
+        // Fallback cleanly to UTC date parts if timezone string is invalid
+      }
+    }
+
+    if (typeof localHourOverride === 'number' && Number.isFinite(localHourOverride)) {
+      hour = Math.max(0, Math.min(23, Math.floor(localHourOverride)));
+    }
+
+    const baseDate = new Date(Date.UTC(year, month - 1, day));
+    if (hour < 12) {
+      baseDate.setUTCDate(baseDate.getUTCDate() - 1);
+    }
+    return `${baseDate.toISOString().slice(0, 10)}@12PM`;
   }
 
   public static inferGenre(title: string, artist: string, explicitGenre?: string): string {
@@ -233,6 +306,9 @@ export class SelfLearningDiscoveryEngine {
     if (lower.includes('afro') && (lower.includes('house') || lower.includes('electronic'))) return 'Electronic & Afro House';
     if (lower.includes('afro') && lower.includes('franc')) return 'Afro-Francophone';
     if (lower.includes('afro')) return 'Afrobeats';
+    if (lower.includes('jazz') || lower.includes('neo-soul') || lower.includes('neo soul')) return 'Nu-Jazz & Neo-Soul';
+    if (lower.includes('bossa') || lower.includes('mpb') || lower.includes('samba')) return 'Bossa Nova & MPB';
+    if (lower.includes('indie') || lower.includes('alt')) return 'Alternative Indie';
     if (lower.includes('hip') || lower.includes('rap') || lower.includes('trap') || lower.includes('drill')) return 'Hip-Hop';
     if (lower.includes('r&b') || lower.includes('rnb') || lower.includes('soul')) return 'R&B';
     if (lower.includes('gospel') || lower.includes('worship')) return 'Gospel';
@@ -521,15 +597,20 @@ export class SelfLearningDiscoveryEngine {
 
   /**
    * Computes UCB + Bayesian contextual score for ranking genres and candidate songs.
+   * Damps UCB exploration bonus when skips/dismissals outweigh completions.
    */
   public scoreGenreForContext(model: UserTasteModel, genre: string, timeSlot: string): number {
     const entry = model.genreWeights[genre];
     if (!entry) return 0.55; // Slight optimistic exploration prior for unseen genres
     const bayesianMean = entry.alpha / (entry.alpha + entry.beta);
     const totalTrials = entry.alpha + entry.beta;
-    const ucbExplorationBonus = Math.min(0.14, Math.sqrt((1.2 * Math.log(model.learningIterations + 2)) / totalTrials));
+    const negativeSkew = entry.dismissals > 0 || entry.skips > entry.completions;
+    const ucbExplorationBonus = negativeSkew
+      ? 0
+      : Math.min(0.14, Math.sqrt((1.2 * Math.log(model.learningIterations + 2)) / totalTrials));
     const slotAffinity = model.timeSlotGenreAffinity[timeSlot]?.[genre] ?? 0.55;
-    const combined = 0.45 * bayesianMean + 0.30 * entry.emaScore + 0.25 * slotAffinity + ucbExplorationBonus;
+    const negativePenalty = entry.dismissals * 0.08 + Math.max(0, entry.skips - entry.completions) * 0.04;
+    const combined = 0.45 * bayesianMean + 0.30 * entry.emaScore + 0.25 * slotAffinity + ucbExplorationBonus - negativePenalty;
     return Math.min(0.99, Math.max(0.05, combined));
   }
 
@@ -539,29 +620,70 @@ export class SelfLearningDiscoveryEngine {
         genre: g.genre,
         score: this.scoreGenreForContext(model, g.genre, currentTimeSlot),
         skips: g.skips + g.dismissals,
+        plays: g.plays,
+        completions: g.completions,
         avgVol: g.avgVolumeRatio
       }))
       .sort((a, b) => b.score - a.score);
 
     const risingGenres = sorted.filter((g) => g.score >= 0.55).slice(0, 4).map((g) => g.genre);
-    const coolingGenres = sorted.filter((g) => g.score < 0.46 || g.skips > 1).slice(0, 2).map((g) => g.genre);
+    const coolingGenres = sorted.filter((g) => g.score < 0.46 || g.skips > 0).slice(0, 3).map((g) => g.genre);
     const hitRate = model.evaluatedOutcomes > 0
       ? Math.round((model.positiveOutcomes / model.evaluatedOutcomes) * 100)
       : 0;
     const slotVol = model.volumeByTimeSlot[currentTimeSlot]
       ?? (sorted.length > 0 ? sorted.reduce((acc, g) => acc + g.avgVol, 0) / sorted.length : 0.65);
+    const avgVolumePercent = Math.round(slotVol * 100);
+
+    // Progressive intelligence quotient scaling smoothly from 34% -> 99% as AI trains
+    const rawIq =
+      34 +
+      Math.min(28, model.learningIterations * 2.2) +
+      Math.min(22, model.evaluatedOutcomes * 2.5) +
+      Math.min(10, sorted.length * 1.8) +
+      (hitRate >= 65 ? 5 : 0);
+    const intelligenceScorePercent = Math.min(99, Math.max(34, Math.round(rawIq)));
+
+    let evolutionStage: EvolutionStage = 'STAGE_1_CALIBRATING';
+    let evolutionLabel = 'Calibrating';
+    if (model.learningIterations >= 25 || (model.evaluatedOutcomes >= 12 && hitRate >= 60)) {
+      evolutionStage = 'STAGE_4_PREDICTIVE_ORACLE';
+      evolutionLabel = 'Predictive Oracle';
+    } else if (model.learningIterations >= 12 || model.evaluatedOutcomes >= 5) {
+      evolutionStage = 'STAGE_3_DEEP_TASTE_SYNC';
+      evolutionLabel = 'Deep Taste Sync';
+    } else if (model.learningIterations >= 3 || sorted.length >= 2) {
+      evolutionStage = 'STAGE_2_PATTERN_LOCK';
+      evolutionLabel = 'Pattern Lock';
+    }
+
+    const learnedTraits: string[] = [];
+    if (risingGenres.length > 0) {
+      const lead = sorted[0];
+      learnedTraits.push(`${lead.genre} leads your ${currentTimeSlot.toLowerCase()} affinity at ${Math.round(lead.score * 100)}% match.`);
+    }
+    learnedTraits.push(`Sweet-spot volume sits around ${avgVolumePercent}% during ${currentTimeSlot.toLowerCase()} listening.`);
+    if (coolingGenres.length > 0) {
+      learnedTraits.push(`Trimming exposure to ${coolingGenres.join(', ')} based on recent skips & dismissals.`);
+    } else if (model.evaluatedOutcomes > 0) {
+      learnedTraits.push(`${hitRate}% positive follow-through across ${model.evaluatedOutcomes} evaluated AI picks.`);
+    }
 
     const narrative = model.evaluatedOutcomes > 0
-      ? `Trained across ${model.learningIterations} updates (${hitRate}% recommendation match rate). Strongest ${currentTimeSlot.toLowerCase()} affinity: ${risingGenres.join(', ') || 'multi-genre flow'}.`
-      : `Calibrating across ${risingGenres.join(', ') || 'your multi-app genres'} based on play depth, time of day, and listening volume.`;
+      ? `Trained across ${model.learningIterations} updates (${hitRate}% match accuracy). ${evolutionLabel} honed in on ${risingGenres.slice(0, 3).join(', ') || 'your multi-genre flow'}.`
+      : `Learning from your multi-app rotations (${sorted.length} active ${sorted.length === 1 ? 'genre' : 'genres'}). Drops refresh daily at 12:00 PM local time.`;
 
     return {
       learningIterations: model.learningIterations,
       evaluatedOutcomes: model.evaluatedOutcomes,
       hitRatePercent: hitRate,
+      intelligenceScorePercent,
+      evolutionStage,
+      evolutionLabel,
+      learnedTraits: learnedTraits.slice(0, 3),
       risingGenres,
       coolingGenres,
-      avgVolumePercent: Math.round(slotVol * 100),
+      avgVolumePercent,
       narrative
     };
   }
@@ -707,11 +829,77 @@ export class SelfLearningDiscoveryEngine {
     return { userId, summary, topGenres };
   }
 
+  private async getCandidateClaudeModels(): Promise<string[]> {
+    const now = Date.now();
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+    const candidates: string[] = [];
+
+    if (SelfLearningDiscoveryEngine.cachedWorkingClaudeModel) {
+      candidates.push(SelfLearningDiscoveryEngine.cachedWorkingClaudeModel);
+    }
+
+    if (
+      apiKey.length > 10 &&
+      !apiKey.startsWith('your_') &&
+      (!SelfLearningDiscoveryEngine.discoveredClaudeModels ||
+        now - SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs > 5 * 60_000)
+    ) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch('https://api.anthropic.com/v1/models?limit=30', {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const body: any = await res.json();
+          const ids = Array.isArray(body?.data)
+            ? body.data.map((m: any) => String(m?.id || '').trim()).filter((id: string) => id.startsWith('claude-'))
+            : [];
+          if (ids.length > 0) {
+            const sonnets = ids.filter((id: string) => id.includes('sonnet'));
+            const haikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('sonnet'));
+            const rest = ids.filter((id: string) => !id.includes('sonnet') && !id.includes('haiku'));
+            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...sonnets, ...haikus, ...rest];
+            SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs = now;
+          }
+        }
+      } catch {
+        // Non-fatal fallback to curated prioritized list
+      }
+    }
+
+    for (const id of SelfLearningDiscoveryEngine.discoveredClaudeModels || []) {
+      if (!candidates.includes(id)) candidates.push(id);
+    }
+
+    const envModel = (process.env.ANTHROPIC_MODEL || '').trim();
+    if (envModel && !candidates.includes(envModel)) candidates.push(envModel);
+
+    for (const id of [
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5',
+      'claude-haiku-4-5',
+      'claude-sonnet-4-20250514',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-haiku-20241022'
+    ]) {
+      if (!candidates.includes(id)) candidates.push(id);
+    }
+
+    return candidates;
+  }
+
   public async generateDailyForYouDrop(payload: DailyDropRequest): Promise<DailyDropResponse> {
     const userId = SelfLearningDiscoveryEngine.normalizeUserId(payload.userId, payload.userEmail);
     const supabaseOverride = { supabaseUrl: payload.supabaseUrl, supabaseKey: payload.supabaseKey };
     const model = await this.getOrCreateModel(userId, supabaseOverride);
-    const dropDate = payload.dropDate || SelfLearningDiscoveryEngine.getTodayDateKey();
+    const dropDate = payload.dropDate || SelfLearningDiscoveryEngine.getNoonDropCycleKey(payload.timezone, payload.localHour);
     const timeSlot = payload.timeSlot || 'Evening';
 
     // 1. Online Self-Learning Step: evaluate yesterday's outcomes + passive cross-app telemetry first
@@ -724,11 +912,12 @@ export class SelfLearningDiscoveryEngine {
       this.applyCrossAppSignals(model, payload.recentTracks);
     }
 
-    // 2. Build genre allocation (2 songs per active genre + 2 Global Frontier wildcards)
+    // 2. Build genre allocation (2 songs per active user genre + 3 Global Wildcards from DIFFERENT genres)
     const genreAllocation = this.computeGenreAllocation(model, payload, timeSlot);
+    const activeGenresLower = new Set(genreAllocation.map((g) => g.genre.toLowerCase()));
     const learningSummary = this.buildLearningSummary(model, timeSlot);
 
-    // 3. Build strict zero-repeat exclusion set from ALL user library/history/past drops
+    // 3. Build strict zero-repeat exclusion set from library/history/vault/past drops
     const excludedTitlesLower = new Set<string>();
     const excludedKeys = new Set<string>();
     for (const t of payload.excludeTitles || []) {
@@ -739,163 +928,203 @@ export class SelfLearningDiscoveryEngine {
       if (r.title) excludedTitlesLower.add(r.title.trim().toLowerCase());
       if (r.title && r.artist) excludedKeys.add(this.normalizeKey(r.title, r.artist));
     }
+    for (const v of payload.vaultTracks || []) {
+      if (v.title) excludedTitlesLower.add(v.title.trim().toLowerCase());
+      if (v.title && v.artist) excludedKeys.add(this.normalizeKey(v.title, v.artist));
+    }
 
-    const totalTargetCount = Math.min(12, Math.max(8, genreAllocation.length * 2 + 2));
+    const desiredWildcards = 3;
+    const genreTargetCount = genreAllocation.length * 2;
+    const totalTargetCount = genreTargetCount + desiredWildcards; // e.g., up to 5*2 + 3 = 13 tracks
     let candidates: ScoredDiscoveryTrack[] = [];
     let isAiGenerated = false;
-    let modelUsed = 'tunemind-bandit-selector';
+    let modelUsed = 'tunemind-contextual-bandit';
 
-    // 4. AI Deep Reasoning Synthesis (Claude Sonnet/Haiku)
+    // 4. AI Deep Reasoning Synthesis (Claude Sonnet/Haiku with live model resolution)
     if (this.anthropic) {
-      try {
-        const allocationInstruction = genreAllocation
-          .map((g) => `- 2 UNHEARD songs in "${g.genre}" (learned affinity score ${(g.score * 100).toFixed(0)}%)`)
-          .join('\n');
+      const allocationInstruction = genreAllocation
+        .map((g) => `- 2 UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
+        .join('\n');
 
-        const outcomeFeedback = [
-          ...(payload.yesterdayOutcomes || []).slice(0, 10).map(
-            (o) => `${o.title} by ${o.artist} [${o.genre || 'Music'}]: ${o.outcome} (listened ${Math.round(((o.listenedMs || 0) / Math.max(1, o.durationMs || 180000)) * 100)}%, volume ${Math.round((o.volumeRatio || 0.6) * 100)}%)`
-          ),
-          ...(payload.playedFeedback || []).slice(0, 6).map((s) => `PLAYED & LIKED: ${s}`),
-          ...(payload.dismissedFeedback || []).slice(0, 6).map((s) => `DISMISSED/SKIPPED: ${s}`)
-        ].join('\n');
+      const outcomeFeedback = [
+        ...(payload.yesterdayOutcomes || []).slice(0, 10).map(
+          (o) => `${o.title} by ${o.artist} [${o.genre || 'Music'}]: ${o.outcome} (listened ${Math.round(((o.listenedMs || 0) / Math.max(1, o.durationMs || 180000)) * 100)}%, volume ${Math.round((o.volumeRatio || 0.6) * 100)}%)`
+        ),
+        ...(payload.playedFeedback || []).slice(0, 6).map((s) => `PLAYED & LIKED: ${s}`),
+        ...(payload.dismissedFeedback || []).slice(0, 6).map((s) => `DISMISSED/SKIPPED: ${s}`)
+      ].join('\n');
 
-        const prompt = `You are TuneMind's Self-Learning Global Music Discovery Engine for date ${dropDate}.
-LISTENER CONTEXT:
+      const foreignSceneHints = [
+        'Afro-Francophone',
+        'Electronic & Afro House',
+        'Latin & Urbano',
+        'Dancehall & Reggae',
+        'Nu-Jazz & Neo-Soul',
+        'Bossa Nova & MPB',
+        'Alternative Indie'
+      ].filter((g) => !activeGenresLower.has(g.toLowerCase()));
+
+      const prompt = `You are TuneMind's Self-Learning AI Discovery Engine for daily noon drop ${dropDate}.
+LISTENER PROFILE (${learningSummary.evolutionLabel} · ${learningSummary.intelligenceScorePercent}% intelligence):
 - Active Time of Day: ${timeSlot}
-- Preferred Listening Volume Now: ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%
+- Preferred Listening Volume: ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%
 - Satiety / Ear Fatigue Level: ${payload.satietyLevel ?? 38}%
-- Learning Insights: ${learningSummary.narrative}
+- Behavioral Insights: ${learningSummary.narrative} ${learningSummary.learnedTraits.join(' ')}
 - Top Artists Observed Across All Apps: ${(payload.topArtists || []).concat(payload.userTasteAnchors || []).slice(0, 12).join(', ') || 'Diverse global listener'}
 
-RECENT FEEDBACK & YESTERDAY SCORECARD:
-${outcomeFeedback || 'First calibration run — maximize discovery accuracy across all detected genres.'}
+RECENT OUTCOMES & FEEDBACK:
+${outcomeFeedback || 'Initial calibration run — maximize prediction precision across observed genres.'}
 
-DAILY SLATE QUOTA (pick ${totalTargetCount} real songs the listener has NOT played yet):
+EXACT DAILY DROP QUOTA (${totalTargetCount} real, verified songs the user has NOT played):
 ${allocationInstruction}
-- Plus 2 "GLOBAL_WILDCARD" songs from worldwide scenes adjacent to their taste, energy, and volume profile!
+- PLUS ${desiredWildcards} "GLOBAL_WILDCARD" songs from COMPLETELY DIFFERENT GENRES NOT IN [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., explore 3 distinct scenes such as ${foreignSceneHints.join(', ')}). Every wildcard MUST explain the tempo, vocal, or acoustic bridge connecting it to this listener.
 
-STRICT EXCLUSIONS (DO NOT recommend any song on this list — user already knows or played them):
-${Array.from(excludedTitlesLower).slice(0, 90).join(', ')}
+STRICT EXCLUSIONS (DO NOT include any of these — already heard or resting in Vault):
+${Array.from(excludedTitlesLower).slice(0, 95).join(', ')}
 
-Respond ONLY with a JSON array (no markdown fences):
+Respond ONLY with a valid JSON array (no markdown fences):
 [
   {
     "title": "Exact Song Title",
     "artist": "Exact Artist Name",
     "album": "Album Name",
-    "genre": "Genre Name",
+    "genre": "Canonical Genre Name",
     "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
     "subTier": "GENRE_PICK" | "GLOBAL_WILDCARD",
     "isWildcard": false,
-    "reason": "1 concise sentence linking their time-of-day, volume, or play pattern to this song.",
+    "reason": "1 sharp sentence explaining WHY TuneMind predicts they will love this right now.",
     "confidence": 0.94
   }
 ]`;
 
-        const aiResp = await this.anthropic.messages.create({
-          model: 'claude-3-5-haiku-20241022',
-          max_tokens: 1800,
-          messages: [{ role: 'user', content: prompt }]
-        });
-        const rawText = aiResp.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text)
-          .join('\n')
-          .trim();
+      const candidateModels = await this.getCandidateClaudeModels();
+      for (const candidateModelId of candidateModels) {
+        try {
+          const aiResp = await this.anthropic.messages.create({
+            model: candidateModelId,
+            max_tokens: 2400,
+            messages: [{ role: 'user', content: prompt }]
+          });
+          const rawText = aiResp.content
+            .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+            .map((b) => b.text)
+            .join('\n')
+            .trim();
 
-        const match = rawText.match(/\[[\s\S]*\]/);
-        const parsed = JSON.parse(match ? match[0] : rawText);
-        if (Array.isArray(parsed)) {
-          isAiGenerated = true;
-          modelUsed = 'claude-3-5-haiku+contextual-bandit';
-          for (const row of parsed) {
-            const title = String(row.title || '').trim();
-            const artist = String(row.artist || '').trim();
-            if (!title || !artist) continue;
-            if (this.isExcludedTrack(title, artist, excludedTitlesLower, excludedKeys)) continue;
+          const match = rawText.match(/\[[\s\S]*\]/);
+          const parsed = JSON.parse(match ? match[0] : rawText);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            SelfLearningDiscoveryEngine.cachedWorkingClaudeModel = candidateModelId;
+            isAiGenerated = true;
+            modelUsed = `${candidateModelId}+contextual-bandit`;
+            for (const row of parsed) {
+              const title = String(row.title || '').trim();
+              const artist = String(row.artist || '').trim();
+              if (!title || !artist) continue;
+              if (this.isExcludedTrack(title, artist, excludedTitlesLower, excludedKeys)) continue;
 
-            const genre = SelfLearningDiscoveryEngine.inferGenre(title, artist, row.genre);
-            const learnedGenreScore = this.scoreGenreForContext(model, genre, timeSlot);
-            const llmConf = Math.min(0.99, Math.max(0.75, Number(row.confidence || 0.91)));
-            const mlScore = Number((llmConf * 0.55 + learnedGenreScore * 0.45).toFixed(3));
-            const isWildcard = Boolean(row.isWildcard || row.subTier === 'GLOBAL_WILDCARD');
+              const genre = SelfLearningDiscoveryEngine.inferGenre(title, artist, row.genre);
+              const isWildcard = Boolean(row.isWildcard || row.subTier === 'GLOBAL_WILDCARD') && !activeGenresLower.has(genre.toLowerCase());
+              const learnedGenreScore = this.scoreGenreForContext(model, genre, timeSlot);
+              const llmConf = Math.min(0.99, Math.max(0.75, Number(row.confidence || 0.91)));
+              const mlScore = Number((llmConf * 0.55 + learnedGenreScore * 0.45).toFixed(3));
 
-            candidates.push({
-              title,
-              artist,
-              album: String(row.album || '').trim(),
-              genre,
-              category: String(row.category || (isWildcard ? 'NOVEL_EXPLORATION' : 'DOPAMINE_FLOW')),
-              subTier: isWildcard ? 'GLOBAL_WILDCARD' : 'GENRE_PICK',
-              reason: String(row.reason || `Picked for your ${timeSlot} ${genre} rotation.`).trim(),
-              confidence: mlScore,
-              mlScore,
-              isWildcard
-            });
+              candidates.push({
+                title,
+                artist,
+                album: String(row.album || '').trim(),
+                genre,
+                category: String(row.category || (isWildcard ? 'NOVEL_EXPLORATION' : 'DOPAMINE_FLOW')),
+                subTier: isWildcard ? 'GLOBAL_WILDCARD' : 'GENRE_PICK',
+                reason: String(row.reason || `Picked for your ${timeSlot} ${genre} rotation.`).trim(),
+                confidence: mlScore,
+                mlScore,
+                isWildcard
+              });
+            }
+            if (candidates.length > 0) break;
           }
+        } catch (err) {
+          console.warn(`[SelfLearningDiscovery] Model ${candidateModelId} notice:`, (err as Error)?.message);
         }
-      } catch (err) {
-        console.warn('[SelfLearningDiscovery] Claude call fallback notice:', (err as Error)?.message);
       }
     }
 
-    // 5. Ensure exact 2-per-genre + 2 global wildcards using curated global bank when slots remain
-    const genreCounts: Record<string, number> = {};
-    for (const c of candidates) {
-      if (!c.isWildcard) {
-        genreCounts[c.genre] = (genreCounts[c.genre] || 0) + 1;
-      }
-    }
-
-    const seenDropKeys = new Set<string>(candidates.map((c) => this.normalizeKey(c.title, c.artist)));
+    // 5. Enforce 2-per-active-genre + 3 COMPLETELY DIFFERENT-GENRE wildcards
+    const finalGenrePicks: ScoredDiscoveryTrack[] = [];
+    const seenDropKeys = new Set<string>();
 
     for (const alloc of genreAllocation) {
-      const currentForGenre = genreCounts[alloc.genre] || 0;
-      let needed = Math.max(0, alloc.slots - currentForGenre);
-      if (needed <= 0) continue;
-
-      const bankMatches = CURATED_GLOBAL_DISCOVERY_BANK.filter(
-        (b) => !b.isWildcard && b.genre.toLowerCase() === alloc.genre.toLowerCase()
-      );
-      for (const b of bankMatches) {
-        if (needed <= 0) break;
-        const k = this.normalizeKey(b.title, b.artist);
-        if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
+      let countForAlloc = 0;
+      for (const c of candidates) {
+        if (countForAlloc >= alloc.slots) break;
+        if (c.isWildcard || c.genre.toLowerCase() !== alloc.genre.toLowerCase()) continue;
+        const k = this.normalizeKey(c.title, c.artist);
+        if (seenDropKeys.has(k)) continue;
         seenDropKeys.add(k);
-        const mlScore = Number((b.confidence * 0.5 + alloc.score * 0.5).toFixed(3));
-        candidates.push({ ...b, confidence: mlScore, mlScore });
-        needed -= 1;
+        finalGenrePicks.push({ ...c, isWildcard: false, subTier: 'GENRE_PICK' });
+        countForAlloc += 1;
+      }
+
+      if (countForAlloc < alloc.slots) {
+        const bankMatches = CURATED_GLOBAL_DISCOVERY_BANK.filter(
+          (b) => !b.isWildcard && b.genre.toLowerCase() === alloc.genre.toLowerCase()
+        );
+        for (const b of bankMatches) {
+          if (countForAlloc >= alloc.slots) break;
+          const k = this.normalizeKey(b.title, b.artist);
+          if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
+          seenDropKeys.add(k);
+          const mlScore = Number((b.confidence * 0.5 + alloc.score * 0.5).toFixed(3));
+          finalGenrePicks.push({ ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' });
+          countForAlloc += 1;
+        }
       }
     }
 
-    let wildcardCount = candidates.filter((c) => c.isWildcard).length;
-    if (wildcardCount < 2) {
-      const wildcards = CURATED_GLOBAL_DISCOVERY_BANK.filter((b) => b.isWildcard);
-      for (const w of wildcards) {
-        if (wildcardCount >= 2) break;
+    // Collect 3 Wildcards strictly from genres NOT in user's active genres (and prefer 3 distinct wildcard genres!)
+    const finalWildcards: ScoredDiscoveryTrack[] = [];
+    const seenWildcardGenres = new Set<string>();
+
+    for (const c of candidates) {
+      if (finalWildcards.length >= desiredWildcards) break;
+      if (!c.isWildcard || activeGenresLower.has(c.genre.toLowerCase())) continue;
+      if (seenWildcardGenres.has(c.genre.toLowerCase())) continue;
+      const k = this.normalizeKey(c.title, c.artist);
+      if (seenDropKeys.has(k)) continue;
+      seenDropKeys.add(k);
+      seenWildcardGenres.add(c.genre.toLowerCase());
+      finalWildcards.push({ ...c, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
+    }
+
+    if (finalWildcards.length < desiredWildcards) {
+      const bankWildcards = CURATED_GLOBAL_DISCOVERY_BANK.filter(
+        (b) => b.isWildcard && !activeGenresLower.has(b.genre.toLowerCase())
+      );
+      // Pass 1: maximize distinct wildcard genres
+      for (const w of bankWildcards) {
+        if (finalWildcards.length >= desiredWildcards) break;
+        if (seenWildcardGenres.has(w.genre.toLowerCase())) continue;
         const k = this.normalizeKey(w.title, w.artist);
         if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys)) continue;
         seenDropKeys.add(k);
-        candidates.push(w);
-        wildcardCount += 1;
+        seenWildcardGenres.add(w.genre.toLowerCase());
+        finalWildcards.push({ ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
+      }
+      // Pass 2: allow second wildcard from non-active genres if pool is tight
+      for (const w of bankWildcards) {
+        if (finalWildcards.length >= desiredWildcards) break;
+        const k = this.normalizeKey(w.title, w.artist);
+        if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys)) continue;
+        seenDropKeys.add(k);
+        finalWildcards.push({ ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
       }
     }
 
-    // Top up up to totalTargetCount with highest-ranked non-excluded global songs if needed
-    if (candidates.length < Math.min(10, totalTargetCount)) {
-      for (const b of CURATED_GLOBAL_DISCOVERY_BANK) {
-        if (candidates.length >= Math.min(10, totalTargetCount)) break;
-        const k = this.normalizeKey(b.title, b.artist);
-        if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
-        seenDropKeys.add(k);
-        candidates.push(b);
-      }
-    }
+    const assembled = [...finalGenrePicks, ...finalWildcards];
 
     // 6. Real-catalog verification (parallel with tight 3s timeout per track)
-    const sliced = candidates.slice(0, totalTargetCount);
-    const verified = await Promise.all(sliced.map((c) => this.verifyWithCatalog(c)));
+    const verified = await Promise.all(assembled.map((c) => this.verifyWithCatalog(c)));
 
     // Record daily drop into model history + save updated model
     model.recentDrops = [
@@ -907,8 +1136,10 @@ Respond ONLY with a JSON array (no markdown fences):
     return {
       status: 'ok',
       dropDate,
+      nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
       isAiGenerated,
       modelUsed,
+      wildcardCount: finalWildcards.length,
       learningSummary: this.buildLearningSummary(model, timeSlot),
       genreAllocation,
       recommendations: verified

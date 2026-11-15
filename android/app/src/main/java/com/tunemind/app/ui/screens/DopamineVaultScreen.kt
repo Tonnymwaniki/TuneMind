@@ -21,8 +21,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.ui.VaultTrack
@@ -58,11 +60,21 @@ fun DopamineVaultScreen(
     onRestoreVaultTrack: (id: String) -> Unit,
     onCycleAtmospherePalette: () -> Unit,
     forYouPicks: List<AiRecommendationEntity> = emptyList(),
+    learningState: ForYouLearningSummary = ForYouLearningSummary(),
+    isDiscovering: Boolean = false,
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { t, _, _ ->
         !nowPlayingTitle.isNullOrBlank() && !t.isNullOrBlank() && t.equals(nowPlayingTitle.trim(), ignoreCase = true)
     },
-    onRefreshForYou: () -> Unit = {}
+    onRefreshForYou: () -> Unit = {},
+    onSaveForYou: (AiRecommendationEntity, Boolean) -> Unit = { _, _ -> },
+    onDismissForYou: (AiRecommendationEntity) -> Unit = {},
+    onPlayForYouTrack: (AiRecommendationEntity) -> Unit = { rec ->
+        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "com.spotify.music")
+    },
+    onPreviewForYouTrack: (AiRecommendationEntity) -> Unit = { rec ->
+        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "com.spotify.music")
+    }
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
@@ -147,7 +159,7 @@ fun DopamineVaultScreen(
     val displayedSongs = if (selectedTab == 0) peakFreshSongs else coolingDownSongs
     val activeTabAccent = when (selectedTab) {
         1 -> Color(0xFFFFB000)
-        2 -> theme.secondaryAccent
+        2 -> Color(0xFF38BDF8)
         else -> theme.primaryAccent
     }
 
@@ -166,94 +178,98 @@ fun DopamineVaultScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Fresh",
+                    text = if (selectedTab == 2) "For You" else "Fresh",
                     color = Color(0xFFF8FAFC),
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.4).sp
                 )
                 Text(
-                    text = "${peakFreshSongs.size} ready · ${coolingDownSongs.size} resting",
-                    color = Color.White.copy(alpha = 0.56f),
+                    text = if (selectedTab == 2) {
+                        "AI · IQ ${learningState.intelligenceScorePercent}%"
+                    } else {
+                        "${peakFreshSongs.size} ready · ${coolingDownSongs.size} resting"
+                    },
+                    color = if (selectedTab == 2) Color(0xFF67E8F9) else Color.White.copy(alpha = 0.56f),
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Dimensional Hero Card
-            SoftGlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                accentTint = activeTabAccent
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(66.dp)
+            // Dimensional Hero Card (hidden on Tab 2 so For You's bespoke AI Evolution Hero Card takes focus)
+            AnimatedVisibility(visible = selectedTab != 2) {
+                Column {
+                    SoftGlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        accentTint = activeTabAccent
                     ) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawArc(
-                                color = Color.White.copy(alpha = 0.10f),
-                                startAngle = 135f,
-                                sweepAngle = 270f,
-                                useCenter = false,
-                                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                            drawArc(
-                                color = activeTabAccent,
-                                startAngle = 135f,
-                                sweepAngle = 270f * (averageFreshness / 100f),
-                                useCenter = false,
-                                style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(18.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.size(66.dp)
+                            ) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    drawArc(
+                                        color = Color.White.copy(alpha = 0.10f),
+                                        startAngle = 135f,
+                                        sweepAngle = 270f,
+                                        useCenter = false,
+                                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                                    )
+                                    drawArc(
+                                        color = activeTabAccent,
+                                        startAngle = 135f,
+                                        sweepAngle = 270f * (averageFreshness / 100f),
+                                        useCenter = false,
+                                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                                    )
+                                }
+                                Text(
+                                    text = "$averageFreshness%",
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (selectedTab == 1) "${coolingDownSongs.size} resting tracks" else "${peakFreshSongs.size} fresh tracks",
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (selectedTab == 1) {
+                                        "Taking a short break so they hit like new again."
+                                    } else {
+                                        "Ready to play without feeling repetitive."
+                                    },
+                                    color = Color.White.copy(alpha = 0.66f),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
+                                )
+                            }
                         }
-                        Text(
-                            text = "$averageFreshness%",
-                            color = Color(0xFFF8FAFC),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = when (selectedTab) {
-                                1 -> "${coolingDownSongs.size} resting tracks"
-                                2 -> "${forYouPicks.size} picks for you"
-                                else -> "${peakFreshSongs.size} fresh tracks"
-                            },
-                            color = Color(0xFFF8FAFC),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = when (selectedTab) {
-                                1 -> "Taking a short break so they hit like new again."
-                                2 -> "New discoveries tuned to what you love playing."
-                                else -> "Ready to play without feeling repetitive."
-                            },
-                            color = Color.White.copy(alpha = 0.66f),
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Spring-sliding capsule tabs (Fresh | Resting | For You)
+            // Spring-sliding capsule tabs (Fresh | Resting | AI For You)
             MagicalSegmentedTabs(
                 tabs = listOf(
                     MagicalTabItem("Fresh (${peakFreshSongs.size})", theme.primaryAccent),
                     MagicalTabItem("Resting (${coolingDownSongs.size})", Color(0xFFFFB000)),
-                    MagicalTabItem("For You", theme.secondaryAccent)
+                    MagicalTabItem("For You", Color(0xFF38BDF8), isAiHighlighted = true)
                 ),
                 selectedIndex = selectedTab,
                 onSelectTab = { selectedTab = it }
@@ -276,72 +292,30 @@ fun DopamineVaultScreen(
                 ) {
                     if (currentTab == 2) {
                         val activeRecs = forYouPicks.filter { !it.isDismissed }
-                        if (activeRecs.isEmpty()) {
-                            item(key = "vault_foryou_empty") {
-                                SoftGlassCard(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 8.dp),
-                                    accentTint = theme.secondaryAccent
-                                ) {
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Text(
-                                            text = "Building fresh picks from your recent plays.",
-                                            color = Color.White.copy(alpha = 0.72f),
-                                            fontSize = 14.sp,
-                                            textAlign = TextAlign.Center,
-                                            lineHeight = 20.sp
-                                        )
-                                        Text(
-                                            text = "Refresh picks",
-                                            color = theme.secondaryAccent,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { onRefreshForYou() }
-                                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            items(activeRecs, key = { "foryou_${it.id}" }) { rec ->
-                                val plays = resolvePlayCount(rec.title, rec.artist, null)
-                                val isPlaying = isTrackCurrentlyPlaying(rec.title, rec.artist, null)
-                                TuneMindTrackCard(
+                        forYouDiscoveryItems(
+                            activeRecs = activeRecs,
+                            learningState = learningState,
+                            isDiscovering = isDiscovering,
+                            isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
+                            onRefreshForYou = onRefreshForYou,
+                            onPlayTrack = onPlayForYouTrack,
+                            onPreviewTrack = onPreviewForYouTrack,
+                            onSaveTrack = onSaveForYou,
+                            onDismissTrack = onDismissForYou,
+                            onInspectTrack = { rec ->
+                                activeSyncSong = DopamineSongItem(
+                                    id = rec.id,
                                     title = rec.title,
                                     artist = rec.artist,
-                                    subtitle = rec.reason,
-                                    playCount = plays,
-                                    showUnplayedLabel = true,
-                                    isCurrentlyPlaying = isPlaying,
-                                    freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(75, 99),
-                                    accentColor = theme.secondaryAccent,
-                                    secondaryAccent = theme.primaryAccent,
-                                    onPlayClick = {
-                                        onPlayTrack(rec.title, rec.artist, null, "com.spotify.music")
-                                    },
-                                    onSyncClick = {
-                                        activeSyncSong = DopamineSongItem(
-                                            id = rec.id,
-                                            title = rec.title,
-                                            artist = rec.artist,
-                                            freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(75, 99),
-                                            playCount = plays,
-                                            spotifyUri = null,
-                                            sourcePackage = "com.spotify.music",
-                                            isCoolingDown = false,
-                                            isFromVault = false
-                                        )
-                                    }
+                                    freshnessPercent = rec.matchScorePercent.coerceIn(72, 99),
+                                    playCount = resolvePlayCount(rec.title, rec.artist, rec.spotifyUri),
+                                    spotifyUri = rec.spotifyUri,
+                                    sourcePackage = "com.spotify.music",
+                                    isCoolingDown = false,
+                                    isFromVault = false
                                 )
                             }
-                        }
+                        )
                     } else if (displayedSongs.isEmpty()) {
                         item(key = "vault_empty") {
                             SoftGlassCard(
