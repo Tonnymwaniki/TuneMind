@@ -102,22 +102,14 @@ fun HearingInsightsScreen(
         "WIRED_EARPHONES" -> Triple("Wired Earphones", "In-Ear", safeGreen)
         "WIRED_HEADPHONES" -> Triple("Wired Headphones", "Over-Ear", theme.secondaryAccent)
         "USB_EARPHONES", "USB_DAC" -> Triple("USB Digital Audio", "Direct", Color(0xFFA855F7))
-        "BUILTIN_SPEAKER" -> Triple("Phone Speaker", "Open Air", warnAmber)
-        else -> Triple(snapshot.deviceType, "Audio Output", theme.secondaryAccent)
+        "BUILTIN_SPEAKER" -> Triple("Speaker", "Open Air", warnAmber)
+        else -> Triple(AudioDeviceObserver.sanitizeOutputDeviceLabel(snapshot.deviceType, snapshot.transducerCategory), "Audio Output", theme.secondaryAccent)
     }
 
-    val sanitizedProduct = snapshot.productName.let { raw ->
-        if (snapshot.transducerCategory == "BUILTIN_SPEAKER" ||
-            raw.contains("SM-", ignoreCase = true) ||
-            raw.contains("Pixel", ignoreCase = true) ||
-            raw.contains("Galaxy", ignoreCase = true) ||
-            raw.contains("Redmi", ignoreCase = true)
-        ) {
-            "Phone Speaker"
-        } else {
-            raw.ifBlank { categoryTitle }
-        }
-    }
+    val sanitizedProduct = AudioDeviceObserver.sanitizeOutputDeviceLabel(
+        raw = snapshot.productName,
+        transducerCategory = snapshot.transducerCategory
+    )
 
     StudioAmbientBackground {
         Column(
@@ -227,167 +219,176 @@ fun HearingInsightsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // 2. Active Output Section
-            StudioSectionHeader(title = "Active Output")
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Row(
+            // 2. Active Output Card
+            SoftGlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                accentTint = categoryColor
             ) {
-                Icon(
-                    imageVector = when (snapshot.transducerCategory) {
-                        "BUILTIN_SPEAKER" -> Icons.Rounded.VolumeUp
-                        "USB_EARPHONES", "USB_DAC" -> Icons.Rounded.GraphicEq
-                        else -> Icons.Rounded.Headphones
-                    },
-                    contentDescription = null,
-                    tint = categoryColor,
-                    modifier = Modifier.size(22.dp)
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = categoryTitle,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFF8FAFC)
-                    )
-                    Text(
-                        text = "$sanitizedProduct · ${snapshot.connectionType} · $categoryTag",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.58f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Active Output")
+                    Spacer(modifier = Modifier.height(10.dp))
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Volume Meter Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Volume (${snapshot.volumeIndex} / ${snapshot.maxVolume})",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.62f)
-                )
-                Text(
-                    text = "${((snapshot.volumeIndex.toFloat() / maxOf(1, snapshot.maxVolume)) * 100).toInt()}%",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = theme.primaryAccent
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            val totalSteps = snapshot.maxVolume.coerceIn(10, 25)
-            val activeSteps = snapshot.volumeIndex.coerceIn(0, totalSteps)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                for (i in 0 until totalSteps) {
-                    val isActive = i < activeSteps
-                    val cellColor = when {
-                        !isActive -> Color.White.copy(alpha = 0.08f)
-                        i < (totalSteps * 0.65f) -> safeGreen
-                        i < (totalSteps * 0.85f) -> warnAmber
-                        else -> alertRed
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = when (snapshot.transducerCategory) {
+                                "BUILTIN_SPEAKER" -> Icons.Rounded.VolumeUp
+                                "USB_EARPHONES", "USB_DAC" -> Icons.Rounded.GraphicEq
+                                else -> Icons.Rounded.Headphones
+                            },
+                            contentDescription = null,
+                            tint = categoryColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = categoryTitle,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFF8FAFC)
+                            )
+                            Text(
+                                text = "$sanitizedProduct · $categoryTag",
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.60f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    Box(
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Volume (${snapshot.volumeIndex} / ${snapshot.maxVolume})",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.64f)
+                        )
+                        Text(
+                            text = "${((snapshot.volumeIndex.toFloat() / maxOf(1, snapshot.maxVolume)) * 100).toInt()}%",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.primaryAccent
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val totalSteps = snapshot.maxVolume.coerceIn(10, 25)
+                    val activeSteps = snapshot.volumeIndex.coerceIn(0, totalSteps)
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(cellColor)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = snapshot.acousticCouplingDescription,
-                fontSize = 13.sp,
-                color = Color.White.copy(alpha = 0.60f),
-                lineHeight = 19.sp
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-            StudioHairlineDivider()
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // 3. Daily Sound Dose
-            StudioSectionHeader(title = "Daily Sound Dose")
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Box(
-                    modifier = Modifier.size(68.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.size(64.dp)) {
-                        val strokeW = 6.dp.toPx()
-                        val arcSize = size.minDimension - strokeW
-                        val topLeftOffset = Offset(strokeW / 2f, strokeW / 2f)
-                        drawArc(
-                            color = Color.White.copy(alpha = 0.08f),
-                            startAngle = -90f,
-                            sweepAngle = 360f,
-                            useCenter = false,
-                            topLeft = topLeftOffset,
-                            size = Size(arcSize, arcSize),
-                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                        )
-                        drawArc(
-                            color = soundDoseColor,
-                            startAngle = -90f,
-                            sweepAngle = 360f * soundDoseFraction,
-                            useCenter = false,
-                            topLeft = topLeftOffset,
-                            size = Size(arcSize, arcSize),
-                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                        )
+                            .fillMaxWidth()
+                            .height(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        for (i in 0 until totalSteps) {
+                            val isActive = i < activeSteps
+                            val cellColor = when {
+                                !isActive -> Color.White.copy(alpha = 0.10f)
+                                i < (totalSteps * 0.65f) -> safeGreen
+                                i < (totalSteps * 0.85f) -> warnAmber
+                                else -> alertRed
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(cellColor)
+                            )
+                        }
                     }
-                    Text(
-                        text = "${(soundDoseFraction * 100).toInt()}%",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = soundDoseColor
-                    )
-                }
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = if (soundDoseFraction < 0.6f) "Healthy range" else "Approaching daily limit",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = soundDoseColor
-                    )
-                    Text(
-                        text = hearingState.safetyGuidance,
+                        text = snapshot.acousticCouplingDescription,
                         fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.64f),
-                        lineHeight = 18.sp
+                        color = Color.White.copy(alpha = 0.62f),
+                        lineHeight = 19.sp
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-            StudioHairlineDivider()
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // 3. Daily Sound Dose Card
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = soundDoseColor
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Daily Sound Dose")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(68.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.size(64.dp)) {
+                                val strokeW = 6.dp.toPx()
+                                val arcSize = size.minDimension - strokeW
+                                val topLeftOffset = Offset(strokeW / 2f, strokeW / 2f)
+                                drawArc(
+                                    color = Color.White.copy(alpha = 0.10f),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    topLeft = topLeftOffset,
+                                    size = Size(arcSize, arcSize),
+                                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                                )
+                                drawArc(
+                                    color = soundDoseColor,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * soundDoseFraction,
+                                    useCenter = false,
+                                    topLeft = topLeftOffset,
+                                    size = Size(arcSize, arcSize),
+                                    style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                                )
+                            }
+                            Text(
+                                text = "${(soundDoseFraction * 100).toInt()}%",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = soundDoseColor
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (soundDoseFraction < 0.6f) "Healthy range" else "Approaching daily limit",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = soundDoseColor
+                            )
+                            Text(
+                                text = hearingState.safetyGuidance,
+                                fontSize = 13.sp,
+                                color = Color.White.copy(alpha = 0.66f),
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
 
             // 4. Output Profiles
             StudioSectionHeader(title = "Output Profiles")
@@ -411,7 +412,7 @@ fun HearingInsightsScreen(
             )
             StudioHairlineDivider()
             OutputProfileRow(
-                title = "Phone Speaker",
+                title = "Speaker",
                 rangeText = "44 – 82 dBA",
                 desc = "Open air listening reduces ear fatigue during casual playback.",
                 isActive = snapshot.transducerCategory == "BUILTIN_SPEAKER",

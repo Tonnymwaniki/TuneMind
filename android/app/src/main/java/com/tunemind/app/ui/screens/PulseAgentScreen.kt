@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,7 +52,6 @@ import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.ui.DopamineCapsuleState
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
-import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
@@ -58,8 +59,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Center Screen: Quiet dark-canvas voice companion anchored by the living fluid orb,
- * unboxed live song strip, and hairline daily mix row.
+ * Center Screen: Living fluid orb voice companion anchored on the adaptive atmospheric canvas
+ * with tactile dimensional mix and now-playing cards plus an interactive palette switcher.
  */
 @Composable
 fun PulseAgentScreen(
@@ -111,29 +112,48 @@ fun PulseAgentScreen(
                 .verticalScroll(scrollState)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(top = 10.dp, bottom = 96.dp),
+                .padding(top = 10.dp, bottom = 112.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Quiet Top Header (only Stats & Settings icon buttons — zero decorative pills)
+            // 1. Clean Top Header with Interactive Theme Cycle + Stats & Settings
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "TuneMind",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.3).sp
-                )
+                Column {
+                    Text(
+                        text = "TuneMind",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        text = colors.activePalette.name,
+                        color = activeAccent.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(onClick = onCycleAtmospherePalette) {
+                        Icon(
+                            imageVector = Icons.Rounded.Palette,
+                            contentDescription = "Cycle Theme Atmosphere",
+                            tint = activeAccent,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
                     IconButton(onClick = onOpenStats) {
                         Icon(
                             imageVector = Icons.Rounded.BarChart,
                             contentDescription = "Listening Stats",
-                            tint = Color.White.copy(alpha = 0.80f),
+                            tint = Color.White.copy(alpha = 0.82f),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -141,23 +161,25 @@ fun PulseAgentScreen(
                         Icon(
                             imageVector = Icons.Rounded.Settings,
                             contentDescription = "Settings",
-                            tint = Color.White.copy(alpha = 0.80f),
+                            tint = Color.White.copy(alpha = 0.82f),
                             modifier = Modifier.size(22.dp)
                         )
                     }
                 }
             }
 
-            // 2. Unboxed Suggested Mix Strip
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 2. Suggested Mix Dimensional Card
             if (dopamineCapsule != null && dopamineCapsule.tracks.isNotEmpty()) {
-                SuggestedMixHairlineRow(
+                SuggestedMixCard(
                     capsule = dopamineCapsule,
                     accentColor = activeAccent,
                     onClick = onLaunchDopamineCapsule
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // 3. Living Fluid Sphere Centerpiece
             Box(
@@ -182,7 +204,7 @@ fun PulseAgentScreen(
                 )
             }
 
-            // 4. Up Next Approval Card (only prominent card when waiting for user action)
+            // 4. Up Next Approval Card
             AnimatedVisibility(
                 visible = pendingProposedTrack != null,
                 enter = fadeIn(tween(240)),
@@ -196,12 +218,12 @@ fun PulseAgentScreen(
                             onApprove = onApproveProposedTrack,
                             onReject = onRejectProposedTrack
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
                 }
             }
 
-            // 5. Open-Canvas Voice Prompt & Live Response
+            // 5. Voice Prompt & Live Response
             val stateHint = when {
                 hasPendingApproval && agentState == AgentState.LISTENING -> "Say \"Yes\" to play or \"Skip\""
                 hasPendingApproval -> "Waiting for your go-ahead"
@@ -216,7 +238,7 @@ fun PulseAgentScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(16.dp))
                     .clickable { onOrbTapped() }
                     .padding(horizontal = 8.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -233,7 +255,7 @@ fun PulseAgentScreen(
                     text = liveTranscript.ifBlank { "Ask for a song, switch the mood, or start your daily mix." },
                     style = TuneMindTypography.bodyMedium,
                     fontSize = 15.sp,
-                    color = if (liveTranscript.isNotBlank()) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.62f),
+                    color = if (liveTranscript.isNotBlank()) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
                     textAlign = TextAlign.Center,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
@@ -243,7 +265,7 @@ fun PulseAgentScreen(
                     Text(
                         text = flowAnalysis,
                         fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.48f),
+                        color = Color.White.copy(alpha = 0.52f),
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -252,10 +274,9 @@ fun PulseAgentScreen(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            StudioHairlineDivider()
 
-            // 6. Unboxed Now-Playing Strip
-            NowPlayingStrip(
+            // 6. Tactile Now-Playing Card
+            NowPlayingCard(
                 trackTitle = currentTrackName,
                 artistName = artistName,
                 isMusicPlaying = isMusicPlaying,
@@ -267,20 +288,22 @@ fun PulseAgentScreen(
 }
 
 @Composable
-private fun SuggestedMixHairlineRow(
+private fun SuggestedMixCard(
     capsule: DopamineCapsuleState,
     accentColor: Color,
     onClick: () -> Unit
 ) {
-    Column(
+    SoftGlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onClick() },
+        accentTint = accentColor,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -288,35 +311,42 @@ private fun SuggestedMixHairlineRow(
                 Text(
                     text = "${capsule.slotLabel} mix",
                     color = accentColor,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = capsule.tracks.take(3).joinToString(" · ") { it.title },
-                    color = Color.White.copy(alpha = 0.78f),
-                    fontSize = 13.sp,
+                    color = Color(0xFFF8FAFC).copy(alpha = 0.88f),
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = 0.14f))
+                    .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
                 Text(
                     text = "Play",
-                    color = Color.White.copy(alpha = 0.68f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
+                    color = Color(0xFFF8FAFC),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Icon(
                     imageVector = Icons.Rounded.ChevronRight,
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.56f),
-                    modifier = Modifier.size(18.dp)
+                    tint = accentColor,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
-        StudioHairlineDivider()
     }
 }
 
@@ -616,7 +646,10 @@ private fun ProposedTrackApprovalCard(
 ) {
     val approvalAccent = Color(0xFF10B981)
 
-    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+    SoftGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        accentTint = approvalAccent
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -691,61 +724,66 @@ private fun ProposedTrackApprovalCard(
 }
 
 @Composable
-private fun NowPlayingStrip(
+private fun NowPlayingCard(
     trackTitle: String?,
     artistName: String?,
     isMusicPlaying: Boolean,
     playCount: Int,
     accentColor: Color
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 14.dp, horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    SoftGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        accentTint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(
-                    if (isMusicPlaying) Color(0xFF10B981).copy(alpha = 0.14f)
-                    else accentColor.copy(alpha = 0.12f)
-                ),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                imageVector = if (isMusicPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = trackTitle ?: "Nothing playing",
-                color = Color(0xFFF8FAFC),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            val meta = buildString {
-                append(artistName ?: "Start a song or ask TuneMind")
-                if (!trackTitle.isNullOrBlank() && playCount > 0) {
-                    append(" · $playCount ${if (playCount == 1) "play" else "plays"}")
-                }
-                if (isMusicPlaying) append(" · Playing")
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isMusicPlaying) Color(0xFF10B981).copy(alpha = 0.18f)
+                        else accentColor.copy(alpha = 0.14f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isMusicPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
+                    modifier = Modifier.size(19.dp)
+                )
             }
-            Text(
-                text = meta,
-                color = Color.White.copy(alpha = 0.56f),
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = trackTitle ?: "Nothing playing",
+                    color = Color(0xFFF8FAFC),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val meta = buildString {
+                    append(artistName ?: "Start a song or ask TuneMind")
+                    if (!trackTitle.isNullOrBlank() && playCount > 0) {
+                        append(" · $playCount ${if (playCount == 1) "play" else "plays"}")
+                    }
+                    if (isMusicPlaying) append(" · Playing")
+                }
+                Text(
+                    text = meta,
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

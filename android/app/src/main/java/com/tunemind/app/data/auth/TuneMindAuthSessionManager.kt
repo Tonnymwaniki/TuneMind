@@ -27,10 +27,11 @@ import java.util.concurrent.TimeUnit
 data class TuneMindUserSession(
     val isLoggedIn: Boolean = false,
     val hasCompletedStartFlow: Boolean = false,
+    val hasCompletedAccountOnboarding: Boolean = false,
     val userId: String = "",
     val email: String = "",
     val displayName: String = "",
-    val primaryProvider: String = "", // "GOOGLE" | "SPOTIFY" | "EMAIL"
+    val primaryProvider: String = "", // "GOOGLE" | "SPOTIFY" | "EMAIL" | "GUEST"
     val isGoogleConnected: Boolean = false,
     val isSpotifyConnected: Boolean = false,
     val supabaseUrl: String = ""
@@ -93,6 +94,9 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         val explicitLoggedIn = prefs.getBoolean(KEY_IS_LOGGED_IN, false) || spotifyConnected || googleConnected
         val completedStart = prefs.getBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
         val email = prefs.getString(KEY_USER_EMAIL, "") ?: ""
+        val seenAccountOnboarding = prefs.getBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false) ||
+            googleConnected ||
+            email.isNotBlank()
         val name = prefs.getString(KEY_DISPLAY_NAME, "")?.ifBlank {
             if (spotifyConnected) "Spotify Listener" else if (email.isNotBlank()) email.substringBefore("@") else "TuneMind Listener"
         } ?: "TuneMind Listener"
@@ -107,6 +111,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         return TuneMindUserSession(
             isLoggedIn = explicitLoggedIn,
             hasCompletedStartFlow = completedStart,
+            hasCompletedAccountOnboarding = seenAccountOnboarding,
             userId = prefs.getString(KEY_USER_ID, "") ?: "",
             email = email,
             displayName = name,
@@ -210,6 +215,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .putBoolean(KEY_GOOGLE_CONNECTED, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
             .putString(KEY_USER_EMAIL, cleanEmail)
             .putString(KEY_DISPLAY_NAME, cleanName)
             .putString(KEY_PRIMARY_PROVIDER, "GOOGLE")
@@ -269,6 +275,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                     val uid = userObj?.optString("id") ?: "supa_${cleanEmail.hashCode()}"
                     prefs.edit()
                         .putBoolean(KEY_IS_LOGGED_IN, true)
+                        .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
                         .putString(KEY_SUPABASE_ACCESS_TOKEN, accessToken)
                         .putString(KEY_USER_ID, uid)
                         .putString(KEY_USER_EMAIL, cleanEmail)
@@ -287,6 +294,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         // Local Encrypted Vault Authentication (when Supabase URL is not yet set)
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
             .putString(KEY_USER_ID, "local_${cleanEmail.lowercase().hashCode()}")
             .putString(KEY_USER_EMAIL, cleanEmail)
             .putString(KEY_DISPLAY_NAME, cleanName)
@@ -343,9 +351,24 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         true
     }
 
+    fun markAccountOnboardingCompleted() {
+        prefs.edit()
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
+            .apply()
+        refreshSessionState()
+    }
+
+    fun reopenAccountOnboarding() {
+        prefs.edit()
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false)
+            .apply()
+        refreshSessionState()
+    }
+
     fun markStartFlowCompleted() {
         prefs.edit()
             .putBoolean(KEY_HAS_COMPLETED_START_FLOW, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .apply()
         refreshSessionState()
@@ -355,6 +378,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, false)
             .putBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false)
             .putBoolean(KEY_GOOGLE_CONNECTED, false)
             .remove(KEY_SUPABASE_ACCESS_TOKEN)
             .remove(KEY_USER_EMAIL)
@@ -398,6 +422,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_HAS_COMPLETED_START_FLOW = "has_completed_start_flow"
+        private const val KEY_HAS_SEEN_ACCOUNT_ONBOARDING = "has_seen_account_onboarding_v3"
         private const val KEY_GOOGLE_CONNECTED = "is_google_connected"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_USER_EMAIL = "user_email"

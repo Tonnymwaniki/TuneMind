@@ -175,6 +175,54 @@ class AudioDeviceObserver(
     }
 
     companion object {
+        fun isPhoneHardwareName(raw: String?): Boolean {
+            val clean = raw?.trim().orEmpty()
+            if (clean.isBlank()) return true
+            val lower = clean.lowercase()
+            val systemNames = listOfNotNull(
+                Build.MODEL,
+                Build.MANUFACTURER,
+                Build.BRAND,
+                Build.DEVICE,
+                Build.PRODUCT,
+                Build.HARDWARE
+            ).map { it.trim().lowercase() }.filter { it.length >= 2 }
+
+            if (systemNames.any { sys -> lower == sys || lower.contains(sys) }) {
+                return true
+            }
+
+            val oemKeywords = listOf(
+                "sm-", "samsung", "galaxy", "pixel", "redmi", "xiaomi", "poco",
+                "tecno", "infinix", "itel", "oppo", "vivo", "realme", "oneplus",
+                "huawei", "honor", "nokia", "motorola", "moto ", "sony xperia",
+                "asus", "rog phone", "phone speaker", "android"
+            )
+            return oemKeywords.any { lower.contains(it) }
+        }
+
+        fun categoryDisplayLabel(transducerCategory: String?): String {
+            return when (transducerCategory) {
+                "BLUETOOTH_EARBUDS" -> "Bluetooth Earbuds"
+                "BLUETOOTH_HEADPHONES" -> "Bluetooth Headphones"
+                "WIRED_EARPHONES" -> "Wired Earphones"
+                "WIRED_HEADPHONES" -> "Wired Headphones"
+                "USB_EARPHONES" -> "USB-C Earphones"
+                "USB_DAC" -> "USB Audio"
+                "HEARING_AID" -> "Hearing Aid"
+                "BUILTIN_SPEAKER" -> "Speaker"
+                else -> "Speaker"
+            }
+        }
+
+        fun sanitizeOutputDeviceLabel(raw: String?, transducerCategory: String? = null): String {
+            val fallback = categoryDisplayLabel(transducerCategory)
+            if (transducerCategory == "BUILTIN_SPEAKER") return "Speaker"
+            val clean = raw?.trim().orEmpty()
+            if (isPhoneHardwareName(clean)) return fallback
+            return clean
+        }
+
         /**
          * Inspects AudioDeviceInfo types and product name to classify earbuds vs headphones vs speakers.
          */
@@ -194,7 +242,7 @@ class AudioDeviceObserver(
             return when (device.type) {
                 AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, 26 /* TYPE_BLE_HEADSET */, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
                     if (isEarbudKeyword || !isHeadphoneKeyword) {
-                        Pair("Bluetooth Earbuds (TWS)", "BLUETOOTH_EARBUDS")
+                        Pair("Bluetooth Earbuds", "BLUETOOTH_EARBUDS")
                     } else {
                         Pair("Bluetooth Headphones", "BLUETOOTH_HEADPHONES")
                     }
@@ -203,23 +251,23 @@ class AudioDeviceObserver(
                     if (isHeadphoneKeyword) {
                         Pair("Wired Headset", "WIRED_HEADPHONES")
                     } else {
-                        Pair("Wired Earphones (3.5mm)", "WIRED_EARPHONES")
+                        Pair("Wired Earphones", "WIRED_EARPHONES")
                     }
                 }
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> {
-                    Pair("Wired Studio Headphones", "WIRED_HEADPHONES")
+                    Pair("Wired Headphones", "WIRED_HEADPHONES")
                 }
                 AudioDeviceInfo.TYPE_USB_HEADSET -> {
-                    Pair("USB-C Digital Earphones", "USB_EARPHONES")
+                    Pair("USB-C Earphones", "USB_EARPHONES")
                 }
                 AudioDeviceInfo.TYPE_USB_DEVICE -> {
-                    Pair("USB Audio Interface / DAC", "USB_DAC")
+                    Pair("USB Audio", "USB_DAC")
                 }
                 23 /* AudioDeviceInfo.TYPE_HEARING_AID */ -> {
-                    Pair("Hearing Aid Transducer", "HEARING_AID")
+                    Pair("Hearing Aid", "HEARING_AID")
                 }
-                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> {
-                    Pair("Phone Speaker", "BUILTIN_SPEAKER")
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> {
+                    Pair("Speaker", "BUILTIN_SPEAKER")
                 }
                 else -> {
                     Pair("Audio Output", "AUDIO_OUTPUT")
@@ -230,19 +278,19 @@ class AudioDeviceObserver(
         fun resolveFriendlyDeviceName(device: AudioDeviceInfo, fallbackLabel: String): String {
             return when (device.type) {
                 AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
-                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone Speaker"
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Speaker"
                 AudioDeviceInfo.TYPE_WIRED_HEADSET,
                 AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
                 AudioDeviceInfo.TYPE_USB_HEADSET,
                 AudioDeviceInfo.TYPE_USB_DEVICE -> {
                     val raw = device.productName?.toString()?.trim().orEmpty()
-                    if (raw.isBlank() || raw.equals(Build.MODEL, ignoreCase = true)) fallbackLabel else raw
+                    if (isPhoneHardwareName(raw)) fallbackLabel else raw
                 }
                 AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
                 26 -> {
                     val raw = device.productName?.toString()?.trim().orEmpty()
-                    if (raw.isBlank() || raw.equals(Build.MODEL, ignoreCase = true)) fallbackLabel else raw
+                    if (isPhoneHardwareName(raw)) fallbackLabel else raw
                 }
                 else -> fallbackLabel
             }
@@ -256,7 +304,8 @@ class AudioDeviceObserver(
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth Headset"
                 AudioDeviceInfo.TYPE_USB_HEADSET -> "USB-C Earphones"
                 AudioDeviceInfo.TYPE_USB_DEVICE -> "USB Audio"
-                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone Speaker"
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Speaker"
                 26 -> "Wireless Earbuds"
                 else -> "Audio Output"
             }
@@ -319,9 +368,9 @@ class AudioDeviceObserver(
             if (preferred == null) {
                 val estimatedDb = 44f + (volRatio * 38f)
                 return AudioDeviceSnapshot(
-                    deviceType = "Phone Speaker",
+                    deviceType = "Speaker",
                     transducerCategory = "BUILTIN_SPEAKER",
-                    productName = "Phone Speaker",
+                    productName = "Speaker",
                     connectionType = "BUILTIN_SPEAKER",
                     volumeIndex = currentVol,
                     maxVolume = maxVol,

@@ -28,6 +28,9 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         authSessionManager.refreshSessionState()
         val session = authSessionManager.sessionFlow.value
         val app = getApplication<Application>()
+        if (!session.hasCompletedAccountOnboarding) {
+            return OnboardingStep.AUTH_LOGIN
+        }
         val isReturningUser = session.isLoggedIn || session.isSpotifyConnected || session.hasCompletedStartFlow
         return if (isReturningUser) {
             if (session.hasCompletedStartFlow && PermissionUtils.hasMicrophonePermission(app)) {
@@ -53,8 +56,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Routes directly without showing a redundant second splash screen:
-     * returning users advance to remaining permissions or COMPLETE; new users start at AUTH_LOGIN.
+     * Routes cleanly: users who haven't completed/skipped the welcome sign-in start at AUTH_LOGIN;
+     * returning signed-in users advance directly to remaining permissions or COMPLETE.
      */
     fun onSplashFinishedAutoRoute() {
         _currentStep.value = evaluateInitialStep()
@@ -65,6 +68,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun proceedFromAuthToPermissions() {
+        authSessionManager.markAccountOnboardingCompleted()
         authSessionManager.markStartFlowCompleted()
         val app = getApplication<Application>()
         _currentStep.value = evaluateRemainingPermissionStep(app)

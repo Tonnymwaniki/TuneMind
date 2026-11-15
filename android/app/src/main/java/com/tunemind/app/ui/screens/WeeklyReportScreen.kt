@@ -181,64 +181,70 @@ fun WeeklyReportScreen(
                 }
             }
 
-            // Top Artists (Open Canvas Section)
+            // Top Artists Card
             if (stats.topArtists.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StudioSectionHeader(title = "Top Artists")
-                    val maxPlays = stats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
-                    stats.topArtists.take(4).forEach { artist ->
-                        val frac = (artist.playCount.toFloat() / maxPlays.toFloat()).coerceIn(0.1f, 1f)
-                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = artist.artistName,
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StudioSectionHeader(title = "Top Artists")
+                        val maxPlays = stats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
+                        stats.topArtists.take(4).forEach { artist ->
+                            val frac = (artist.playCount.toFloat() / maxPlays.toFloat()).coerceIn(0.1f, 1f)
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = artist.artistName,
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                                        color = theme.primaryAccent,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { frac },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp)),
                                     color = theme.primaryAccent,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
+                                    trackColor = Color.White.copy(alpha = 0.10f)
                                 )
                             }
-                            LinearProgressIndicator(
-                                progress = { frac },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
-                                color = theme.primaryAccent,
-                                trackColor = Color.White.copy(alpha = 0.08f)
-                            )
                         }
                     }
-                    StudioHairlineDivider()
                 }
             }
 
-            // Practical Guidance Section (Open Canvas)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Next Week Focus",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF10B981)
-                )
-                Text(
-                    text = buildString {
-                        append("• Keep ${vaultTracks.size} resting tracks in your Vault a little longer so their freshness rebounds.\n")
-                        append("• Peak listening energy lands around ${stats.peakWindowLabel} — great time for upbeat sets.\n")
-                        append("• Mix in songs from For You picks to raise your ${stats.discoveryRatePercent}% fresh discovery balance.")
-                    },
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.68f),
-                    lineHeight = 20.sp
-                )
+            // Practical Guidance Card
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = Color(0xFF10B981)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Next Week Focus",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF10B981)
+                    )
+                    Text(
+                        text = buildString {
+                            append("• Keep ${vaultTracks.size} resting tracks in your Vault a little longer so their freshness rebounds.\n")
+                            append("• Peak listening energy lands around ${stats.peakWindowLabel} — great time for upbeat sets.\n")
+                            append("• Mix in songs from For You picks to raise your ${stats.discoveryRatePercent}% fresh discovery balance.")
+                        },
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.70f),
+                        lineHeight = 20.sp
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))

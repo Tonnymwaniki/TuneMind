@@ -1,5 +1,10 @@
 package com.tunemind.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,10 +35,13 @@ import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
 import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
+import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.ui.HearingInsightsState
+import com.tunemind.app.ui.components.MagicalSegmentedTabs
+import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
@@ -86,7 +94,8 @@ fun RhythmDnaScreen(
     onOpenWeeklyReport: () -> Unit = {},
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
-    onOpenMoments: () -> Unit = {}
+    onOpenMoments: () -> Unit = {},
+    onOpenAccountAuth: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -160,15 +169,11 @@ fun RhythmDnaScreen(
     }
 
     val dbValue = hearingInsights.estimatedAverageDb.toInt().coerceIn(45, 95)
-    val rawRouteName = hearingInsights.activeAudioDevice?.deviceName?.trim().orEmpty()
-    val audioRouteLabel = when {
-        rawRouteName.isBlank() -> "Phone Speaker"
-        rawRouteName.contains("SM-", ignoreCase = true) ||
-            rawRouteName.contains("Pixel", ignoreCase = true) ||
-            rawRouteName.contains("Galaxy", ignoreCase = true) ||
-            rawRouteName.contains("Redmi", ignoreCase = true) -> "Phone Speaker"
-        else -> rawRouteName
-    }
+    // Strictly sanitize against phone model / OEM names & prefer live transducer snapshot
+    val audioRouteLabel = AudioDeviceObserver.sanitizeOutputDeviceLabel(
+        raw = hearingInsights.activeSnapshot?.productName ?: hearingInsights.activeAudioDevice?.deviceName,
+        transducerCategory = hearingInsights.activeSnapshot?.transducerCategory
+    )
 
     val spotifyRepo = remember {
         com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context)
@@ -204,67 +209,67 @@ fun RhythmDnaScreen(
         else -> "Flow"
     }
 
-    StudioAmbientBackground {
+    val activeSubDeckAccent = when (activeRhythmSubDeck) {
+        1 -> theme.secondaryAccent
+        2 -> Color(0xFF1DB954)
+        3 -> Color(0xFF00E5FF)
+        else -> theme.primaryAccent
+    }
+
+    StudioAmbientBackground(accentOverride = activeSubDeckAccent) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
         ) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Single clean header title — no "Server" button, no eyebrow clutter
-            Text(
-                text = screenTitle,
-                color = Color(0xFFF8FAFC),
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.4).sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = screenTitle,
+                    color = Color(0xFFF8FAFC),
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.4).sp
+                )
+                Text(
+                    text = theme.musicMood.label,
+                    color = activeSubDeckAccent.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Clean underline tab bar (Overview | Stats | Spotify | History)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                val subTabs = listOf(
-                    Triple("Overview", theme.primaryAccent, 0),
-                    Triple("Stats", theme.secondaryAccent, 1),
-                    Triple("Spotify", Color(0xFF1DB954), 2),
-                    Triple("History", Color(0xFF00E5FF), 3)
-                )
-                subTabs.forEach { (label, tabAccent, idx) ->
-                    val isSelected = activeRhythmSubDeck == idx
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { activeRhythmSubDeck = idx }
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.50f),
-                            fontSize = 14.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            maxLines = 1
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(24.dp)
-                                .height(2.dp)
-                                .background(if (isSelected) tabAccent else Color.Transparent)
-                        )
-                    }
-                }
-            }
-            StudioHairlineDivider()
+            // Spring-sliding capsule tabs (Overview | Stats | Spotify | History)
+            MagicalSegmentedTabs(
+                tabs = listOf(
+                    MagicalTabItem("Overview", theme.primaryAccent),
+                    MagicalTabItem("Stats", theme.secondaryAccent),
+                    MagicalTabItem("Spotify", Color(0xFF1DB954)),
+                    MagicalTabItem("History", Color(0xFF00E5FF))
+                ),
+                selectedIndex = activeRhythmSubDeck,
+                onSelectTab = { activeRhythmSubDeck = it }
+            )
 
-            Box(modifier = Modifier.weight(1f)) {
-                when (activeRhythmSubDeck) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            AnimatedContent(
+                targetState = activeRhythmSubDeck,
+                transitionSpec = {
+                    fadeIn(tween(220)) togetherWith fadeOut(tween(160))
+                },
+                modifier = Modifier.weight(1f),
+                label = "flow_subdeck_transition"
+            ) { subDeck ->
+                when (subDeck) {
                     1 -> {
                         StatsDashboardContent(
                             stats = listeningStats,
@@ -302,7 +307,7 @@ fun RhythmDnaScreen(
                     3 -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp)
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 110.dp)
                         ) {
                             item(key = "history_controls") {
                                 Column(
@@ -316,7 +321,7 @@ fun RhythmDnaScreen(
                                     ) {
                                         Text(
                                             text = "${listeningStats.totalVerifiedPlays} plays · ${listeningStats.uniqueTrackCount} songs",
-                                            color = Color.White.copy(alpha = 0.72f),
+                                            color = Color.White.copy(alpha = 0.76f),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Medium
                                         )
@@ -332,26 +337,16 @@ fun RhythmDnaScreen(
                                         )
                                     }
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                    ) {
-                                        val filters = listOf("All Apps", "Spotify", "Most Played")
-                                        filters.forEachIndexed { idx, label ->
-                                            val sel = historyFilterMode == idx
-                                            Text(
-                                                text = label,
-                                                color = if (sel) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.50f),
-                                                fontSize = 13.sp,
-                                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable { historyFilterMode = idx }
-                                                    .padding(vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-                                    StudioHairlineDivider()
+                                    MagicalSegmentedTabs(
+                                        tabs = listOf(
+                                            MagicalTabItem("All Apps", Color(0xFF00E5FF)),
+                                            MagicalTabItem("Spotify", Color(0xFF1DB954)),
+                                            MagicalTabItem("Most Played", theme.secondaryAccent)
+                                        ),
+                                        selectedIndex = historyFilterMode,
+                                        onSelectTab = { historyFilterMode = it },
+                                        height = 42.dp
+                                    )
                                 }
                             }
 
@@ -359,12 +354,17 @@ fun RhythmDnaScreen(
                                 val topList = listeningStats.topTracks
                                 if (topList.isEmpty()) {
                                     item(key = "history_top_empty") {
-                                        Text(
-                                            text = "Play songs in your music apps to rank your most-played tracks.",
-                                            color = Color.White.copy(alpha = 0.60f),
-                                            fontSize = 14.sp,
-                                            modifier = Modifier.padding(vertical = 36.dp)
-                                        )
+                                        SoftGlassCard(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 14.dp)
+                                        ) {
+                                            Text(
+                                                text = "Play songs in your music apps to rank your most-played tracks.",
+                                                color = Color.White.copy(alpha = 0.66f),
+                                                fontSize = 14.sp
+                                            )
+                                        }
                                     }
                                 } else {
                                     itemsIndexed(
@@ -417,17 +417,22 @@ fun RhythmDnaScreen(
 
                                 if (timeline.isEmpty()) {
                                     item(key = "history_timeline_empty") {
-                                        Text(
-                                            text = if (effectiveSpotifyConnected) {
-                                                "No plays recorded yet. Tap Sync above or start a song."
-                                            } else {
-                                                "Connect Spotify or play a song to build your timeline."
-                                            },
-                                            color = Color.White.copy(alpha = 0.60f),
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            modifier = Modifier.padding(vertical = 36.dp)
-                                        )
+                                        SoftGlassCard(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 14.dp)
+                                        ) {
+                                            Text(
+                                                text = if (effectiveSpotifyConnected) {
+                                                    "No plays recorded yet. Tap Sync above or start a song."
+                                                } else {
+                                                    "Connect Spotify or play a song to build your timeline."
+                                                },
+                                                color = Color.White.copy(alpha = 0.66f),
+                                                fontSize = 14.sp,
+                                                lineHeight = 20.sp
+                                            )
+                                        }
                                     }
                                 } else {
                                     itemsIndexed(
@@ -474,22 +479,26 @@ fun RhythmDnaScreen(
                         }
                     }
 
-                    // TAB 0: OVERVIEW — 1 Hero Rhythm Card + Clean Hairline Sections
+                    // TAB 0: OVERVIEW — Thoughtful Dimensional Cards + Clean Spacing
                     else -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp)
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 112.dp)
                         ) {
-                            // 1. Primary Hero Block (Only SoftGlassCard on this screen): Daily Rhythm Ring
+                            // 1. Primary Hero Card: Daily Rhythm Ring
                             item(key = "overview_rhythm_ring") {
-                                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                SoftGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    accentTint = activePhase.color
+                                ) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Box(
                                             contentAlignment = Alignment.Center,
-                                            modifier = Modifier.size(156.dp)
+                                            modifier = Modifier.size(154.dp)
                                         ) {
                                             Canvas(modifier = Modifier.fillMaxSize()) {
                                                 phases.forEachIndexed { index, phase ->
@@ -523,7 +532,7 @@ fun RhythmDnaScreen(
                                                 )
                                                 Text(
                                                     text = if (activePhasePlays > 0) "${activePhaseMins}m · $dbValue dB" else "${activePhase.hoursLabel} · $dbValue dB",
-                                                    color = Color.White.copy(alpha = 0.60f),
+                                                    color = Color.White.copy(alpha = 0.62f),
                                                     fontSize = 12.sp
                                                 )
                                             }
@@ -531,49 +540,26 @@ fun RhythmDnaScreen(
 
                                         Spacer(modifier = Modifier.height(14.dp))
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceEvenly
-                                        ) {
-                                            phases.forEachIndexed { index, phase ->
-                                                val isSelected = index == selectedPhaseIndex
-                                                Column(
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            selectedPhaseIndex = index
-                                                            onUpdateThemePreferences(
-                                                                themePreferences.copy(
-                                                                    behavior = ThemeBehavior.FIXED,
-                                                                    fixedPaletteId = phase.paletteId
-                                                                )
-                                                            )
-                                                        }
-                                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = phase.label,
-                                                        color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.50f),
-                                                        fontSize = 13.sp,
-                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                        MagicalSegmentedTabs(
+                                            tabs = phases.map { MagicalTabItem(it.label, it.color) },
+                                            selectedIndex = selectedPhaseIndex,
+                                            onSelectTab = { index ->
+                                                selectedPhaseIndex = index
+                                                onUpdateThemePreferences(
+                                                    themePreferences.copy(
+                                                        behavior = ThemeBehavior.FIXED,
+                                                        fixedPaletteId = phases[index].paletteId
                                                     )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .width(20.dp)
-                                                            .height(2.dp)
-                                                            .background(if (isSelected) phase.color else Color.Transparent)
-                                                    )
-                                                }
-                                            }
-                                        }
+                                                )
+                                            },
+                                            height = 40.dp
+                                        )
 
                                         if (topArtists.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Spacer(modifier = Modifier.height(10.dp))
                                             Text(
                                                 text = "Top artists · ${topArtists.joinToString(" · ")}",
-                                                color = Color.White.copy(alpha = 0.62f),
+                                                color = Color.White.copy(alpha = 0.66f),
                                                 fontSize = 12.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
@@ -583,202 +569,211 @@ fun RhythmDnaScreen(
                                 }
                             }
 
-                            // 2. Insights Hairline Rows
+                            // 2. Insights 2x2 Interactive Bento Cards
                             item(key = "overview_insights_hub") {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 24.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     StudioSectionHeader(title = "Insights")
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    StudioHairlineDivider()
-
-                                    FlowNavRow(
-                                        title = "Weekly Recap",
-                                        trailingValue = "${formatListeningDuration(listeningStats.sevenDayListeningMs)} this week",
-                                        icon = Icons.Rounded.Insights,
-                                        accent = theme.primaryAccent,
-                                        onClick = onOpenWeeklyReport
-                                    )
-                                    FlowNavRow(
-                                        title = "Hearing Health",
-                                        trailingValue = "$dbValue dB",
-                                        icon = Icons.Rounded.Headphones,
-                                        accent = Color(0xFF10B981),
-                                        onClick = onOpenHearingHealth
-                                    )
-                                    FlowNavRow(
-                                        title = "Taste Profile",
-                                        trailingValue = "${listeningStats.uniqueArtistCount} artists",
-                                        icon = Icons.Rounded.PersonOutline,
-                                        accent = Color(0xFFA855F7),
-                                        onClick = onOpenMusicProfile
-                                    )
-                                    FlowNavRow(
-                                        title = "Sound Moments",
-                                        trailingValue = "Saved hooks",
-                                        icon = Icons.Rounded.BookmarkBorder,
-                                        accent = Color(0xFFFFB000),
-                                        onClick = onOpenMoments
-                                    )
-                                }
-                            }
-
-                            // 3. Spotify Account Hairline Section
-                            item(key = "overview_spotify_account") {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 24.dp)
-                                ) {
-                                    StudioSectionHeader(
-                                        title = "Spotify",
-                                        actionLabel = if (effectiveSpotifyConnected) "Open Library" else "Connect",
-                                        onActionClick = {
-                                            if (effectiveSpotifyConnected) {
-                                                onRefreshSpotifyLibrary()
-                                                activeRhythmSubDeck = 2
-                                            } else {
-                                                spotifyAuthManager.launchSpotifyAuth(context)
-                                            }
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = if (effectiveSpotifyConnected) {
-                                                    "${likedTracks.size} liked songs · ${playlists.size} playlists"
-                                                } else {
-                                                    "Connect Spotify for full library & history sync"
-                                                },
-                                                color = Color.White.copy(alpha = 0.72f),
-                                                fontSize = 13.sp
-                                            )
-                                            if (authSession.email.isNotBlank() || authSession.displayName.isNotBlank()) {
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = listOfNotNull(
-                                                        authSession.displayName.takeIf { it.isNotBlank() },
-                                                        authSession.email.takeIf { it.isNotBlank() }
-                                                    ).joinToString(" · "),
-                                                    color = Color.White.copy(alpha = 0.50f),
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                        }
-                                        if (authSession.isLoggedIn || effectiveSpotifyConnected) {
-                                            Text(
-                                                text = "Sign out",
-                                                color = Color.White.copy(alpha = 0.56f),
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable { authSessionManager.signOut() }
-                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-                                    StudioHairlineDivider()
-                                }
-                            }
-
-                            // 4. Appearance Preset Selector
-                            item(key = "overview_adaptive_theme") {
-                                val isAuto = themePreferences.behavior == ThemeBehavior.ADAPTIVE
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    StudioSectionHeader(
-                                        title = "Appearance",
-                                        actionLabel = if (isAuto) "Auto On" else "Use Auto",
-                                        onActionClick = {
-                                            onUpdateThemePreferences(
-                                                themePreferences.copy(
-                                                    behavior = ThemeBehavior.ADAPTIVE,
-                                                    enableMoodAdaptation = true,
-                                                    enableEnergyAdaptation = true
-                                                )
-                                            )
-                                        }
-                                    )
-
-                                    val atmospherePresets = listOf(
-                                        Triple("morning", "Glacier", Color(0xFF00E5FF)),
-                                        Triple("afternoon", "Emerald", Color(0xFF10B981)),
-                                        Triple("evening", "Ember", Color(0xFFFFB000)),
-                                        Triple("night", "Violet", Color(0xFFA855F7))
-                                    )
 
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        atmospherePresets.forEach { (id, label, color) ->
-                                            val isSelected = theme.activePalette.id == id && themePreferences.behavior == ThemeBehavior.FIXED
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.Center,
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(
-                                                        if (isSelected) color.copy(alpha = 0.16f) else Color(0xFF0E131D)
-                                                    )
-                                                    .border(
-                                                        1.dp,
-                                                        if (isSelected) color.copy(alpha = 0.70f) else Color.White.copy(alpha = 0.08f),
-                                                        RoundedCornerShape(10.dp)
-                                                    )
-                                                    .clickable {
-                                                        onUpdateThemePreferences(
-                                                            themePreferences.copy(
-                                                                behavior = ThemeBehavior.FIXED,
-                                                                fixedPaletteId = id
-                                                            )
-                                                        )
-                                                    }
-                                                    .padding(vertical = 10.dp, horizontal = 6.dp)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(7.dp)
-                                                        .clip(CircleShape)
-                                                        .background(color)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
+                                        FlowInsightCard(
+                                            title = "Weekly Recap",
+                                            value = "${formatListeningDuration(listeningStats.sevenDayListeningMs)} this week",
+                                            icon = Icons.Rounded.Insights,
+                                            accent = theme.primaryAccent,
+                                            onClick = onOpenWeeklyReport,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FlowInsightCard(
+                                            title = "Hearing Health",
+                                            value = "$dbValue dB · Safe",
+                                            icon = Icons.Rounded.Headphones,
+                                            accent = Color(0xFF10B981),
+                                            onClick = onOpenHearingHealth,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        FlowInsightCard(
+                                            title = "Taste Profile",
+                                            value = "${listeningStats.uniqueArtistCount} artists",
+                                            icon = Icons.Rounded.PersonOutline,
+                                            accent = Color(0xFFA855F7),
+                                            onClick = onOpenMusicProfile,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FlowInsightCard(
+                                            title = "Sound Moments",
+                                            value = "Saved hooks",
+                                            icon = Icons.Rounded.BookmarkBorder,
+                                            accent = Color(0xFFFFB000),
+                                            onClick = onOpenMoments,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 3. Account & Spotify Card
+                            item(key = "overview_spotify_account") {
+                                val hasExplicitAccount = authSession.isGoogleConnected || authSession.email.isNotBlank()
+                                SoftGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    accentTint = if (effectiveSpotifyConnected) Color(0xFF1DB954) else theme.primaryAccent
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        StudioSectionHeader(
+                                            title = "Account & Spotify",
+                                            actionLabel = if (effectiveSpotifyConnected) "Library" else "Connect Spotify",
+                                            onActionClick = {
+                                                if (effectiveSpotifyConnected) {
+                                                    onRefreshSpotifyLibrary()
+                                                    activeRhythmSubDeck = 2
+                                                } else {
+                                                    spotifyAuthManager.launchSpotifyAuth(context)
+                                                }
+                                            }
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = label,
-                                                    color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.72f),
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                                    maxLines = 1
+                                                    text = if (effectiveSpotifyConnected) {
+                                                        "${likedTracks.size} liked songs · ${playlists.size} playlists"
+                                                    } else {
+                                                        "Connect Spotify for full library & history sync"
+                                                    },
+                                                    color = Color(0xFFF8FAFC),
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium
                                                 )
+                                                Spacer(modifier = Modifier.height(3.dp))
+                                                Text(
+                                                    text = if (hasExplicitAccount) {
+                                                        listOfNotNull(
+                                                            authSession.displayName.takeIf { it.isNotBlank() },
+                                                            authSession.email.takeIf { it.isNotBlank() }
+                                                        ).joinToString(" · ")
+                                                    } else {
+                                                        "Using guest session — tap Sign In to save your profile"
+                                                    },
+                                                    color = Color.White.copy(alpha = 0.58f),
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = if (hasExplicitAccount) "Switch" else "Sign In",
+                                                color = theme.primaryAccent,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clickable { onOpenAccountAuth() }
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. Adaptive Appearance Preset Card
+                            item(key = "overview_adaptive_theme") {
+                                val isAuto = themePreferences.behavior == ThemeBehavior.ADAPTIVE
+                                SoftGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    accentTint = theme.primaryAccent
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        StudioSectionHeader(
+                                            title = "Adaptive Appearance",
+                                            actionLabel = if (isAuto) "Auto · ${theme.activePalette.name}" else "Enable Auto",
+                                            onActionClick = {
+                                                onUpdateThemePreferences(
+                                                    themePreferences.copy(
+                                                        behavior = ThemeBehavior.ADAPTIVE,
+                                                        enableMoodAdaptation = true,
+                                                        enableEnergyAdaptation = true
+                                                    )
+                                                )
+                                            }
+                                        )
+
+                                        val atmospherePresets = listOf(
+                                            Triple("morning", "Glacier", Color(0xFF00E5FF)),
+                                            Triple("afternoon", "Emerald", Color(0xFF10B981)),
+                                            Triple("evening", "Ember", Color(0xFFFFB000)),
+                                            Triple("night", "Violet", Color(0xFFA855F7))
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            atmospherePresets.forEach { (id, label, color) ->
+                                                val isSelected = theme.activePalette.id == id && themePreferences.behavior == ThemeBehavior.FIXED
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(
+                                                            if (isSelected) color.copy(alpha = 0.20f) else Color(0xFF080C15).copy(alpha = 0.65f)
+                                                        )
+                                                        .border(
+                                                            1.dp,
+                                                            if (isSelected) color.copy(alpha = 0.78f) else Color.White.copy(alpha = 0.10f),
+                                                            RoundedCornerShape(10.dp)
+                                                        )
+                                                        .clickable {
+                                                            onUpdateThemePreferences(
+                                                                themePreferences.copy(
+                                                                    behavior = ThemeBehavior.FIXED,
+                                                                    fixedPaletteId = id
+                                                                )
+                                                            )
+                                                        }
+                                                        .padding(vertical = 10.dp, horizontal = 6.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(7.dp)
+                                                            .clip(CircleShape)
+                                                            .background(color)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(5.dp))
+                                                    Text(
+                                                        text = label,
+                                                        color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.74f),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                        maxLines = 1
+                                                    )
+                                                }
                                             }
                                         }
                                     }
-                                    StudioHairlineDivider()
                                 }
                             }
 
                             // 5. Top Rotation Track Rows
                             if (powerTracks.isNotEmpty()) {
                                 item(key = "overview_top_rotation_header") {
-                                    StudioSectionHeader(
-                                        title = "Top Rotation · ${activePhase.label}",
-                                        modifier = Modifier.padding(top = 24.dp, bottom = 4.dp)
-                                    )
+                                    StudioSectionHeader(title = "Top Rotation · ${activePhase.label}")
                                 }
 
                                 itemsIndexed(
@@ -801,6 +796,7 @@ fun RhythmDnaScreen(
                                         subtitle = track.album,
                                         playCount = strictPlays,
                                         isCurrentlyPlaying = isPlaying,
+                                        appLabel = track.primaryAppName,
                                         accentColor = activePhase.color,
                                         secondaryAccent = theme.secondaryAccent,
                                         onPlayClick = { onPlayTrack(title, artist, uri, pkg) },
@@ -809,7 +805,7 @@ fun RhythmDnaScreen(
                                 }
                             }
 
-                            // 6. Playback Output Hairline Rows (clean "Phone Speaker · XX dB")
+                            // 6. Playback Output Card (clean "Speaker · XX dB" with zero phone model names)
                             item(key = "overview_playback_output") {
                                 val registry = remember(context) {
                                     com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
@@ -821,56 +817,56 @@ fun RhythmDnaScreen(
                                     mutableStateOf(registry.getPreferredProviderId())
                                 }
 
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 24.dp)
-                                ) {
-                                    StudioSectionHeader(
-                                        title = "Playback Output",
-                                        actionLabel = "$audioRouteLabel · $dbValue dB",
-                                        onActionClick = onOpenHearingHealth
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    StudioHairlineDivider()
+                                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        StudioSectionHeader(
+                                            title = "Playback Output",
+                                            actionLabel = "$audioRouteLabel · $dbValue dB",
+                                            onActionClick = onOpenHearingHealth
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        StudioHairlineDivider()
 
-                                    installedProviders.forEach { provider ->
-                                        val isSelected = preferredProviderId == provider.providerId ||
-                                            (provider.packageName != "*" && selectedTargetPlayer == provider.packageName)
-                                        val shortName = when (provider.providerId) {
-                                            "local_files" -> "Local Audio"
-                                            "tunemind_inapp" -> "TuneMind Player"
-                                            else -> provider.displayName
-                                        }
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    preferredProviderId = provider.providerId
-                                                    registry.setPreferredProviderId(provider.providerId)
-                                                    val pkg = provider.packageName.takeIf { it != "*" } ?: provider.providerId
-                                                    onSelectTargetPlayer(pkg)
-                                                }
-                                                .padding(vertical = 14.dp, horizontal = 2.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = shortName,
-                                                color = if (isSelected) theme.primaryAccent else Color(0xFFF8FAFC),
-                                                fontSize = 15.sp,
-                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
-                                            )
-                                            if (isSelected) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Check,
-                                                    contentDescription = "Selected",
-                                                    tint = theme.primaryAccent,
-                                                    modifier = Modifier.size(18.dp)
+                                        installedProviders.forEachIndexed { idx, provider ->
+                                            val isSelected = preferredProviderId == provider.providerId ||
+                                                (provider.packageName != "*" && selectedTargetPlayer == provider.packageName)
+                                            val shortName = when (provider.providerId) {
+                                                "local_files" -> "Local Audio"
+                                                "tunemind_inapp" -> "TuneMind Player"
+                                                else -> provider.displayName
+                                            }
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        preferredProviderId = provider.providerId
+                                                        registry.setPreferredProviderId(provider.providerId)
+                                                        val pkg = provider.packageName.takeIf { it != "*" } ?: provider.providerId
+                                                        onSelectTargetPlayer(pkg)
+                                                    }
+                                                    .padding(vertical = 13.dp, horizontal = 2.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = shortName,
+                                                    color = if (isSelected) theme.primaryAccent else Color(0xFFF8FAFC),
+                                                    fontSize = 15.sp,
+                                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
                                                 )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = theme.primaryAccent,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (idx < installedProviders.lastIndex) {
+                                                StudioHairlineDivider()
                                             }
                                         }
-                                        StudioHairlineDivider()
                                     }
                                 }
                             }
@@ -908,57 +904,55 @@ fun RhythmDnaScreen(
 }
 
 @Composable
-private fun FlowNavRow(
+private fun FlowInsightCard(
     title: String,
-    trailingValue: String,
+    value: String,
     icon: ImageVector,
     accent: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onClick() }
-                .padding(vertical = 14.dp, horizontal = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+    SoftGlassCard(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onClick() },
+        accentTint = accent,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(14.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = accent,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = title,
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = trailingValue,
-                    color = Color.White.copy(alpha = 0.56f),
-                    fontSize = 13.sp
-                )
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.36f),
                     modifier = Modifier.size(18.dp)
                 )
             }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    color = Color(0xFFF8FAFC),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = value,
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
-        StudioHairlineDivider()
     }
 }
 

@@ -3,11 +3,14 @@ package com.tunemind.app.ui.onboarding
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,9 +50,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.data.auth.TuneMindUserSession
+import com.tunemind.app.ui.components.MagicalSegmentedTabs
+import com.tunemind.app.ui.components.MagicalTabItem
+import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.TuneMindLogoMark
+import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.util.PermissionUtils
 import kotlinx.coroutines.launch
 
@@ -98,60 +105,68 @@ fun OnboardingScreen(
     )
 
     StudioAmbientBackground {
-        when (currentStep) {
-            OnboardingStep.WELCOME -> {
-                LaunchedEffect(Unit) {
-                    viewModel.onSplashFinishedAutoRoute()
+        AnimatedContent(
+            targetState = currentStep,
+            transitionSpec = {
+                fadeIn(tween(240)) togetherWith fadeOut(tween(180))
+            },
+            label = "onboarding_step_transition"
+        ) { step ->
+            when (step) {
+                OnboardingStep.WELCOME -> {
+                    LaunchedEffect(Unit) {
+                        viewModel.onSplashFinishedAutoRoute()
+                    }
                 }
-            }
-            OnboardingStep.AUTH_LOGIN -> {
-                AuthLoginStep(
-                    session = session,
-                    authManager = authManager,
-                    onContinue = { viewModel.proceedFromAuthToPermissions() }
-                )
-            }
-            OnboardingStep.MICROPHONE -> {
-                PermissionSetupStep(
-                    stepIndex = 1,
-                    totalSteps = 3,
-                    icon = Icons.Rounded.Mic,
-                    accent = Color(0xFF00E5FF),
-                    title = "Allow Microphone",
-                    description = "Talk naturally to TuneMind by saying \"Hey TuneMind\" or tapping the sphere to ask for tracks.",
-                    primaryButtonText = "Allow Microphone",
-                    onPrimaryClick = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                    onSkipClick = { viewModel.skipCurrentPermissionStep() }
-                )
-            }
-            OnboardingStep.NOTIFICATION -> {
-                PermissionSetupStep(
-                    stepIndex = 2,
-                    totalSteps = 3,
-                    icon = Icons.Rounded.NotificationsActive,
-                    accent = Color(0xFFFFB000),
-                    title = "Enable Music Detection",
-                    description = "Lets TuneMind recognize what is playing across your music apps and protect favorites from overplay.",
-                    primaryButtonText = "Allow Music Access",
-                    onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getNotificationListenerIntent()) },
-                    onSkipClick = { viewModel.skipCurrentPermissionStep() }
-                )
-            }
-            OnboardingStep.BATTERY -> {
-                PermissionSetupStep(
-                    stepIndex = 3,
-                    totalSteps = 3,
-                    icon = Icons.Rounded.BatteryChargingFull,
-                    accent = Color(0xFF10B981),
-                    title = "Keep Sync Running",
-                    description = "Keeps your Spotify listening history up to date and playback responsive even with your screen off.",
-                    primaryButtonText = "Allow Background Sync",
-                    onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context)) },
-                    onSkipClick = { viewModel.skipCurrentPermissionStep() }
-                )
-            }
-            OnboardingStep.COMPLETE -> {
-                // Handled by LaunchedEffect
+                OnboardingStep.AUTH_LOGIN -> {
+                    AuthLoginStep(
+                        session = session,
+                        authManager = authManager,
+                        onContinue = { viewModel.proceedFromAuthToPermissions() }
+                    )
+                }
+                OnboardingStep.MICROPHONE -> {
+                    PermissionSetupStep(
+                        stepIndex = 1,
+                        totalSteps = 3,
+                        icon = Icons.Rounded.Mic,
+                        accent = Color(0xFF00E5FF),
+                        title = "Allow Microphone",
+                        description = "Talk naturally to TuneMind by saying \"Hey TuneMind\" or tapping the sphere to ask for tracks.",
+                        primaryButtonText = "Allow Microphone",
+                        onPrimaryClick = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        onSkipClick = { viewModel.skipCurrentPermissionStep() }
+                    )
+                }
+                OnboardingStep.NOTIFICATION -> {
+                    PermissionSetupStep(
+                        stepIndex = 2,
+                        totalSteps = 3,
+                        icon = Icons.Rounded.NotificationsActive,
+                        accent = Color(0xFFFFB000),
+                        title = "Enable Music Detection",
+                        description = "Lets TuneMind recognize what is playing across your music apps and protect favorites from overplay.",
+                        primaryButtonText = "Allow Music Access",
+                        onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getNotificationListenerIntent()) },
+                        onSkipClick = { viewModel.skipCurrentPermissionStep() }
+                    )
+                }
+                OnboardingStep.BATTERY -> {
+                    PermissionSetupStep(
+                        stepIndex = 3,
+                        totalSteps = 3,
+                        icon = Icons.Rounded.BatteryChargingFull,
+                        accent = Color(0xFF10B981),
+                        title = "Keep Sync Running",
+                        description = "Keeps your Spotify listening history up to date and playback responsive even with your screen off.",
+                        primaryButtonText = "Allow Background Sync",
+                        onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context)) },
+                        onSkipClick = { viewModel.skipCurrentPermissionStep() }
+                    )
+                }
+                OnboardingStep.COMPLETE -> {
+                    // Handled by LaunchedEffect
+                }
             }
         }
     }
@@ -164,12 +179,12 @@ private fun AuthLoginStep(
     authManager: TuneMindAuthSessionManager,
     onContinue: () -> Unit
 ) {
+    val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
 
     var isSignUpMode by remember { mutableStateOf(true) }
-    var showPasswordSection by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf(session.email) }
     var passwordInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf(session.displayName) }
@@ -224,11 +239,6 @@ private fun AuthLoginStep(
             authError = "Enter a valid email address."
             return
         }
-        if (!showPasswordSection) {
-            showPasswordSection = true
-            authError = null
-            return
-        }
         if (passwordInput.length < 4) {
             authError = "Password must be at least 4 characters."
             return
@@ -255,13 +265,13 @@ private fun AuthLoginStep(
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = Color(0xFFF8FAFC),
         unfocusedTextColor = Color(0xFFF8FAFC),
-        focusedContainerColor = Color(0xFF0E131D),
-        unfocusedContainerColor = Color(0xFF0E131D),
-        focusedBorderColor = Color(0xFF10B981),
-        unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
-        focusedLabelColor = Color(0xFF10B981),
-        unfocusedLabelColor = Color.White.copy(alpha = 0.56f),
-        cursorColor = Color(0xFF10B981)
+        focusedContainerColor = Color(0xFF080C15).copy(alpha = 0.72f),
+        unfocusedContainerColor = Color(0xFF080C15).copy(alpha = 0.56f),
+        focusedBorderColor = theme.primaryAccent,
+        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+        focusedLabelColor = theme.primaryAccent,
+        unfocusedLabelColor = Color.White.copy(alpha = 0.58f),
+        cursorColor = theme.primaryAccent
     )
 
     Column(
@@ -270,78 +280,96 @@ private fun AuthLoginStep(
             .statusBarsPadding()
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
+            .padding(horizontal = 22.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.Start
     ) {
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        // Clean brand mark & headline
-        TuneMindLogoMark(
-            size = 56.dp,
-            showContainer = false,
-            animatedWave = true
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TuneMindLogoMark(
+                size = 48.dp,
+                showContainer = false,
+                animatedWave = true
+            )
 
-        Spacer(modifier = Modifier.height(20.dp))
+            TextButton(onClick = onContinue) {
+                Text(
+                    text = "Continue as Guest",
+                    color = theme.primaryAccent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Welcome to TuneMind",
+            text = if (isSignUpMode) "Create your TuneMind" else "Welcome back",
             color = Color(0xFFF8FAFC),
-            fontSize = 28.sp,
+            fontSize = 27.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = (-0.5).sp
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "Keep your favorite music fresh, build effortless mixes, and sync across your players.",
-            color = Color.White.copy(alpha = 0.64f),
+            text = "Keep your favorite songs fresh, build daily mixes, and sync across your music players.",
+            color = Color.White.copy(alpha = 0.66f),
             fontSize = 14.sp,
             lineHeight = 20.sp
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Email-first upfront input
-        OutlinedTextField(
-            value = emailInput,
-            onValueChange = {
-                emailInput = it
-                authError = null
-                if (it.contains("@") && !showPasswordSection) {
-                    showPasswordSection = true
-                }
-            },
-            label = { Text("Email address") },
-            placeholder = { Text("you@example.com", color = Color.White.copy(alpha = 0.34f)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Email,
-                imeAction = if (showPasswordSection) ImeAction.Next else ImeAction.Done
-            ),
-            keyboardActions = KeyboardActions(
-                onDone = { submitEmailAuth() }
-            ),
-            shape = RoundedCornerShape(14.dp),
-            colors = fieldColors,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        AnimatedVisibility(
-            visible = showPasswordSection,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+        // Main Auth Card with Magical Switch between Register & Sign In
+        SoftGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            accentTint = theme.primaryAccent
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (isSignUpMode) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                MagicalSegmentedTabs(
+                    tabs = listOf(
+                        MagicalTabItem("Create Account", theme.primaryAccent),
+                        MagicalTabItem("Sign In", theme.secondaryAccent)
+                    ),
+                    selectedIndex = if (isSignUpMode) 0 else 1,
+                    onSelectTab = { idx ->
+                        isSignUpMode = idx == 0
+                        authError = null
+                    }
+                )
+
+                OutlinedTextField(
+                    value = emailInput,
+                    onValueChange = {
+                        emailInput = it
+                        authError = null
+                    },
+                    label = { Text("Email address") },
+                    placeholder = { Text("you@example.com", color = Color.White.copy(alpha = 0.34f)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                AnimatedVisibility(
+                    visible = isSignUpMode,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it },
-                        label = { Text("Your name (optional)") },
+                        label = { Text("Display name (optional)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                         shape = RoundedCornerShape(14.dp),
@@ -371,194 +399,158 @@ private fun AuthLoginStep(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                if (!authError.isNullOrBlank()) {
+                    Text(
+                        text = authError!!,
+                        color = Color(0xFFFF6B81),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Button(
+                    onClick = { submitEmailAuth() },
+                    enabled = !isSubmitting,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF8FAFC),
+                        contentColor = Color(0xFF07090E)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
                 ) {
                     Text(
-                        text = if (isSignUpMode) "Creating a new account" else "Signing in to your account",
-                        color = Color.White.copy(alpha = 0.52f),
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = if (isSignUpMode) "Have an account? Sign in" else "New here? Create account",
-                        color = Color(0xFF10B981),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { isSignUpMode = !isSignUpMode }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                        text = when {
+                            isSubmitting -> "Please wait…"
+                            isSignUpMode -> "Create Account"
+                            else -> "Sign In"
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
-        }
-
-        if (!authError.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = authError!!,
-                color = Color(0xFFFF6B81),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = { submitEmailAuth() },
-            enabled = !isSubmitting,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFF8FAFC),
-                contentColor = Color(0xFF07090E)
-            ),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-        ) {
-            Text(
-                text = when {
-                    isSubmitting -> "Signing in…"
-                    showPasswordSection && isSignUpMode -> "Continue with Email"
-                    showPasswordSection -> "Sign in with Email"
-                    else -> "Continue with Email"
-                },
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
         }
 
         // Hairline divider
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 22.dp),
+                .padding(vertical = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StudioHairlineDivider(modifier = Modifier.weight(1f))
             Text(
-                text = "or",
-                color = Color.White.copy(alpha = 0.42f),
+                text = "or continue quickly with",
+                color = Color.White.copy(alpha = 0.46f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
             StudioHairlineDivider(modifier = Modifier.weight(1f))
         }
 
-        // Social & Music connections
-        Column(
+        // Quick Social & Player Card
+        SoftGlassCard(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(14.dp)
         ) {
-            OutlinedButton(
-                onClick = { launchGoogleAccountPicker() },
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color(0xFF0E131D),
-                    contentColor = Color(0xFFF8FAFC)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (session.isGoogleConnected) {
+                OutlinedButton(
+                    onClick = { launchGoogleAccountPicker() },
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color(0xFF0B101B).copy(alpha = 0.8f),
+                        contentColor = Color(0xFFF8FAFC)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    if (session.isGoogleConnected) {
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Text(
+                            text = "G",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Text(
+                        text = if (session.isGoogleConnected) {
+                            "Google · ${session.email.ifBlank { session.displayName }}"
+                        } else {
+                            "Continue with Google"
+                        },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        authError = null
+                        authManager.launchSpotifyLogin(context)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1DB954),
+                        contentColor = Color(0xFF040605)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
                     Icon(
-                        Icons.Rounded.Check,
+                        imageVector = if (session.isSpotifyConnected) Icons.Rounded.Check else Icons.Rounded.MusicNote,
                         contentDescription = null,
-                        tint = Color(0xFF10B981),
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                } else {
                     Text(
-                        text = "G",
-                        color = Color(0xFFF8FAFC),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        text = if (session.isSpotifyConnected) "Spotify Connected" else "Continue with Spotify",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.width(10.dp))
                 }
-                Text(
-                    text = if (session.isGoogleConnected) {
-                        "Google Connected · ${session.email.ifBlank { session.displayName }}"
-                    } else {
-                        "Continue with Google"
-                    },
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            Button(
-                onClick = {
-                    authError = null
-                    authManager.launchSpotifyLogin(context)
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1DB954),
-                    contentColor = Color(0xFF040605)
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) {
-                Icon(
-                    imageVector = if (session.isSpotifyConnected) Icons.Rounded.Check else Icons.Rounded.MusicNote,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = if (session.isSpotifyConnected) "Spotify Connected" else "Continue with Spotify",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
 
         if (session.isLoggedIn || session.isSpotifyConnected || session.isGoogleConnected) {
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = onContinue,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF10B981),
+                    containerColor = theme.primaryAccent,
                     contentColor = Color(0xFF040605)
                 ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(50.dp)
             ) {
                 Text(
-                    text = "Continue to TuneMind",
+                    text = "Enter TuneMind",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f, fill = true))
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            TextButton(onClick = onContinue) {
-                Text(
-                    text = "Skip for now",
-                    color = Color.White.copy(alpha = 0.54f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
+        Spacer(modifier = Modifier.height(12.dp))
     }
 
     if (showGoogleConfirmSheet) {
@@ -566,7 +558,7 @@ private fun AuthLoginStep(
         ModalBottomSheet(
             onDismissRequest = { showGoogleConfirmSheet = false },
             sheetState = sheetState,
-            containerColor = Color(0xFF0E131D),
+            containerColor = theme.cardSurface,
             contentColor = Color(0xFFF8FAFC),
             dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
         ) {
@@ -721,7 +713,7 @@ private fun PermissionSetupStep(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(3.dp)
+                            .height(4.dp)
                             .clip(CircleShape)
                             .background(
                                 if (i <= stepIndex) accent else Color.White.copy(alpha = 0.12f)
@@ -731,43 +723,47 @@ private fun PermissionSetupStep(
             }
         }
 
-        // Open-canvas editorial centerpiece (no card box)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        // Tactile dimensional permission card
+        SoftGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            accentTint = accent,
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(accent.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(32.dp)
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(accent.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(22.dp))
+                Text(
+                    text = title,
+                    color = Color(0xFFF8FAFC),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = description,
+                    color = Color.White.copy(alpha = 0.68f),
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 22.sp
                 )
             }
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = title,
-                color = Color(0xFFF8FAFC),
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = description,
-                color = Color.White.copy(alpha = 0.66f),
-                fontSize = 15.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 22.sp
-            )
         }
 
         // Bottom-pinned primary action + quiet skip

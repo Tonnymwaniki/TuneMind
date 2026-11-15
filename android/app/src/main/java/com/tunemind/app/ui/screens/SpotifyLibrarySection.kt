@@ -33,6 +33,8 @@ import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
+import com.tunemind.app.ui.components.MagicalSegmentedTabs
+import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
@@ -268,48 +270,20 @@ fun SpotifyLibrarySection(
                     }
                 }
 
-                // Underline Sub-Tabs: Liked | Playlists | Podcasts
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(20.dp)
-                    ) {
-                        val tabs = listOf(
-                            "Liked (${likedTracks.size})",
-                            "Playlists (${playlists.size})",
-                            "Podcasts (${podcastShows.size + podcastEpisodes.size})"
-                        )
-                        tabs.forEachIndexed { idx, label ->
-                            val selected = subTab == idx
-                            Column(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        subTab = idx
-                                        if (idx != 1) selectedPlaylistId = null
-                                    }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (selected) spotifyGreen else Color.White.copy(alpha = 0.54f),
-                                    fontSize = 13.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .width(36.dp)
-                                        .height(2.dp)
-                                        .background(if (selected) spotifyGreen else Color.Transparent)
-                                )
-                            }
-                        }
-                    }
-                    StudioHairlineDivider()
-                }
+                // Magical Sliding Capsule Sub-Tabs: Liked | Playlists | Podcasts
+                MagicalSegmentedTabs(
+                    tabs = listOf(
+                        MagicalTabItem("Liked (${likedTracks.size})", spotifyGreen),
+                        MagicalTabItem("Playlists (${playlists.size})", spotifyGreen),
+                        MagicalTabItem("Podcasts (${podcastShows.size + podcastEpisodes.size})", theme.secondaryAccent)
+                    ),
+                    selectedIndex = subTab,
+                    onSelectTab = { idx ->
+                        subTab = idx
+                        if (idx != 1) selectedPlaylistId = null
+                    },
+                    height = 42.dp
+                )
             }
         }
 
@@ -812,25 +786,27 @@ private fun LibraryEmptyBlock(
     title: String,
     subtitle: String
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(
-            text = title,
-            color = Color(0xFFF8FAFC),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = subtitle,
-            color = Color.White.copy(alpha = 0.58f),
-            fontSize = 13.sp,
-            lineHeight = 18.sp
-        )
+    SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = title,
+                color = Color(0xFFF8FAFC),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = subtitle,
+                color = Color.White.copy(alpha = 0.62f),
+                fontSize = 13.sp,
+                lineHeight = 18.sp
+            )
+        }
     }
 }
 

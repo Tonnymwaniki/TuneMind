@@ -26,8 +26,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.ui.AudioFocusBehavior
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
@@ -41,7 +43,8 @@ fun SettingsScreen(
     vm: TuneMindViewModel,
     onBack: () -> Unit,
     onOpenCrossApp: () -> Unit,
-    onOpenWeeklyReport: () -> Unit
+    onOpenWeeklyReport: () -> Unit,
+    onOpenAccountAuth: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -176,10 +179,46 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 1. Voice & Playback
-            StudioSectionHeader(title = "Voice & Playback")
-            Spacer(modifier = Modifier.height(6.dp))
-            StudioHairlineDivider()
+            // 0. Account & Sign-In Card
+            val authSessionManager = remember(context) { TuneMindAuthSessionManager.getInstance(context) }
+            val authSession by authSessionManager.sessionFlow.collectAsState()
+            val hasExplicitAccount = authSession.isGoogleConnected || authSession.email.isNotBlank()
+
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = colors.primaryAccent
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StudioSectionHeader(
+                        title = "Account",
+                        actionLabel = if (hasExplicitAccount) "Switch / Manage" else "Sign In / Register",
+                        onActionClick = onOpenAccountAuth
+                    )
+                    Text(
+                        text = if (hasExplicitAccount) {
+                            listOfNotNull(
+                                authSession.displayName.takeIf { it.isNotBlank() },
+                                authSession.email.takeIf { it.isNotBlank() },
+                                authSession.primaryProvider.takeIf { it.isNotBlank() }
+                            ).joinToString(" · ")
+                        } else {
+                            "Guest session active. Sign in or create an account to save your TuneMind profile."
+                        },
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.70f),
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 1. Voice & Playback Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Voice & Playback")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Hands-Free DJ",
@@ -389,14 +428,17 @@ fun SettingsScreen(
                     )
                 }
             }
-            StudioHairlineDivider()
+            }
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. Permissions
-            StudioSectionHeader(title = "Permissions")
-            Spacer(modifier = Modifier.height(6.dp))
-            StudioHairlineDivider()
+            // 2. Permissions Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Permissions")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
 
             SettingsPermissionRow(
                 title = "Return to TuneMind",
@@ -480,14 +522,17 @@ fun SettingsScreen(
                 colors = colors,
                 onClick = { vm.requestIgnoreBatteryOptimization(context) }
             )
-            StudioHairlineDivider()
+            }
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Audio & Hearing
-            StudioSectionHeader(title = "Audio & Hearing")
-            Spacer(modifier = Modifier.height(6.dp))
-            StudioHairlineDivider()
+            // 3. Audio & Hearing Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Audio & Hearing")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Safe Listening Alerts",
@@ -544,19 +589,27 @@ fun SettingsScreen(
                     }
                 }
             }
-            StudioHairlineDivider()
+            }
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // 4. Appearance
-            AdaptiveAtmosphereSection(vm = vm)
+            // 4. Appearance Card
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = colors.primaryAccent
+            ) {
+                AdaptiveAtmosphereSection(vm = vm)
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // 5. Default Music Player
-            StudioSectionHeader(title = "Default Music Player")
-            Spacer(modifier = Modifier.height(6.dp))
-            StudioHairlineDivider()
+            // 5. Default Music Player Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Default Music Player")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Always Ask Before Playing",
@@ -613,12 +666,17 @@ fun SettingsScreen(
                 StudioHairlineDivider()
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            }
+            }
 
-            // 6. Freshness & Privacy
-            StudioSectionHeader(title = "Freshness & Privacy")
-            Spacer(modifier = Modifier.height(6.dp))
-            StudioHairlineDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 6. Freshness & Privacy Card
+            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    StudioSectionHeader(title = "Freshness & Privacy")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    StudioHairlineDivider()
 
             Column(
                 modifier = Modifier
@@ -694,9 +752,10 @@ fun SettingsScreen(
                     com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
                 }
             )
-            StudioHairlineDivider()
+                }
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 7. Reset Listening Data
             OutlinedButton(
@@ -722,7 +781,7 @@ fun SettingsScreen(
         ModalBottomSheet(
             onDismissRequest = { showResetSheet = false },
             sheetState = sheetState,
-            containerColor = Color(0xFF0E131D),
+            containerColor = colors.cardSurface,
             contentColor = Color(0xFFF8FAFC),
             dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
         ) {

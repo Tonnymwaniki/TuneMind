@@ -331,6 +331,9 @@ open class MainActivity : ComponentActivity() {
                     val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
                     var liveTranscript by remember { mutableStateOf("") }
                     var hasCompletedLaunchStartFlow by remember { mutableStateOf(authSession.hasCompletedStartFlow) }
+                    val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding ||
+                        authSession.isGoogleConnected ||
+                        authSession.email.isNotBlank()
 
                     val orchestrator = remember(agentVoiceManager) {
                         AgentOrchestrator(
@@ -341,7 +344,10 @@ open class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    val isMainAppActive = hasCompletedLaunchStartFlow && authSession.hasCompletedStartFlow && hasAllPermissions
+                    val isMainAppActive = hasCompletedLaunchStartFlow &&
+                        authSession.hasCompletedStartFlow &&
+                        hasCompletedAccountGate &&
+                        hasAllPermissions
 
                     LaunchedEffect(isMainAppActive) {
                         agentVoiceManager.setForegroundActive(isMainAppActive)
@@ -410,12 +416,13 @@ open class MainActivity : ComponentActivity() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xFF07090E))
+                                .background(adaptiveState.primaryBackground)
                         ) {
                             if (!isMainAppActive) {
                                 OnboardingScreen(
                                     onComplete = {
                                         hasCompletedLaunchStartFlow = true
+                                        authSessionManager.markAccountOnboardingCompleted()
                                         authSessionManager.markStartFlowCompleted()
                                         hasAllPermissions = true
                                     }
@@ -476,7 +483,7 @@ open class MainActivity : ComponentActivity() {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color(0xFF07090E))
+                                        .background(adaptiveState.primaryBackground)
                                 ) {
                                 HorizontalPager(
                                     state = pagerState,
@@ -632,7 +639,10 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },
-                                                onOpenMoments = { showMomentsScreen = true }
+                                                onOpenMoments = { showMomentsScreen = true },
+                                                onOpenAccountAuth = {
+                                                    authSessionManager.reopenAccountOnboarding()
+                                                }
                                             )
                                         }
                                     }
@@ -782,6 +792,10 @@ open class MainActivity : ComponentActivity() {
                                         onOpenWeeklyReport = {
                                             showSettingsScreen = false
                                             showWeeklyReportScreen = true
+                                        },
+                                        onOpenAccountAuth = {
+                                            showSettingsScreen = false
+                                            authSessionManager.reopenAccountOnboarding()
                                         }
                                     )
                                 }

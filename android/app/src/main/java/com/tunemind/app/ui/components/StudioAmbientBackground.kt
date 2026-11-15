@@ -10,11 +10,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 /**
- * Clean obsidian canvas (#07090E) with a subtle ambient key light.
- * Avoids noisy gradient blobs so foreground typography and hairline lists breathe.
+ * Adaptive atmospheric canvas driven live by [LocalAdaptiveTheme].
+ * Blends circadian time-of-day palettes (Glacier, Emerald, Ember, Violet)
+ * with live song mood and energy intensity while preserving dark contrast.
  */
 @Composable
 fun StudioAmbientBackground(
@@ -24,29 +26,59 @@ fun StudioAmbientBackground(
     content: @Composable BoxScope.() -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
-    val topGlow = accentOverride ?: theme.primaryAccent
-    val glowAlpha = if (isActivePulse) 0.07f else 0.045f
+    val topAccent = accentOverride ?: theme.primaryAccent
+    val bottomAccent = theme.secondaryAccent
+    val intensity = theme.gradientIntensity.coerceIn(0.25f, 0.85f)
+
+    val topBg = theme.primaryBackground
+    val midBg = theme.secondaryBackground
+    val deepBg = lerp(theme.secondaryBackground, theme.recessedBackground, 0.42f)
+
+    val topGlowAlpha = if (isActivePulse) (0.20f * intensity).coerceIn(0.08f, 0.24f)
+    else (0.14f * intensity).coerceIn(0.06f, 0.17f)
+    val bottomGlowAlpha = if (isActivePulse) (0.12f * intensity).coerceIn(0.05f, 0.15f)
+    else (0.08f * intensity).coerceIn(0.04f, 0.11f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF07090E))
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(topBg, midBg, deepBg)
+                )
+            )
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            val center = Offset(w * 0.5f, h * 0.08f)
+
+            val topCenter = Offset(w * 0.50f, h * 0.08f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        topGlow.copy(alpha = glowAlpha),
+                        topAccent.copy(alpha = topGlowAlpha),
+                        topAccent.copy(alpha = topGlowAlpha * 0.32f),
                         Color.Transparent
                     ),
-                    center = center,
-                    radius = w * 0.95f
+                    center = topCenter,
+                    radius = w * 1.05f
                 ),
-                center = center,
-                radius = w * 0.95f
+                center = topCenter,
+                radius = w * 1.05f
+            )
+
+            val lowerCenter = Offset(w * 0.82f, h * 0.84f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        bottomAccent.copy(alpha = bottomGlowAlpha),
+                        Color.Transparent
+                    ),
+                    center = lowerCenter,
+                    radius = w * 0.90f
+                ),
+                center = lowerCenter,
+                radius = w * 0.90f
             )
         }
 

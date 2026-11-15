@@ -73,7 +73,7 @@ fun AdaptiveAtmosphereSection(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSelected) swatchColor.copy(alpha = 0.16f) else Color(0xFF0E131D))
+                        .background(if (isSelected) swatchColor.copy(alpha = 0.18f) else colors.secondaryBackground.copy(alpha = 0.72f))
                         .border(
                             1.dp,
                             if (isSelected) swatchColor.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.08f),
@@ -172,8 +172,8 @@ fun AdaptiveAtmosphereSection(
                         .height(28.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(
-                            if (themePreferences.customAccentHex == null) colors.primaryAccent.copy(alpha = 0.16f)
-                            else Color(0xFF0E131D)
+                            if (themePreferences.customAccentHex == null) colors.primaryAccent.copy(alpha = 0.18f)
+                            else colors.secondaryBackground.copy(alpha = 0.72f)
                         )
                         .border(
                             1.dp,

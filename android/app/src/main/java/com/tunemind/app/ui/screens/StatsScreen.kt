@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.MagicalSegmentedTabs
+import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
@@ -188,35 +190,12 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
 
         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    StatsTimeWindow.entries.forEach { w ->
-                        val selected = window == w
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { window = w }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = w.label,
-                                color = if (selected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.50f),
-                                fontSize = 13.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                            )
-                            Spacer(modifier = Modifier.height(5.dp))
-                            Box(
-                                modifier = Modifier
-                                    .width(24.dp)
-                                    .height(2.dp)
-                                    .background(if (selected) theme.primaryAccent else Color.Transparent)
-                            )
-                        }
-                    }
-                }
+                MagicalSegmentedTabs(
+                    tabs = StatsTimeWindow.entries.map { MagicalTabItem(it.label, theme.primaryAccent) },
+                    selectedIndex = StatsTimeWindow.entries.indexOf(window),
+                    onSelectTab = { idx -> window = StatsTimeWindow.entries[idx] },
+                    height = 42.dp
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -275,21 +254,22 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 2. Listening Habits (Open Canvas Metrics)
+    // 2. Listening Habits (Paired Metric Cards)
     item(key = "stats_habits_row") {
         val theme = LocalAdaptiveTheme.current
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            SoftGlassCard(
+                modifier = Modifier.weight(1f),
+                accentTint = Color(0xFF10B981),
+                contentPadding = PaddingValues(14.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Completion Rate",
-                        color = Color.White.copy(alpha = 0.58f),
+                        color = Color.White.copy(alpha = 0.62f),
                         fontSize = 12.sp
                     )
                     Text(
@@ -305,22 +285,25 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp)),
                         color = Color(0xFF10B981),
-                        trackColor = Color.White.copy(alpha = 0.08f)
+                        trackColor = Color.White.copy(alpha = 0.10f)
                     )
                     Text(
                         text = if (stats.skippedCount == 0) "Low skip rate" else "${stats.skippedCount} quick skips filtered",
-                        color = Color.White.copy(alpha = 0.52f),
+                        color = Color.White.copy(alpha = 0.54f),
                         fontSize = 11.sp
                     )
                 }
+            }
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+            SoftGlassCard(
+                modifier = Modifier.weight(1f),
+                accentTint = theme.primaryAccent,
+                contentPadding = PaddingValues(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         text = "Fresh Mix Ratio",
-                        color = Color.White.copy(alpha = 0.58f),
+                        color = Color.White.copy(alpha = 0.62f),
                         fontSize = 12.sp
                     )
                     Text(
@@ -336,214 +319,215 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp)),
                         color = theme.primaryAccent,
-                        trackColor = Color.White.copy(alpha = 0.08f)
+                        trackColor = Color.White.copy(alpha = 0.10f)
                     )
                     Text(
                         text = "${100 - stats.discoveryRatePercent}% on repeat",
-                        color = Color.White.copy(alpha = 0.52f),
+                        color = Color.White.copy(alpha = 0.54f),
                         fontSize = 11.sp
                     )
                 }
             }
-            StudioHairlineDivider()
         }
     }
 
-    // 3. Cross-App Breakdown (Hairline List)
+    // 3. Cross-App Breakdown Card
     item(key = "stats_apps_breakdown") {
         val theme = LocalAdaptiveTheme.current
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            StudioSectionHeader(title = "Music Apps Used")
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                StudioSectionHeader(title = "Music Apps Used")
 
-            if (stats.appBreakdown.isEmpty()) {
-                Text(
-                    text = "Play music in Spotify, YouTube Music, Boomplay, or any player to see your cross-app breakdown.",
-                    color = Color.White.copy(alpha = 0.58f),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-            } else {
-                stats.appBreakdown.forEach { app ->
-                    val appColor = resolveAppAccentColor(app.packageName, theme.primaryAccent)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                if (stats.appBreakdown.isEmpty()) {
+                    Text(
+                        text = "Play music in Spotify, YouTube Music, Boomplay, or any player to see your cross-app breakdown.",
+                        color = Color.White.copy(alpha = 0.62f),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                } else {
+                    stats.appBreakdown.forEach { app ->
+                        val appColor = resolveAppAccentColor(app.packageName, theme.primaryAccent)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(appColor)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(appColor)
+                                    )
+                                    Text(
+                                        text = "${app.displayName} · ${app.playCount} ${if (app.playCount == 1) "play" else "plays"}",
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                                 Text(
-                                    text = "${app.displayName} · ${app.playCount} ${if (app.playCount == 1) "play" else "plays"}",
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
+                                    text = "${formatListeningDuration(app.listeningMs)} (${(app.shareFraction * 100).toInt()}%)",
+                                    color = appColor,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            Text(
-                                text = "${formatListeningDuration(app.listeningMs)} (${(app.shareFraction * 100).toInt()}%)",
+                            LinearProgressIndicator(
+                                progress = { app.shareFraction.coerceIn(0.03f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
                                 color = appColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                trackColor = Color.White.copy(alpha = 0.10f)
                             )
                         }
-                        LinearProgressIndicator(
-                            progress = { app.shareFraction.coerceIn(0.03f, 1f) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp)),
-                            color = appColor,
-                            trackColor = Color.White.copy(alpha = 0.08f)
-                        )
                     }
                 }
             }
-            StudioHairlineDivider()
         }
     }
 
-    // 4. 7-Day Listening Rhythm Chart (Open Canvas)
+    // 4. 7-Day Listening Rhythm Chart Card
     item(key = "stats_daily_chart") {
         val theme = LocalAdaptiveTheme.current
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Last 7 Days",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = formatListeningDuration(stats.sevenDayListeningMs),
-                    color = theme.primaryAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Last 7 Days",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = formatListeningDuration(stats.sevenDayListeningMs),
+                        color = theme.primaryAccent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
-            val maxDayMs = (stats.dailyBuckets.maxOfOrNull { it.listeningMs } ?: 1L).coerceAtLeast(1L)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(104.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                stats.dailyBuckets.forEach { bucket ->
-                    val frac = (bucket.listeningMs.toFloat() / maxDayMs.toFloat()).coerceIn(0.06f, 1f)
-                    val isToday = bucket.label == "Today"
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Bottom
-                    ) {
-                        Text(
-                            text = if (bucket.playCount > 0) "${bucket.playCount}" else "",
-                            color = Color.White.copy(alpha = 0.56f),
-                            fontSize = 10.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.50f)
-                                .height((64f * frac).dp.coerceAtLeast(5.dp))
-                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                .background(
-                                    if (isToday) theme.primaryAccent
-                                    else if (bucket.playCount > 0) theme.secondaryAccent.copy(alpha = 0.72f)
-                                    else Color.White.copy(alpha = 0.08f)
-                                )
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = bucket.label,
-                            color = if (isToday) Color.White else Color.White.copy(alpha = 0.54f),
-                            fontSize = 10.sp,
-                            fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1
-                        )
+                val maxDayMs = (stats.dailyBuckets.maxOfOrNull { it.listeningMs } ?: 1L).coerceAtLeast(1L)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(104.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    stats.dailyBuckets.forEach { bucket ->
+                        val frac = (bucket.listeningMs.toFloat() / maxDayMs.toFloat()).coerceIn(0.06f, 1f)
+                        val isToday = bucket.label == "Today"
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            Text(
+                                text = if (bucket.playCount > 0) "${bucket.playCount}" else "",
+                                color = Color.White.copy(alpha = 0.60f),
+                                fontSize = 10.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.50f)
+                                    .height((64f * frac).dp.coerceAtLeast(5.dp))
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(
+                                        if (isToday) theme.primaryAccent
+                                        else if (bucket.playCount > 0) theme.secondaryAccent.copy(alpha = 0.78f)
+                                        else Color.White.copy(alpha = 0.10f)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = bucket.label,
+                                color = if (isToday) Color.White else Color.White.copy(alpha = 0.56f),
+                                fontSize = 10.sp,
+                                fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
-            StudioHairlineDivider()
         }
     }
 
-    // 5. 24-Hour Peak Activity Clock (Open Canvas)
+    // 5. 24-Hour Peak Activity Clock Card
     item(key = "stats_hourly_clock") {
         val theme = LocalAdaptiveTheme.current
         val maxHourCount = (stats.hourlyPlayCounts.maxOrNull() ?: 1).coerceAtLeast(1)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Listening Hours",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = stats.peakWindowLabel,
-                    color = Color(0xFF10B981),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                stats.hourlyPlayCounts.forEachIndexed { hour, count ->
-                    val frac = (count.toFloat() / maxHourCount.toFloat()).coerceIn(0.08f, 1f)
-                    val isPeak = hour == stats.peakHourOfDay && count > 0
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height((44f * frac).dp.coerceAtLeast(4.dp))
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(
-                                when {
-                                    isPeak -> Color(0xFF10B981)
-                                    count > 0 -> theme.primaryAccent.copy(alpha = 0.70f)
-                                    else -> Color.White.copy(alpha = 0.08f)
-                                }
-                            )
+        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Listening Hours",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = stats.peakWindowLabel,
+                        color = Color(0xFF10B981),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("12 AM", color = Color.White.copy(alpha = 0.48f), fontSize = 10.sp)
-                Text("6 AM", color = Color.White.copy(alpha = 0.48f), fontSize = 10.sp)
-                Text("12 PM", color = Color.White.copy(alpha = 0.48f), fontSize = 10.sp)
-                Text("6 PM", color = Color.White.copy(alpha = 0.48f), fontSize = 10.sp)
-                Text("11 PM", color = Color.White.copy(alpha = 0.48f), fontSize = 10.sp)
-            }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    stats.hourlyPlayCounts.forEachIndexed { hour, count ->
+                        val frac = (count.toFloat() / maxHourCount.toFloat()).coerceIn(0.08f, 1f)
+                        val isPeak = hour == stats.peakHourOfDay && count > 0
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height((44f * frac).dp.coerceAtLeast(4.dp))
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    when {
+                                        isPeak -> Color(0xFF10B981)
+                                        count > 0 -> theme.primaryAccent.copy(alpha = 0.72f)
+                                        else -> Color.White.copy(alpha = 0.10f)
+                                    }
+                                )
+                        )
+                    }
+                }
 
-            StudioHairlineDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("12 AM", color = Color.White.copy(alpha = 0.50f), fontSize = 10.sp)
+                    Text("6 AM", color = Color.White.copy(alpha = 0.50f), fontSize = 10.sp)
+                    Text("12 PM", color = Color.White.copy(alpha = 0.50f), fontSize = 10.sp)
+                    Text("6 PM", color = Color.White.copy(alpha = 0.50f), fontSize = 10.sp)
+                    Text("11 PM", color = Color.White.copy(alpha = 0.50f), fontSize = 10.sp)
+                }
+            }
         }
     }
 
