@@ -328,6 +328,49 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     return candidateModels;
   }
 
+  private async callClaudeWithHaikuPriority(
+    systemPrompt: string,
+    userContent: string,
+    maxTokens: number = 700
+  ): Promise<any> {
+    const all = await this.getCandidateClaudeModels();
+    const haikus = all.filter((m) => m.includes('haiku'));
+    const rest = all.filter((m) => !m.includes('haiku'));
+    const ordered = [
+      ...haikus,
+      'claude-haiku-4-5',
+      'claude-3-5-haiku-20241022',
+      ...rest
+    ].filter((v, idx, arr) => arr.indexOf(v) === idx);
+
+    let lastErr: any = null;
+    for (const modelId of ordered) {
+      try {
+        const res = await this.anthropic.messages.create({
+          model: modelId,
+          max_tokens: maxTokens,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }]
+        });
+        this.activeModelUsed = modelId;
+        ClaudeMusicReasoningProvider.lastActiveModelUsed = modelId;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
+        return res;
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message || err);
+        this.lastErrorDetails = { status: err?.status, message: msg };
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { status: err?.status, message: msg, provider: 'anthropic' };
+        if (msg.includes('authentication_error') || msg.includes('invalid x-api-key') || msg.includes('credit balance is too low')) {
+          throw err;
+        }
+        continue;
+      }
+    }
+    throw lastErr || new Error('All Claude Haiku/Sonnet models failed');
+  }
+
   private async callClaudeWithSonnetPriority(
     systemPrompt: string,
     userContent: string,
@@ -2707,10 +2750,10 @@ Respond ONLY with a valid JSON object matching this schema:
 }`;
 
     try {
-      const response = await this.callClaudeWithSonnetPriority(
-        this.getSystemPrompt(),
+      const response = await this.callClaudeWithHaikuPriority(
+        'You are TuneMind Neuro-Acoustic Analyst. Respond ONLY with compact valid JSON matching the requested schema.',
         prompt,
-        800
+        650
       );
 
       const rawText = this.extractRawText(response?.content);
@@ -2920,10 +2963,10 @@ Respond ONLY with a JSON object:
   "probabilisticInferences": [{"inference": "High structural tolerance in current session", "confidence": 0.91, "basis": "Completion rates remain above 80%"}]
 }`;
 
-        const res = await this.callClaudeWithSonnetPriority(
-          this.getSystemPrompt(),
+        const res = await this.callClaudeWithHaikuPriority(
+          'You are TuneMind Neuro-Acoustic Analyst. Respond ONLY with compact valid JSON matching the requested schema.',
           prompt,
-          600
+          500
         );
 
         const raw = this.extractRawText(res?.content);
@@ -3001,10 +3044,10 @@ Generate 10 real, genre-congruent song recommendations (4 CORE_DOPAMINE, 3 DEEP_
 Respond ONLY with a JSON array:
 [{"title": "Song Title", "artist": "Artist", "album": "Album", "category": "DOPAMINE_FLOW", "subTier": "CORE_DOPAMINE", "reason": "Reason", "confidence": 0.95}]`;
 
-        const res = await this.callClaudeWithSonnetPriority(
-          this.getSystemPrompt(),
+        const res = await this.callClaudeWithHaikuPriority(
+          'You are TuneMind Music Discovery Engine. Respond ONLY with a compact JSON array.',
           prompt,
-          1000
+          900
         );
 
         const raw = this.extractRawText(res?.content);

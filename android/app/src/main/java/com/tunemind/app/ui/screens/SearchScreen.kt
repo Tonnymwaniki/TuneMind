@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -464,7 +465,7 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    items(filteredItems, key = { it.id }) { item ->
+                    itemsIndexed(filteredItems, key = { idx, item -> "search_${item.id}_$idx" }) { _, item ->
                         val accent = when (item.origin) {
                             SearchOrigin.SPOTIFY -> spotifyGreen
                             SearchOrigin.VAULT -> vaultAmber

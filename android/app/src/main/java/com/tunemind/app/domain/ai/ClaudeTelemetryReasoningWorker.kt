@@ -125,18 +125,18 @@ class ClaudeTelemetryReasoningWorker(
         const val IMMEDIATE_WORK_TAG = "tunemind_claude_telemetry_reasoning_immediate"
 
         /**
-         * Schedules periodic reasoning generation every 15 minutes.
+         * Schedules periodic reasoning generation every 6 hours (obeying local 4h cooldown cache).
          */
         fun schedulePeriodic(context: Context) {
             try {
                 val periodicRequest = PeriodicWorkRequestBuilder<ClaudeTelemetryReasoningWorker>(
-                    15, TimeUnit.MINUTES,
-                    5, TimeUnit.MINUTES
+                    6, TimeUnit.HOURS,
+                    1, TimeUnit.HOURS
                 ).build()
 
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                     PERIODIC_WORK_TAG,
-                    ExistingPeriodicWorkPolicy.KEEP,
+                    ExistingPeriodicWorkPolicy.UPDATE,
                     periodicRequest
                 )
             } catch (_: Exception) {}

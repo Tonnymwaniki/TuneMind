@@ -389,7 +389,7 @@ class TuneMindViewModel : ViewModel() {
         val ctx = AppHolder.context ?: return
         val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
         prefs.edit().putString("taste_anchors", anchors.joinToString(",")).apply()
-        triggerChronoDiscovery(forceRefresh = true)
+        triggerChronoDiscovery(forceRefresh = false)
     }
 
     fun addTasteAnchor(anchor: String) {
@@ -543,6 +543,9 @@ class TuneMindViewModel : ViewModel() {
 
     @Volatile
     private var activeTrackedForYouSession: TrackedForYouSession? = null
+
+    @Volatile
+    private var autoTriggeredNoonCycleKey: String? = null
 
     private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
     val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
@@ -1210,17 +1213,25 @@ class TuneMindViewModel : ViewModel() {
                     evaluateActiveForYouSessionTransition(nowPlayingObs)
                     refreshRecommendations()
 
-                    // If real tracks are observed and today's 12:00 PM drop is missing or uncalibrated, auto-calibrate
+                    // At most once per 12:00 PM daily cycle, trigger discovery ONLY if Room has no drop yet
                     val observedArtists = recent.mapNotNull { it.artist }.filter { it.isNotBlank() }.distinct()
                     if (observedArtists.isNotEmpty()) {
                         val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
-                        val currentCrate = _aiDiscoveryCrate.value
-                        val hasTodayNoonDrop = currentCrate.any { it.dropDateKey == todayNoonKey && !it.isDismissed }
-                        val needsCalibration = currentCrate.isEmpty() || !hasTodayNoonDrop || currentCrate.any {
-                            it.telemetryBasisSummary.contains("Emerging") || it.telemetryBasisSummary.contains("Daypart:")
-                        }
-                        if (needsCalibration && !_isDiscovering.value) {
-                            triggerChronoDiscovery(forceRefresh = true)
+                        if (autoTriggeredNoonCycleKey != todayNoonKey && !_isDiscovering.value) {
+                            val hasDropInFlow = _aiDiscoveryCrate.value.any {
+                                it.dropDateKey == todayNoonKey && !it.isDismissed
+                            }
+                            if (hasDropInFlow) {
+                                autoTriggeredNoonCycleKey = todayNoonKey
+                            } else {
+                                val hasDropInRoom = withContext(Dispatchers.IO) {
+                                    (aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()).isNotEmpty()
+                                }
+                                autoTriggeredNoonCycleKey = todayNoonKey
+                                if (!hasDropInRoom) {
+                                    triggerChronoDiscovery(forceRefresh = false)
+                                }
+                            }
                         }
                     }
                 }
@@ -1756,13 +1767,25 @@ class TuneMindViewModel : ViewModel() {
                 if (_isDiscovering.value) return@launch
 
                 val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
-                val existingForCycle = _aiDiscoveryCrate.value.filter {
+                val existingInFlow = _aiDiscoveryCrate.value.filter {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
-                if (!forceRefresh && existingForCycle.isNotEmpty()) {
-                    return@launch
+                if (!forceRefresh) {
+                    if (existingInFlow.isNotEmpty()) {
+                        autoTriggeredNoonCycleKey = todayNoonKey
+                        return@launch
+                    }
+                    // Check Room synchronously before hitting backend (Flow may not have emitted on startup yet)
+                    val existingInRoom = withContext(Dispatchers.IO) {
+                        aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()
+                    }
+                    if (existingInRoom.isNotEmpty()) {
+                        autoTriggeredNoonCycleKey = todayNoonKey
+                        return@launch
+                    }
                 }
 
+                autoTriggeredNoonCycleKey = todayNoonKey
                 _isDiscovering.value = true
                 val prefProvider = getPreferredProviderId(ctx)
                 val currentPlays = _homeState.value.recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
@@ -1814,6 +1837,7 @@ class TuneMindViewModel : ViewModel() {
                     userEmail = authSession.email,
                     avgVolumeRatio = avgVolume,
                     yesterdayOutcomes = previousOutcomes,
+                    forceRefresh = forceRefresh,
                     onLearningSummaryUpdated = { summary ->
                         _forYouLearningState.value = summary
                     }

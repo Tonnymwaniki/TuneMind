@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -84,6 +85,7 @@ fun DopamineVaultScreen(
     val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount, repetitionSensitivity) {
         val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
+        val seenIds = mutableSetOf<String>()
         val satietyPerPlay = (12f + repetitionSensitivity.coerceIn(0.2f, 1.0f) * 12f).toInt().coerceIn(13, 25)
         val coolingPlayThreshold = when {
             repetitionSensitivity >= 0.85f -> 3
@@ -94,11 +96,13 @@ fun DopamineVaultScreen(
         for (v in vaultTracks) {
             val key = "${v.title.trim().lowercase()}|${v.artist.trim().lowercase()}"
             if (!seenKeys.add(key)) continue
+            val safeId = v.id.takeIf { it.isNotBlank() && seenIds.add(it) } ?: "vault_${list.size}"
+            seenIds.add(safeId)
             val freshness = (v.recoveryProgress * 100f).toInt().coerceIn(15, 75)
             val resolvedPlays = resolvePlayCount(v.title, v.artist, null).takeIf { it > 0 } ?: 4
             list.add(
                 DopamineSongItem(
-                    id = v.id,
+                    id = safeId,
                     title = v.title,
                     artist = v.artist,
                     freshnessPercent = freshness,
@@ -117,6 +121,8 @@ fun DopamineVaultScreen(
             val key = "${title.lowercase()}|${artist.lowercase()}"
             if (!seenKeys.add(key)) continue
 
+            val safeId = t.entryId.takeIf { it.isNotBlank() && seenIds.add(it) }
+                ?: "track_${key.hashCode()}_${list.size}".also { seenIds.add(it) }
             val uri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
             val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
                 ?: maxOf(1, t.distinctAppearanceCount)
@@ -126,7 +132,7 @@ fun DopamineVaultScreen(
 
             list.add(
                 DopamineSongItem(
-                    id = t.entryId,
+                    id = safeId,
                     title = title,
                     artist = artist,
                     freshnessPercent = freshness,
@@ -366,7 +372,10 @@ fun DopamineVaultScreen(
                             }
                         }
                     } else {
-                        items(displayedSongs, key = { it.id }) { song ->
+                        itemsIndexed(
+                            items = displayedSongs,
+                            key = { index, song -> "fresh_${currentTab}_${song.id}_$index" }
+                        ) { _, song ->
                             val isCurrentlyPlaying = isTrackCurrentlyPlaying(song.title, song.artist, song.spotifyUri)
                             val accurateCount = resolvePlayCount(song.title, song.artist, song.spotifyUri)
                                 .takeIf { it > 0 } ?: song.playCount

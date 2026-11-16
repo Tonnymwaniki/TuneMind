@@ -567,6 +567,7 @@ object ClaudeReasoningEngine {
         userEmail: String = "",
         avgVolumeRatio: Float? = null,
         yesterdayOutcomes: List<AiRecommendationEntity> = emptyList(),
+        forceRefresh: Boolean = false,
         onLearningSummaryUpdated: ((ForYouLearningSummary) -> Unit)? = null
     ): List<AiRecommendationEntity> = withContext(Dispatchers.IO) {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
@@ -583,6 +584,7 @@ object ClaudeReasoningEngine {
             if (userId.isNotBlank()) put("userId", userId)
             if (userEmail.isNotBlank()) put("userEmail", userEmail)
             put("dropDate", noonCycleKey)
+            put("forceRefresh", forceRefresh)
             put("timezone", timezoneId)
             put("localHour", localHour)
             put("timeSlot", timeSlotLabel)
@@ -941,8 +943,18 @@ object ClaudeReasoningEngine {
         recentTracks: List<TrackMemoryEntry>,
         vaultTracks: List<VaultTrack>,
         nowPlaying: NowPlayingObservation?,
-        timeSlot: String
+        timeSlot: String,
+        forceRefresh: Boolean = false
     ): Result<ReasoningReport> {
+        val existingCached = getLatestReport(context)
+        if (!forceRefresh && existingCached != null) {
+            val ageMs = System.currentTimeMillis() - existingCached.generatedAtMs
+            val eventDelta = kotlin.math.abs(eventCount - existingCached.analyzedEventCount)
+            if (ageMs in 0L..(4 * 60 * 60_000L) && eventDelta < 8) {
+                return Result.success(existingCached)
+            }
+        }
+
         val currentTrackName = nowPlaying?.title ?: recentTracks.firstOrNull()?.title
         val currentTrackPlays = recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
         val estSatiety = minOf(95, maxOf(15, currentTrackPlays * 22))

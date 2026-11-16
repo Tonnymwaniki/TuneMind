@@ -113,6 +113,7 @@ export interface DailyDropRequest {
   userId?: string;
   userEmail?: string;
   dropDate?: string;
+  forceRefresh?: boolean;
   timezone?: string;
   localHour?: number;
   timeSlot?: string;
@@ -960,10 +961,11 @@ export class SelfLearningDiscoveryEngine {
             ? body.data.map((m: any) => String(m?.id || '').trim()).filter((id: string) => id.startsWith('claude-'))
             : [];
           if (ids.length > 0) {
-            const sonnets = ids.filter((id: string) => id.includes('sonnet'));
-            const haikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('sonnet'));
-            const rest = ids.filter((id: string) => !id.includes('sonnet') && !id.includes('haiku'));
-            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...sonnets, ...haikus, ...rest];
+            // Prioritize fast, cost-efficient Haiku models first for daily JSON recommendations (4x lower cost than Sonnet)
+            const haikus = ids.filter((id: string) => id.includes('haiku'));
+            const sonnets = ids.filter((id: string) => id.includes('sonnet') && !id.includes('haiku'));
+            const rest = ids.filter((id: string) => !id.includes('haiku') && !id.includes('sonnet'));
+            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...haikus, ...sonnets, ...rest];
             SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs = now;
           }
         }
@@ -980,12 +982,11 @@ export class SelfLearningDiscoveryEngine {
     if (envModel && !candidates.includes(envModel)) candidates.push(envModel);
 
     for (const id of [
-      'claude-sonnet-4-6',
-      'claude-sonnet-4-5',
       'claude-haiku-4-5',
-      'claude-sonnet-4-20250514',
-      'claude-3-5-sonnet-20241022',
-      'claude-3-5-haiku-20241022'
+      'claude-haiku-4-5-20251001',
+      'claude-3-5-haiku-20241022',
+      'claude-sonnet-4-5',
+      'claude-sonnet-4-6'
     ]) {
       if (!candidates.includes(id)) candidates.push(id);
     }
@@ -1012,8 +1013,31 @@ export class SelfLearningDiscoveryEngine {
 
     // 2. Build genre allocation (2 songs per active user genre + 3 Global Wildcards from DIFFERENT genres)
     const genreAllocation = this.computeGenreAllocation(model, payload, timeSlot);
-    const activeGenresLower = new Set(genreAllocation.map((g) => g.genre.toLowerCase()));
     const learningSummary = this.buildLearningSummary(model, timeSlot);
+
+    // Cost Protection: return today's cached 12:00 PM drop immediately (0 Claude tokens) unless manually refreshed past cooldown
+    const existingDropForCycle = (model.recentDrops || []).find(
+      (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= 6
+    );
+    const forceRefreshCooldownMs = 2 * 60_000; // Prevent accidental double-tap/loop within 2 minutes even when forceRefresh=true
+    if (
+      existingDropForCycle &&
+      (!payload.forceRefresh || Date.now() - (existingDropForCycle.generatedAtMs || 0) < forceRefreshCooldownMs)
+    ) {
+      return {
+        status: 'ok',
+        dropDate,
+        nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
+        isAiGenerated: true,
+        modelUsed: 'cached-daily-drop',
+        wildcardCount: existingDropForCycle.recommendations.filter((r) => r.isWildcard).length,
+        learningSummary,
+        genreAllocation,
+        recommendations: existingDropForCycle.recommendations
+      };
+    }
+
+    const activeGenresLower = new Set(genreAllocation.map((g) => g.genre.toLowerCase()));
 
     // 3. Build strict zero-repeat exclusion set from library/history/vault/past drops
     const excludedTitlesLower = new Set<string>();
@@ -1069,45 +1093,22 @@ export class SelfLearningDiscoveryEngine {
         'Alternative Indie'
       ].filter((g) => !activeGenresLower.has(g.toLowerCase()));
 
-      const prompt = `You are TuneMind's Self-Learning AI Discovery Engine for daily noon drop ${dropDate}.
-LISTENER PROFILE (${learningSummary.evolutionLabel} · ${learningSummary.intelligenceScorePercent}% intelligence):
-- Active Time of Day: ${timeSlot}
-- Preferred Listening Volume: ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%
-- Satiety / Ear Fatigue Level: ${payload.satietyLevel ?? 38}%
-- Behavioral Insights: ${learningSummary.narrative} ${learningSummary.learnedTraits.join(' ')}
-- Top Artists Observed Across All Apps: ${(payload.topArtists || []).concat(payload.userTasteAnchors || []).slice(0, 12).join(', ') || 'Diverse global listener'}
-
-RECENT OUTCOMES & FEEDBACK:
-${outcomeFeedback || 'Initial calibration run — maximize prediction precision across observed genres.'}
-
-EXACT DAILY DROP QUOTA (${totalTargetCount} real, verified songs the user has NOT played):
+      const prompt = `TuneMind Daily Drop (${dropDate}, ${timeSlot}, Vol ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%).
+Top Artists: ${(payload.topArtists || []).concat(payload.userTasteAnchors || []).slice(0, 8).join(', ') || 'Diverse global'}
+Feedback: ${outcomeFeedback.split('\n').slice(0, 5).join('; ') || 'Calibrating'}
+Quota (${totalTargetCount} UNHEARD real songs):
 ${allocationInstruction}
-- PLUS ${desiredWildcards} "GLOBAL_WILDCARD" songs from COMPLETELY DIFFERENT GENRES NOT IN [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., explore 3 distinct scenes such as ${foreignSceneHints.join(', ')}). Every wildcard MUST explain the tempo, vocal, or acoustic bridge connecting it to this listener.
-
-STRICT EXCLUSIONS (DO NOT include any of these — already heard or resting in Vault):
-${Array.from(excludedTitlesLower).slice(0, 95).join(', ')}
-
-Respond ONLY with a valid JSON array (no markdown fences):
-[
-  {
-    "title": "Exact Song Title",
-    "artist": "Exact Artist Name",
-    "album": "Album Name",
-    "genre": "Canonical Genre Name",
-    "category": "DOPAMINE_FLOW" | "PALATE_CLEANSER" | "CHRONO_RESTORE" | "NOVEL_EXPLORATION",
-    "subTier": "GENRE_PICK" | "GLOBAL_WILDCARD",
-    "isWildcard": false,
-    "reason": "1 sharp sentence explaining WHY TuneMind predicts they will love this right now.",
-    "confidence": 0.94
-  }
-]`;
+- 3 "GLOBAL_WILDCARD" songs in DISTINCT genres NOT in [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., ${foreignSceneHints.slice(0, 4).join(', ')}), each with 1 crisp bridge reason.
+Exclude: ${Array.from(excludedTitlesLower).slice(0, 40).join(', ')}
+Return ONLY a raw JSON array:
+[{"title":"","artist":"","album":"","genre":"","category":"DOPAMINE_FLOW|PALATE_CLEANSER|CHRONO_RESTORE|NOVEL_EXPLORATION","subTier":"GENRE_PICK|GLOBAL_WILDCARD","isWildcard":false,"reason":"1 short sentence","confidence":0.93}]`;
 
       const candidateModels = await this.getCandidateClaudeModels();
       for (const candidateModelId of candidateModels) {
         try {
           const aiResp = await this.anthropic.messages.create({
             model: candidateModelId,
-            max_tokens: 2400,
+            max_tokens: 1350,
             messages: [{ role: 'user', content: prompt }]
           });
           const rawText = aiResp.content

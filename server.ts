@@ -484,9 +484,9 @@ async function startServer() {
   // 5. Start the server
   server.listen(PORT, HOST, () => {
     console.log(`TuneMind server running on http://${HOST}:${PORT} [${process.env['NODE_ENV']}] (with WebSocket STT)`);
-    // Start background telemetry reasoning poller
+    // Start background telemetry reasoning poller (30m cadence + change-gated inside poller)
     try {
-      TelemetryReasoningPoller.getInstance().start(30000);
+      TelemetryReasoningPoller.getInstance().start(30 * 60_000);
     } catch (e) {
       console.warn('Could not start TelemetryReasoningPoller:', e);
     }

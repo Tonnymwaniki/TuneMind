@@ -25,6 +25,7 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       userId: req.authUser ? identity.userId : (body.userId || body.user_id),
       userEmail: req.authUser ? identity.userEmail : (body.userEmail || body.user_email),
       dropDate: body.dropDate || body.drop_date,
+      forceRefresh: Boolean(body.forceRefresh || body.force_refresh),
       timezone: body.timezone,
       localHour: typeof body.localHour === 'number' ? body.localHour : undefined,
       timeSlot: body.timeSlot || body.time_slot,

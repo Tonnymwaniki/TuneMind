@@ -35,13 +35,15 @@ export class TelemetryReasoningPoller {
   private timer: NodeJS.Timeout | null = null;
   private isPolling = false;
 
-  private pollIntervalMs: number = 30_000; // 30 seconds default interval
+  private pollIntervalMs: number = 30 * 60_000; // 30 minutes default interval (saves tokens)
   private lastPolledAt: string | null = null;
   private lastAnalyzedEventCount: number = 0;
   private totalReportsGenerated: number = 0;
 
   // In-memory reports cache: userId -> latest report
   private latestReports: Map<string, ReasoningReport> = new Map();
+  // Event fingerprint cache so unchanged telemetry never re-triggers paid Claude calls
+  private lastUserEventSignature: Map<string, string> = new Map();
   // History of reports
   private reportHistory: ReasoningReport[] = [];
 
@@ -95,15 +97,15 @@ export class TelemetryReasoningPoller {
   /**
    * Starts the periodic telemetry polling loop.
    */
-  start(intervalMs: number = 30_000): void {
-    this.pollIntervalMs = intervalMs;
+  start(intervalMs: number = 30 * 60_000): void {
+    this.pollIntervalMs = Math.max(60_000, intervalMs);
     if (this.timer) {
       clearInterval(this.timer);
     }
 
-    console.log(`[TelemetryReasoningPoller] Starting telemetry reasoning poller (interval: ${intervalMs / 1000}s)`);
-    // Run an initial poll immediately
-    this.pollNow().catch(err => {
+    console.log(`[TelemetryReasoningPoller] Starting telemetry reasoning poller (interval: ${this.pollIntervalMs / 1000}s)`);
+    // Run an initial poll only if stale (>45m) or new events arrived
+    this.pollNow(undefined, false).catch(err => {
       console.warn('[TelemetryReasoningPoller] Initial poll error:', err);
     });
 
@@ -128,7 +130,7 @@ export class TelemetryReasoningPoller {
   /**
    * Polls the EventStore and runs Claude reasoning analysis on telemetry.
    */
-  async pollNow(targetUserId?: string): Promise<ReasoningReport | null> {
+  async pollNow(targetUserId?: string, force: boolean = false): Promise<ReasoningReport | null> {
     if (this.isPolling) {
       return this.getLatestReport(targetUserId);
     }
@@ -157,16 +159,38 @@ export class TelemetryReasoningPoller {
         : Array.from(userEventMap.keys());
 
       let lastReport: ReasoningReport | null = null;
+      const nowMs = Date.now();
+      const autoCooldownMs = 45 * 60_000; // Minimum 45m between automatic Claude background analyses per user
 
       for (const userId of userIdsToProcess) {
         const events = userEventMap.get(userId) || allEvents;
         if (events.length === 0) continue;
+
+        const latestTs = events[events.length - 1]?.occurred_at || '';
+        const signature = `${events.length}:${latestTs}`;
+        const existingReport = this.latestReports.get(userId);
+        const existingAgeMs = existingReport
+          ? Math.max(0, nowMs - new Date(existingReport.generatedAt).getTime())
+          : Number.MAX_SAFE_INTEGER;
+        const prevSig = this.lastUserEventSignature.get(userId);
+
+        // Skip paid Claude call if telemetry hasn't changed OR cooldown hasn't elapsed (unless manual force with >= 60s gap)
+        if (!force) {
+          if (existingReport && (prevSig === signature || existingAgeMs < autoCooldownMs)) {
+            lastReport = existingReport;
+            continue;
+          }
+        } else if (existingReport && existingAgeMs < 60_000 && prevSig === signature) {
+          lastReport = existingReport;
+          continue;
+        }
 
         const context = this.synthesizeUserContext(userId, events);
         const rawSummary = this.buildRawEventsSummary(events);
 
         const report = await this.reasoningProvider.generateReport(context, rawSummary);
 
+        this.lastUserEventSignature.set(userId, signature);
         this.latestReports.set(userId, report);
         this.reportHistory.push(report);
         this.totalReportsGenerated++;
@@ -174,7 +198,9 @@ export class TelemetryReasoningPoller {
       }
 
       this.lastAnalyzedEventCount = allEvents.length;
-      this.persistReports();
+      if (this.totalReportsGenerated > 0) {
+        this.persistReports();
+      }
 
       return lastReport || this.getLatestReport(targetUserId);
     } finally {
