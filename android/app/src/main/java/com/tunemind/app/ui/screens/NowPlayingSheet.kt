@@ -79,7 +79,28 @@ fun NowPlayingSheet(
         ?.takeIf { it.isNotBlank() } ?: "Start a song or ask TuneMind"
     val effectivePlaying = if (inAppHasTrack) inAppPlaying else (nowPlaying?.isPlaying == true)
     val effectiveDurationMs = if (inAppHasTrack && inAppDurMs > 0L) inAppDurMs else (nowPlaying?.durationMs ?: 0L)
-    val effectivePosMs = if (inAppHasTrack) inAppPosMs else (nowPlaying?.positionMs ?: 0L)
+
+    var externalTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(inAppHasTrack, effectivePlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
+        externalTickMs = System.currentTimeMillis()
+        while (!inAppHasTrack && effectivePlaying) {
+            kotlinx.coroutines.delay(1000L)
+            externalTickMs = System.currentTimeMillis()
+        }
+    }
+    val effectivePosMs = if (inAppHasTrack) {
+        inAppPosMs
+    } else {
+        val base = nowPlaying?.positionMs ?: 0L
+        val updatedAt = nowPlaying?.updatedAtMs ?: 0L
+        if (effectivePlaying && updatedAt > 0L) {
+            val delta = (externalTickMs - updatedAt).coerceIn(0L, 12 * 60 * 1000L)
+            val extrapolated = base + delta
+            if (effectiveDurationMs > 0L) extrapolated.coerceIn(0L, effectiveDurationMs) else extrapolated
+        } else {
+            base
+        }
+    }
 
     val sourceLabel = when {
         inAppHasTrack -> "TuneMind Built-In Player"
@@ -408,7 +429,8 @@ fun NowPlayingSheet(
                                 album = nowPlaying?.album,
                                 sourcePkg = nowPlaying?.sourcePackage,
                                 startMs = start,
-                                endMs = end
+                                endMs = end,
+                                spotifyUri = liveSpotify?.spotifyUri
                             )
                             actionStatus = "Saved moment from \"$effectiveTitle\""
                         }

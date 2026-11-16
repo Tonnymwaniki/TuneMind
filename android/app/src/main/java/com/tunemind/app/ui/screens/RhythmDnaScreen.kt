@@ -100,7 +100,8 @@ fun RhythmDnaScreen(
     onOpenMusicProfile: () -> Unit = {},
     onOpenMoments: () -> Unit = {},
     onOpenAccountAuth: () -> Unit = {},
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    momentsCount: Int = 0
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -173,7 +174,13 @@ fun RhythmDnaScreen(
         }
     }
 
-    val dbValue = hearingInsights.estimatedAverageDb.toInt().coerceIn(45, 95)
+    val dbValue = hearingInsights.estimatedAverageDb.toInt().coerceIn(40, 108)
+    val (hearingStatus, hearingColor) = when {
+        dbValue >= 92 -> "High Risk" to Color(0xFFFF4D6D)
+        dbValue >= 85 -> "Loud" to Color(0xFFFFB000)
+        dbValue >= 80 -> "Moderate" to theme.primaryAccent
+        else -> "Safe" to Color(0xFF10B981)
+    }
     // Strictly sanitize against phone model / OEM names & prefer live transducer snapshot
     val audioRouteLabel = AudioDeviceObserver.sanitizeOutputDeviceLabel(
         raw = hearingInsights.activeSnapshot?.productName ?: hearingInsights.activeAudioDevice?.deviceName,
@@ -533,7 +540,7 @@ fun RhythmDnaScreen(
                                                 )
                                                 Spacer(modifier = Modifier.height(3.dp))
                                                 Text(
-                                                    text = if (activePhasePlays > 0) "$activePhasePlays plays" else "${activePhase.targetBpm} BPM",
+                                                    text = if (activePhasePlays > 0) "$activePhasePlays plays" else "0 plays",
                                                     color = Color(0xFFF8FAFC),
                                                     fontSize = 21.sp,
                                                     fontWeight = FontWeight.Bold
@@ -627,9 +634,9 @@ fun RhythmDnaScreen(
                                         )
                                         FlowInsightCard(
                                             title = "Hearing Health",
-                                            value = "$dbValue dB · Safe",
+                                            value = "$dbValue dB · $hearingStatus",
                                             icon = Icons.Rounded.Headphones,
-                                            accent = Color(0xFF10B981),
+                                            accent = hearingColor,
                                             onClick = onOpenHearingHealth,
                                             modifier = Modifier.weight(1f)
                                         )
@@ -649,7 +656,7 @@ fun RhythmDnaScreen(
                                         )
                                         FlowInsightCard(
                                             title = "Sound Moments",
-                                            value = "Saved hooks",
+                                            value = if (momentsCount > 0) "$momentsCount saved" else "Save clip hooks",
                                             icon = Icons.Rounded.BookmarkBorder,
                                             accent = Color(0xFFFFB000),
                                             onClick = onOpenMoments,

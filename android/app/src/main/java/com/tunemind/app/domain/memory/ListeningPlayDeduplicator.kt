@@ -73,10 +73,10 @@ data class OverallListeningStats(
     val uniqueTrackCount: Int = 0,
     val uniqueArtistCount: Int = 0,
     val skippedCount: Int = 0,
-    val completionRatePercent: Int = 100,
-    val discoveryRatePercent: Int = 100,
+    val completionRatePercent: Int = 0,
+    val discoveryRatePercent: Int = 0,
     val peakHourOfDay: Int = 20,
-    val peakWindowLabel: String = "Evening",
+    val peakWindowLabel: String = "No plays yet",
     val hourlyPlayCounts: List<Int> = List(24) { 0 },
     val dailyBuckets: List<DailyListeningBucket> = emptyList(),
     val appBreakdown: List<AppListeningStats> = emptyList(),
@@ -497,8 +497,15 @@ object ListeningPlayDeduplicator {
             val hr = cal.get(Calendar.HOUR_OF_DAY).coerceIn(0, 23)
             hourlyCounts[hr]++
         }
-        val peakHour = hourlyCounts.indices.maxByOrNull { hourlyCounts[it] } ?: 20
-        val peakWindowLabel = when (peakHour) {
+        val hasHourlyActivity = hourlyCounts.any { it > 0 }
+        val peakHour = if (hasHourlyActivity) {
+            hourlyCounts.indices.maxByOrNull { hourlyCounts[it] } ?: 20
+        } else {
+            Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.HOUR_OF_DAY)
+        }
+        val peakWindowLabel = if (!hasHourlyActivity) {
+            "No plays yet"
+        } else when (peakHour) {
             in 5..11 -> "Morning (${formatHour(peakHour)})"
             in 12..16 -> "Afternoon (${formatHour(peakHour)})"
             in 17..21 -> "Evening (${formatHour(peakHour)})"
@@ -553,9 +560,9 @@ object ListeningPlayDeduplicator {
 
         val totalPlays = finalTimeline.size
         val totalAttempts = (totalPlays + skippedCount).coerceAtLeast(1)
-        val completionPct = ((totalPlays.toFloat() / totalAttempts.toFloat()) * 100f).toInt().coerceIn(40, 100)
+        val completionPct = if (totalPlays == 0) 0 else ((totalPlays.toFloat() / totalAttempts.toFloat()) * 100f).toInt().coerceIn(40, 100)
         val freshPlays = unifiedTracks.count { it.verifiedPlayCount <= 2 }
-        val discoveryPct = if (unifiedTracks.isEmpty()) 100 else ((freshPlays.toFloat() / unifiedTracks.size) * 100f).toInt().coerceIn(10, 100)
+        val discoveryPct = if (unifiedTracks.isEmpty()) 0 else ((freshPlays.toFloat() / unifiedTracks.size) * 100f).toInt().coerceIn(10, 100)
 
         val overallStats = OverallListeningStats(
             todayListeningMs = todayMs,

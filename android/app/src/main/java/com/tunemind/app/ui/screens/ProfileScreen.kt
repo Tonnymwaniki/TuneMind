@@ -360,14 +360,14 @@ fun ProfileScreen(
                     StudioHairlineDivider()
 
                     val monitoredHours = formatListeningDuration(stats.allTimeListeningMs)
-                    val matchPct = (74 + minOf(24, stats.uniqueTrackCount)).coerceAtMost(98)
+                    val matchPct = if (stats.uniqueTrackCount == 0) 0 else (74 + minOf(24, stats.uniqueTrackCount)).coerceAtMost(98)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         ProfileMetricColumn("Listened", monitoredHours, neonCyan)
                         ProfileMetricColumn("Tracks", "${stats.uniqueTrackCount}", electricPurple.copy(alpha = 0.95f))
-                        ProfileMetricColumn("Taste Match", "$matchPct%", safeGreen)
+                        ProfileMetricColumn("Taste Match", if (matchPct > 0) "$matchPct%" else "--", safeGreen)
                     }
 
                     if (!hasExplicitAccount) {

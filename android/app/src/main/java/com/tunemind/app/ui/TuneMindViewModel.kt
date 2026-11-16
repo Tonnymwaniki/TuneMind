@@ -54,20 +54,20 @@ data class HearingInsightsState(
     val activeAudioDevice: AudioDeviceSessionEntity? = null,
     val activeSnapshot: com.tunemind.app.domain.audio.AudioDeviceSnapshot? = null,
     val recentVolumeObs: List<VolumeObservationEntity> = emptyList(),
-    val estimatedAverageDb: Float = 68f,
-    val currentHeadroomDb: Float = 17f,
-    val dailyExposureMinutes: Int = 45,
-    val soundDoseFraction: Float = 0.32f,
-    val safeHoursRemaining: Float = 16f,
-    val safetyGuidance: String = "Listening exposure within safe acoustic threshold (<80 dB)."
+    val estimatedAverageDb: Float = 58f,
+    val currentHeadroomDb: Float = 27f,
+    val dailyExposureMinutes: Int = 0,
+    val soundDoseFraction: Float = 0f,
+    val safeHoursRemaining: Float = 24f,
+    val safetyGuidance: String = "Listening exposure within comfortable limits (<80 dBA)."
 )
 
 data class UserProfileState(
-    val name: String = "Tonny",
-    val email: String = "tonny@tunemind.neuro",
+    val name: String = "Guest Listener",
+    val email: String = "",
     val tier: String = "Acoustic Intelligence Tier 1",
-    val archetype: String = "Late-Night Deep Explorer",
-    val archetypeDescription: String = "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals."
+    val archetype: String = "Adaptive Listener",
+    val archetypeDescription: String = "Evolving across your listening sessions, recovery pauses, and daily flow."
 )
 
 enum class AudioFocusBehavior {
@@ -441,12 +441,14 @@ class TuneMindViewModel : ViewModel() {
         val ctx = AppHolder.context ?: return UserProfileState()
         val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
         return UserProfileState(
-            name = prefs.getString("user_name", "Tonny") ?: "Tonny",
-            email = prefs.getString("user_email", "tonny@tunemind.neuro") ?: "tonny@tunemind.neuro",
+            name = prefs.getString("user_name", null)?.takeIf { it.isNotBlank() } ?: "Guest Listener",
+            email = prefs.getString("user_email", null).orEmpty(),
             tier = prefs.getString("user_tier", "Acoustic Intelligence Tier 1") ?: "Acoustic Intelligence Tier 1",
-            archetype = prefs.getString("user_archetype", "Late-Night Deep Explorer") ?: "Late-Night Deep Explorer",
-            archetypeDescription = prefs.getString("user_archetype_desc", "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals.")
-                ?: "High affinity for low-fatigue timbres, nocturnal groove retention, and circadian recovery intervals."
+            archetype = prefs.getString("user_archetype", null)?.takeIf { it.isNotBlank() } ?: "Adaptive Listener",
+            archetypeDescription = prefs.getString(
+                "user_archetype_desc",
+                "Evolving across your listening sessions, recovery pauses, and daily flow."
+            ) ?: "Evolving across your listening sessions, recovery pauses, and daily flow."
         )
     }
 
@@ -905,7 +907,7 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        // Observe audio devices and volume
+        // Observe audio devices and volume from Room DB
         viewModelScope.launch {
             try {
                 audioDao?.observeRecentSessions()?.collect { sessions ->
@@ -932,6 +934,8 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
+        // Foreground live volume + headset + Bluetooth monitor so UI reacts immediately even if listener service is asleep
+        registerForegroundHearingMonitor()
         refreshHearingInsights()
 
         refreshReadiness()
@@ -1193,6 +1197,7 @@ class TuneMindViewModel : ViewModel() {
                     _listeningStats.value = snapshot.stats
                     _playCountByKey.value = snapshot.playCountByTrackKey
                     _playCountByUri.value = snapshot.playCountByUri
+                    refreshHearingInsights()
 
                     // Build authoritative deduplicated TrackMemoryEntry list (accurate play counts everywhere)
                     val recent = snapshot.unifiedTracks
@@ -1449,6 +1454,8 @@ class TuneMindViewModel : ViewModel() {
                 val elapsedDays = maxOf(0f, (now - qTime) / 86_400_000f)
                 val remaining = maxOf(0f, totalDays - elapsedDays)
                 val progress = (1f - (remaining / totalDays)).coerceIn(0f, 1f)
+                val pkg = obj.optString("sourcePackage", "").ifBlank { "com.spotify.music" }
+                val uri = obj.optString("spotifyUri", "").takeIf { it.isNotBlank() }
                 list.add(
                     VaultTrack(
                         id = obj.getString("id"),
@@ -1458,7 +1465,9 @@ class TuneMindViewModel : ViewModel() {
                         totalDays = totalDays,
                         cooldownDaysRemaining = (remaining * 10).toInt() / 10f,
                         recoveryProgress = progress,
-                        satietyScore = obj.optInt("satietyScore", 85)
+                        satietyScore = obj.optInt("satietyScore", 85),
+                        sourcePackage = pkg,
+                        spotifyUri = uri
                     )
                 )
             }
@@ -1482,13 +1491,30 @@ class TuneMindViewModel : ViewModel() {
                 put("quarantinedAtMs", item.quarantinedAtMs)
                 put("totalDays", item.totalDays.toDouble())
                 put("satietyScore", item.satietyScore)
+                put("sourcePackage", item.sourcePackage)
+                item.spotifyUri?.let { put("spotifyUri", it) }
             }
             array.put(obj)
         }
         prefs.edit().putString("vault_items", array.toString()).apply()
     }
 
-    fun quarantineTrack(title: String, artist: String, durationDays: Float = 5f) {
+    fun quarantineTrack(
+        title: String,
+        artist: String,
+        durationDays: Float = 5f,
+        sourcePackage: String? = null,
+        spotifyUri: String? = null
+    ) {
+        val matched = _unifiedTracks.value.firstOrNull {
+            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, spotifyUri)
+        }
+        val resolvedPkg = sourcePackage?.takeIf { it.isNotBlank() }
+            ?: matched?.primarySourcePackage
+            ?: _homeState.value.nowPlaying?.sourcePackage?.takeIf { it.isNotBlank() }
+            ?: "com.spotify.music"
+        val resolvedUri = spotifyUri?.takeIf { it.isNotBlank() } ?: matched?.spotifyUri
+
         val id = "vault-${System.currentTimeMillis()}"
         val newTrack = VaultTrack(
             id = id,
@@ -1498,9 +1524,11 @@ class TuneMindViewModel : ViewModel() {
             totalDays = durationDays,
             cooldownDaysRemaining = durationDays,
             recoveryProgress = 0.05f,
-            satietyScore = 85
+            satietyScore = 85,
+            sourcePackage = resolvedPkg,
+            spotifyUri = resolvedUri
         )
-        val updated = listOf(newTrack) + _vaultState.value.filter { it.title != title }
+        val updated = listOf(newTrack) + _vaultState.value.filter { !it.title.equals(title, ignoreCase = true) }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
         refreshRecommendations()
@@ -1518,30 +1546,138 @@ class TuneMindViewModel : ViewModel() {
     }
 
 
+    private var foregroundVolumeObserver: android.database.ContentObserver? = null
+    private var foregroundAudioReceiver: android.content.BroadcastReceiver? = null
+    private var foregroundDeviceCallback: android.media.AudioDeviceCallback? = null
+
+    private fun registerForegroundHearingMonitor() {
+        val ctx = AppHolder.context ?: return
+        if (foregroundVolumeObserver != null) return
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val audioMgr = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+
+        val volObserver = object : android.database.ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                refreshHearingInsights()
+            }
+        }
+        foregroundVolumeObserver = volObserver
+        runCatching {
+            ctx.contentResolver.registerContentObserver(
+                android.provider.Settings.System.CONTENT_URI,
+                true,
+                volObserver
+            )
+        }
+
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                when (intent?.action) {
+                    "android.media.VOLUME_CHANGED_ACTION",
+                    android.media.AudioManager.ACTION_HEADSET_PLUG,
+                    android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+                    android.bluetooth.BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                        refreshHearingInsights()
+                    }
+                }
+            }
+        }
+        foregroundAudioReceiver = receiver
+        val filter = android.content.IntentFilter().apply {
+            addAction("android.media.VOLUME_CHANGED_ACTION")
+            addAction(android.media.AudioManager.ACTION_HEADSET_PLUG)
+            addAction(android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+            addAction(android.bluetooth.BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                ctx,
+                receiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && audioMgr != null) {
+            val cb = object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                    refreshHearingInsights()
+                }
+
+                override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                    refreshHearingInsights()
+                }
+            }
+            foregroundDeviceCallback = cb
+            runCatching { audioMgr.registerAudioDeviceCallback(cb, mainHandler) }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        val ctx = AppHolder.context ?: return
+        foregroundVolumeObserver?.let { obs ->
+            runCatching { ctx.contentResolver.unregisterContentObserver(obs) }
+        }
+        foregroundAudioReceiver?.let { rec ->
+            runCatching { ctx.unregisterReceiver(rec) }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val audioMgr = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            foregroundDeviceCallback?.let { cb ->
+                runCatching { audioMgr?.unregisterAudioDeviceCallback(cb) }
+            }
+        }
+        foregroundVolumeObserver = null
+        foregroundAudioReceiver = null
+        foregroundDeviceCallback = null
+    }
+
+    fun setSystemMediaVolumePercent(percent: Int, showUi: Boolean = false) {
+        val ctx = AppHolder.context ?: return
+        com.tunemind.app.domain.audio.AudioDeviceObserver.setMediaVolumePercent(ctx, percent, showUi)
+        refreshHearingInsights()
+    }
+
     fun refreshHearingInsights() {
         val ctx = AppHolder.context ?: return
         val snapshot = com.tunemind.app.domain.audio.AudioDeviceObserver.getActiveAudioDeviceSnapshot(ctx)
         val estDb = snapshot.estimatedDb
         val headroom = snapshot.headroomDb
+        val todayMins = ((_listeningStats.value.todayListeningMs) / 60_000L).toInt().coerceAtLeast(0)
 
-        val safeHours = if (estDb <= 70f) 24f else {
-            (8f / Math.pow(2.0, ((estDb - 85f) / 3f).toDouble())).toFloat().coerceIn(0.1f, 24f)
+        // NIOSH 3 dB exchange rule: 8h max at 85 dBA; halves every +3 dB above 85 dBA
+        val safeWindowHours = if (estDb <= 72f) {
+            24f
+        } else {
+            (8.0 / Math.pow(2.0, ((estDb - 85f) / 3f).toDouble())).toFloat().coerceIn(0.05f, 24f)
+        }
+        val elapsedHours = todayMins / 60f
+        val safeHoursLeft = (safeWindowHours - elapsedHours).coerceAtLeast(0f)
+
+        // Real accumulated dose based on today's listened minutes vs safe NIOSH ceiling at current dBA
+        val timeWeightedDose = if (todayMins > 0) {
+            (elapsedHours / safeWindowHours).coerceIn(0.01f, 1.0f)
+        } else {
+            0f
         }
 
-        val doseFraction = ((estDb / 85f) * 0.44f).coerceIn(0.1f, 1.0f)
         val guidance = when {
-            headroom >= 12f -> "Pristine acoustic headroom (+%.1f dB). Safe for all-day listening.".format(headroom)
-            headroom >= 4f -> "Optimal safety headroom (+%.1f dB). Stereocilia fatigue within healthy bounds.".format(headroom)
-            headroom >= 0f -> "Approaching 85 dBA threshold (+%.1f dB headroom). Max 8h daily recommended.".format(headroom)
-            else -> "Headroom exceeded (%.1f dB). High auditory fatigue risk; lower volume.".format(headroom)
+            estDb >= 92f -> "High volume (${estDb.toInt()} dBA). Lowering to ~70% protects inner-ear hair cells."
+            headroom < 0f -> "Above 85 dBA daily threshold (%.1f dB over). Shorten session or step volume down.".format(kotlin.math.abs(headroom))
+            headroom < 4f -> "Approaching 85 dBA guide (+%.1f dB margin). Safe for up to %.1fh today.".format(headroom, safeHoursLeft)
+            todayMins == 0 -> "Comfortable level (+%.1f dB headroom). Ready to monitor today's sound dose.".format(headroom)
+            else -> "${todayMins}m listened today with +%.1f dB margin — comfortable within safe limits.".format(headroom)
         }
 
         _hearingInsightsState.value = _hearingInsightsState.value.copy(
             activeSnapshot = snapshot,
             estimatedAverageDb = estDb,
             currentHeadroomDb = headroom,
-            soundDoseFraction = doseFraction,
-            safeHoursRemaining = safeHours,
+            dailyExposureMinutes = todayMins,
+            soundDoseFraction = timeWeightedDose,
+            safeHoursRemaining = safeHoursLeft,
             safetyGuidance = guidance
         )
     }
@@ -1581,10 +1717,12 @@ class TuneMindViewModel : ViewModel() {
                 _homeState.value.identifiableTrackCount + _homeState.value.distinctAppearanceCount,
                 _profileState.value.observationCount
             )
-            val currentSource = _homeState.value.nowPlaying?.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
+            val currentSource = _listeningStats.value.appBreakdown.firstOrNull()?.displayName
+                ?: _homeState.value.nowPlaying?.sourcePackage?.let { ListeningPlayDeduplicator.resolveAppDisplayName(it) }
+                ?: "No active player"
             val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateTelemetryReasoningReport(
                 context = ctx,
-                eventCount = maxOf(rowsCount, 12),
+                eventCount = rowsCount,
                 topSourceApp = currentSource,
                 recentTracks = _homeState.value.recentTracks,
                 vaultTracks = _vaultState.value,
@@ -1727,9 +1865,13 @@ class TuneMindViewModel : ViewModel() {
         sourcePkg: String? = null,
         startMs: Long,
         endMs: Long,
-        customName: String? = null
+        customName: String? = null,
+        spotifyUri: String? = null
     ) {
         val duration = maxOf(5_000L, endMs - startMs)
+        val resolvedUri = spotifyUri?.takeIf { it.isNotBlank() } ?: _unifiedTracks.value.firstOrNull {
+            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, null)
+        }?.spotifyUri
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 momentDao?.insertOrUpdate(
@@ -1739,6 +1881,7 @@ class TuneMindViewModel : ViewModel() {
                         trackArtist = artist,
                         trackAlbum = album,
                         sourcePackage = sourcePkg,
+                        providerTrackId = resolvedUri,
                         startPositionMs = startMs,
                         endPositionMs = endMs,
                         preferredPlaybackDurationMs = duration,
@@ -2265,6 +2408,8 @@ data class VaultTrack(
     val cooldownDaysRemaining: Float = 5f,
     val recoveryProgress: Float = 0f,
     val satietyScore: Int = 85,
+    val sourcePackage: String = "com.spotify.music",
+    val spotifyUri: String? = null
 )
 
 data class DopamineCapsuleTrack(

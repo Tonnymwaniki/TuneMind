@@ -194,9 +194,10 @@ fun SearchScreen(
                     title = vt.title,
                     artist = vt.artist,
                     subtitle = "Vault · $pct% recovered",
-                    spotifyUri = null,
-                    sourcePkg = selectedTargetPlayer,
+                    spotifyUri = vt.spotifyUri,
+                    sourcePkg = vt.sourcePackage.ifBlank { selectedTargetPlayer },
                     origin = SearchOrigin.VAULT,
+                    playCount = vm.resolvePlayCount(vt.title, vt.artist, vt.spotifyUri),
                     vaultId = vt.id
                 )
             )
@@ -209,7 +210,7 @@ fun SearchScreen(
                     title = ai.title,
                     artist = ai.artist,
                     subtitle = "For You Pick",
-                    spotifyUri = null,
+                    spotifyUri = ai.spotifyUri,
                     sourcePkg = selectedTargetPlayer,
                     origin = SearchOrigin.DISCOVERY
                 )

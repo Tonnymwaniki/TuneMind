@@ -104,7 +104,7 @@ fun DopamineVaultScreen(
             val safeId = v.id.takeIf { it.isNotBlank() && seenIds.add(it) } ?: "vault_${list.size}"
             seenIds.add(safeId)
             val freshness = (v.recoveryProgress * 100f).toInt().coerceIn(15, 75)
-            val resolvedPlays = resolvePlayCount(v.title, v.artist, null).takeIf { it > 0 } ?: 4
+            val resolvedPlays = resolvePlayCount(v.title, v.artist, v.spotifyUri).takeIf { it > 0 } ?: 1
             list.add(
                 DopamineSongItem(
                     id = safeId,
@@ -112,8 +112,8 @@ fun DopamineVaultScreen(
                     artist = v.artist,
                     freshnessPercent = freshness,
                     playCount = resolvedPlays,
-                    spotifyUri = null,
-                    sourcePackage = "com.spotify.music",
+                    spotifyUri = v.spotifyUri,
+                    sourcePackage = v.sourcePackage.ifBlank { "com.spotify.music" },
                     isCoolingDown = true,
                     isFromVault = true
                 )
@@ -163,7 +163,7 @@ fun DopamineVaultScreen(
     }
 
     val averageFreshness = remember(allSongs) {
-        if (allSongs.isEmpty()) 92
+        if (allSongs.isEmpty()) 0
         else allSongs.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
     }
 
@@ -253,13 +253,13 @@ fun DopamineVaultScreen(
                                     drawArc(
                                         color = activeTabAccent,
                                         startAngle = 135f,
-                                        sweepAngle = 270f * (averageFreshness / 100f),
+                                        sweepAngle = if (allSongs.isEmpty()) 0f else 270f * (averageFreshness / 100f),
                                         useCenter = false,
                                         style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
                                     )
                                 }
                                 Text(
-                                    text = "$averageFreshness%",
+                                    text = if (allSongs.isEmpty()) "--" else "$averageFreshness%",
                                     color = Color(0xFFF8FAFC),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
@@ -268,17 +268,21 @@ fun DopamineVaultScreen(
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (selectedTab == 1) "${coolingDownSongs.size} resting tracks" else "${peakFreshSongs.size} fresh tracks",
+                                    text = when {
+                                        selectedTab == 1 -> "${coolingDownSongs.size} resting tracks"
+                                        allSongs.isEmpty() -> "No tracks tracked yet"
+                                        else -> "${peakFreshSongs.size} fresh tracks"
+                                    },
                                     color = Color(0xFFF8FAFC),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = if (selectedTab == 1) {
-                                        "Taking a short break so they hit like new again."
-                                    } else {
-                                        "Ready to play without feeling repetitive."
+                                    text = when {
+                                        selectedTab == 1 -> "Taking a short break so they hit like new again."
+                                        allSongs.isEmpty() -> "Play music in Spotify or any player to build your Fresh mix."
+                                        else -> "Ready to play without feeling repetitive."
                                     },
                                     color = Color.White.copy(alpha = 0.66f),
                                     fontSize = 13.sp,

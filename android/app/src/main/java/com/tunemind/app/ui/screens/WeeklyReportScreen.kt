@@ -45,7 +45,7 @@ fun WeeklyReportScreen(
 
     val avgFreshness = if (stats.topTracks.isNotEmpty()) {
         stats.topTracks.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
-    } else 88
+    } else 0
 
     StudioAmbientBackground {
         Column(
@@ -98,7 +98,11 @@ fun WeeklyReportScreen(
                             color = Color(0xFFF8FAFC)
                         )
                         Text(
-                            text = "Built from your verified plays across ${stats.appBreakdown.size.coerceAtLeast(1)} music ${if (stats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries.",
+                            text = if (stats.appBreakdown.isEmpty()) {
+                                "Play music in any supported app or connect Spotify to populate your 7-day recap."
+                            } else {
+                                "Built from your verified plays across ${stats.appBreakdown.size} music ${if (stats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries."
+                            },
                             fontSize = 13.sp,
                             color = Color.White.copy(alpha = 0.62f),
                             lineHeight = 19.sp
@@ -113,8 +117,12 @@ fun WeeklyReportScreen(
                     ) {
                         RecapMetricColumn(
                             label = "Freshness",
-                            value = "$avgFreshness%",
-                            note = if (avgFreshness >= 65) "Balanced" else "High repeat",
+                            value = if (avgFreshness > 0) "$avgFreshness%" else "--",
+                            note = when {
+                                avgFreshness == 0 -> "No plays yet"
+                                avgFreshness >= 65 -> "Balanced"
+                                else -> "High repeat"
+                            },
                             accent = Color(0xFF10B981),
                             modifier = Modifier.weight(1f)
                         )
@@ -253,11 +261,26 @@ fun WeeklyReportScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF10B981)
                     )
+                    val heavyRepeatTrack = stats.topTracks.firstOrNull { it.verifiedPlayCount >= 4 }
                     Text(
                         text = buildString {
-                            append("• Keep ${vaultTracks.size} resting tracks in your Vault a little longer so their freshness rebounds.\n")
-                            append("• Peak listening energy lands around ${stats.peakWindowLabel} — great time for upbeat sets.\n")
-                            append("• Mix in songs from For You picks to raise your ${stats.discoveryRatePercent}% fresh discovery balance.")
+                            when {
+                                vaultTracks.isNotEmpty() -> {
+                                    append("• Keep ${vaultTracks.size} resting ${if (vaultTracks.size == 1) "track" else "tracks"} in your Vault a little longer so freshness rebounds.\n")
+                                }
+                                heavyRepeatTrack != null -> {
+                                    append("• Consider resting \"${heavyRepeatTrack.title}\" (${heavyRepeatTrack.verifiedPlayCount} plays) in the Vault to prevent ear fatigue.\n")
+                                }
+                                else -> {
+                                    append("• Your rotation has zero overplayed tracks — keep mixing in fresh discoveries.\n")
+                                }
+                            }
+                            if (stats.totalVerifiedPlays > 0) {
+                                append("• Peak listening lands around ${stats.peakWindowLabel} — great window for longer sessions.\n")
+                                append("• Mix in picks from For You to keep your ${stats.discoveryRatePercent}% fresh balance steady.")
+                            } else {
+                                append("• Start playing music across Spotify or other players to unlock peak window & freshness insights.")
+                            }
                         },
                         fontSize = 13.sp,
                         color = Color.White.copy(alpha = 0.70f),

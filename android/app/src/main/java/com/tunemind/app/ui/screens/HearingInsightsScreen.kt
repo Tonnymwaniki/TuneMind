@@ -1,8 +1,14 @@
 package com.tunemind.app.ui.screens
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -13,6 +19,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.audio.AudioDeviceSnapshot
 import com.tunemind.app.ui.TuneMindViewModel
@@ -40,6 +50,7 @@ import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
+import kotlin.math.roundToInt
 
 @Composable
 fun HearingInsightsScreen(
@@ -47,11 +58,49 @@ fun HearingInsightsScreen(
     onBack: () -> Unit
 ) {
     val hearingState by vm.hearingInsightsState.collectAsState()
+    val homeState by vm.homeState.collectAsState()
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    LaunchedEffect(Unit) {
+    val isMusicPlaying = homeState.nowPlaying?.isPlaying == true ||
+        com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
+
+    // Guarantee instant live reactivity to hardware volume rocker / Bluetooth while screen is open
+    DisposableEffect(context, lifecycleOwner) {
         vm.refreshHearingInsights()
+        val handler = Handler(Looper.getMainLooper())
+        val contentObserver = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                vm.refreshHearingInsights()
+            }
+        }
+        runCatching {
+            context.contentResolver.registerContentObserver(
+                Settings.System.CONTENT_URI,
+                true,
+                contentObserver
+            )
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                vm.refreshHearingInsights()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        onDispose {
+            runCatching { context.contentResolver.unregisterContentObserver(contentObserver) }
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+        }
+    }
+
+    // Light 450ms safety poll while screen is on top so Bluetooth AVRCP absolute-volume steps always reflect live
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(450L)
+            vm.refreshHearingInsights()
+        }
     }
 
     val snapshot: AudioDeviceSnapshot = hearingState.activeSnapshot
@@ -64,20 +113,37 @@ fun HearingInsightsScreen(
     val warnAmber = Color(0xFFFFB000)
     val alertRed = Color(0xFFFF4D6D)
 
+    val liveWave = if (isMusicPlaying) {
+        val inf = rememberInfiniteTransition(label = "vu_live")
+        val wave by inf.animateFloat(
+            initialValue = -1.6f,
+            targetValue = 1.6f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(380, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "vu_wave"
+        )
+        wave
+    } else 0f
+
+    val leftDb = (avgDb - 0.8f + liveWave).coerceAtLeast(30f)
+    val rightDb = (avgDb + 0.8f - liveWave * 0.8f).coerceAtLeast(30f)
+
     val needleAngleL by animateFloatAsState(
-        targetValue = -50f + (((avgDb - 1.4f) - 40f) / 75f).coerceIn(0f, 1f) * 100f,
-        animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
+        targetValue = -50f + ((leftDb - 40f) / 70f).coerceIn(0f, 1f) * 100f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = Spring.StiffnessMediumLow),
         label = "vuLeft"
     )
     val needleAngleR by animateFloatAsState(
-        targetValue = -50f + (((avgDb + 1.2f) - 40f) / 75f).coerceIn(0f, 1f) * 100f,
-        animationSpec = spring(dampingRatio = 0.52f, stiffness = Spring.StiffnessLow),
+        targetValue = -50f + ((rightDb - 40f) / 70f).coerceIn(0f, 1f) * 100f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = Spring.StiffnessMediumLow),
         label = "vuRight"
     )
 
-    val soundDoseFraction = hearingState.soundDoseFraction.coerceIn(0.10f, 1.0f)
+    val soundDoseFraction = hearingState.soundDoseFraction.coerceIn(0f, 1.0f)
     val soundDoseColor = when {
-        soundDoseFraction < 0.60f -> safeGreen
+        soundDoseFraction < 0.55f -> safeGreen
         soundDoseFraction < 0.82f -> warnAmber
         else -> alertRed
     }
@@ -86,7 +152,7 @@ fun HearingInsightsScreen(
     val safeHoursText = when {
         safeHours >= 16f -> "16+ hrs"
         safeHours >= 1f -> "%.1f hrs".format(safeHours)
-        else -> "%d mins".format((safeHours * 60).toInt())
+        else -> "%d mins".format((safeHours * 60).toInt().coerceAtLeast(0))
     }
 
     val (headroomText, headroomColor) = when {
@@ -110,6 +176,12 @@ fun HearingInsightsScreen(
         raw = snapshot.productName,
         transducerCategory = snapshot.transducerCategory
     )
+
+    val currentVolPercent = ((snapshot.volumeIndex.toFloat() / maxOf(1, snapshot.maxVolume).toFloat()) * 100f)
+        .roundToInt()
+        .coerceIn(0, 100)
+    var sliderDragPercent by remember(currentVolPercent) { mutableStateOf<Float?>(null) }
+    val displayedVolPercent = sliderDragPercent?.roundToInt() ?: currentVolPercent
 
     StudioAmbientBackground {
         Column(
@@ -156,7 +228,7 @@ fun HearingInsightsScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 1. Primary Hero Card (only SoftGlassCard on this screen): Sound Level + VU Meters
+            // 1. Primary Hero Card: Sound Level + Live VU Meters
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(
@@ -168,7 +240,11 @@ fun HearingInsightsScreen(
                             text = "${avgDb.toInt()} dBA",
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSafe) safeGreen else warnAmber
+                            color = when {
+                                avgDb >= 92f -> alertRed
+                                isSafe -> safeGreen
+                                else -> warnAmber
+                            }
                         )
                         Text(
                             text = "$headroomText · ${snapshot.sampleRate / 1000} kHz",
@@ -184,17 +260,17 @@ fun HearingInsightsScreen(
                     ) {
                         StereoMeterPanel(
                             channelLabel = "Left",
-                            dbLabel = "${(avgDb - 1.4f).toInt()} dBA",
+                            dbLabel = "${leftDb.toInt()} dBA",
                             needleAngle = needleAngleL,
-                            accent = if (isSafe) safeGreen else warnAmber,
+                            accent = if (avgDb >= 92f) alertRed else if (isSafe) safeGreen else warnAmber,
                             needleTint = theme.primaryAccent,
                             modifier = Modifier.weight(1f)
                         )
                         StereoMeterPanel(
                             channelLabel = "Right",
-                            dbLabel = "${(avgDb + 1.2f).toInt()} dBA",
+                            dbLabel = "${rightDb.toInt()} dBA",
                             needleAngle = needleAngleR,
-                            accent = if (isSafe) safeGreen else warnAmber,
+                            accent = if (avgDb >= 92f) alertRed else if (isSafe) safeGreen else warnAmber,
                             needleTint = theme.primaryAccent,
                             modifier = Modifier.weight(1f)
                         )
@@ -212,7 +288,7 @@ fun HearingInsightsScreen(
                             Text("Below 85 dBA guide", fontSize = 12.sp, color = Color.White.copy(alpha = 0.54f))
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(safeHoursText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = safeGreen)
+                            Text(safeHoursText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = if (safeHours < 1f) alertRed else safeGreen)
                             Text("Safe time left today", fontSize = 12.sp, color = Color.White.copy(alpha = 0.54f))
                         }
                     }
@@ -221,7 +297,7 @@ fun HearingInsightsScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 2. Active Output Card
+            // 2. Active Output Card + Interactive Live Media Volume Control
             SoftGlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 accentTint = categoryColor
@@ -260,6 +336,28 @@ fun HearingInsightsScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        if (!isSafe) {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = safeGreen.copy(alpha = 0.16f),
+                                border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        val safeTarget = if (snapshot.transducerCategory.contains("EARBUD") || snapshot.transducerCategory.contains("EARPHONE")) 55 else 65
+                                        vm.setSystemMediaVolumePercent(safeTarget)
+                                    }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Icon(Icons.Rounded.Shield, contentDescription = null, tint = safeGreen, modifier = Modifier.size(13.dp))
+                                    Text("Safe Level", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = safeGreen)
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -269,12 +367,12 @@ fun HearingInsightsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Volume (${snapshot.volumeIndex} / ${snapshot.maxVolume})",
+                            text = "Media Volume (${snapshot.volumeIndex} / ${snapshot.maxVolume})",
                             fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.64f)
                         )
                         Text(
-                            text = "${((snapshot.volumeIndex.toFloat() / maxOf(1, snapshot.maxVolume)) * 100).toInt()}%",
+                            text = "$displayedVolPercent%",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = theme.primaryAccent
@@ -307,7 +405,25 @@ fun HearingInsightsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Slider(
+                        value = sliderDragPercent ?: currentVolPercent.toFloat(),
+                        onValueChange = { pct ->
+                            sliderDragPercent = pct
+                            vm.setSystemMediaVolumePercent(pct.roundToInt())
+                        },
+                        onValueChangeFinished = {
+                            sliderDragPercent = null
+                            vm.refreshHearingInsights()
+                        },
+                        valueRange = 0f..100f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = if (isSafe) safeGreen else warnAmber,
+                            activeTrackColor = if (isSafe) safeGreen else warnAmber,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.12f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Text(
                         text = snapshot.acousticCouplingDescription,
                         fontSize = 13.sp,
@@ -325,7 +441,10 @@ fun HearingInsightsScreen(
                 accentTint = soundDoseColor
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Daily Sound Dose")
+                    StudioSectionHeader(
+                        title = "Daily Sound Dose",
+                        actionLabel = "${hearingState.dailyExposureMinutes}m today"
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -372,7 +491,12 @@ fun HearingInsightsScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = if (soundDoseFraction < 0.6f) "Healthy range" else "Approaching daily limit",
+                                text = when {
+                                    hearingState.dailyExposureMinutes == 0 -> "No dose logged today"
+                                    soundDoseFraction < 0.6f -> "Healthy range"
+                                    soundDoseFraction < 0.85f -> "Approaching daily limit"
+                                    else -> "Daily limit reached"
+                                },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = soundDoseColor

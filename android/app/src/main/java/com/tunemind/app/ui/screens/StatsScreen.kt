@@ -110,7 +110,7 @@ fun StatsScreen(
                     }
 
                     Text(
-                        text = "${stats.appBreakdown.size.coerceAtLeast(1)} ${if (stats.appBreakdown.size == 1) "app" else "apps"}",
+                        text = "${stats.appBreakdown.size} ${if (stats.appBreakdown.size == 1) "app" else "apps"}",
                         color = Color.White.copy(alpha = 0.56f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium

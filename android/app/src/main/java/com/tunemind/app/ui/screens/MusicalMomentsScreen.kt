@@ -50,6 +50,8 @@ fun MusicalMomentsScreen(
     val context = LocalContext.current
     val momentsState by vm.musicalMomentsState.collectAsState()
     val homeState by vm.homeState.collectAsState()
+    val liveSpotify by vm.spotifyLiveState.collectAsState()
+    val unifiedTracks by vm.unifiedTracks.collectAsState()
     val isLoopActive by AgentSettingsStore.loopMomentsEnabled.collectAsState()
     val theme = LocalAdaptiveTheme.current
 
@@ -63,15 +65,60 @@ fun MusicalMomentsScreen(
         ?: "Play any song to bookmark a moment"
     val canSaveCurrent = currentTrackTitle != "No active track"
 
-    val totalTrackDurationMs = remember(nowPlaying?.title, nowPlaying?.durationMs) {
-        (nowPlaying?.durationMs?.takeIf { it >= 30_000L } ?: 210_000L).coerceAtMost(600_000L)
+    val activeTrackMatch = remember(unifiedTracks, currentTrackTitle, currentTrackArtist, canSaveCurrent) {
+        if (!canSaveCurrent) null
+        else unifiedTracks.firstOrNull {
+            com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                it.title, it.artist, it.spotifyUri,
+                currentTrackTitle, currentTrackArtist, null
+            )
+        }
+    }
+    val activeUri = remember(liveSpotify?.spotifyUri, liveSpotify?.title, currentTrackTitle, currentTrackArtist, activeTrackMatch) {
+        liveSpotify?.takeIf {
+            !it.title.isNullOrBlank() && com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                it.title, it.artistOrShow, it.spotifyUri,
+                currentTrackTitle, currentTrackArtist, null
+            )
+        }?.spotifyUri ?: activeTrackMatch?.spotifyUri
     }
 
-    var activeScrubStartMs by remember(nowPlaying?.title) {
-        val livePos = nowPlaying?.positionMs?.coerceIn(0L, totalTrackDurationMs - 15_000L)
-        mutableStateOf(livePos?.takeIf { it > 0L } ?: 45_000L)
+    val totalTrackDurationMs = remember(nowPlaying?.title, nowPlaying?.durationMs, liveSpotify?.durationMs, activeTrackMatch?.durationMs) {
+        val resolvedDur = nowPlaying?.durationMs?.takeIf { it >= 30_000L }
+            ?: liveSpotify?.takeIf {
+                com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                    it.title, it.artistOrShow, it.spotifyUri,
+                    currentTrackTitle, currentTrackArtist, null
+                )
+            }?.durationMs?.takeIf { it >= 30_000L }
+            ?: activeTrackMatch?.durationMs?.takeIf { it >= 30_000L }
+            ?: 180_000L
+        resolvedDur.coerceAtMost(600_000L)
     }
-    var activeScrubEndMs by remember(nowPlaying?.title) {
+
+    var liveTickNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(nowPlaying?.isPlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
+        liveTickNowMs = System.currentTimeMillis()
+        while (nowPlaying?.isPlaying == true) {
+            kotlinx.coroutines.delay(1000L)
+            liveTickNowMs = System.currentTimeMillis()
+        }
+    }
+    val livePositionMs = remember(nowPlaying, liveTickNowMs, totalTrackDurationMs) {
+        val base = nowPlaying?.positionMs ?: 0L
+        if (nowPlaying?.isPlaying == true && nowPlaying.updatedAtMs > 0L) {
+            (base + (liveTickNowMs - nowPlaying.updatedAtMs).coerceIn(0L, 12 * 60 * 1000L))
+                .coerceIn(0L, totalTrackDurationMs)
+        } else {
+            base.coerceIn(0L, totalTrackDurationMs)
+        }
+    }
+
+    var activeScrubStartMs by remember(currentTrackTitle, totalTrackDurationMs) {
+        val livePos = livePositionMs.takeIf { it > 0L }?.coerceIn(0L, maxOf(0L, totalTrackDurationMs - 15_000L))
+        mutableStateOf(livePos ?: minOf(30_000L, maxOf(0L, totalTrackDurationMs - 30_000L)))
+    }
+    var activeScrubEndMs by remember(currentTrackTitle, totalTrackDurationMs) {
         val start = activeScrubStartMs
         mutableStateOf(minOf(totalTrackDurationMs, start + 30_000L))
     }
@@ -143,8 +190,8 @@ fun MusicalMomentsScreen(
                 rememberResolvedTrackMedia(
                     title = currentTrackTitle,
                     artist = currentTrackArtist,
-                    spotifyUri = null,
-                    fallbackAlbumArtUrl = null
+                    spotifyUri = activeUri,
+                    fallbackAlbumArtUrl = liveSpotify?.albumArtUrl
                 )
             } else null
 
@@ -185,7 +232,7 @@ fun MusicalMomentsScreen(
                         )
                     }
 
-                    if (nowPlaying != null && nowPlaying.positionMs > 0L) {
+                    if (nowPlaying != null && livePositionMs > 0L) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -193,7 +240,7 @@ fun MusicalMomentsScreen(
                                 .clip(RoundedCornerShape(10.dp))
                                 .border(1.dp, theme.primaryAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .bouncyClickable {
-                                    val pos = nowPlaying.positionMs.coerceIn(0L, totalTrackDurationMs - 10_000L)
+                                    val pos = livePositionMs.coerceIn(0L, maxOf(0L, totalTrackDurationMs - 10_000L))
                                     activeScrubStartMs = pos
                                     activeScrubEndMs = minOf(totalTrackDurationMs, pos + 30_000L)
                                 }
@@ -206,7 +253,7 @@ fun MusicalMomentsScreen(
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = formatDuration(nowPlaying.positionMs),
+                                text = formatDuration(livePositionMs),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = theme.primaryAccent
@@ -250,11 +297,22 @@ fun MusicalMomentsScreen(
                         )
                     }
 
-                    val bars = remember {
-                        listOf(
-                            18, 26, 42, 35, 60, 48, 70, 85, 92, 68, 88, 96, 72, 85, 92,
-                            98, 88, 92, 95, 86, 78, 88, 76, 65, 52, 40, 32, 22
-                        )
+                    val bars = remember(currentTrackTitle, currentTrackArtist, canSaveCurrent) {
+                        if (!canSaveCurrent) {
+                            List(28) { 18 }
+                        } else {
+                            val seed = "${currentTrackTitle.lowercase()}|${currentTrackArtist.lowercase()}".hashCode().toLong()
+                            val rng = java.util.Random(seed)
+                            List(28) { idx ->
+                                val envelope = when {
+                                    idx < 3 || idx > 24 -> 0.48f
+                                    idx in 10..20 -> 1.0f
+                                    else -> 0.78f
+                                }
+                                val raw = 24 + rng.nextInt(72)
+                                (raw * envelope).toInt().coerceIn(18, 98)
+                            }
+                        }
                     }
                     val startFraction = (activeScrubStartMs.toFloat() / totalTrackDurationMs.toFloat()).coerceIn(0f, 1f)
                     val endFraction = (activeScrubEndMs.toFloat() / totalTrackDurationMs.toFloat()).coerceIn(startFraction, 1f)
@@ -334,11 +392,12 @@ fun MusicalMomentsScreen(
                                 vm.saveMusicalMoment(
                                     title = currentTrackTitle,
                                     artist = currentTrackArtist,
-                                    album = nowPlaying?.album,
-                                    sourcePkg = nowPlaying?.sourcePackage,
+                                    album = nowPlaying?.album ?: activeTrackMatch?.album,
+                                    sourcePkg = nowPlaying?.sourcePackage ?: activeTrackMatch?.primarySourcePackage,
                                     startMs = activeScrubStartMs,
                                     endMs = activeScrubEndMs,
-                                    customName = "Highlight (${formatDuration(activeScrubStartMs)} – ${formatDuration(activeScrubEndMs)})"
+                                    customName = "Highlight (${formatDuration(activeScrubStartMs)} – ${formatDuration(activeScrubEndMs)})",
+                                    spotifyUri = activeUri
                                 )
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent),
@@ -397,7 +456,7 @@ fun MusicalMomentsScreen(
                         val momentMedia = rememberResolvedTrackMedia(
                             title = moment.trackTitle,
                             artist = moment.trackArtist,
-                            spotifyUri = null,
+                            spotifyUri = moment.providerTrackId,
                             fallbackAlbumArtUrl = null
                         )
                         Row(
@@ -421,7 +480,7 @@ fun MusicalMomentsScreen(
                                             onPlayTrack(
                                                 moment.trackTitle,
                                                 moment.trackArtist,
-                                                null,
+                                                moment.providerTrackId,
                                                 moment.sourcePackage ?: "com.spotify.music"
                                             )
                                             vm.configureAndSeekMomentPlayback(

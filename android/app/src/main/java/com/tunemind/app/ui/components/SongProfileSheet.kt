@@ -292,7 +292,7 @@ data class SongProfileData(
                 title = title,
                 artist = artist,
                 album = "Resting Vault",
-                sourcePackage = "com.spotify.music",
+                sourcePackage = vault.sourcePackage.ifBlank { "com.spotify.music" },
                 appearanceCount = 4,
                 satietyScore = satiety,
                 firstObservedMs = vault.quarantinedAtMs,

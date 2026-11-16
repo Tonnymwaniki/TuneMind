@@ -144,6 +144,7 @@ open class MainActivity : ComponentActivity() {
                     val tasteShiftSummary by vm.tasteShiftSummary.collectAsState()
                     val spotifyNewReleases by vm.spotifyNewReleases.collectAsState()
                     val spotifyActionFeedback by vm.spotifyActionFeedback.collectAsState()
+                    val musicalMomentsState by vm.musicalMomentsState.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -814,7 +815,8 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenAccountAuth = {
                                                     showProfileScreen = true
                                                 },
-                                                tasteShiftSummary = tasteShiftSummary
+                                                tasteShiftSummary = tasteShiftSummary,
+                                                momentsCount = musicalMomentsState.confirmedMoments.size
                                             )
                                         }
                                     }

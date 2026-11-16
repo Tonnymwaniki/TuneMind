@@ -52,7 +52,7 @@ fun MusicProfileScreen(
     val theme = LocalAdaptiveTheme.current
 
     val monitoredHours = formatListeningDuration(stats.allTimeListeningMs)
-    val confidencePct = (74 + minOf(24, stats.uniqueTrackCount)).coerceAtMost(98)
+    val confidencePct = if (stats.uniqueTrackCount == 0) 0 else (74 + minOf(24, stats.uniqueTrackCount)).coerceAtMost(98)
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(userProfile.name) }
@@ -183,8 +183,8 @@ fun MusicProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         ProfileStatColumn("Listened", monitoredHours, theme.primaryAccent)
-                        ProfileStatColumn("Apps", "${stats.appBreakdown.size.coerceAtLeast(1)}", theme.secondaryAccent)
-                        ProfileStatColumn("Match", "$confidencePct%", Color(0xFF10B981))
+                        ProfileStatColumn("Apps", "${stats.appBreakdown.size}", theme.secondaryAccent)
+                        ProfileStatColumn("Match", if (confidencePct > 0) "$confidencePct%" else "--", Color(0xFF10B981))
                     }
                 }
             }

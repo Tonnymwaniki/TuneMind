@@ -1,16 +1,21 @@
 package com.tunemind.app.domain.audio
 
+import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothHeadset
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.database.ContentObserver
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -33,38 +38,69 @@ data class AudioDeviceSnapshot(
 
 /**
  * Observes audio device connection/disconnection and media volume changes.
- * Uses official Android AudioManager APIs, inspects AudioDeviceInfo transducer categories,
- * and calculates calibrated decibel headroom.
+ * Uses official Android AudioManager APIs, Settings ContentObserver, and RECEIVER_EXPORTED
+ * broadcasts to capture hardware volume button presses immediately on Android 14+.
  */
 class AudioDeviceObserver(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val dao: AudioDeviceDao
+    private val dao: AudioDeviceDao,
+    private val onLiveUpdate: ((AudioDeviceSnapshot) -> Unit)? = null
 ) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private val activeSessionMap = mutableMapOf<Int, String>() // deviceId -> sessionId
+    @Volatile private var lastObservedVolIndex: Int = -1
+    @Volatile private var lastObservedCategory: String = ""
 
     private val deviceCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
                 addedDevices?.forEach { handleDeviceAdded(it) }
+                emitLiveSnapshot()
             }
 
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
                 removedDevices?.forEach { handleDeviceRemoved(it) }
+                emitLiveSnapshot()
             }
         }
     } else null
 
+    private val volumeContentObserver = object : ContentObserver(mainHandler) {
+        override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            val am = audioManager ?: return
+            val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val snapshot = getActiveAudioDeviceSnapshot(context)
+            if (currentVol != lastObservedVolIndex || snapshot.transducerCategory != lastObservedCategory) {
+                recordVolumeChange(currentVol, maxVol)
+            } else {
+                onLiveUpdate?.invoke(snapshot)
+            }
+        }
+    }
+
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
-            if (intent?.action == "android.media.VOLUME_CHANGED_ACTION") {
-                val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
-                if (streamType == AudioManager.STREAM_MUSIC) {
-                    val currentVol = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
-                    val maxVol = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-                    recordVolumeChange(currentVol, maxVol)
+            when (intent?.action) {
+                "android.media.VOLUME_CHANGED_ACTION" -> {
+                    val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
+                    if (streamType == AudioManager.STREAM_MUSIC || streamType == -1) {
+                        val am = audioManager
+                        val currentVol = intent.getIntExtra(
+                            "android.media.EXTRA_VOLUME_STREAM_VALUE",
+                            am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
+                        )
+                        val maxVol = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+                        recordVolumeChange(currentVol, maxVol)
+                    }
+                }
+                AudioManager.ACTION_HEADSET_PLUG,
+                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                    emitLiveSnapshot()
                 }
             }
         }
@@ -79,21 +115,35 @@ class AudioDeviceObserver(
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && deviceCallback != null) {
                 audioManager?.registerAudioDeviceCallback(deviceCallback, mainHandler)
-                // Log existing devices
                 audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.forEach {
                     handleDeviceAdded(it)
                 }
             }
 
-            // Immediately observe current volume level on startup
             audioManager?.let { am ->
                 val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                 val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 recordVolumeChange(currentVol, maxVol)
             }
 
-            val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
-            context.registerReceiver(volumeReceiver, filter)
+            context.contentResolver.registerContentObserver(
+                Settings.System.CONTENT_URI,
+                true,
+                volumeContentObserver
+            )
+
+            val filter = IntentFilter().apply {
+                addAction("android.media.VOLUME_CHANGED_ACTION")
+                addAction(AudioManager.ACTION_HEADSET_PLUG)
+                addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+                addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+            }
+            ContextCompat.registerReceiver(
+                context,
+                volumeReceiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
         } catch (e: Exception) {
             Log.w("AudioDeviceObserver", "Failed to register audio device or volume observer: ${e.message}")
         }
@@ -106,10 +156,18 @@ class AudioDeviceObserver(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && deviceCallback != null) {
                 audioManager?.unregisterAudioDeviceCallback(deviceCallback)
             }
-            context.unregisterReceiver(volumeReceiver)
+            runCatching { context.contentResolver.unregisterContentObserver(volumeContentObserver) }
+            runCatching { context.unregisterReceiver(volumeReceiver) }
         } catch (e: Exception) {
             Log.w("AudioDeviceObserver", "Error stopping audio device observer: ${e.message}")
         }
+    }
+
+    private fun emitLiveSnapshot() {
+        val snapshot = getActiveAudioDeviceSnapshot(context)
+        lastObservedVolIndex = snapshot.volumeIndex
+        lastObservedCategory = snapshot.transducerCategory
+        onLiveUpdate?.invoke(snapshot)
     }
 
     private fun handleDeviceAdded(device: AudioDeviceInfo) {
@@ -151,8 +209,15 @@ class AudioDeviceObserver(
 
     private fun recordVolumeChange(volumeIndex: Int, maxVolume: Int) {
         if (volumeIndex < 0) return
-        val ratio = volumeIndex.toFloat() / maxOf(1, maxVolume).toFloat()
         val snapshot = getActiveAudioDeviceSnapshot(context)
+        if (volumeIndex == lastObservedVolIndex && snapshot.transducerCategory == lastObservedCategory) {
+            onLiveUpdate?.invoke(snapshot)
+            return
+        }
+        lastObservedVolIndex = volumeIndex
+        lastObservedCategory = snapshot.transducerCategory
+        onLiveUpdate?.invoke(snapshot)
+
         val estDb = snapshot.estimatedDb
 
         scope.launch {
@@ -384,7 +449,7 @@ class AudioDeviceObserver(
             val (typeLabel, transducerCategory) = classifyDevice(preferred)
             val productName = resolveFriendlyDeviceName(preferred, typeLabel)
 
-            val sampleRate = preferred.sampleRates.firstOrNull() ?: 48000
+            val sampleRate = preferred.sampleRates.maxOrNull() ?: 48000
             val estimatedDb = calculateCalibratedDb(transducerCategory, volRatio)
             val headroomDb = 85f - estimatedDb
 
@@ -411,6 +476,19 @@ class AudioDeviceObserver(
                 sampleRate = sampleRate,
                 acousticCouplingDescription = couplingDescription
             )
+        }
+
+        fun setMediaVolumePercent(context: Context, percent: Int, showUi: Boolean = false): AudioDeviceSnapshot {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                val targetIdx = kotlin.math.round((percent.coerceIn(0, 100) / 100f) * maxVol)
+                    .toInt()
+                    .coerceIn(0, maxVol)
+                val flags = if (showUi) AudioManager.FLAG_SHOW_UI else 0
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, targetIdx, flags)
+            }
+            return getActiveAudioDeviceSnapshot(context)
         }
     }
 }
