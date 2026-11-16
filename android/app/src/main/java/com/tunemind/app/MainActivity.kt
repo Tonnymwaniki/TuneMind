@@ -25,20 +25,23 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import com.tunemind.app.domain.voice.AgentOrchestrator
 import com.tunemind.app.domain.voice.AgentVoiceManager
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.AppHolder
 import com.tunemind.app.ui.components.FloatingGlassDock
-import com.tunemind.app.ui.components.TuneMindSplashOverlay
 import com.tunemind.app.ui.onboarding.OnboardingScreen
 import com.tunemind.app.ui.screens.DopamineVaultScreen
 import com.tunemind.app.ui.screens.PulseAgentScreen
 import com.tunemind.app.ui.screens.RhythmDnaScreen
 import com.tunemind.app.ui.theme.TuneMindTheme
 import com.tunemind.app.util.PermissionUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 open class MainActivity : ComponentActivity() {
 
@@ -46,8 +49,35 @@ open class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 1. Initialize official AndroidX splash screen before super.onCreate
+        val splashScreen = installSplashScreen()
+
         super.onCreate(savedInstanceState)
         AppHolder.context = applicationContext
+
+        var isInitializationComplete by mutableStateOf(false)
+
+        // 2. Keep native splash on screen until core auth/settings/DB init finishes (zero double-splash)
+        splashScreen.setKeepOnScreenCondition {
+            !isInitializationComplete
+        }
+
+        // 3. Background startup initialization (auth session, settings, Room warm-up)
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(applicationContext)
+                    com.tunemind.app.data.auth.TuneMindAuthSessionManager
+                        .getInstance(applicationContext)
+                        .refreshSessionState()
+                    runCatching {
+                        com.tunemind.app.data.local.TuneMindDatabase.getInstance(applicationContext)
+                    }
+                }
+            } finally {
+                isInitializationComplete = true
+            }
+        }
 
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -61,7 +91,7 @@ open class MainActivity : ComponentActivity() {
 
         // Handle Spotify OAuth 2.0 Authorization Code + PKCE callback if launched via tunemind://spotify-callback
         intent?.let { incoming ->
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
                 com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(applicationContext)
                     .handleAuthRedirectIntent(incoming)
             }
@@ -70,6 +100,7 @@ open class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         try {
             setContent {
+                if (!isInitializationComplete) return@setContent
                 var interceptedError by remember { mutableStateOf(startupError) }
 
                 if (interceptedError != null) {
@@ -166,7 +197,6 @@ open class MainActivity : ComponentActivity() {
                     var showNotificationsScreen by remember { mutableStateOf(false) }
                     var showAgentGuideSheet by remember { mutableStateOf(false) }
                     var currentPagerPage by remember { mutableStateOf(1) }
-                    var showLaunchSplash by remember { mutableStateOf(true) }
 
                     val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
                     val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
@@ -1070,12 +1100,6 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
-                            }
-
-                            if (showLaunchSplash) {
-                                TuneMindSplashOverlay(
-                                    onFinished = { showLaunchSplash = false }
-                                )
                             }
                         }
                     }
