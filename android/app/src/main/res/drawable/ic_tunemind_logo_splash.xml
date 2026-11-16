@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Transparent 180dp canvas prevents OS splash container from stretching the logo -->
+    <item
+        android:width="180dp"
+        android:height="180dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+    <!-- Crisp 100dp centered TuneMind emblem -->
+    <item
+        android:width="100dp"
+        android:height="100dp"
+        android:gravity="center">
+        <bitmap
+            android:antialias="true"
+            android:filter="true"
+            android:gravity="fill"
+            android:src="@drawable/ic_tunemind_logo" />
+    </item>
+</layer-list>

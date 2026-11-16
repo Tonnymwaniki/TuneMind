@@ -4,10 +4,8 @@
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <!-- Exact deep indigo background color -->
         <item name="windowSplashScreenBackground">#07020F</item>
-        <!-- Map directly to our custom logo -->
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_tunemind_logo</item>
-        <!-- Confine the logo size to prevent stretching -->
-        <item name="windowSplashScreenIconSize">100dp</item>
+        <!-- Crisp 100dp centered logo inside 180dp safe canvas -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_tunemind_logo_splash</item>
         <!-- Transition to main theme -->
         <item name="postSplashScreenTheme">@style/Theme.TuneMind</item>
     </style>
