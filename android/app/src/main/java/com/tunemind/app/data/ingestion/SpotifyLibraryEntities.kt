@@ -201,6 +201,9 @@ interface SpotifyLibraryDao {
     @Query("SELECT * FROM spotify_liked_tracks ORDER BY added_at_epoch_ms DESC LIMIT :limit")
     fun observeLikedTracks(limit: Int = 150): Flow<List<SpotifyLikedTrackEntity>>
 
+    @Query("SELECT * FROM spotify_liked_tracks ORDER BY added_at_epoch_ms DESC LIMIT :limit")
+    suspend fun getLikedTracksSnapshot(limit: Int = 150): List<SpotifyLikedTrackEntity>
+
     @Query("DELETE FROM spotify_liked_tracks")
     suspend fun clearLikedTracks()
 
