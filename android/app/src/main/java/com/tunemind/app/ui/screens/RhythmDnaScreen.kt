@@ -19,6 +19,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +40,7 @@ import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
 import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
+import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.ui.HearingInsightsState
@@ -200,8 +202,9 @@ fun RhythmDnaScreen(
     val authSession by authSessionManager.sessionFlow.collectAsState()
 
     // 0 = Overview, 1 = Stats, 2 = Spotify Library, 3 = History
-    var activeRhythmSubDeck by remember { mutableStateOf(0) }
-    var historyFilterMode by remember { mutableStateOf(0) } // 0 = All Apps, 1 = Spotify, 2 = Most Played
+    var activeRhythmSubDeck by rememberSaveable { mutableStateOf(0) }
+    var selectedStatsWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
+    var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Spotify, 2 = Most Played
 
     val effectiveSpotifyConnected = isSpotifyConnected || authSession.isSpotifyConnected
 
@@ -285,6 +288,9 @@ fun RhythmDnaScreen(
                     1 -> {
                         StatsDashboardContent(
                             stats = listeningStats,
+                            cleanPlayHistory = cleanPlayHistory,
+                            selectedWindow = selectedStatsWindow,
+                            onSelectWindow = { selectedStatsWindow = it },
                             tasteShiftSummary = tasteShiftSummary,
                             resolvePlayCount = resolvePlayCount,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,

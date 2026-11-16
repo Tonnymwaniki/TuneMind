@@ -58,10 +58,43 @@ data class ArtistListeningStats(
     val uniqueTrackCount: Int
 )
 
+enum class StatsTimeWindow(val label: String) {
+    TODAY("Today"),
+    SEVEN_DAYS("7 Days"),
+    THIRTY_DAYS("30 Days"),
+    ALL_TIME("All Time")
+}
+
 data class DailyListeningBucket(
     val label: String,
     val listeningMs: Long,
     val playCount: Int
+)
+
+data class ActivityChartBucket(
+    val label: String,
+    val listeningMs: Long,
+    val playCount: Int,
+    val isHighlighted: Boolean = false
+)
+
+data class WindowedListeningStats(
+    val window: StatsTimeWindow,
+    val chartTitle: String,
+    val chartBuckets: List<ActivityChartBucket>,
+    val totalListeningMs: Long,
+    val totalVerifiedPlays: Int,
+    val uniqueTrackCount: Int,
+    val uniqueArtistCount: Int,
+    val skippedCount: Int,
+    val completionRatePercent: Int,
+    val discoveryRatePercent: Int,
+    val peakHourOfDay: Int,
+    val peakWindowLabel: String,
+    val hourlyPlayCounts: List<Int>,
+    val appBreakdown: List<AppListeningStats>,
+    val topTracks: List<UnifiedTrackStats>,
+    val topArtists: List<ArtistListeningStats>
 )
 
 data class OverallListeningStats(
@@ -73,6 +106,7 @@ data class OverallListeningStats(
     val uniqueTrackCount: Int = 0,
     val uniqueArtistCount: Int = 0,
     val skippedCount: Int = 0,
+    val skippedTimestampsMs: List<Long> = emptyList(),
     val completionRatePercent: Int = 0,
     val discoveryRatePercent: Int = 0,
     val peakHourOfDay: Int = 20,
@@ -202,6 +236,7 @@ object ListeningPlayDeduplicator {
         val segments = mutableListOf<CandidateSegment>()
         var currentBySource = mutableMapOf<String, CandidateSegment>()
         var skippedCount = 0
+        val skippedTimestampsMs = mutableListOf<Long>()
 
         for (obs in filteredObs) {
             val title = obs.trackTitle?.trim()?.takeIf { it.isNotEmpty() } ?: continue
@@ -266,6 +301,7 @@ object ListeningPlayDeduplicator {
 
             if (isQuickSkip) {
                 skippedCount++
+                skippedTimestampsMs.add(seg.startMs)
                 continue
             }
 
@@ -277,6 +313,7 @@ object ListeningPlayDeduplicator {
 
             if (!qualifiesAsPlay && !isCurrentlyActiveSeg) {
                 skippedCount++
+                skippedTimestampsMs.add(seg.startMs)
                 continue
             }
 
@@ -573,6 +610,7 @@ object ListeningPlayDeduplicator {
             uniqueTrackCount = unifiedTracks.size,
             uniqueArtistCount = artistStats.size,
             skippedCount = skippedCount,
+            skippedTimestampsMs = skippedTimestampsMs,
             completionRatePercent = completionPct,
             discoveryRatePercent = discoveryPct,
             peakHourOfDay = peakHour,
@@ -593,6 +631,270 @@ object ListeningPlayDeduplicator {
             playCountByTrackKey = countByKey,
             playCountByUri = countByUri,
             stats = overallStats
+        )
+    }
+
+    fun buildWindowedStats(
+        cleanPlayHistory: List<UnifiedPlayEvent>,
+        overallStats: OverallListeningStats,
+        window: StatsTimeWindow,
+        nowMs: Long = System.currentTimeMillis()
+    ): WindowedListeningStats {
+        val calStartOfToday = Calendar.getInstance().apply {
+            timeInMillis = nowMs
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val cutoffMs = when (window) {
+            StatsTimeWindow.TODAY -> calStartOfToday
+            StatsTimeWindow.SEVEN_DAYS -> calStartOfToday - 6L * 86_400_000L
+            StatsTimeWindow.THIRTY_DAYS -> calStartOfToday - 29L * 86_400_000L
+            StatsTimeWindow.ALL_TIME -> 0L
+        }
+
+        val filteredEvents = if (window == StatsTimeWindow.ALL_TIME) {
+            cleanPlayHistory
+        } else {
+            cleanPlayHistory.filter { it.playedAtMs >= cutoffMs }
+        }
+
+        val totalListenMs = filteredEvents.sumOf { it.listenedMs }
+        val totalPlays = filteredEvents.size
+        val windowSkips = if (window == StatsTimeWindow.ALL_TIME) {
+            overallStats.skippedCount
+        } else {
+            overallStats.skippedTimestampsMs.count { it >= cutoffMs }
+        }
+
+        val hourlyCounts = IntArray(24)
+        val hrCal = Calendar.getInstance()
+        for (ev in filteredEvents) {
+            hrCal.timeInMillis = ev.playedAtMs
+            val hr = hrCal.get(Calendar.HOUR_OF_DAY).coerceIn(0, 23)
+            hourlyCounts[hr]++
+        }
+        val hasHourlyActivity = hourlyCounts.any { it > 0 }
+        val peakHour = if (hasHourlyActivity) {
+            hourlyCounts.indices.maxByOrNull { hourlyCounts[it] } ?: 20
+        } else {
+            Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.HOUR_OF_DAY)
+        }
+        val peakWindowLabel = if (!hasHourlyActivity) {
+            "No plays yet"
+        } else when (peakHour) {
+            in 5..11 -> "Morning (${formatHour(peakHour)})"
+            in 12..16 -> "Afternoon (${formatHour(peakHour)})"
+            in 17..21 -> "Evening (${formatHour(peakHour)})"
+            else -> "Late Night (${formatHour(peakHour)})"
+        }
+
+        val totalListenSafe = totalListenMs.coerceAtLeast(1L)
+        val appBreakdown = filteredEvents
+            .groupBy { it.sourcePackage }
+            .map { (pkg, events) ->
+                val appMs = events.sumOf { it.listenedMs }
+                AppListeningStats(
+                    packageName = pkg,
+                    displayName = resolveAppDisplayName(pkg),
+                    listeningMs = appMs,
+                    playCount = events.size,
+                    uniqueTrackCount = events.map { it.trackKey }.distinct().size,
+                    shareFraction = (appMs.toFloat() / totalListenSafe.toFloat()).coerceIn(0f, 1f),
+                    lastActiveAtMs = events.maxOf { it.playedAtMs }
+                )
+            }
+            .sortedByDescending { it.listeningMs }
+
+        val topArtists = filteredEvents
+            .filter { it.artist.isNotBlank() && !it.artist.equals("Unknown Artist", ignoreCase = true) }
+            .groupBy { normalizeText(it.artist) }
+            .map { (_, events) ->
+                ArtistListeningStats(
+                    artistName = events.first().artist,
+                    playCount = events.size,
+                    listeningMs = events.sumOf { it.listenedMs },
+                    uniqueTrackCount = events.map { it.trackKey }.distinct().size
+                )
+            }
+            .sortedWith(compareByDescending<ArtistListeningStats> { it.playCount }.thenByDescending { it.listeningMs })
+
+        val baseTrackByKey = overallStats.topTracks.associateBy { it.trackKey }
+        val windowTracks = filteredEvents
+            .groupBy { it.trackKey }
+            .map { (key, events) ->
+                val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
+                val plays = events.size.coerceAtLeast(1)
+                val baseTrack = baseTrackByKey[key]
+                val satiety = minOf(94, plays * 18)
+                val freshness = (100 - satiety).coerceIn(12, 98)
+                val bestUri = events.firstNotNullOfOrNull { it.spotifyUri } ?: baseTrack?.spotifyUri
+                val bestAlbum = events.firstNotNullOfOrNull { it.album } ?: baseTrack?.album
+                val bestArt = events.firstNotNullOfOrNull { it.albumArtUrl } ?: baseTrack?.albumArtUrl
+                UnifiedTrackStats(
+                    trackKey = key,
+                    entryId = bestUri?.let { "spotify:${it.substringAfterLast(':')}" } ?: "track:$key",
+                    title = latest.title,
+                    artist = latest.artist,
+                    album = bestAlbum,
+                    albumArtUrl = bestArt,
+                    spotifyUri = bestUri,
+                    primarySourcePackage = latest.sourcePackage,
+                    primaryAppName = latest.appDisplayName,
+                    verifiedPlayCount = plays,
+                    totalListeningMs = events.sumOf { it.listenedMs },
+                    durationMs = events.maxOfOrNull { it.durationMs } ?: baseTrack?.durationMs ?: 195_000L,
+                    firstPlayedAtMs = events.minOf { it.playedAtMs },
+                    lastPlayedAtMs = latest.playedAtMs,
+                    freshnessPercent = freshness,
+                    isCoolingDown = plays >= 4 || freshness < 45,
+                    sourcesUsed = events.map { it.sourcePackage }.toSet()
+                )
+            }
+            .sortedWith(
+                compareByDescending<UnifiedTrackStats> { it.verifiedPlayCount }
+                    .thenByDescending { it.totalListeningMs }
+            )
+
+        val completionPct = if (totalPlays == 0) {
+            0
+        } else {
+            ((totalPlays.toFloat() / (totalPlays + windowSkips).coerceAtLeast(1).toFloat()) * 100f)
+                .toInt().coerceIn(25, 100)
+        }
+        val freshTracks = windowTracks.count { it.verifiedPlayCount <= 2 }
+        val discoveryPct = if (windowTracks.isEmpty()) {
+            0
+        } else {
+            ((freshTracks.toFloat() / windowTracks.size.toFloat()) * 100f).toInt().coerceIn(0, 100)
+        }
+
+        val chartTitle: String
+        val chartBuckets: List<ActivityChartBucket> = when (window) {
+            StatsTimeWindow.TODAY -> {
+                chartTitle = "Today by Time"
+                val labels = listOf("12a", "4a", "8a", "12p", "4p", "8p")
+                val currentBlock = (Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.HOUR_OF_DAY) / 4).coerceIn(0, 5)
+                (0..5).map { idx ->
+                    val bStart = calStartOfToday + idx * 4L * 3_600_000L
+                    val bEnd = bStart + 4L * 3_600_000L
+                    val bEvents = filteredEvents.filter { it.playedAtMs in bStart until bEnd }
+                    ActivityChartBucket(
+                        label = labels[idx],
+                        listeningMs = bEvents.sumOf { it.listenedMs },
+                        playCount = bEvents.size,
+                        isHighlighted = idx == currentBlock
+                    )
+                }
+            }
+
+            StatsTimeWindow.SEVEN_DAYS -> {
+                chartTitle = "Last 7 Days"
+                val dayCal = Calendar.getInstance()
+                val dayFmt = java.text.SimpleDateFormat("EEE", Locale.getDefault())
+                (6 downTo 0).map { offset ->
+                    dayCal.timeInMillis = calStartOfToday - offset * 86_400_000L
+                    val dStart = dayCal.timeInMillis
+                    val dEnd = dStart + 86_400_000L
+                    val dayEvents = filteredEvents.filter { it.playedAtMs in dStart until dEnd }
+                    ActivityChartBucket(
+                        label = if (offset == 0) "Today" else dayFmt.format(dayCal.time),
+                        listeningMs = dayEvents.sumOf { it.listenedMs },
+                        playCount = dayEvents.size,
+                        isHighlighted = offset == 0
+                    )
+                }
+            }
+
+            StatsTimeWindow.THIRTY_DAYS -> {
+                chartTitle = "Last 30 Days"
+                val dateFmt = java.text.SimpleDateFormat("d MMM", Locale.US)
+                val start30 = calStartOfToday - 29L * 86_400_000L
+                val bucketCal = Calendar.getInstance()
+                (0..5).map { idx ->
+                    val bStart = start30 + idx * 5L * 86_400_000L
+                    val bEnd = if (idx == 5) {
+                        maxOf(calStartOfToday + 86_400_000L, nowMs + 60_000L)
+                    } else {
+                        start30 + (idx + 1) * 5L * 86_400_000L
+                    }
+                    bucketCal.timeInMillis = bStart
+                    val bEvents = filteredEvents.filter { it.playedAtMs >= bStart && it.playedAtMs < bEnd }
+                    ActivityChartBucket(
+                        label = if (idx == 5) "Now" else dateFmt.format(bucketCal.time),
+                        listeningMs = bEvents.sumOf { it.listenedMs },
+                        playCount = bEvents.size,
+                        isHighlighted = idx == 5
+                    )
+                }
+            }
+
+            StatsTimeWindow.ALL_TIME -> {
+                chartTitle = "All-Time Activity"
+                val endRange = maxOf(calStartOfToday + 86_400_000L, nowMs + 60_000L)
+                val earliestEventMs = filteredEvents.minOfOrNull { it.playedAtMs } ?: calStartOfToday
+                val spanDays = ((endRange - earliestEventMs) / 86_400_000L).coerceAtLeast(1L)
+                if (spanDays <= 1L) {
+                    val labels = listOf("12a", "4a", "8a", "12p", "4p", "8p")
+                    val currentBlock = (Calendar.getInstance().apply { timeInMillis = nowMs }.get(Calendar.HOUR_OF_DAY) / 4).coerceIn(0, 5)
+                    (0..5).map { idx ->
+                        val bStart = calStartOfToday + idx * 4L * 3_600_000L
+                        val bEnd = bStart + 4L * 3_600_000L
+                        val bEvents = filteredEvents.filter { it.playedAtMs in bStart until bEnd }
+                        ActivityChartBucket(
+                            label = labels[idx],
+                            listeningMs = bEvents.sumOf { it.listenedMs },
+                            playCount = bEvents.size,
+                            isHighlighted = idx == currentBlock
+                        )
+                    }
+                } else {
+                    val earliestDayStart = Calendar.getInstance().apply {
+                        timeInMillis = earliestEventMs
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                    val totalSpanMs = (endRange - earliestDayStart).coerceAtLeast(6L * 3_600_000L)
+                    val stepMs = totalSpanMs / 6L
+                    val fmt = java.text.SimpleDateFormat(if (spanDays > 180L) "MMM yy" else "d MMM", Locale.US)
+                    val bucketCal = Calendar.getInstance()
+                    (0..5).map { idx ->
+                        val bStart = earliestDayStart + idx * stepMs
+                        val bEnd = if (idx == 5) endRange else earliestDayStart + (idx + 1) * stepMs
+                        bucketCal.timeInMillis = bStart
+                        val bEvents = filteredEvents.filter { it.playedAtMs >= bStart && it.playedAtMs < bEnd }
+                        ActivityChartBucket(
+                            label = if (idx == 5) "Now" else fmt.format(bucketCal.time),
+                            listeningMs = bEvents.sumOf { it.listenedMs },
+                            playCount = bEvents.size,
+                            isHighlighted = idx == 5
+                        )
+                    }
+                }
+            }
+        }
+
+        return WindowedListeningStats(
+            window = window,
+            chartTitle = chartTitle,
+            chartBuckets = chartBuckets,
+            totalListeningMs = totalListenMs,
+            totalVerifiedPlays = totalPlays,
+            uniqueTrackCount = windowTracks.size,
+            uniqueArtistCount = topArtists.size,
+            skippedCount = windowSkips,
+            completionRatePercent = completionPct,
+            discoveryRatePercent = discoveryPct,
+            peakHourOfDay = peakHour,
+            peakWindowLabel = peakWindowLabel,
+            hourlyPlayCounts = hourlyCounts.toList(),
+            appBreakdown = appBreakdown,
+            topTracks = windowTracks,
+            topArtists = topArtists
         )
     }
 

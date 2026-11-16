@@ -1,5 +1,7 @@
 package com.tunemind.app.ui.screens
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,6 +17,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,7 +28,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
+import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
+import com.tunemind.app.domain.memory.StatsTimeWindow
+import com.tunemind.app.domain.memory.UnifiedPlayEvent
+import com.tunemind.app.domain.memory.WindowedListeningStats
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
@@ -39,13 +46,6 @@ import com.tunemind.app.ui.components.bouncyClickable
 import com.tunemind.app.ui.components.rememberResolvedArtistPhoto
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import java.util.Locale
-
-private enum class StatsTimeWindow(val label: String) {
-    TODAY("Today"),
-    SEVEN_DAYS("7 Days"),
-    THIRTY_DAYS("30 Days"),
-    ALL_TIME("All Time")
-}
 
 /**
  * Fullscreen Cross-App Listening Stats screen opened from the header shortcut.
@@ -61,9 +61,19 @@ fun StatsScreen(
     onOpenMoments: () -> Unit
 ) {
     val stats by vm.listeningStats.collectAsState()
+    val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
     val tasteShifts by vm.tasteShiftSummary.collectAsState()
     val nowPlaying = vm.homeState.collectAsState().value.nowPlaying
     val liveSpotify by vm.spotifyLiveState.collectAsState()
+
+    var selectedWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
+    val windowStats = remember(selectedWindow, cleanPlayHistory, stats) {
+        ListeningPlayDeduplicator.buildWindowedStats(
+            cleanPlayHistory = cleanPlayHistory,
+            overallStats = stats,
+            window = selectedWindow
+        )
+    }
 
     StudioAmbientBackground {
         LazyColumn(
@@ -74,7 +84,7 @@ fun StatsScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
             contentPadding = PaddingValues(top = 14.dp, bottom = 40.dp)
         ) {
-            item {
+            item(key = "stats_screen_header") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -110,7 +120,7 @@ fun StatsScreen(
                     }
 
                     Text(
-                        text = "${stats.appBreakdown.size} ${if (stats.appBreakdown.size == 1) "app" else "apps"}",
+                        text = "${windowStats.appBreakdown.size} ${if (windowStats.appBreakdown.size == 1) "app" else "apps"}",
                         color = Color.White.copy(alpha = 0.56f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
@@ -119,9 +129,10 @@ fun StatsScreen(
             }
 
             statsDashboardItems(
-                stats = stats,
+                windowStats = windowStats,
+                selectedWindow = selectedWindow,
+                onSelectWindow = { selectedWindow = it },
                 tasteShiftSummary = tasteShifts,
-                resolvePlayCount = { t, a, uri -> vm.resolvePlayCount(t, a, uri) },
                 isTrackCurrentlyPlaying = { t, a, uri ->
                     // Reactive read on nowPlaying & liveSpotify ensures immediate live highlight
                     val _np = nowPlaying
@@ -144,6 +155,9 @@ fun StatsScreen(
 @Composable
 fun StatsDashboardContent(
     stats: OverallListeningStats,
+    cleanPlayHistory: List<UnifiedPlayEvent> = emptyList(),
+    selectedWindow: StatsTimeWindow = StatsTimeWindow.SEVEN_DAYS,
+    onSelectWindow: ((StatsTimeWindow) -> Unit)? = null,
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
@@ -153,15 +167,28 @@ fun StatsDashboardContent(
     onOpenMoments: () -> Unit,
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
+    var internalWindow by rememberSaveable { mutableStateOf(selectedWindow) }
+    val activeWindow = if (onSelectWindow != null) selectedWindow else internalWindow
+    val handleWindowSelect: (StatsTimeWindow) -> Unit = onSelectWindow ?: { internalWindow = it }
+
+    val windowStats = remember(activeWindow, cleanPlayHistory, stats) {
+        ListeningPlayDeduplicator.buildWindowedStats(
+            cleanPlayHistory = cleanPlayHistory,
+            overallStats = stats,
+            window = activeWindow
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(18.dp),
         contentPadding = PaddingValues(bottom = 110.dp)
     ) {
         statsDashboardItems(
-            stats = stats,
+            windowStats = windowStats,
+            selectedWindow = activeWindow,
+            onSelectWindow = handleWindowSelect,
             tasteShiftSummary = tasteShiftSummary,
-            resolvePlayCount = resolvePlayCount,
             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
             onPlayTrack = onPlayTrack,
             onOpenWeeklyReport = onOpenWeeklyReport,
@@ -173,8 +200,9 @@ fun StatsDashboardContent(
 }
 
 fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
-    stats: OverallListeningStats,
-    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
+    windowStats: WindowedListeningStats,
+    selectedWindow: StatsTimeWindow,
+    onSelectWindow: (StatsTimeWindow) -> Unit,
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
     onOpenWeeklyReport: () -> Unit,
@@ -183,25 +211,17 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenMoments: () -> Unit,
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
-    // 1. Single Hero Card: Time Window + Listening Summary
+    // 1. Single Hero Card: Time Window + Listening Summary (state hoisted so scrolling never resets selected tab)
     item(key = "stats_hero_card") {
         val theme = LocalAdaptiveTheme.current
-        var window by remember { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
-
-        val activeMs = when (window) {
-            StatsTimeWindow.TODAY -> stats.todayListeningMs
-            StatsTimeWindow.SEVEN_DAYS -> stats.sevenDayListeningMs
-            StatsTimeWindow.THIRTY_DAYS -> stats.thirtyDayListeningMs
-            StatsTimeWindow.ALL_TIME -> stats.allTimeListeningMs
-        }
-        val activeDurationText = formatListeningDuration(activeMs)
+        val activeDurationText = formatListeningDuration(windowStats.totalListeningMs)
 
         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 MagicalSegmentedTabs(
                     tabs = StatsTimeWindow.entries.map { MagicalTabItem(it.label, theme.primaryAccent) },
-                    selectedIndex = StatsTimeWindow.entries.indexOf(window),
-                    onSelectTab = { idx -> window = StatsTimeWindow.entries[idx] },
+                    selectedIndex = StatsTimeWindow.entries.indexOf(selectedWindow),
+                    onSelectTab = { idx -> onSelectWindow(StatsTimeWindow.entries[idx]) },
                     height = 42.dp
                 )
 
@@ -212,7 +232,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 ) {
                     Column {
                         Text(
-                            text = "Listening Time (${window.label})",
+                            text = "Listening Time (${selectedWindow.label})",
                             color = Color.White.copy(alpha = 0.56f),
                             fontSize = 12.sp
                         )
@@ -226,8 +246,8 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                     }
 
                     Text(
-                        text = "Peak · ${stats.peakWindowLabel}",
-                        color = Color(0xFF10B981),
+                        text = if (windowStats.totalVerifiedPlays > 0) "Peak · ${windowStats.peakWindowLabel}" else windowStats.peakWindowLabel,
+                        color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.50f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -241,19 +261,19 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 ) {
                     MetricMiniColumn(
                         label = "Verified Plays",
-                        value = "${stats.totalVerifiedPlays}",
+                        value = "${windowStats.totalVerifiedPlays}",
                         accent = theme.primaryAccent,
                         modifier = Modifier.weight(1f)
                     )
                     MetricMiniColumn(
                         label = "Songs",
-                        value = "${stats.uniqueTrackCount}",
+                        value = "${windowStats.uniqueTrackCount}",
                         accent = theme.secondaryAccent,
                         modifier = Modifier.weight(1f)
                     )
                     MetricMiniColumn(
                         label = "Artists",
-                        value = "${stats.uniqueArtistCount}",
+                        value = "${windowStats.uniqueArtistCount}",
                         accent = Color(0xFF10B981),
                         modifier = Modifier.weight(1f)
                     )
@@ -262,7 +282,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 2. Listening Habits (Paired Metric Cards)
+    // 2. Listening Habits (Paired Metric Cards — live for selected window)
     item(key = "stats_habits_row") {
         val theme = LocalAdaptiveTheme.current
         Row(
@@ -281,13 +301,13 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         fontSize = 12.sp
                     )
                     Text(
-                        text = "${stats.completionRatePercent}%",
+                        text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.completionRatePercent}%" else "--",
                         color = Color(0xFF10B981),
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     LinearProgressIndicator(
-                        progress = { stats.completionRatePercent / 100f },
+                        progress = { windowStats.completionRatePercent / 100f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(4.dp)
@@ -296,7 +316,11 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         trackColor = Color.White.copy(alpha = 0.10f)
                     )
                     Text(
-                        text = if (stats.skippedCount == 0) "Low skip rate" else "${stats.skippedCount} quick skips filtered",
+                        text = when {
+                            windowStats.totalVerifiedPlays == 0 -> "No plays in window"
+                            windowStats.skippedCount == 0 -> "Low skip rate"
+                            else -> "${windowStats.skippedCount} quick skips filtered"
+                        },
                         color = Color.White.copy(alpha = 0.54f),
                         fontSize = 11.sp
                     )
@@ -315,13 +339,13 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         fontSize = 12.sp
                     )
                     Text(
-                        text = "${stats.discoveryRatePercent}%",
+                        text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.discoveryRatePercent}%" else "--",
                         color = theme.primaryAccent,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     LinearProgressIndicator(
-                        progress = { stats.discoveryRatePercent / 100f },
+                        progress = { windowStats.discoveryRatePercent / 100f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(4.dp)
@@ -330,7 +354,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         trackColor = Color.White.copy(alpha = 0.10f)
                     )
                     Text(
-                        text = "${100 - stats.discoveryRatePercent}% on repeat",
+                        text = if (windowStats.totalVerifiedPlays > 0) "${100 - windowStats.discoveryRatePercent}% on repeat" else "No plays in window",
                         color = Color.White.copy(alpha = 0.54f),
                         fontSize = 11.sp
                     )
@@ -339,22 +363,25 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 3. Cross-App Breakdown Card
+    // 3. Cross-App Breakdown Card (filtered by selected window)
     item(key = "stats_apps_breakdown") {
         val theme = LocalAdaptiveTheme.current
         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                StudioSectionHeader(title = "Music Apps Used")
+                StudioSectionHeader(
+                    title = "Music Apps Used",
+                    actionLabel = selectedWindow.label
+                )
 
-                if (stats.appBreakdown.isEmpty()) {
+                if (windowStats.appBreakdown.isEmpty()) {
                     Text(
-                        text = "Play music in Spotify, YouTube Music, Boomplay, or any player to see your cross-app breakdown.",
+                        text = "No playback recorded for ${selectedWindow.label.lowercase()} yet. Play music in any supported app or switch timeframe above.",
                         color = Color.White.copy(alpha = 0.62f),
                         fontSize = 13.sp,
                         lineHeight = 18.sp
                     )
                 } else {
-                    stats.appBreakdown.forEach { app ->
+                    windowStats.appBreakdown.forEach { app ->
                         val appColor = resolveAppAccentColor(app.packageName, theme.primaryAccent)
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(
@@ -402,7 +429,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 4. 7-Day Listening Rhythm Chart Card
+    // 4. Dynamic Activity Bar Chart (adapts chart type & bars to Today / 7 Days / 30 Days / All Time)
     item(key = "stats_daily_chart") {
         val theme = LocalAdaptiveTheme.current
         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -413,30 +440,39 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Last 7 Days",
+                        text = windowStats.chartTitle,
                         color = Color(0xFFF8FAFC),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = formatListeningDuration(stats.sevenDayListeningMs),
+                        text = "${formatListeningDuration(windowStats.totalListeningMs)} · ${windowStats.totalVerifiedPlays} plays",
                         color = theme.primaryAccent,
-                        fontSize = 13.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
-                val maxDayMs = (stats.dailyBuckets.maxOfOrNull { it.listeningMs } ?: 1L).coerceAtLeast(1L)
+                val maxBucketMs = (windowStats.chartBuckets.maxOfOrNull { it.listeningMs } ?: 1L).coerceAtLeast(1L)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(104.dp),
+                        .height(106.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    stats.dailyBuckets.forEach { bucket ->
-                        val frac = (bucket.listeningMs.toFloat() / maxDayMs.toFloat()).coerceIn(0.06f, 1f)
-                        val isToday = bucket.label == "Today"
+                    windowStats.chartBuckets.forEachIndexed { idx, bucket ->
+                        val targetHeightDp = if (bucket.playCount <= 0) {
+                            5.dp
+                        } else {
+                            val frac = (bucket.listeningMs.toFloat() / maxBucketMs.toFloat()).coerceIn(0.14f, 1f)
+                            (64f * frac).dp.coerceAtLeast(10.dp)
+                        }
+                        val animatedHeight by animateDpAsState(
+                            targetValue = targetHeightDp,
+                            animationSpec = tween(durationMillis = 280),
+                            label = "stats_bar_$idx"
+                        )
                         Column(
                             modifier = Modifier.weight(1f),
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -444,28 +480,33 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         ) {
                             Text(
                                 text = if (bucket.playCount > 0) "${bucket.playCount}" else "",
-                                color = Color.White.copy(alpha = 0.60f),
-                                fontSize = 10.sp
+                                color = if (bucket.isHighlighted) theme.primaryAccent else Color.White.copy(alpha = 0.65f),
+                                fontSize = 10.sp,
+                                fontWeight = if (bucket.isHighlighted) FontWeight.SemiBold else FontWeight.Normal
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(0.50f)
-                                    .height((64f * frac).dp.coerceAtLeast(5.dp))
+                                    .height(animatedHeight)
                                     .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                     .background(
-                                        if (isToday) theme.primaryAccent
-                                        else if (bucket.playCount > 0) theme.secondaryAccent.copy(alpha = 0.78f)
-                                        else Color.White.copy(alpha = 0.10f)
+                                        when {
+                                            bucket.isHighlighted && bucket.playCount > 0 -> theme.primaryAccent
+                                            bucket.isHighlighted -> theme.primaryAccent.copy(alpha = 0.25f)
+                                            bucket.playCount > 0 -> theme.secondaryAccent.copy(alpha = 0.82f)
+                                            else -> Color.White.copy(alpha = 0.10f)
+                                        }
                                     )
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = bucket.label,
-                                color = if (isToday) Color.White else Color.White.copy(alpha = 0.56f),
-                                fontSize = 10.sp,
-                                fontWeight = if (isToday) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1
+                                color = if (bucket.isHighlighted) Color.White else Color.White.copy(alpha = 0.56f),
+                                fontSize = 9.5.sp,
+                                fontWeight = if (bucket.isHighlighted) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip
                             )
                         }
                     }
@@ -474,10 +515,10 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 5. 24-Hour Peak Activity Clock Card
+    // 5. 24-Hour Peak Activity Clock Card (live for selected window)
     item(key = "stats_hourly_clock") {
         val theme = LocalAdaptiveTheme.current
-        val maxHourCount = (stats.hourlyPlayCounts.maxOrNull() ?: 1).coerceAtLeast(1)
+        val maxHourCount = (windowStats.hourlyPlayCounts.maxOrNull() ?: 1).coerceAtLeast(1)
         SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -492,8 +533,8 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = stats.peakWindowLabel,
-                        color = Color(0xFF10B981),
+                        text = windowStats.peakWindowLabel,
+                        color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.52f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -506,13 +547,23 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    stats.hourlyPlayCounts.forEachIndexed { hour, count ->
-                        val frac = (count.toFloat() / maxHourCount.toFloat()).coerceIn(0.08f, 1f)
-                        val isPeak = hour == stats.peakHourOfDay && count > 0
+                    windowStats.hourlyPlayCounts.forEachIndexed { hour, count ->
+                        val isPeak = hour == windowStats.peakHourOfDay && count > 0
+                        val targetHrHeight = if (count <= 0) {
+                            4.dp
+                        } else {
+                            val frac = (count.toFloat() / maxHourCount.toFloat()).coerceIn(0.16f, 1f)
+                            (44f * frac).dp.coerceAtLeast(8.dp)
+                        }
+                        val animatedHrHeight by animateDpAsState(
+                            targetValue = targetHrHeight,
+                            animationSpec = tween(durationMillis = 260),
+                            label = "stats_hr_$hour"
+                        )
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height((44f * frac).dp.coerceAtLeast(4.dp))
+                                .height(animatedHrHeight)
                                 .clip(RoundedCornerShape(2.dp))
                                 .background(
                                     when {
@@ -539,13 +590,16 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 6. Top Artists (Hairline List with End Artist Profile Photos)
-    if (stats.topArtists.isNotEmpty()) {
+    // 6. Top Artists (Hairline List for selected window)
+    if (windowStats.topArtists.isNotEmpty()) {
         item(key = "stats_top_artists") {
             val theme = LocalAdaptiveTheme.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                StudioSectionHeader(title = "Top Artists")
-                stats.topArtists.take(5).forEachIndexed { index, artist ->
+                StudioSectionHeader(
+                    title = "Top Artists",
+                    actionLabel = selectedWindow.label
+                )
+                windowStats.topArtists.take(5).forEachIndexed { index, artist ->
                     val artistPhotoUrl = rememberResolvedArtistPhoto(artist.artistName)
                     Row(
                         modifier = Modifier
@@ -571,7 +625,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${artist.uniqueTrackCount} ${if (artist.uniqueTrackCount == 1) "track" else "tracks"}",
+                                text = "${artist.uniqueTrackCount} ${if (artist.uniqueTrackCount == 1) "track" else "tracks"} · ${formatListeningDuration(artist.listeningMs)}",
                                 color = Color.White.copy(alpha = 0.54f),
                                 fontSize = 12.sp
                             )
@@ -645,24 +699,29 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 7. Top Songs (with live Playing highlight & strict play count)
-    if (stats.topTracks.isNotEmpty()) {
+    // 7. Top Songs for selected window (with live Playing highlight & window-accurate play count)
+    if (windowStats.topTracks.isNotEmpty()) {
         item(key = "stats_top_tracks_header") {
-            StudioSectionHeader(title = "Most Played Songs")
+            StudioSectionHeader(
+                title = "Most Played Songs",
+                actionLabel = selectedWindow.label
+            )
         }
 
         itemsIndexed(
-            items = stats.topTracks.take(12),
-            key = { _, track -> "stats_top_${track.trackKey}" }
+            items = windowStats.topTracks.take(12),
+            key = { index, track -> "stats_top_${selectedWindow.name}_${index}_${track.trackKey}" }
         ) { index, track ->
-            val strictCount = resolvePlayCount(track.title, track.artist, track.spotifyUri)
-                .takeIf { it > 0 } ?: track.verifiedPlayCount
             val playingNow = isTrackCurrentlyPlaying(track.title, track.artist, track.spotifyUri)
+            val windowSubtitle = listOfNotNull(
+                track.album?.takeIf { it.isNotBlank() },
+                formatListeningDuration(track.totalListeningMs)
+            ).joinToString(" · ")
             TuneMindTrackCard(
                 title = track.title,
                 artist = track.artist,
-                subtitle = track.album,
-                playCount = strictCount,
+                subtitle = windowSubtitle.ifBlank { track.album },
+                playCount = track.verifiedPlayCount,
                 isCurrentlyPlaying = playingNow,
                 appLabel = track.primaryAppName,
                 leadingIndex = index + 1,
