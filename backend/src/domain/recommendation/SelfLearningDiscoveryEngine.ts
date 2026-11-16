@@ -961,11 +961,12 @@ export class SelfLearningDiscoveryEngine {
             ? body.data.map((m: any) => String(m?.id || '').trim()).filter((id: string) => id.startsWith('claude-'))
             : [];
           if (ids.length > 0) {
-            // Prioritize fast, cost-efficient Haiku models first for daily JSON recommendations (4x lower cost than Sonnet)
-            const haikus = ids.filter((id: string) => id.includes('haiku'));
+            // Prioritize Claude Haiku 5.5 first (fastest, ultra-low cost), then other Haikus, then Sonnet fallback
+            const haiku55 = ids.filter((id: string) => id.includes('haiku') && id.includes('5-5'));
+            const otherHaikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('5-5'));
             const sonnets = ids.filter((id: string) => id.includes('sonnet') && !id.includes('haiku'));
             const rest = ids.filter((id: string) => !id.includes('haiku') && !id.includes('sonnet'));
-            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...haikus, ...sonnets, ...rest];
+            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...haiku55, ...otherHaikus, ...sonnets, ...rest];
             SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs = now;
           }
         }
@@ -982,6 +983,7 @@ export class SelfLearningDiscoveryEngine {
     if (envModel && !candidates.includes(envModel)) candidates.push(envModel);
 
     for (const id of [
+      'claude-haiku-5-5',
       'claude-haiku-4-5',
       'claude-haiku-4-5-20251001',
       'claude-3-5-haiku-20241022',

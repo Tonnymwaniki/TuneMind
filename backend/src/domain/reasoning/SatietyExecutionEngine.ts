@@ -337,12 +337,16 @@ You MUST invoke all three tools in your response:
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
     if (apiKey && apiKey !== 'your_key_here') {
       try {
+        const envModel = (process.env.ANTHROPIC_MODEL || '').trim();
         const modelsToTry = [
+          ...(envModel ? [envModel] : []),
+          'claude-haiku-5-5',
+          'claude-haiku-4-5',
           'claude-3-5-haiku-20241022',
           'claude-sonnet-4-20250514',
           'claude-3-7-sonnet-20250219',
           'claude-3-haiku-20240307'
-        ];
+        ].filter((v, idx, arr) => arr.indexOf(v) === idx);
 
         let response: Anthropic.Message | null = null;
         for (const modelId of modelsToTry) {

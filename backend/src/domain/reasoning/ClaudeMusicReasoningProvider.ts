@@ -146,7 +146,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private anthropic: Anthropic;
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
   private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
@@ -154,7 +154,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static discoveredAnthropicModels: string[] | null = null;
   private static lastModelDiscoveryAt: number = 0;
   private static lastStaticErrorDetails: { status?: number | string; message?: string; provider?: string } | null = null;
-  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   private static pendingProposedTracksByUser = new Map<
     string,
     { title: string; artist: string; trackId?: string; source?: string; never_open_external_app?: boolean }
@@ -269,11 +269,12 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
           .filter(id => id.startsWith('claude-'));
 
         if (rawIds.length > 0) {
-          // Prioritize Sonnet first for deepest conversational + tool reasoning, then Haiku/Opus/others
-          const sonnets = rawIds.filter(id => id.includes('sonnet'));
-          const haikus = rawIds.filter(id => id.includes('haiku') && !id.includes('sonnet'));
-          const others = rawIds.filter(id => !id.includes('sonnet') && !id.includes('haiku'));
-          const ranked = [...sonnets, ...haikus, ...others];
+          // Prioritize Claude Haiku 5.5 first across all reasoning & discovery paths for speed and cost efficiency
+          const haiku55 = rawIds.filter(id => id.includes('haiku') && id.includes('5-5'));
+          const otherHaikus = rawIds.filter(id => id.includes('haiku') && !id.includes('5-5'));
+          const sonnets = rawIds.filter(id => id.includes('sonnet') && !id.includes('haiku'));
+          const others = rawIds.filter(id => !id.includes('haiku') && !id.includes('sonnet'));
+          const ranked = [...haiku55, ...otherHaikus, ...sonnets, ...others];
 
           ClaudeMusicReasoningProvider.discoveredAnthropicModels = ranked;
           ClaudeMusicReasoningProvider.lastModelDiscoveryAt = now;
@@ -310,15 +311,14 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     }
 
     for (const m of [
-      'claude-sonnet-5-5',
       'claude-haiku-5-5',
-      'claude-opus-5-5',
-      'claude-fable-5-2',
+      'claude-haiku-4-5',
+      'claude-haiku-4-5-20251001',
+      'claude-3-5-haiku-20241022',
+      'claude-sonnet-5-5',
       'claude-sonnet-4-6',
       'claude-sonnet-4-5',
       'claude-sonnet-4-5-20250929',
-      'claude-haiku-4-5',
-      'claude-haiku-4-5-20251001',
       'claude-sonnet-4-20250514'
     ]) {
       if (!candidateModels.includes(m)) {
@@ -334,10 +334,13 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     maxTokens: number = 700
   ): Promise<any> {
     const all = await this.getCandidateClaudeModels();
-    const haikus = all.filter((m) => m.includes('haiku'));
+    const haiku55 = all.filter((m) => m.includes('haiku') && m.includes('5-5'));
+    const otherHaikus = all.filter((m) => m.includes('haiku') && !m.includes('5-5'));
     const rest = all.filter((m) => !m.includes('haiku'));
     const ordered = [
-      ...haikus,
+      ...haiku55,
+      'claude-haiku-5-5',
+      ...otherHaikus,
       'claude-haiku-4-5',
       'claude-3-5-haiku-20241022',
       ...rest
