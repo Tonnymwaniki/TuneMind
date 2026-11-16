@@ -24,9 +24,9 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Android WorkManager CoroutineWorker that periodically fetches user telemetry events
- * from the Room database and invokes Google Gemini to generate a high-level Reasoning Report.
+ * from the Room database and invokes backend Claude reasoning to generate a Reasoning Report.
  */
-class GeminiTelemetryReasoningWorker(
+class ClaudeTelemetryReasoningWorker(
     appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
@@ -78,7 +78,7 @@ class GeminiTelemetryReasoningWorker(
 
             // Read vault tracks from SharedPreferences
             val vaultPrefs = applicationContext.getSharedPreferences("tunemind_vault_prefs", Context.MODE_PRIVATE)
-            val vaultJson = vaultPrefs.getString("vault_tracks_json", null)
+            val vaultJson = vaultPrefs.getString("vault_items", null) ?: vaultPrefs.getString("vault_tracks_json", null)
             val vaultTracks = mutableListOf<VaultTrack>()
             if (!vaultJson.isNullOrBlank()) {
                 try {
@@ -103,7 +103,7 @@ class GeminiTelemetryReasoningWorker(
 
             val timeSlot = TimeSlot.currentSlot().label
 
-            GeminiReasoningEngine.generateTelemetryReasoningReport(
+            ClaudeReasoningEngine.generateTelemetryReasoningReport(
                 context = applicationContext,
                 eventCount = observations.size,
                 topSourceApp = topSourceApp,
@@ -121,17 +121,17 @@ class GeminiTelemetryReasoningWorker(
     }
 
     companion object {
-        const val PERIODIC_WORK_TAG = "tunemind_gemini_telemetry_reasoning_periodic"
-        const val IMMEDIATE_WORK_TAG = "tunemind_gemini_telemetry_reasoning_immediate"
+        const val PERIODIC_WORK_TAG = "tunemind_claude_telemetry_reasoning_periodic"
+        const val IMMEDIATE_WORK_TAG = "tunemind_claude_telemetry_reasoning_immediate"
 
         /**
          * Schedules periodic reasoning generation every 15 minutes.
          */
         fun schedulePeriodic(context: Context) {
             try {
-                val periodicRequest = PeriodicWorkRequestBuilder<GeminiTelemetryReasoningWorker>(
+                val periodicRequest = PeriodicWorkRequestBuilder<ClaudeTelemetryReasoningWorker>(
                     15, TimeUnit.MINUTES,
-                    5, TimeUnit.MINUTES // Flex window
+                    5, TimeUnit.MINUTES
                 ).build()
 
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -147,7 +147,7 @@ class GeminiTelemetryReasoningWorker(
          */
         fun enqueueImmediate(context: Context) {
             try {
-                val oneTimeRequest = OneTimeWorkRequestBuilder<GeminiTelemetryReasoningWorker>()
+                val oneTimeRequest = OneTimeWorkRequestBuilder<ClaudeTelemetryReasoningWorker>()
                     .build()
 
                 WorkManager.getInstance(context).enqueueUniqueWork(

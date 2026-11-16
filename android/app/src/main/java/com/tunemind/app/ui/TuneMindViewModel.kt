@@ -363,7 +363,7 @@ class TuneMindViewModel : ViewModel() {
     private fun loadInitialForYouLearningState(): com.tunemind.app.domain.ai.ForYouLearningSummary {
         val ctx = AppHolder.context
         return if (ctx != null) {
-            com.tunemind.app.domain.ai.GeminiReasoningEngine.getSavedLearningSummary(ctx)
+            com.tunemind.app.domain.ai.ClaudeReasoningEngine.getSavedLearningSummary(ctx)
         } else {
             com.tunemind.app.domain.ai.ForYouLearningSummary(
                 dropDateKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
@@ -526,12 +526,23 @@ class TuneMindViewModel : ViewModel() {
     private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
     val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
 
-    // Gemini Cognitive AI Reasoning State
-    private val _geminiSessionInsight = MutableStateFlow<String?>(null)
-    val geminiSessionInsight: StateFlow<String?> = _geminiSessionInsight.asStateFlow()
+    // Claude Cognitive AI Reasoning State
+    private val _claudeSessionInsight = MutableStateFlow<String?>(null)
+    val claudeSessionInsight: StateFlow<String?> = _claudeSessionInsight.asStateFlow()
 
-    private val _isGeminiConfigured = MutableStateFlow<Boolean>(false)
-    val isGeminiConfigured: StateFlow<Boolean> = _isGeminiConfigured.asStateFlow()
+    private val _isClaudeConfigured = MutableStateFlow<Boolean>(false)
+    val isClaudeConfigured: StateFlow<Boolean> = _isClaudeConfigured.asStateFlow()
+
+    private data class TrackedForYouSession(
+        val rec: com.tunemind.app.domain.recommendation.AiRecommendationEntity,
+        val startedAtMs: Long,
+        var matchedNowPlayingAtMs: Long? = null,
+        var observedTrackDurationMs: Long = 0L,
+        var reportedOutcome: Boolean = false
+    )
+
+    @Volatile
+    private var activeTrackedForYouSession: TrackedForYouSession? = null
 
     private val _isReasoningLoading = MutableStateFlow<Boolean>(false)
     val isReasoningLoading: StateFlow<Boolean> = _isReasoningLoading.asStateFlow()
@@ -881,8 +892,19 @@ class TuneMindViewModel : ViewModel() {
         refreshHearingInsights()
 
         refreshReadiness()
-        refreshGeminiState()
-        requestGeminiSessionReasoning()
+        refreshClaudeState()
+        requestClaudeSessionReasoning()
+
+        // Hook in-app 30s preview completion directly into the closed-loop Room + Backend + Supabase learning model
+        com.tunemind.app.provider.TuneMindInAppPlayer.setOnTrackCompletedListener { doneTitle, doneArtist, _ ->
+            val session = activeTrackedForYouSession ?: return@setOnTrackCompletedListener
+            if (!session.reportedOutcome &&
+                ListeningPlayDeduplicator.isSameTrack(doneTitle, doneArtist, null, session.rec.title, session.rec.artist, session.rec.spotifyUri)
+            ) {
+                val listenedMs = (System.currentTimeMillis() - (session.matchedNowPlayingAtMs ?: session.startedAtMs)).coerceAtLeast(25_000L)
+                finalizeTrackedForYouOutcome(session, outcome = "COMPLETED", listenedMs = listenedMs, durationMs = 30_000L)
+            }
+        }
 
         // Observe AI Recommendation Crate from Room DB
         viewModelScope.launch {
@@ -929,10 +951,10 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Initialize Telemetry Reasoning Report & schedule periodic Worker
+        // Initialize Telemetry Reasoning Report & schedule periodic Claude Worker
         AppHolder.context?.let { ctx ->
-            _reasoningReport.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.getLatestReport(ctx)
-            com.tunemind.app.domain.ai.GeminiTelemetryReasoningWorker.schedulePeriodic(ctx)
+            _reasoningReport.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.getLatestReport(ctx)
+            com.tunemind.app.domain.ai.ClaudeTelemetryReasoningWorker.schedulePeriodic(ctx)
         }
         refreshTelemetryReasoningReport()
         recomputeAdaptiveTheme()
@@ -1185,6 +1207,7 @@ class TuneMindViewModel : ViewModel() {
                         observationCount = summary.distinctReconstructedAppearanceCount.coerceAtLeast(rows.size),
                     )
 
+                    evaluateActiveForYouSessionTransition(nowPlayingObs)
                     refreshRecommendations()
 
                     // If real tracks are observed and today's 12:00 PM drop is missing or uncalibrated, auto-calibrate
@@ -1422,20 +1445,20 @@ class TuneMindViewModel : ViewModel() {
         )
     }
 
-    fun refreshGeminiState() {
+    fun refreshClaudeState() {
         val ctx = AppHolder.context ?: return
-        _isGeminiConfigured.value = com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)
+        _isClaudeConfigured.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.isConfigured(ctx)
     }
 
-    fun requestGeminiSessionReasoning() {
+    fun requestClaudeSessionReasoning() {
         val ctx = AppHolder.context ?: return
-        if (!com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)) {
-            _geminiSessionInsight.value = null
+        if (!com.tunemind.app.domain.ai.ClaudeReasoningEngine.isConfigured(ctx)) {
+            _claudeSessionInsight.value = null
             return
         }
         viewModelScope.launch {
             _isReasoningLoading.value = true
-            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.analyzeActiveSession(
+            val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.analyzeActiveSession(
                 context = ctx,
                 recentTracks = _homeState.value.recentTracks,
                 nowPlaying = _homeState.value.nowPlaying,
@@ -1444,7 +1467,7 @@ class TuneMindViewModel : ViewModel() {
             )
             _isReasoningLoading.value = false
             result.onSuccess { insight ->
-                _geminiSessionInsight.value = insight
+                _claudeSessionInsight.value = insight
             }
         }
     }
@@ -1458,7 +1481,7 @@ class TuneMindViewModel : ViewModel() {
                 _profileState.value.observationCount
             )
             val currentSource = _homeState.value.nowPlaying?.sourcePackage?.substringAfterLast(".")?.replaceFirstChar { it.uppercase() } ?: "Spotify"
-            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateTelemetryReasoningReport(
+            val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateTelemetryReasoningReport(
                 context = ctx,
                 eventCount = maxOf(rowsCount, 12),
                 topSourceApp = currentSource,
@@ -1474,19 +1497,10 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    fun saveGeminiApiKey(key: String) {
-        val ctx = AppHolder.context ?: return
-        com.tunemind.app.domain.ai.GeminiReasoningEngine.saveApiKey(ctx, key)
-        refreshGeminiState()
-        refreshRecommendations()
-        requestGeminiSessionReasoning()
-        refreshTelemetryReasoningReport()
-    }
-
-    fun testGeminiApiKey(candidateKey: String, onResult: (Boolean, String) -> Unit) {
+    fun testClaudeConnection(onResult: (Boolean, String) -> Unit) {
         val ctx = AppHolder.context ?: return
         viewModelScope.launch {
-            val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.testConnection(ctx, candidateKey)
+            val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.testConnection(ctx)
             result.onSuccess { text ->
                 onResult(true, text)
             }.onFailure { err ->
@@ -1578,9 +1592,9 @@ class TuneMindViewModel : ViewModel() {
         _recommendations.value = baseline
 
         // Elevate asynchronously with Claude backend reasoning
-        if (ctx != null && com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(ctx)) {
+        if (ctx != null && com.tunemind.app.domain.ai.ClaudeReasoningEngine.isConfigured(ctx)) {
             viewModelScope.launch {
-                val aiRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateReasonedRecommendations(
+                val aiRecs = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateReasonedRecommendations(
                     context = ctx,
                     recentTracks = _historyState.value.tracks,
                     vaultTracks = _vaultState.value,
@@ -1783,7 +1797,7 @@ class TuneMindViewModel : ViewModel() {
                     currentTimeSlot.label
                 }
 
-                val newRecs = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateChronoCrateRecommendations(
+                val newRecs = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateChronoCrateRecommendations(
                     context = ctx,
                     recentTracks = _historyState.value.tracks,
                     vaultTracks = _vaultState.value,
@@ -1848,11 +1862,11 @@ class TuneMindViewModel : ViewModel() {
                 val ctx = AppHolder.context ?: return@launch
                 val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
                 val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
-                val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                val updated = com.tunemind.app.domain.ai.ClaudeReasoningEngine.sendDiscoveryFeedback(
                     context = ctx,
                     userId = userId,
                     item = item,
-                    outcome = if (isSaved) "SAVED" else "SKIPPED",
+                    outcome = if (isSaved) "SAVED" else "IGNORED",
                     volumeRatio = resolveCurrentVolumeRatio(ctx)
                 )
                 if (updated != null) {
@@ -1860,6 +1874,90 @@ class TuneMindViewModel : ViewModel() {
                 }
             } catch (t: Throwable) {
                 android.util.Log.e("TuneMindVM", "toggleSaveRecommendation error: ${t.message}", t)
+            }
+        }
+    }
+
+    private fun evaluateActiveForYouSessionTransition(nowPlayingObs: NowPlayingObservation?) {
+        val session = activeTrackedForYouSession ?: return
+        if (session.reportedOutcome) return
+
+        val matches = nowPlayingObs != null &&
+            ListeningPlayDeduplicator.isSameTrack(
+                nowPlayingObs.title,
+                nowPlayingObs.artist,
+                null,
+                session.rec.title,
+                session.rec.artist,
+                session.rec.spotifyUri
+            )
+
+        if (matches && nowPlayingObs != null) {
+            if (session.matchedNowPlayingAtMs == null) {
+                session.matchedNowPlayingAtMs = System.currentTimeMillis()
+            }
+            if (nowPlayingObs.durationMs > 0L) {
+                session.observedTrackDurationMs = nowPlayingObs.durationMs
+            }
+            val elapsedMatchedMs = System.currentTimeMillis() - (session.matchedNowPlayingAtMs ?: session.startedAtMs)
+            val effectiveDurMs = (session.observedTrackDurationMs.takeIf { it > 0L } ?: session.rec.trackDurationMs).takeIf { it > 0L } ?: 180_000L
+            if (elapsedMatchedMs >= (effectiveDurMs * 0.65).toLong() || elapsedMatchedMs >= 60_000L) {
+                finalizeTrackedForYouOutcome(session, outcome = "COMPLETED", listenedMs = elapsedMatchedMs, durationMs = effectiveDurMs)
+            } else if (!nowPlayingObs.isPlaying && elapsedMatchedMs in 2_500L..24_999L && elapsedMatchedMs < (effectiveDurMs * 0.25).toLong()) {
+                finalizeTrackedForYouOutcome(session, outcome = "SKIPPED", listenedMs = elapsedMatchedMs, durationMs = effectiveDurMs)
+            }
+            return
+        }
+
+        // Track changed to a different song after we observed this recommended track playing
+        val matchedAt = session.matchedNowPlayingAtMs
+        if (matchedAt != null) {
+            val listenedMs = System.currentTimeMillis() - matchedAt
+            val effectiveDurMs = (session.observedTrackDurationMs.takeIf { it > 0L } ?: session.rec.trackDurationMs).takeIf { it > 0L } ?: 180_000L
+            if (listenedMs >= 30_000L || listenedMs >= (effectiveDurMs * 0.65).toLong()) {
+                finalizeTrackedForYouOutcome(session, outcome = "COMPLETED", listenedMs = listenedMs, durationMs = effectiveDurMs)
+            } else if (listenedMs in 2_500L..24_999L && listenedMs < (effectiveDurMs * 0.25).toLong()) {
+                finalizeTrackedForYouOutcome(session, outcome = "SKIPPED", listenedMs = listenedMs, durationMs = effectiveDurMs)
+            }
+        }
+    }
+
+    private fun finalizeTrackedForYouOutcome(
+        session: TrackedForYouSession,
+        outcome: String,
+        listenedMs: Long,
+        durationMs: Long
+    ) {
+        if (session.reportedOutcome) return
+        session.reportedOutcome = true
+        val item = session.rec
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val ctx = AppHolder.context ?: return@launch
+                val volRatio = resolveCurrentVolumeRatio(ctx) ?: 0f
+                val isCompletedFlag = if (outcome == "COMPLETED") 1 else 0
+                aiRecDao?.recordListeningOutcome(
+                    id = item.id,
+                    listenedMs = listenedMs.coerceAtLeast(0L),
+                    durationMs = durationMs.coerceAtLeast(0L),
+                    volumeRatio = volRatio,
+                    isCompleted = isCompletedFlag
+                )
+                val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
+                val updated = com.tunemind.app.domain.ai.ClaudeReasoningEngine.sendDiscoveryFeedback(
+                    context = ctx,
+                    userId = userId,
+                    item = item,
+                    outcome = outcome,
+                    listenedMs = listenedMs,
+                    durationMs = durationMs,
+                    volumeRatio = volRatio.takeIf { it > 0f }
+                )
+                if (updated != null) {
+                    _forYouLearningState.value = updated
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindVM", "finalizeTrackedForYouOutcome error: ${t.message}", t)
             }
         }
     }
@@ -1872,8 +1970,13 @@ class TuneMindViewModel : ViewModel() {
                 aiRecDao?.markPlayed(id, volRatio)
                 if (ctx != null) {
                     val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                    activeTrackedForYouSession = TrackedForYouSession(
+                        rec = item,
+                        startedAtMs = System.currentTimeMillis(),
+                        observedTrackDurationMs = item.trackDurationMs
+                    )
                     val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
-                    val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                    val updated = com.tunemind.app.domain.ai.ClaudeReasoningEngine.sendDiscoveryFeedback(
                         context = ctx,
                         userId = userId,
                         item = item,
@@ -1899,7 +2002,7 @@ class TuneMindViewModel : ViewModel() {
                 val ctx = AppHolder.context ?: return@launch
                 val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
                 val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
-                val updated = com.tunemind.app.domain.ai.GeminiReasoningEngine.sendDiscoveryFeedback(
+                val updated = com.tunemind.app.domain.ai.ClaudeReasoningEngine.sendDiscoveryFeedback(
                     context = ctx,
                     userId = userId,
                     item = item,

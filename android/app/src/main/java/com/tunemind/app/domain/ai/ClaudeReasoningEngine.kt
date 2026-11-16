@@ -40,7 +40,7 @@ data class ForYouLearningSummary(
     val coolingGenres: List<String> = emptyList(),
     val avgVolumePercent: Int = 62,
     val learnedTraits: List<String> = emptyList(),
-    val narrative: String = "AI learns from every track you play, save, preview, or skip and refreshes picks daily at 12:00 PM.",
+    val narrative: String = "AI learns from every track you play, lock, preview, or pass and refreshes picks daily at 12:00 PM.",
     val isAiGenerated: Boolean = true,
     val modelUsed: String = "Claude Reasoning + Neural Bandit",
     val dropDateKey: String = "",
@@ -153,10 +153,8 @@ object NoonDropSchedule {
  * Cognitive Reasoning Engine powered exclusively by the TuneMind Backend
  * (Anthropic Claude via paid server-side `ANTHROPIC_API_KEY`), with local
  * neuro-acoustic heuristic fallbacks when offline.
- *
- * No Google Gemini endpoints or keys are used anywhere in TuneMind.
  */
-object GeminiReasoningEngine {
+object ClaudeReasoningEngine {
 
     private const val PREFS_REPORT = "tunemind_telemetry_reasoning_prefs"
     private const val KEY_LATEST_REPORT = "latest_reasoning_report_json"
@@ -549,7 +547,7 @@ object GeminiReasoningEngine {
     /**
      * Generates the 12:00 PM Self-Learning AI Daily Drop (`POST /api/v1/discovery/daily-drop`):
      * - Auto-rotates strictly on the user's local 12:00 PM cycle key.
-     * - Delivers 2 unheard songs per active genre + 3 Global Wildcards from non-overlapping genres.
+     * - Delivers 2 unheard songs per active genre + 1 Wildcard Deck (3 songs from uncharted genres).
      * - Feeds back previous drop outcomes, volume ratio, & cross-app listening so the bandit + Claude evolve daily.
      */
     suspend fun generateChronoCrateRecommendations(
@@ -728,7 +726,7 @@ object GeminiReasoningEngine {
                                     confidence = confidence,
                                     timeSlotKey = timeSlotKey,
                                     timeSlotLabel = timeSlotLabel,
-                                    recommendedAtMs = nowMs - i, // Keep backend ML ordering deterministic in DESC queries
+                                    recommendedAtMs = nowMs - i,
                                     suggestedProviderId = preferredProviderId,
                                     telemetryBasisSummary = "Demonstrated Rotation: $artistsSummary",
                                     genreTag = genreTag,
@@ -746,8 +744,10 @@ object GeminiReasoningEngine {
             } catch (_: Exception) {}
         }
 
-        // Offline genre-aware baseline fallback (still preserves 2-per-genre + 3 non-overlapping Global Wildcards)
+        // Offline genre-aware baseline fallback (preserves 2-per-genre + 1 Wildcard Deck of 3 songs)
         val lower = artistsSummary.lowercase()
+        val isGikuyu = lower.contains("gikuyu") || lower.contains("kikuyu") || lower.contains("mugithi") || lower.contains("samidoh") || lower.contains("salim") || lower.contains("demathew") || lower.contains("gatutura")
+        val isGospel = lower.contains("gospel") || lower.contains("worship") || lower.contains("mercy masika") || lower.contains("kigame") || lower.contains("sinach") || lower.contains("guardian angel")
         val isBongo = lower.contains("bongo") || lower.contains("mbosso") || lower.contains("diamond") || lower.contains("platnumz") || lower.contains("harmonize") || lower.contains("rayvanny") || lower.contains("zuchu") || lower.contains("marioo") || lower.contains("kiba") || lower.contains("kusah") || lower.contains("jux") || lower.contains("otile") || lower.contains("nandy") || lower.contains("swahili") || lower.contains("east africa")
         val isAfro = lower.contains("afro") || lower.contains("amapiano") || lower.contains("burna") || lower.contains("wizkid") || lower.contains("rema") || lower.contains("asake") || lower.contains("tems")
         val isHipHop = lower.contains("hip") || lower.contains("rap") || lower.contains("drake") || lower.contains("kendrick") || lower.contains("cole") || lower.contains("travis")
@@ -764,6 +764,18 @@ object GeminiReasoningEngine {
         )
 
         val genrePicks = when {
+            isGikuyu -> listOf(
+                FallbackTrack("Murata Wa Thiururuka", "Samidoh", "Gikuyu / Mugithi", "Crisp acoustic Mugithi guitar & storytelling fit your melodic groove.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
+                FallbackTrack("Nindacokia Ngatho", "John De'Mathew", "Gikuyu / Mugithi", "Timeless Kikuyu brass and vocal phrasing preserve high freshness.", "DOPAMINE_FLOW", "GENRE_PICK", false, 93),
+                FallbackTrack("Huwezi Jua", "Mbosso", "Bongo Flava", "Warm Swahili guitar harmonies complement Mugithi warmth cleanly.", "DOPAMINE_FLOW", "GENRE_PICK", false, 91),
+                FallbackTrack("Mi Amor", "Marioo & Jovial", "Bongo Flava", "Mid-tempo coastal cadence balances acoustic fatigue smoothly.", "PALATE_CLEANSER", "GENRE_PICK", false, 89)
+            )
+            isGospel -> listOf(
+                FallbackTrack("Mwema", "Mercy Masika", "Kenyan Gospel", "Uplifting East African praise harmonies sustain receptive focus.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
+                FallbackTrack("Nadeka", "Guardian Angel", "Kenyan Gospel", "Warm acoustic worship groove fits calm reflective flow.", "DOPAMINE_FLOW", "GENRE_PICK", false, 93),
+                FallbackTrack("Lonely At The Top", "Asake", "Afrobeats", "Spacious log drums extend uplifting groove without overload.", "DOPAMINE_FLOW", "GENRE_PICK", false, 90),
+                FallbackTrack("Free Mind", "Tems", "Afrobeats", "Airy vocal space gives auditory receptors restorative calm.", "PALATE_CLEANSER", "GENRE_PICK", false, 88)
+            )
             isBongo -> listOf(
                 FallbackTrack("Huwezi Jua", "Mbosso", "Bongo Flava", "Soulful Bongo Flava chords match your melodic cadence cleanly.", "DOPAMINE_FLOW", "GENRE_PICK", false, 95),
                 FallbackTrack("Mi Amor", "Marioo & Jovial", "Bongo Flava", "Warm Swahili vocal harmonies lift receptor freshness immediately.", "DOPAMINE_FLOW", "GENRE_PICK", false, 93),
@@ -790,7 +802,7 @@ object GeminiReasoningEngine {
             )
         }
 
-        // 3 Global Wildcards strictly outside the user's primary genres
+        // 3 Global Wildcard deck picks strictly outside the user's primary genres
         val activeGenreNames = genrePicks.map { it.genre.lowercase() }.toSet()
         val wildcardCandidates = listOf(
             FallbackTrack("Black Satin", "Yussef Dayes", "Nu-Jazz & Neo-Soul", "Live London percussion meets hypnotic Rhodes chords — a fresh sonic leap outside your normal lanes.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 84),
@@ -997,7 +1009,7 @@ object GeminiReasoningEngine {
                     acousticShiftRecommendation = shiftRec,
                     steerAction = steer,
                     observedTrackContext = currentTrackName,
-                    isGeminiGenerated = res.optBoolean("isAiGenerated", true)
+                    isClaudeGenerated = res.optBoolean("isAiGenerated", true)
                 )
                 saveLatestReport(context, report)
                 return Result.success(report)

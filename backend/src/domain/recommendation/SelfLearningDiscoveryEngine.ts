@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { getLiveSupabaseClient } from '../../config/supabase';
+import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 
 export type RecommendationOutcomeType =
   | 'PENDING'
@@ -146,12 +147,13 @@ export interface DailyDropResponse {
 const DEFAULT_FALLBACK_GENRES = ['Afrobeats', 'Bongo Flava', 'Hip-Hop', 'R&B', 'Pop'];
 
 const ARTIST_GENRE_HINTS: Array<{ keywords: string[]; genre: string }> = [
+  { keywords: ['samidoh', 'salim', 'demathew', 'de\'mathew', 'joyce wa mamaa', 'gatutura', 'kigia', 'kamaru', 'mike rua', 'kamande', 'musaimo', 'tony young', 'mugithi', 'wendo wi cama', 'murata'], genre: 'Gikuyu / Mugithi' },
   { keywords: ['mbosso', 'diamond', 'platnumz', 'harmonize', 'zuchu', 'marioo', 'rayvanny', 'alikiba', 'jux', 'nandy', 'otile', 'lavalava', 'kusah'], genre: 'Bongo Flava' },
   { keywords: ['burna', 'wizkid', 'rema', 'asake', 'ayra', 'tems', 'omah lay', 'davido', 'ckay', 'fireboy', 'tiwa', 'kizz daniel', 'victony', 'oxlade', 'ruger', 'buju', 'bnxn', 'olamide', 'shallipopi'], genre: 'Afrobeats' },
   { keywords: ['tyler icu', 'kabza', 'dj maphorisa', 'uncle waffles', 'tyla', 'sha sha', 'vigro', 'focalistic', 'kelvin momo', 'musa keys'], genre: 'Amapiano' },
   { keywords: ['kendrick', 'drake', 'j. cole', 'cole', 'travis scott', '21 savage', 'future', 'metro boomin', 'kanye', 'eminem', 'nas', 'baby keem', 'jid', 'lil baby', 'gunna', 'central cee', 'nyashinski', 'khaligraph'], genre: 'Hip-Hop' },
   { keywords: ['sza', 'frank ocean', 'the weeknd', 'weeknd', 'brent faiyaz', 'h.e.r.', 'daniel caesar', 'giveon', 'summer walker', 'khalid', 'ariana', 'chris brown', 'usher', 'bruno mars', 'chloe'], genre: 'R&B' },
-  { keywords: ['maverick city', 'kirk franklin', 'tasha cobbs', 'sinach', 'mercy chinwo', 'nathaniel bassey', 'elevation worship', 'hillsong', 'dunsin'], genre: 'Gospel' },
+  { keywords: ['maverick city', 'kirk franklin', 'tasha cobbs', 'sinach', 'mercy chinwo', 'nathaniel bassey', 'elevation worship', 'hillsong', 'dunsin', 'mercy masika', 'reuben kigame', 'guardian angel', 'evelyn wanjiru', 'christina shusho', 'gloria muliro', 'paul mwai', 'florence andenyi', 'eunice njeri'], genre: 'Gospel' },
   { keywords: ['dua lipa', 'taylor swift', 'billie eilish', 'sabrina carpenter', 'olivia rodrigo', 'harry styles', 'ed sheeran', 'doja cat', 'justin bieber', 'post malone'], genre: 'Pop' },
   { keywords: ['burnaboy', 'popcaan', 'vibes kartel', 'shenseea', 'koffee', 'chronixx', 'bob marley', 'sean paul', 'alkaline'], genre: 'Dancehall & Reggae' },
   { keywords: ['fally ipupa', 'koffi olomide', 'innoss', 'ferre gola', 'dadju', 'aya nakamura', 'maitre gims', 'tayc'], genre: 'Afro-Francophone' },
@@ -199,6 +201,13 @@ const CURATED_GLOBAL_DISCOVERY_BANK: Array<ScoredDiscoveryTrack> = [
   // Gospel
   { title: 'Firm Foundation (He Won\'t)', artist: 'Maverick City Music', album: 'The Maverick Way', genre: 'Gospel', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Expansive uplifting harmonies that restore calm clarity.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
   { title: 'Olorun Agbaye', artist: 'Nathaniel Bassey', album: 'Hallelujah Again', genre: 'Gospel', category: 'PALATE_CLEANSER', subTier: 'GENRE_PICK', reason: 'Resonant horn and choir swells for deep reflective listening.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
+  { title: 'Mwema', artist: 'Mercy Masika', album: 'Mwema', genre: 'Gospel', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Warm East African Swahili worship cadence built for grounded calm.', confidence: 0.94, mlScore: 0.94, isWildcard: false },
+  { title: 'Nadeka', artist: 'Guardian Angel', album: 'Nadeka', genre: 'Gospel', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Upbeat Kenyan praise groove that elevates focus without fatigue.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
+
+  // Gikuyu / Mugithi
+  { title: 'Murata Wa Thiururuka', artist: 'Samidoh', album: 'Mugithi Essentials', genre: 'Gikuyu / Mugithi', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Crisp acoustic Kikuyu guitar plucking tuned to your East African melodic cadence.', confidence: 0.95, mlScore: 0.95, isWildcard: false },
+  { title: 'Wendo Ni Uriru', artist: 'Joyce Wa Mamaa', album: 'Gikuyu Classics', genre: 'Gikuyu / Mugithi', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Warm high-life bassline and vocal storytelling that reset overplayed rotations.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
+  { title: 'Nindacokia Ngatho', artist: 'John De\'Mathew', album: 'Timeless Mugithi', genre: 'Gikuyu / Mugithi', category: 'PALATE_CLEANSER', subTier: 'GENRE_PICK', reason: 'Classic Benga-Mugithi chord progression with steady restorative groove.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
 
   // Global Frontier Wildcards (distinct non-overlapping global scenes)
   { title: 'N\'y Pense Plus', artist: 'Tayc', album: 'Fleur Froide', genre: 'Afro-Francophone', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Parisian Afro-lovin grooves merging silky French vocals with warm percussive swing.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
@@ -301,6 +310,7 @@ export class SelfLearningDiscoveryEngine {
 
   public static canonicalGenreName(raw: string): string {
     const lower = raw.trim().toLowerCase();
+    if (lower.includes('gikuyu') || lower.includes('kikuyu') || lower.includes('mugithi') || lower.includes('benga')) return 'Gikuyu / Mugithi';
     if (lower.includes('bongo') || lower.includes('swahili')) return 'Bongo Flava';
     if (lower.includes('amapiano')) return 'Amapiano';
     if (lower.includes('afro') && (lower.includes('house') || lower.includes('electronic'))) return 'Electronic & Afro House';
@@ -358,21 +368,62 @@ export class SelfLearningDiscoveryEngine {
     const sb = getLiveSupabaseClient(supabaseOverride?.supabaseUrl, supabaseOverride?.supabaseKey);
     if (sb) {
       try {
-        const { data } = await sb
-          .from('ml_user_taste_models')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-        if (data) {
+        const [{ data }, { data: outcomeRows }] = await Promise.all([
+          sb.from('ml_user_taste_models').select('*').eq('user_id', userId).maybeSingle(),
+          sb
+            .from('discovery_recommendation_outcomes')
+            .select('drop_date, track_title, artist, genre, sub_tier, outcome_status, reason, confidence, preview_url, album_art_url, track_duration_ms, updated_at')
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false })
+            .limit(80)
+        ]);
+
+        const dropsByDate = new Map<string, ScoredDiscoveryTrack[]>();
+        if (Array.isArray(outcomeRows)) {
+          for (const row of outcomeRows) {
+            const dKey = String(row.drop_date || '').trim();
+            if (!dKey || !row.track_title || !row.artist) continue;
+            const list = dropsByDate.get(dKey) || [];
+            if (!list.some((x) => this.normalizeKey(x.title, x.artist) === this.normalizeKey(row.track_title, row.artist))) {
+              const isWild = String(row.sub_tier || '').toUpperCase() === 'GLOBAL_WILDCARD';
+              const conf = Number(row.confidence || 0.9);
+              list.push({
+                title: String(row.track_title),
+                artist: String(row.artist),
+                album: '',
+                genre: String(row.genre || 'Discovery'),
+                category: isWild ? 'NOVEL_EXPLORATION' : 'DOPAMINE_FLOW',
+                subTier: isWild ? 'GLOBAL_WILDCARD' : 'GENRE_PICK',
+                reason: String(row.reason || 'Previously dropped from your long-term taste model.'),
+                confidence: conf,
+                mlScore: conf,
+                isWildcard: isWild,
+                previewUrl: row.preview_url || undefined,
+                albumArtUrl: row.album_art_url || undefined,
+                durationMs: Number(row.track_duration_ms || 0) || undefined
+              });
+            }
+            dropsByDate.set(dKey, list);
+          }
+        }
+        const hydratedDrops: DailyDropRecord[] = Array.from(dropsByDate.entries())
+          .slice(0, 10)
+          .map(([dropDate, recommendations]) => ({
+            dropDate,
+            generatedAtMs: Date.now(),
+            recommendations
+          }));
+
+        if (data || hydratedDrops.length > 0) {
           const hydrated: UserTasteModel = {
             userId,
-            learningIterations: Number(data.learning_iterations || 0),
-            evaluatedOutcomes: Number(data.evaluated_outcomes || 0),
-            positiveOutcomes: Number(data.positive_outcomes || 0),
-            genreWeights: (data.genre_weights as Record<string, GenreWeightEntry>) || {},
-            timeSlotGenreAffinity: (data.time_slot_affinity as Record<string, Record<string, number>>) || {},
-            volumeByTimeSlot: (data.volume_profile as Record<string, number>) || {},
-            recentDrops: [],
+            learningIterations: Number(data?.learning_iterations || 0),
+            evaluatedOutcomes: Number(data?.evaluated_outcomes || 0),
+            positiveOutcomes: Number(data?.positive_outcomes || 0),
+            genreWeights: (data?.genre_weights as Record<string, GenreWeightEntry>) || {},
+            timeSlotGenreAffinity: (data?.time_slot_affinity as Record<string, Record<string, number>>) || {},
+            volumeByTimeSlot: (data?.volume_profile as Record<string, number>) || {},
+            recentDrops: hydratedDrops,
             updatedAtMs: Date.now()
           };
           SelfLearningDiscoveryEngine.memoryCache.set(userId, hydrated);
@@ -782,26 +833,73 @@ export class SelfLearningDiscoveryEngine {
     this.applyOutcomeUpdate(model, event);
     await this.saveModel(model, supabaseOverride);
 
+    const dropDate = event.dropDate || SelfLearningDiscoveryEngine.getTodayDateKey();
+    const genre = SelfLearningDiscoveryEngine.inferGenre(event.title, event.artist, event.genre);
+    const completionRatio = event.durationMs && event.durationMs > 0 ? Math.min(1, (event.listenedMs || 0) / event.durationMs) : 0;
+    const rewardScore =
+      event.outcome === 'SAVED' ? 1.4
+      : event.outcome === 'COMPLETED' ? 1.2
+      : event.outcome === 'PLAYED' ? (completionRatio >= 0.65 ? 1.0 : 0.6)
+      : event.outcome === 'SKIPPED' ? -0.65
+      : event.outcome === 'DISMISSED' ? -0.85
+      : -0.2;
+
     const sb = getLiveSupabaseClient(supabaseOverride?.supabaseUrl, supabaseOverride?.supabaseKey);
     if (sb) {
       try {
-        await sb.from('discovery_recommendation_outcomes').insert({
+        const { data: existingRows } = await sb
+          .from('discovery_recommendation_outcomes')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('drop_date', dropDate)
+          .ilike('track_title', event.title.trim())
+          .limit(1);
+
+        const rowPayload = {
           user_id: userId,
-          drop_date: event.dropDate || SelfLearningDiscoveryEngine.getTodayDateKey(),
-          track_title: event.title,
-          artist: event.artist,
-          genre: SelfLearningDiscoveryEngine.inferGenre(event.title, event.artist, event.genre),
+          drop_date: dropDate,
+          track_title: event.title.trim(),
+          artist: event.artist.trim(),
+          genre,
           sub_tier: event.subTier || 'GENRE_PICK',
           outcome_status: event.outcome,
-          completion_ratio: event.durationMs && event.durationMs > 0 ? Math.min(1, (event.listenedMs || 0) / event.durationMs) : 0,
+          completion_ratio: completionRatio,
           volume_ratio: event.volumeRatio || 0,
           time_slot: event.timeSlot || 'Evening',
           listened_ms: event.listenedMs || 0,
-          track_duration_ms: event.durationMs || 0
-        });
+          track_duration_ms: event.durationMs || 0,
+          reward_score: rewardScore,
+          updated_at: new Date().toISOString()
+        };
+
+        if (Array.isArray(existingRows) && existingRows[0]?.id) {
+          await sb.from('discovery_recommendation_outcomes').update(rowPayload).eq('id', existingRows[0].id);
+        } else {
+          await sb.from('discovery_recommendation_outcomes').insert(rowPayload);
+        }
       } catch {
         // Ignore if table not migrated yet
       }
+    }
+
+    // Mirror explicit Locks / Saves & Passes / Dismissals into long-term Supabase Taste Genome
+    if (event.outcome === 'SAVED' || event.outcome === 'COMPLETED' || event.outcome === 'DISMISSED' || event.outcome === 'SKIPPED') {
+      const actionTag = (event.outcome === 'SAVED' || event.outcome === 'COMPLETED') ? 'APPROVED_TRACK' : 'REJECTED_TRACK';
+      SupabaseIntelligenceStore.recordAgentIntervention(
+        {
+          user_id: userId,
+          trigger_transcript: `FOR_YOU_${event.subTier || 'GENRE_PICK'}_${event.outcome}`,
+          computed_satiety: actionTag === 'APPROVED_TRACK' ? 18 : 82,
+          agent_tts_response: `${event.outcome} ${event.title} by ${event.artist} (${genre})`,
+          os_intent: actionTag,
+          target_search_query: `${event.title} by ${event.artist}`,
+          action: actionTag,
+          track_title: event.title,
+          track_artist: event.artist,
+          circadian_daypart: event.timeSlot || 'Evening'
+        },
+        supabaseOverride
+      ).catch(() => {});
     }
 
     return this.buildLearningSummary(model, event.timeSlot || 'Evening');
@@ -932,10 +1030,17 @@ export class SelfLearningDiscoveryEngine {
       if (v.title) excludedTitlesLower.add(v.title.trim().toLowerCase());
       if (v.title && v.artist) excludedKeys.add(this.normalizeKey(v.title, v.artist));
     }
+    for (const pastDrop of model.recentDrops || []) {
+      if (pastDrop.dropDate === dropDate) continue;
+      for (const prev of pastDrop.recommendations || []) {
+        if (prev.title) excludedTitlesLower.add(prev.title.trim().toLowerCase());
+        if (prev.title && prev.artist) excludedKeys.add(this.normalizeKey(prev.title, prev.artist));
+      }
+    }
 
     const desiredWildcards = 3;
     const genreTargetCount = genreAllocation.length * 2;
-    const totalTargetCount = genreTargetCount + desiredWildcards; // e.g., up to 5*2 + 3 = 13 tracks
+    const totalTargetCount = genreTargetCount + desiredWildcards; // 2 per active genre + 1 Wildcard deck (3 songs) ≈ 11–13 tracks daily
     let candidates: ScoredDiscoveryTrack[] = [];
     let isAiGenerated = false;
     let modelUsed = 'tunemind-contextual-bandit';
@@ -1126,12 +1231,54 @@ Respond ONLY with a valid JSON array (no markdown fences):
     // 6. Real-catalog verification (parallel with tight 3s timeout per track)
     const verified = await Promise.all(assembled.map((c) => this.verifyWithCatalog(c)));
 
-    // Record daily drop into model history + save updated model
+    // Record daily drop into model history + save updated model & Supabase slate snapshot
     model.recentDrops = [
       { dropDate, generatedAtMs: Date.now(), recommendations: verified },
       ...model.recentDrops.filter((d) => d.dropDate !== dropDate)
     ].slice(0, 14);
     await this.saveModel(model, supabaseOverride);
+
+    const sb = getLiveSupabaseClient(supabaseOverride?.supabaseUrl, supabaseOverride?.supabaseKey);
+    if (sb && verified.length > 0) {
+      try {
+        const { data: alreadySeeded } = await sb
+          .from('discovery_recommendation_outcomes')
+          .select('track_title, artist')
+          .eq('user_id', userId)
+          .eq('drop_date', dropDate);
+        const existingSet = new Set(
+          (Array.isArray(alreadySeeded) ? alreadySeeded : []).map((r: any) =>
+            this.normalizeKey(String(r.track_title || ''), String(r.artist || ''))
+          )
+        );
+        const rowsToInsert = verified
+          .filter((item) => !existingSet.has(this.normalizeKey(item.title, item.artist)))
+          .map((item) => ({
+            user_id: userId,
+            drop_date: dropDate,
+            track_title: item.title,
+            artist: item.artist,
+            genre: item.genre,
+            sub_tier: item.subTier,
+            outcome_status: 'PENDING',
+            completion_ratio: 0,
+            volume_ratio: payload.avgVolumeRatio || 0,
+            time_slot: timeSlot,
+            listened_ms: 0,
+            track_duration_ms: item.durationMs || 0,
+            reward_score: 0,
+            reason: item.reason,
+            confidence: item.mlScore,
+            preview_url: item.previewUrl || null,
+            album_art_url: item.albumArtUrl || null
+          }));
+        if (rowsToInsert.length > 0) {
+          await sb.from('discovery_recommendation_outcomes').insert(rowsToInsert);
+        }
+      } catch {
+        // Safe non-blocking fallback if table wasn't provisioned yet
+      }
+    }
 
     return {
       status: 'ok',

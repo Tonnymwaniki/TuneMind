@@ -8,6 +8,12 @@ import { execSync } from 'child_process';
 import rawEventsRouter from './backend/src/api/v1/events';
 import rawAnalyticsRouter from './backend/src/api/v1/analytics';
 import rawReasoningRouter from './backend/src/api/v1/reasoning';
+import rawDiscoveryRouter from './backend/src/api/v1/discovery';
+import rawSpotifyAuthRouter from './backend/src/api/v1/spotifyAuth';
+import rawSupportRouter from './backend/src/api/v1/support';
+import rawAccountRouter from './backend/src/api/v1/account';
+import { optionalAuth, resolveEffectiveUserIdentity } from './backend/src/middleware/authMiddleware';
+import { SupabaseIntelligenceStore } from './backend/src/domain/storage/SupabaseIntelligenceStore';
 import { TelemetryReasoningPoller } from './backend/src/domain/reasoning/TelemetryReasoningPoller';
 import { EventStore } from './backend/src/domain/events/EventStore';
 
@@ -43,13 +49,6 @@ for (const envFile of envCandidates) {
   }
 }
 
-// Normalize API_KEY and GEMINI_API_KEY
-if (process.env.API_KEY && !process.env.GEMINI_API_KEY) {
-  process.env.GEMINI_API_KEY = process.env.API_KEY;
-} else if (process.env.GEMINI_API_KEY && !process.env.API_KEY) {
-  process.env.API_KEY = process.env.GEMINI_API_KEY;
-}
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -57,6 +56,10 @@ const getRouter = (r: any) => (typeof r === 'function' ? r : r?.default || r);
 const eventsRouter = getRouter(rawEventsRouter);
 const analyticsRouter = getRouter(rawAnalyticsRouter);
 const reasoningRouter = getRouter(rawReasoningRouter);
+const discoveryRouter = getRouter(rawDiscoveryRouter);
+const spotifyAuthRouter = getRouter(rawSpotifyAuthRouter);
+const supportRouter = getRouter(rawSupportRouter);
+const accountRouter = getRouter(rawAccountRouter);
 
 async function startServer() {
   const app = express();
@@ -65,11 +68,76 @@ async function startServer() {
   const HOST = '0.0.0.0';
 
   app.use(express.json({ limit: '5mb' }));
+  app.use('/api/v1', optionalAuth);
 
   // Mount API routes
   app.use('/api/v1/events', eventsRouter);
   app.use('/api/v1/analytics', analyticsRouter);
   app.use('/api/v1/reasoning', reasoningRouter);
+  app.use('/api/v1/discovery', discoveryRouter);
+  app.use('/api/v1/spotify', spotifyAuthRouter);
+  app.use('/api/v1/support', supportRouter);
+  app.use('/api/v1/account', accountRouter);
+
+  app.post('/api/v1/intelligence/sync', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
+      const userId = identity.userId;
+      const override = {
+        supabaseUrl: body.supabase_url,
+        supabaseKey: body.supabase_anon_key
+      };
+      const tracks = Array.isArray(body.tracks) ? body.tracks : [];
+      const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(userId, tracks, {
+        hearingTelemetry: body.hearing_telemetry,
+        vaultTracks: body.vault_tracks,
+        override
+      });
+      if (body.intervention && typeof body.intervention === 'object') {
+        await SupabaseIntelligenceStore.recordAgentIntervention(
+          {
+            user_id: userId,
+            trigger_transcript: body.intervention.trigger_transcript || 'app_event',
+            computed_satiety: Number(body.intervention.computed_satiety ?? 24),
+            agent_tts_response: body.intervention.agent_tts_response || '',
+            os_intent: body.intervention.os_intent || body.intervention.action || 'NONE',
+            target_search_query: body.intervention.target_search_query || '',
+            action: body.intervention.action,
+            track_title: body.intervention.track_title,
+            track_artist: body.intervention.track_artist,
+            spotify_uri: body.intervention.spotify_uri,
+            circadian_daypart: body.intervention.circadian_daypart
+          },
+          override
+        );
+      }
+      const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, override);
+      res.json({
+        status: 'synced',
+        user_id: userId,
+        synced_tracks_count: syncRes.syncedTracksCount,
+        live_supabase_stored: syncRes.liveSupabaseStored,
+        intelligence_summary: summary
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Intelligence sync failed' });
+    }
+  });
+
+  app.get('/api/v1/intelligence/growth', async (req, res) => {
+    try {
+      const identity = resolveEffectiveUserIdentity(
+        req,
+        String(req.query.user_id || ''),
+        String(req.query.user_email || '')
+      );
+      const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(identity.userId);
+      res.json(summary);
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Failed to load intelligence growth summary' });
+    }
+  });
 
   app.get('/health', (_req, res) => {
     res.json({

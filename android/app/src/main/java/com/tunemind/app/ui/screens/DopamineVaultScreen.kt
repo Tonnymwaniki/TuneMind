@@ -172,18 +172,35 @@ fun DopamineVaultScreen(
         ) {
             Spacer(modifier = Modifier.height(14.dp))
 
+            val hasFreshDrop = remember(forYouPicks) {
+                forYouPicks.any { !it.isDismissed && !it.wasPlayed }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (selectedTab == 2) "For You" else "Fresh",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.4).sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (selectedTab == 2) {
+                        AiNeuralCoreEmblem(
+                            accentPrimary = Color(0xFF38BDF8),
+                            accentSecondary = Color(0xFFA855F7),
+                            isThinking = isDiscovering,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                    Text(
+                        text = if (selectedTab == 2) "For You" else "Fresh",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.4).sp
+                    )
+                }
                 Text(
                     text = if (selectedTab == 2) {
                         "AI · IQ ${learningState.intelligenceScorePercent}%"
@@ -264,12 +281,17 @@ fun DopamineVaultScreen(
                 }
             }
 
-            // Spring-sliding capsule tabs (Fresh | Resting | AI For You)
+            // Spring-sliding capsule tabs (Fresh | Resting | For You)
             MagicalSegmentedTabs(
                 tabs = listOf(
                     MagicalTabItem("Fresh (${peakFreshSongs.size})", theme.primaryAccent),
                     MagicalTabItem("Resting (${coolingDownSongs.size})", Color(0xFFFFB000)),
-                    MagicalTabItem("For You", Color(0xFF38BDF8), isAiHighlighted = true)
+                    MagicalTabItem(
+                        label = "For You",
+                        accent = Color(0xFF38BDF8),
+                        isAiHighlighted = true,
+                        hasFreshDrop = hasFreshDrop
+                    )
                 ),
                 selectedIndex = selectedTab,
                 onSelectTab = { selectedTab = it }
@@ -292,10 +314,16 @@ fun DopamineVaultScreen(
                 ) {
                     if (currentTab == 2) {
                         val activeRecs = forYouPicks.filter { !it.isDismissed }
+                        val allWildcardsInCycle = forYouPicks.filter {
+                            (it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true)) &&
+                                (learningState.dropDateKey.isBlank() || it.dropDateKey == learningState.dropDateKey)
+                        }
                         forYouDiscoveryItems(
                             activeRecs = activeRecs,
                             learningState = learningState,
                             isDiscovering = isDiscovering,
+                            totalWildcardsInCycle = allWildcardsInCycle.size,
+                            lockedWildcardsCount = allWildcardsInCycle.count { it.isSaved && !it.isDismissed },
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                             onRefreshForYou = onRefreshForYou,
                             onPlayTrack = onPlayForYouTrack,

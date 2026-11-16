@@ -1,6 +1,5 @@
 ## TuneMind Android Configuration
-## Add your Google Gemini Reasoning API key here:
-GEMINI_API_KEY=your_gemini_api_key_here
+## AI reasoning runs on the TuneMind backend via paid ANTHROPIC_API_KEY (zero keys stored on device).
 
 ## Android SDK Location (example):
 # sdk.dir=C\:\\Users\\hp\\AppData\\Local\\Android\\Sdk

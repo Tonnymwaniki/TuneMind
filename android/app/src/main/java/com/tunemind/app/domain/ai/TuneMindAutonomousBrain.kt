@@ -42,7 +42,7 @@ data class TrackLlmTag(
 
 /**
  * Autonomous Audiophile Cognitive Intelligence Brain for TuneMind.
- * - Directly supports on-device Gemini API Key for autonomous LLM reasoning.
+ * - Powered strictly by backend Claude LLM reasoning (paid ANTHROPIC_API_KEY).
  * - Dynamic rotation: NEVER repeats the same song.
  * - High-precision East African cultural lexicons (Gikuyu/Mugithi, Bongo Flava, Gospel, Afrobeats).
  * - Conversational chatbot dialogue (brief, natural, no unsolicited monologues).
@@ -135,9 +135,8 @@ object TuneMindAutonomousBrain {
     /**
      * Primary reasoning entrypoint.
      * Evaluates user input against:
-     * 1. On-device Gemini LLM API (if API key is present)
-     * 2. Backend LLM agent-chat
-     * 3. Non-repeating deterministic East African musicology engine
+     * 1. Backend Claude LLM agent-chat (paid ANTHROPIC_API_KEY)
+     * 2. Non-repeating deterministic East African musicology engine
      */
     suspend fun reason(
         context: Context,
@@ -527,7 +526,7 @@ object TuneMindAutonomousBrain {
                 title = matchedEntry?.title ?: suggTitle,
                 artist = matchedEntry?.artist ?: suggArtist,
                 album = matchedEntry?.album,
-                reason = "Selected by Gemini LLM from your timeline archive",
+                reason = "Selected by Claude LLM from your timeline archive",
                 confidence = 0.98f,
                 category = RecommendationCategory.FAMILIAR_RECEPTIVE,
                 suggestedProviderId = currentProviderId
@@ -537,7 +536,7 @@ object TuneMindAutonomousBrain {
                 spokenText = spoken,
                 action = action,
                 resolvedTrack = resolvedTrack,
-                reasoningRationale = "Gemini LLM semantic match."
+                reasoningRationale = "Claude LLM semantic match."
             )
         }
         null
@@ -573,7 +572,7 @@ object TuneMindAutonomousBrain {
             return@withContext result
         }
 
-        // 1. Query backend Gemini tagger if server is available
+        // 1. Query backend Claude tagger if server is available
         val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
         if (baseUrl.isNotBlank()) {
             try {

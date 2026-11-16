@@ -1,10 +1,17 @@
 package com.tunemind.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,11 +30,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,8 +40,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,13 +103,97 @@ fun SoftGlassCard(
 }
 
 /**
+ * Miniature animated AI neural orbit emblem rendered directly inside AI-powered tabs (e.g. For You).
+ */
+@Composable
+private fun CompactAiTabLogo(
+    isSelected: Boolean,
+    hasFreshDrop: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "compact_ai_tab_logo")
+    val orbitAngle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(5600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "tab_orbit_angle"
+    )
+    val pulse by transition.animateFloat(
+        initialValue = 0.78f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "tab_star_pulse"
+    )
+
+    val aiCyan = Color(0xFF38BDF8)
+    val aiViolet = Color(0xFFA855F7)
+    val aiGold = Color(0xFFFBBF24)
+
+    Canvas(modifier = modifier) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val r = size.minDimension / 2f
+
+        rotate(degrees = orbitAngle, pivot = Offset(cx, cy)) {
+            drawArc(
+                brush = Brush.sweepGradient(
+                    colors = listOf(
+                        aiCyan,
+                        aiViolet,
+                        aiGold,
+                        aiCyan.copy(alpha = 0.2f)
+                    )
+                ),
+                startAngle = 0f,
+                sweepAngle = 275f,
+                useCenter = false,
+                topLeft = Offset(cx - r * 0.84f, cy - r * 0.84f),
+                size = Size(r * 1.68f, r * 1.68f),
+                style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
+            )
+        }
+
+        val starR = r * 0.52f * (if (isSelected) pulse else 0.92f)
+        val innerR = starR * 0.32f
+        val starPath = Path().apply {
+            moveTo(cx, cy - starR)
+            lineTo(cx + innerR, cy - innerR)
+            lineTo(cx + starR, cy)
+            lineTo(cx + innerR, cy + innerR)
+            lineTo(cx, cy + starR)
+            lineTo(cx - innerR, cy + innerR)
+            lineTo(cx - starR, cy)
+            lineTo(cx - innerR, cy - innerR)
+            close()
+        }
+        drawPath(
+            path = starPath,
+            brush = Brush.linearGradient(
+                colors = if (hasFreshDrop) {
+                    listOf(Color(0xFFF8FAFC), aiCyan)
+                } else {
+                    listOf(Color(0xFFE2E8F0), aiViolet)
+                }
+            )
+        )
+    }
+}
+
+/**
  * Spring-animated sliding capsule tab switcher with generous spacing,
  * adaptive glow indicator, and smooth per-tab accent tinting.
  */
 data class MagicalTabItem(
     val label: String,
     val accent: Color? = null,
-    val isAiHighlighted: Boolean = false
+    val isAiHighlighted: Boolean = false,
+    val hasFreshDrop: Boolean = false
 )
 
 @Composable
@@ -166,7 +261,7 @@ fun MagicalSegmentedTabs(
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            animatedAccent.copy(alpha = 0.26f),
+                            animatedAccent.copy(alpha = 0.28f),
                             animatedAccent.copy(alpha = 0.12f)
                         )
                     )
@@ -175,8 +270,8 @@ fun MagicalSegmentedTabs(
                     width = 1.dp,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            animatedAccent.copy(alpha = 0.58f),
-                            animatedAccent.copy(alpha = 0.22f)
+                            animatedAccent.copy(alpha = 0.62f),
+                            animatedAccent.copy(alpha = 0.24f)
                         )
                     ),
                     shape = pillShape
@@ -192,11 +287,10 @@ fun MagicalSegmentedTabs(
                 val isSelected = idx == safeIndex
                 val aiCyan = Color(0xFF38BDF8)
                 val aiViolet = Color(0xFFA855F7)
-                val tabAccent = tab.accent ?: theme.primaryAccent
                 val textColor by animateColorAsState(
                     targetValue = when {
                         isSelected -> Color(0xFFF8FAFC)
-                        tab.isAiHighlighted -> aiCyan.copy(alpha = 0.92f)
+                        tab.isAiHighlighted -> Color(0xFFBAE6FD)
                         else -> Color.White.copy(alpha = 0.56f)
                     },
                     animationSpec = tween(180),
@@ -213,17 +307,17 @@ fun MagicalSegmentedTabs(
                                     .background(
                                         brush = Brush.horizontalGradient(
                                             colors = listOf(
-                                                aiCyan.copy(alpha = 0.14f),
-                                                aiViolet.copy(alpha = 0.14f)
+                                                aiCyan.copy(alpha = 0.16f),
+                                                aiViolet.copy(alpha = 0.16f)
                                             )
                                         )
                                     )
                                     .border(
-                                        width = 0.8.dp,
+                                        width = 0.9.dp,
                                         brush = Brush.horizontalGradient(
                                             colors = listOf(
-                                                aiCyan.copy(alpha = 0.48f),
-                                                aiViolet.copy(alpha = 0.42f)
+                                                aiCyan.copy(alpha = 0.52f),
+                                                aiViolet.copy(alpha = 0.45f)
                                             )
                                         ),
                                         shape = pillShape
@@ -245,22 +339,30 @@ fun MagicalSegmentedTabs(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (tab.isAiHighlighted) {
-                            Icon(
-                                imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = "AI Powered",
-                                tint = if (isSelected) Color(0xFF67E8F9) else tabAccent,
-                                modifier = Modifier.size(13.dp)
+                            CompactAiTabLogo(
+                                isSelected = isSelected,
+                                hasFreshDrop = tab.hasFreshDrop,
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                         }
                         Text(
                             text = tab.label,
                             color = textColor,
                             fontSize = 12.5.sp,
-                            fontWeight = if (isSelected || tab.isAiHighlighted) FontWeight.SemiBold else FontWeight.Medium,
+                            fontWeight = if (isSelected || tab.isAiHighlighted) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (tab.isAiHighlighted && tab.hasFreshDrop && !isSelected) {
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF34D399))
+                            )
+                        }
                     }
                 }
             }

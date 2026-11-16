@@ -4,7 +4,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * High-fidelity cognitive telemetry reasoning report synthesized by Google Gemini.
+ * High-fidelity cognitive telemetry reasoning report synthesized by Claude Reasoning Engine.
  * Evaluates real-time listening habits, track repetition velocity, auditory receptor fatigue,
  * and cognitive flow state directly from local Room database telemetry.
  */
@@ -20,7 +20,7 @@ data class ReasoningReport(
     val acousticShiftRecommendation: String = "Maintain moderate tempo (95-115 BPM) with wide dynamic range.",
     val steerAction: String = "Continue current listening curve; receptor fatigue remains low.",
     val observedTrackContext: String? = null,
-    val isGeminiGenerated: Boolean = true
+    val isClaudeGenerated: Boolean = true
 ) {
     fun toJson(): String {
         val obj = JSONObject()
@@ -35,7 +35,7 @@ data class ReasoningReport(
         obj.put("acousticShiftRecommendation", acousticShiftRecommendation)
         obj.put("steerAction", steerAction)
         obj.put("observedTrackContext", observedTrackContext ?: "")
-        obj.put("isGeminiGenerated", isGeminiGenerated)
+        obj.put("isClaudeGenerated", isClaudeGenerated)
         return obj.toString()
     }
 
@@ -65,7 +65,7 @@ data class ReasoningReport(
                         "Continue current listening curve; receptor fatigue remains low."
                     ),
                     observedTrackContext = obj.optString("observedTrackContext", "").takeIf { it.isNotBlank() },
-                    isGeminiGenerated = obj.optBoolean("isGeminiGenerated", true)
+                    isClaudeGenerated = obj.optBoolean("isClaudeGenerated", obj.optBoolean("isAiGenerated", true))
                 )
             } catch (_: Exception) {
                 null
@@ -122,7 +122,7 @@ data class ReasoningReport(
                 acousticShiftRecommendation = shift,
                 steerAction = action,
                 observedTrackContext = currentTrack,
-                isGeminiGenerated = false
+                isClaudeGenerated = false
             )
         }
     }

@@ -347,7 +347,7 @@ fun SongProfile(
 
     var claudeInsightText by remember { mutableStateOf<String?>(null) }
     var isInsightLoading by remember { mutableStateOf(false) }
-    val isAiAvailable = remember(context) { com.tunemind.app.domain.ai.GeminiReasoningEngine.isConfigured(context) }
+    val isAiAvailable = remember(context) { com.tunemind.app.domain.ai.ClaudeReasoningEngine.isConfigured(context) }
     val coroutineScope = rememberCoroutineScope()
 
     Column(
@@ -500,7 +500,7 @@ fun SongProfile(
                             onClick = {
                                 isInsightLoading = true
                                 coroutineScope.launch {
-                                    val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
+                                    val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateSongProfileDossier(
                                         context = context,
                                         title = profile.title,
                                         artist = profile.artist,
@@ -544,7 +544,7 @@ fun SongProfile(
                         onClick = {
                             isInsightLoading = true
                             coroutineScope.launch {
-                                val result = com.tunemind.app.domain.ai.GeminiReasoningEngine.generateSongProfileDossier(
+                                val result = com.tunemind.app.domain.ai.ClaudeReasoningEngine.generateSongProfileDossier(
                                     context = context,
                                     title = profile.title,
                                     artist = profile.artist,

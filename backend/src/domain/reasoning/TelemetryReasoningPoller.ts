@@ -16,8 +16,7 @@ export interface PollerStatus {
   lastPolledAt: string | null;
   lastAnalyzedEventCount: number;
   totalReportsGenerated: number;
-  isGeminiConfigured: boolean;
-  isClaudeConfigured?: boolean;
+  isClaudeConfigured: boolean;
   activeUsersObserved: string[];
   diagnostics?: any;
 }
@@ -127,7 +126,7 @@ export class TelemetryReasoningPoller {
   }
 
   /**
-   * Polls the EventStore and runs Gemini reasoning analysis on telemetry.
+   * Polls the EventStore and runs Claude reasoning analysis on telemetry.
    */
   async pollNow(targetUserId?: string): Promise<ReasoningReport | null> {
     if (this.isPolling) {
@@ -216,7 +215,6 @@ export class TelemetryReasoningPoller {
       lastPolledAt: this.lastPolledAt,
       lastAnalyzedEventCount: this.lastAnalyzedEventCount,
       totalReportsGenerated: this.totalReportsGenerated,
-      isGeminiConfigured: isConfigured,
       isClaudeConfigured: isConfigured,
       activeUsersObserved: activeUsers.length > 0 ? activeUsers : ['tunemind-dev'],
       diagnostics

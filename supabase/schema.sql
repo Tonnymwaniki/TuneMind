@@ -331,3 +331,93 @@ CREATE POLICY "Users can view own support feedback"
     TO authenticated
     USING (auth.uid()::text = user_id);
 
+-- 7. Self-Learning Discovery: Per-User Contextual Genre/Time/Volume Taste Models
+CREATE TABLE IF NOT EXISTS public.ml_user_taste_models (
+    user_id TEXT PRIMARY KEY,
+    learning_iterations INTEGER NOT NULL DEFAULT 0,
+    evaluated_outcomes INTEGER NOT NULL DEFAULT 0,
+    positive_outcomes INTEGER NOT NULL DEFAULT 0,
+    genre_weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+    time_slot_affinity JSONB NOT NULL DEFAULT '{}'::jsonb,
+    volume_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.ml_user_taste_models
+    ADD COLUMN IF NOT EXISTS user_id TEXT,
+    ADD COLUMN IF NOT EXISTS learning_iterations INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS evaluated_outcomes INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS positive_outcomes INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS genre_weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS time_slot_affinity JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS volume_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ml_user_taste_models_user_id
+    ON public.ml_user_taste_models (user_id);
+
+ALTER TABLE public.ml_user_taste_models ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own ml_user_taste_models" ON public.ml_user_taste_models;
+CREATE POLICY "Users can manage own ml_user_taste_models"
+    ON public.ml_user_taste_models FOR ALL
+    USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
+    WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
+
+-- 8. Self-Learning Discovery: Daily Drop Slate & Recommendation Outcomes
+CREATE TABLE IF NOT EXISTS public.discovery_recommendation_outcomes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    drop_date TEXT NOT NULL,
+    track_title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    genre TEXT NOT NULL DEFAULT 'Discovery',
+    sub_tier TEXT NOT NULL DEFAULT 'GENRE_PICK',
+    outcome_status TEXT NOT NULL DEFAULT 'PENDING',
+    completion_ratio DOUBLE PRECISION DEFAULT 0,
+    volume_ratio DOUBLE PRECISION DEFAULT 0,
+    time_slot TEXT DEFAULT 'Evening',
+    listened_ms BIGINT DEFAULT 0,
+    track_duration_ms BIGINT DEFAULT 0,
+    reward_score DOUBLE PRECISION DEFAULT 0,
+    reason TEXT DEFAULT '',
+    confidence DOUBLE PRECISION DEFAULT 0.9,
+    preview_url TEXT,
+    album_art_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.discovery_recommendation_outcomes
+    ADD COLUMN IF NOT EXISTS user_id TEXT,
+    ADD COLUMN IF NOT EXISTS drop_date TEXT,
+    ADD COLUMN IF NOT EXISTS track_title TEXT,
+    ADD COLUMN IF NOT EXISTS artist TEXT,
+    ADD COLUMN IF NOT EXISTS genre TEXT NOT NULL DEFAULT 'Discovery',
+    ADD COLUMN IF NOT EXISTS sub_tier TEXT NOT NULL DEFAULT 'GENRE_PICK',
+    ADD COLUMN IF NOT EXISTS outcome_status TEXT NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN IF NOT EXISTS completion_ratio DOUBLE PRECISION DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS volume_ratio DOUBLE PRECISION DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS time_slot TEXT DEFAULT 'Evening',
+    ADD COLUMN IF NOT EXISTS listened_ms BIGINT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS track_duration_ms BIGINT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS reward_score DOUBLE PRECISION DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS reason TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION DEFAULT 0.9,
+    ADD COLUMN IF NOT EXISTS preview_url TEXT,
+    ADD COLUMN IF NOT EXISTS album_art_url TEXT,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_discovery_outcomes_user_date
+    ON public.discovery_recommendation_outcomes (user_id, drop_date DESC, updated_at DESC);
+
+ALTER TABLE public.discovery_recommendation_outcomes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own discovery_recommendation_outcomes" ON public.discovery_recommendation_outcomes;
+CREATE POLICY "Users can manage own discovery_recommendation_outcomes"
+    ON public.discovery_recommendation_outcomes FOR ALL
+    USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
+    WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
+
+
