@@ -1841,7 +1841,11 @@ class TuneMindViewModel : ViewModel() {
     private fun resolveCurrentVolumeRatio(context: android.content.Context): Float? {
         val recentAvg = _hearingInsightsState.value.recentVolumeObs
             .take(10)
-            .map { it.volumeRatio }
+            .mapNotNull { obs ->
+                if (obs.maximumVolumeIndex > 0) {
+                    (obs.volumeIndex.toFloat() / obs.maximumVolumeIndex.toFloat()).coerceIn(0.05f, 1.0f)
+                } else null
+            }
             .takeIf { it.isNotEmpty() }
             ?.average()
             ?.toFloat()

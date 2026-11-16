@@ -896,7 +896,7 @@ private fun WildcardDeckSection(
             }
 
             // Active Top Swipeable & Flippable Wildcard Card
-            val rotationY by animateFloatAsState(
+            val flipRotationY by animateFloatAsState(
                 targetValue = if (isFlipped) 180f else 0f,
                 animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
                 label = "wildcard_flip_rotation"
@@ -920,7 +920,7 @@ private fun WildcardDeckSection(
                     .offset { IntOffset(dragX.roundToInt(), 0) }
                     .graphicsLayer {
                         rotationZ = dragTiltDeg
-                        this.rotationY = rotationY
+                        rotationY = flipRotationY
                         cameraDistance = 14f * density.density
                     }
                     .pointerInput(currentCard.id, cards.size) {
@@ -976,7 +976,7 @@ private fun WildcardDeckSection(
                     .clickable { isFlipped = !isFlipped }
                     .padding(16.dp)
             ) {
-                if (rotationY <= 90f) {
+                if (flipRotationY <= 90f) {
                     // ─── FRONT FACE ─────────────────────────────────────────────────
                     Column(
                         modifier = Modifier.fillMaxWidth(),
