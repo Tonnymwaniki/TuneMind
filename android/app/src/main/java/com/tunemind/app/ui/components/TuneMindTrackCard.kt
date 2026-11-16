@@ -103,6 +103,9 @@ fun TuneMindTrackCard(
     secondaryAccent: Color = LocalAdaptiveTheme.current.secondaryAccent,
     leadingIndex: Int? = null,
     showUnplayedLabel: Boolean = false,
+    spotifyUri: String? = null,
+    albumArtUrl: String? = null,
+    artistImageUrl: String? = null,
     onSyncClick: (() -> Unit)? = null,
     onCardClick: (() -> Unit)? = null
 ) {
@@ -114,6 +117,15 @@ fun TuneMindTrackCard(
         isCoolingDown -> coolingAmber
         else -> accentColor
     }
+
+    val resolvedMedia = rememberResolvedTrackMedia(
+        title = title,
+        artist = artist,
+        spotifyUri = spotifyUri,
+        fallbackAlbumArtUrl = albumArtUrl
+    )
+    val effectiveAlbumUrl = albumArtUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.albumArtUrl
+    val effectiveArtistUrl = artistImageUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.artistImageUrl
 
     val playSummary = when {
         playCount > 0 -> "$playCount ${if (playCount == 1) "play" else "plays"}"
@@ -141,7 +153,7 @@ fun TuneMindTrackCard(
                 .clickable { (onCardClick ?: onPlayClick).invoke() }
                 .padding(horizontal = 4.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (leadingIndex != null) {
                 Text(
@@ -153,7 +165,7 @@ fun TuneMindTrackCard(
                 )
             }
 
-            // 44dp touch-safe play / equalizer circle
+            // Start: 44dp touch-safe play / equalizer circle
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -196,6 +208,7 @@ fun TuneMindTrackCard(
                 }
             }
 
+            // Middle: Song Title & Metadata
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
@@ -215,6 +228,7 @@ fun TuneMindTrackCard(
                 )
             }
 
+            // Gently left of the end photo: Neural Sonic Action button when provided
             if (onSyncClick != null) {
                 NeuralSonicActionButton(
                     accentColor = effectiveAccent,
@@ -222,6 +236,16 @@ fun TuneMindTrackCard(
                     onClick = onSyncClick
                 )
             }
+
+            // End: Layered Song Album Art + Mini Circular Artist Profile Badge
+            LayeredSongArtistBadge(
+                albumArtUrl = effectiveAlbumUrl,
+                artistImageUrl = effectiveArtistUrl,
+                title = title,
+                artist = artist,
+                accentColor = effectiveAccent,
+                size = 46.dp
+            )
         }
 
         HorizontalDivider(
@@ -231,3 +255,4 @@ fun TuneMindTrackCard(
         )
     }
 }
+

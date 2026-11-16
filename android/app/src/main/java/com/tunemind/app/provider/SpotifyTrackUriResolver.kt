@@ -909,7 +909,7 @@ object SpotifyTrackUriResolver {
      * Uses the user's OAuth token if available, otherwise fetches a lightweight
      * `client_credentials` token using `SpotifyAuthManager.CLIENT_ID` & `CLIENT_SECRET`.
      */
-    private suspend fun getSearchBearerToken(context: Context): String? {
+    suspend fun getSearchBearerToken(context: Context): String? {
         val authManager = SpotifyAuthManager(context)
         if (authManager.isAuthenticated()) {
             val userToken = authManager.getValidAccessToken()

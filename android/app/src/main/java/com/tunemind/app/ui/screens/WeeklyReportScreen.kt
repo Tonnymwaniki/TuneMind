@@ -20,10 +20,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.TuneMindTrackCard
+import com.tunemind.app.ui.components.rememberResolvedArtistPhoto
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
@@ -173,6 +175,7 @@ fun WeeklyReportScreen(
                             freshnessPercent = track.freshnessPercent,
                             isCoolingDown = track.isCoolingDown,
                             leadingIndex = index + 1,
+                            spotifyUri = track.spotifyUri,
                             onPlayClick = {
                                 onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
                             }
@@ -181,7 +184,7 @@ fun WeeklyReportScreen(
                 }
             }
 
-            // Top Artists Card
+            // Top Artists Card (with End Artist Profile Photos)
             if (stats.topArtists.isNotEmpty()) {
                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -189,32 +192,48 @@ fun WeeklyReportScreen(
                         val maxPlays = stats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
                         stats.topArtists.take(4).forEach { artist ->
                             val frac = (artist.playCount.toFloat() / maxPlays.toFloat()).coerceIn(0.1f, 1f)
-                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                            val artistPhotoUrl = rememberResolvedArtistPhoto(artist.artistName)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    Text(
-                                        text = artist.artistName,
-                                        color = Color(0xFFF8FAFC),
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = artist.artistName,
+                                            color = Color(0xFFF8FAFC),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                                            color = theme.primaryAccent,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    LinearProgressIndicator(
+                                        progress = { frac },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(4.dp)
+                                            .clip(RoundedCornerShape(2.dp)),
                                         color = theme.primaryAccent,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        trackColor = Color.White.copy(alpha = 0.10f)
                                     )
                                 }
-                                LinearProgressIndicator(
-                                    progress = { frac },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp)),
-                                    color = theme.primaryAccent,
-                                    trackColor = Color.White.copy(alpha = 0.10f)
+                                SpotifyAvatarCircle(
+                                    imageUrl = artistPhotoUrl,
+                                    fallbackInitial = artist.artistName,
+                                    size = 38.dp,
+                                    accentColor = theme.primaryAccent
                                 )
                             }
                         }

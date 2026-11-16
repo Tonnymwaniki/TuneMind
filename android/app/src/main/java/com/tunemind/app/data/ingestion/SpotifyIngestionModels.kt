@@ -185,10 +185,18 @@ data class SpotifyAlbumDto(
     @SerializedName("release_date") val releaseDate: String? = null
 )
 
+data class SpotifyFollowersDto(
+    @SerializedName("total") val total: Long = 0L
+)
+
 data class SpotifyArtistDto(
     @SerializedName("id") val id: String? = null,
     @SerializedName("name") val name: String = "",
-    @SerializedName("uri") val uri: String? = null
+    @SerializedName("uri") val uri: String? = null,
+    @SerializedName("images") val images: List<SpotifyImageDto>? = null,
+    @SerializedName("genres") val genres: List<String>? = null,
+    @SerializedName("popularity") val popularity: Int? = null,
+    @SerializedName("followers") val followers: SpotifyFollowersDto? = null
 )
 
 data class SpotifyImageDto(
@@ -205,6 +213,115 @@ data class SpotifyContextDto(
 
 data class SpotifyExternalUrlsDto(
     @SerializedName("spotify") val spotifyUrl: String? = null
+)
+
+data class SpotifyUserProfileDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("display_name") val displayName: String? = null,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("country") val country: String? = null,
+    @SerializedName("product") val product: String? = null,
+    @SerializedName("images") val images: List<SpotifyImageDto> = emptyList(),
+    @SerializedName("followers") val followers: SpotifyFollowersDto? = null
+)
+
+data class SpotifyTopArtistsResponse(
+    @SerializedName("items") val items: List<SpotifyArtistDto> = emptyList(),
+    @SerializedName("total") val total: Int = 0
+)
+
+data class SpotifyArtistsBatchResponse(
+    @SerializedName("artists") val artists: List<SpotifyArtistDto?> = emptyList()
+)
+
+data class SpotifyTracksBatchResponse(
+    @SerializedName("tracks") val tracks: List<SpotifyTrackDto?> = emptyList()
+)
+
+data class SpotifyFollowedArtistsCursorDto(
+    @SerializedName("items") val items: List<SpotifyArtistDto> = emptyList()
+)
+
+data class SpotifyFollowedArtistsResponse(
+    @SerializedName("artists") val artists: SpotifyFollowedArtistsCursorDto? = null
+)
+
+data class SpotifySimpleAlbumDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("album_type") val albumType: String = "single",
+    @SerializedName("release_date") val releaseDate: String = "",
+    @SerializedName("images") val images: List<SpotifyImageDto> = emptyList(),
+    @SerializedName("artists") val artists: List<SpotifyArtistDto> = emptyList()
+)
+
+data class SpotifyArtistAlbumsResponse(
+    @SerializedName("items") val items: List<SpotifySimpleAlbumDto> = emptyList()
+)
+
+data class SpotifySimpleTrackDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("name") val name: String = "",
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("duration_ms") val durationMs: Long = 0L,
+    @SerializedName("artists") val artists: List<SpotifyArtistDto> = emptyList()
+)
+
+data class SpotifyAlbumTracksResponse(
+    @SerializedName("items") val items: List<SpotifySimpleTrackDto> = emptyList()
+)
+
+data class SpotifySearchTracksPageDto(
+    @SerializedName("items") val items: List<SpotifyTrackDto> = emptyList()
+)
+
+data class SpotifySearchArtistsPageDto(
+    @SerializedName("items") val items: List<SpotifyArtistDto> = emptyList()
+)
+
+data class SpotifySearchResponse(
+    @SerializedName("tracks") val tracks: SpotifySearchTracksPageDto? = null,
+    @SerializedName("artists") val artists: SpotifySearchArtistsPageDto? = null
+)
+
+data class SpotifyDeviceDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("is_active") val isActive: Boolean = false,
+    @SerializedName("is_private_session") val isPrivateSession: Boolean = false,
+    @SerializedName("is_restricted") val isRestricted: Boolean = false,
+    @SerializedName("name") val name: String = "Device",
+    @SerializedName("type") val type: String = "Smartphone",
+    @SerializedName("volume_percent") val volumePercent: Int? = null
+)
+
+data class SpotifyDevicesResponse(
+    @SerializedName("devices") val devices: List<SpotifyDeviceDto> = emptyList()
+)
+
+data class CreatePlaylistRequestDto(
+    @SerializedName("name") val name: String,
+    @SerializedName("description") val description: String,
+    @SerializedName("public") val isPublic: Boolean = false
+)
+
+data class CreatedPlaylistDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("uri") val uri: String = "",
+    @SerializedName("name") val name: String = ""
+)
+
+data class AddTracksToPlaylistRequestDto(
+    @SerializedName("uris") val uris: List<String>
+)
+
+data class SpotifyTrackIdsBodyDto(
+    @SerializedName("ids") val ids: List<String>
+)
+
+data class TransferPlaybackRequestDto(
+    @SerializedName("device_ids") val deviceIds: List<String>,
+    @SerializedName("play") val play: Boolean = true
 )
 
 // ============================================================================

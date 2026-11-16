@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.data.ingestion.SpotifyNewReleaseItem
 import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
@@ -63,6 +64,7 @@ fun DopamineVaultScreen(
     forYouPicks: List<AiRecommendationEntity> = emptyList(),
     learningState: ForYouLearningSummary = ForYouLearningSummary(),
     isDiscovering: Boolean = false,
+    spotifyNewReleases: List<SpotifyNewReleaseItem> = emptyList(),
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { t, _, _ ->
         !nowPlayingTitle.isNullOrBlank() && !t.isNullOrBlank() && t.equals(nowPlayingTitle.trim(), ignoreCase = true)
@@ -75,7 +77,10 @@ fun DopamineVaultScreen(
     },
     onPreviewForYouTrack: (AiRecommendationEntity) -> Unit = { rec ->
         onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "com.spotify.music")
-    }
+    },
+    onAddToQueue: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
+    onSaveToSpotifyLiked: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
+    onExportForYouPlaylist: (List<AiRecommendationEntity>) -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
@@ -330,6 +335,7 @@ fun DopamineVaultScreen(
                             isDiscovering = isDiscovering,
                             totalWildcardsInCycle = allWildcardsInCycle.size,
                             lockedWildcardsCount = allWildcardsInCycle.count { it.isSaved && !it.isDismissed },
+                            newReleases = spotifyNewReleases,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                             onRefreshForYou = onRefreshForYou,
                             onPlayTrack = onPlayForYouTrack,
@@ -348,6 +354,10 @@ fun DopamineVaultScreen(
                                     isCoolingDown = false,
                                     isFromVault = false
                                 )
+                            },
+                            onExportPlaylist = onExportForYouPlaylist,
+                            onPlayNewRelease = { rel ->
+                                onPlayTrack(rel.title, rel.artistName, rel.spotifyUri, "com.spotify.music")
                             }
                         )
                     } else if (displayedSongs.isEmpty()) {
@@ -389,6 +399,7 @@ fun DopamineVaultScreen(
                                 isCoolingDown = song.isCoolingDown,
                                 accentColor = theme.primaryAccent,
                                 secondaryAccent = theme.secondaryAccent,
+                                spotifyUri = song.spotifyUri,
                                 onPlayClick = {
                                     onPlayTrack(song.title, song.artist, song.spotifyUri, song.sourcePackage)
                                 },
@@ -410,6 +421,7 @@ fun DopamineVaultScreen(
             freshnessPercent = selectedSong.freshnessPercent,
             playCount = selectedSong.playCount,
             isCoolingDown = selectedSong.isCoolingDown,
+            spotifyUri = selectedSong.spotifyUri,
             onDismiss = { activeSyncSong = null },
             onPlayNow = {
                 onPlayTrack(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri, selectedSong.sourcePackage)
@@ -432,6 +444,12 @@ fun DopamineVaultScreen(
                     onQuarantineTrack(selectedSong.title, selectedSong.artist)
                     selectedTab = 1
                 }
+            },
+            onAddToSpotifyQueue = {
+                onAddToQueue(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
+            },
+            onSaveToSpotifyLiked = {
+                onSaveToSpotifyLiked(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
             }
         )
     }

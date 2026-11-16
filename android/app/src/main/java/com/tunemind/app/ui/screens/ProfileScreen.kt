@@ -41,6 +41,7 @@ import com.tunemind.app.data.ingestion.SpotifyAuthManager
 import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
@@ -73,6 +74,7 @@ fun ProfileScreen(
 
     val stats by vm.listeningStats.collectAsState()
     val userProfile by vm.userProfile.collectAsState()
+    val spotifyProfile by vm.spotifyUserProfile.collectAsState()
     val likedTracks by vm.spotifyLikedTracks.collectAsState()
     val playlists by vm.spotifyPlaylists.collectAsState()
     val isLibrarySyncing by vm.isLibrarySyncing.collectAsState()
@@ -270,25 +272,14 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(62.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(neonCyan, electricPurple)
-                                    )
-                                )
-                                .border(2.dp, Color.White.copy(alpha = 0.25f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = effectiveDisplayName.take(1).uppercase().ifEmpty { "T" },
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFF0D0D0D)
-                            )
-                        }
+                        SpotifyAvatarCircle(
+                            imageUrl = session.avatarUrl.ifBlank { spotifyProfile?.avatarUrl.orEmpty() },
+                            fallbackInitial = effectiveDisplayName.ifEmpty { "T" },
+                            size = 62.dp,
+                            accentColor = neonCyan,
+                            borderWidth = 2.dp,
+                            borderColor = Color.White.copy(alpha = 0.25f)
+                        )
 
                         Column(
                             modifier = Modifier.weight(1f),
@@ -349,6 +340,20 @@ fun ProfileScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (session.isSupabaseAuthenticated) safeGreen else theme.primaryAccent
                             )
+                            val spProfile = spotifyProfile
+                            if (spProfile != null && spProfile.displayName.isNotBlank()) {
+                                val spPlan = listOfNotNull(
+                                    spProfile.product.takeIf { it.isNotBlank() }?.replaceFirstChar { it.uppercase() },
+                                    spProfile.country.takeIf { it.isNotBlank() }
+                                ).joinToString(" · ")
+                                Text(
+                                    text = if (spPlan.isNotBlank()) "Spotify: ${spProfile.displayName} ($spPlan)" else "Spotify: ${spProfile.displayName}",
+                                    fontSize = 11.5.sp,
+                                    color = safeGreen.copy(alpha = 0.9f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
 

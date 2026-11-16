@@ -31,11 +31,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.bouncyClickable
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -137,11 +139,20 @@ fun MusicalMomentsScreen(
             }
 
             // Current Track Strip (Open Canvas)
+            val currentMedia = if (canSaveCurrent) {
+                rememberResolvedTrackMedia(
+                    title = currentTrackTitle,
+                    artist = currentTrackArtist,
+                    spotifyUri = null,
+                    fallbackAlbumArtUrl = null
+                )
+            } else null
+
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -201,6 +212,17 @@ fun MusicalMomentsScreen(
                                 color = theme.primaryAccent
                             )
                         }
+                    }
+
+                    if (currentMedia != null) {
+                        LayeredSongArtistBadge(
+                            albumArtUrl = currentMedia.albumArtUrl,
+                            artistImageUrl = currentMedia.artistImageUrl,
+                            title = currentTrackTitle,
+                            artist = currentTrackArtist,
+                            accentColor = theme.primaryAccent,
+                            size = 44.dp
+                        )
                     }
                 }
                 StudioHairlineDivider()
@@ -372,11 +394,17 @@ fun MusicalMomentsScreen(
             } else {
                 Column {
                     confirmed.forEach { moment ->
+                        val momentMedia = rememberResolvedTrackMedia(
+                            title = moment.trackTitle,
+                            artist = moment.trackArtist,
+                            spotifyUri = null,
+                            fallbackAlbumArtUrl = null
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
@@ -457,6 +485,15 @@ fun MusicalMomentsScreen(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
+
+                            LayeredSongArtistBadge(
+                                albumArtUrl = momentMedia.albumArtUrl,
+                                artistImageUrl = momentMedia.artistImageUrl,
+                                title = moment.trackTitle,
+                                artist = moment.trackArtist,
+                                accentColor = theme.primaryAccent,
+                                size = 46.dp
+                            )
                         }
                         StudioHairlineDivider()
                     }

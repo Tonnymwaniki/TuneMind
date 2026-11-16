@@ -176,6 +176,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.lottie.compose)
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("androidx.palette:palette-ktx:1.0.0")
     implementation(libs.gson)
     implementation(libs.androidx.media)
     implementation(libs.androidx.browser)

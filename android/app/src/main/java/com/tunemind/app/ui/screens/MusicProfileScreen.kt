@@ -26,10 +26,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
@@ -45,6 +47,8 @@ fun MusicProfileScreen(
     val stats by vm.listeningStats.collectAsState()
     val userProfile by vm.userProfile.collectAsState()
     val tasteAnchors by vm.userTasteAnchors.collectAsState()
+    val spotifyProfile by vm.spotifyUserProfile.collectAsState()
+    val tasteShifts by vm.tasteShiftSummary.collectAsState()
     val theme = LocalAdaptiveTheme.current
 
     val monitoredHours = formatListeningDuration(stats.allTimeListeningMs)
@@ -122,24 +126,12 @@ fun MusicProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(theme.primaryAccent, theme.secondaryAccent)
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = userProfile.name.take(1).uppercase().ifEmpty { "T" },
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF07090E)
-                            )
-                        }
+                        SpotifyAvatarCircle(
+                            imageUrl = spotifyProfile?.avatarUrl.orEmpty(),
+                            fallbackInitial = userProfile.name.ifEmpty { "T" },
+                            size = 56.dp,
+                            accentColor = theme.primaryAccent
+                        )
 
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Row(
@@ -307,6 +299,96 @@ fun MusicProfileScreen(
                 ProfileStatColumn("Fresh Balance", "${stats.discoveryRatePercent}% Fresh", Color(0xFF10B981))
                 ProfileStatColumn("Completion", "${stats.completionRatePercent}%", theme.primaryAccent)
                 ProfileStatColumn("Peak Time", stats.peakWindowLabel.substringBefore(" "), theme.secondaryAccent)
+            }
+
+            if (tasteShifts.topGenres.isNotEmpty() || tasteShifts.risingArtists.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                StudioHairlineDivider()
+                Spacer(modifier = Modifier.height(20.dp))
+
+                if (tasteShifts.topGenres.isNotEmpty()) {
+                    StudioSectionHeader(title = "Spotify Genre DNA")
+                    Spacer(modifier = Modifier.height(10.dp))
+                    tasteShifts.topGenres.take(5).forEach { weight ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = weight.genre.replaceFirstChar { it.uppercase() },
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFFF8FAFC)
+                                )
+                                Text(
+                                    text = "${weight.sharePercent}%",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = theme.primaryAccent
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { (weight.sharePercent / 100f).coerceIn(0.06f, 1f) },
+                                color = theme.primaryAccent,
+                                trackColor = Color.White.copy(alpha = 0.08f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(18.dp))
+                }
+
+                if (tasteShifts.risingArtists.isNotEmpty()) {
+                    StudioSectionHeader(title = "Rising in Your Rotation")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    StudioHairlineDivider()
+                    tasteShifts.risingArtists.take(4).forEach { artistInsight ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 11.dp, horizontal = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = artistInsight.name,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFF8FAFC),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val genreLine = artistInsight.genres.take(2)
+                                    .joinToString(" · ") { g -> g.replaceFirstChar { it.uppercase() } }
+                                    .ifBlank { "Recent Spotify favorite" }
+                                Text(
+                                    text = genreLine,
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.58f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            SpotifyAvatarCircle(
+                                imageUrl = artistInsight.imageUrl,
+                                fallbackInitial = artistInsight.name,
+                                size = 38.dp,
+                                accentColor = theme.primaryAccent
+                            )
+                        }
+                        StudioHairlineDivider()
+                    }
+                }
             }
 
             if (stats.appBreakdown.isNotEmpty()) {

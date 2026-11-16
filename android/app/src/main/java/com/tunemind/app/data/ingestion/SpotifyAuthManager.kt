@@ -231,6 +231,14 @@ class SpotifyAuthManager(context: Context) {
         return granted.contains("user-library-read") && granted.contains("playlist-read-private")
     }
 
+    fun hasExtendedActionScopes(): Boolean {
+        if (!isAuthenticated()) return false
+        val granted = getGrantedScopes()
+        return granted.contains("user-library-modify") &&
+            granted.contains("playlist-modify-private") &&
+            granted.contains("user-follow-read")
+    }
+
     fun clearTokens() {
         encryptedPrefs.edit().clear().apply()
     }
@@ -241,7 +249,7 @@ class SpotifyAuthManager(context: Context) {
         const val CLIENT_ID = "dcfad6acbd594477b0705ecc1e6ace3a"
         const val CLIENT_SECRET = "134028eff64c4e2cafa4b1f617463650"
         const val REDIRECT_URI = "tunemind://spotify-auth-callback"
-        const val SCOPES = "user-read-recently-played user-read-currently-playing user-read-playback-state user-top-read user-library-read playlist-read-private playlist-read-collaborative user-read-playback-position user-modify-playback-state app-remote-control"
+        const val SCOPES = "user-read-private user-read-email user-read-recently-played user-read-currently-playing user-read-playback-state user-top-read user-library-read user-library-modify playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-follow-read user-read-playback-position user-modify-playback-state app-remote-control"
 
         private const val AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
         private const val PREFS_FILE_NAME = "tunemind_spotify_secure_vault"

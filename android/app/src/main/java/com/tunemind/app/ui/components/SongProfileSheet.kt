@@ -349,6 +349,18 @@ fun SongProfile(
     var isInsightLoading by remember { mutableStateOf(false) }
     val isAiAvailable = remember(context) { com.tunemind.app.domain.ai.ClaudeReasoningEngine.isConfigured(context) }
     val coroutineScope = rememberCoroutineScope()
+    val resolvedMedia = rememberResolvedTrackMedia(
+        title = profile.title,
+        artist = profile.artist,
+        spotifyUri = profile.trackId?.takeIf { it.startsWith("spotify:track:") },
+        fallbackAlbumArtUrl = null
+    )
+    val badgeAccent = when {
+        profile.isInVault -> warnAmber
+        isFatigued -> alertRed
+        else -> theme.primaryAccent
+    }
+    val spotifyGenresLine = resolvedMedia.genres.take(3).joinToString(" · ")
 
     Column(
         modifier = Modifier
@@ -357,30 +369,12 @@ fun SongProfile(
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // Hero Track Identity + Freshness Summary
+        // Hero Track Identity + Freshness Summary + Layered Song/Artist Art
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        Brush.radialGradient(
-                            colors = when {
-                                profile.isInVault -> listOf(warnAmber.copy(alpha = 0.30f), Color(0xFF07090E))
-                                isFatigued -> listOf(alertRed.copy(alpha = 0.30f), Color(0xFF07090E))
-                                else -> listOf(theme.primaryAccent.copy(alpha = 0.28f), Color(0xFF07090E))
-                            }
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = profile.emoji, fontSize = 28.sp)
-            }
-
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -402,13 +396,26 @@ fun SongProfile(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${if (profile.isInVault) "Resting in Vault" else profile.vibeTag} · ${profile.appearanceCount}x plays · ${playMinutes}m ${playSeconds}s",
+                    text = buildString {
+                        append(if (profile.isInVault) "Resting in Vault" else profile.vibeTag)
+                        append(" · ${profile.appearanceCount}x plays · ${playMinutes}m ${playSeconds}s")
+                        if (spotifyGenresLine.isNotBlank()) append(" · $spotifyGenresLine")
+                    },
                     fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.56f),
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            LayeredSongArtistBadge(
+                albumArtUrl = resolvedMedia.albumArtUrl,
+                artistImageUrl = resolvedMedia.artistImageUrl,
+                title = profile.title,
+                artist = profile.artist,
+                accentColor = badgeAccent,
+                size = 64.dp
+            )
         }
 
         StudioHairlineDivider()

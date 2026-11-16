@@ -37,7 +37,9 @@ import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.TuneMindTrackCard
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.util.PermissionUtils
 import kotlinx.coroutines.Dispatchers
@@ -474,6 +476,12 @@ fun SearchScreen(
                             SearchOrigin.HISTORY -> theme.primaryAccent
                         }
                         if (item.vaultId != null) {
+                            val vaultMedia = rememberResolvedTrackMedia(
+                                title = item.title,
+                                artist = item.artist,
+                                spotifyUri = item.spotifyUri,
+                                fallbackAlbumArtUrl = null
+                            )
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
                                 color = vaultAmber.copy(alpha = 0.08f),
@@ -525,6 +533,14 @@ fun SearchScreen(
                                     ) {
                                         Text("Restore", color = neonCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
+                                    LayeredSongArtistBadge(
+                                        albumArtUrl = vaultMedia.albumArtUrl,
+                                        artistImageUrl = vaultMedia.artistImageUrl,
+                                        title = item.title,
+                                        artist = item.artist,
+                                        accentColor = vaultAmber,
+                                        size = 44.dp
+                                    )
                                 }
                             }
                         } else {
@@ -535,6 +551,7 @@ fun SearchScreen(
                                 playCount = item.playCount,
                                 isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
                                 accentColor = accent,
+                                spotifyUri = item.spotifyUri,
                                 onPlayClick = { playUniversalItem(item) },
                                 onSyncClick = {
                                     onAskAgentAboutTrack(item.title, item.artist, 85, item.spotifyUri)

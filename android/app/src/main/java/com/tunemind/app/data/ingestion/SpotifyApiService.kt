@@ -4,11 +4,13 @@ import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
@@ -185,6 +187,99 @@ interface SpotifyWebApiService {
         @Header("Authorization") authHeader: String? = null,
         @Query("limit") limit: Int = 10
     ): Response<SpotifyShowEpisodesResponse>
+
+    @GET("v1/me")
+    suspend fun getCurrentUserProfile(
+        @Header("Authorization") authHeader: String? = null
+    ): Response<SpotifyUserProfileDto>
+
+    @GET("v1/me/top/artists")
+    suspend fun getTopArtists(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("time_range") timeRange: String = "short_term",
+        @Query("limit") limit: Int = 20
+    ): Response<SpotifyTopArtistsResponse>
+
+    @GET("v1/tracks")
+    suspend fun getTracksByIds(
+        @Query("ids") idsCsv: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<SpotifyTracksBatchResponse>
+
+    @GET("v1/artists")
+    suspend fun getArtistsByIds(
+        @Query("ids") idsCsv: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<SpotifyArtistsBatchResponse>
+
+    @GET("v1/search")
+    suspend fun searchCatalog(
+        @Query("q") query: String,
+        @Query("type") type: String = "track,artist",
+        @Query("limit") limit: Int = 3,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<SpotifySearchResponse>
+
+    @GET("v1/me/following")
+    suspend fun getFollowedArtists(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("type") type: String = "artist",
+        @Query("limit") limit: Int = 20
+    ): Response<SpotifyFollowedArtistsResponse>
+
+    @GET("v1/artists/{id}/albums")
+    suspend fun getArtistAlbums(
+        @Path("id") artistId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Query("include_groups") includeGroups: String = "single,album",
+        @Query("limit") limit: Int = 4
+    ): Response<SpotifyArtistAlbumsResponse>
+
+    @GET("v1/albums/{id}/tracks")
+    suspend fun getAlbumTracks(
+        @Path("id") albumId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Query("limit") limit: Int = 5
+    ): Response<SpotifyAlbumTracksResponse>
+
+    @PUT("v1/me/tracks")
+    suspend fun saveTracksToLibrary(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("ids") idsCsv: String,
+        @Body body: SpotifyTrackIdsBodyDto
+    ): Response<Unit>
+
+    @POST("v1/me/player/queue")
+    suspend fun addTrackToQueue(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("uri") uri: String,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
+
+    @POST("v1/users/{user_id}/playlists")
+    suspend fun createPlaylist(
+        @Path("user_id") userId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Body body: CreatePlaylistRequestDto
+    ): Response<CreatedPlaylistDto>
+
+    @POST("v1/playlists/{playlist_id}/tracks")
+    suspend fun addItemsToPlaylist(
+        @Path("playlist_id") playlistId: String,
+        @Header("Authorization") authHeader: String? = null,
+        @Body body: AddTracksToPlaylistRequestDto
+    ): Response<Unit>
+
+    @GET("v1/me/player/devices")
+    suspend fun getPlaybackDevices(
+        @Header("Authorization") authHeader: String? = null
+    ): Response<SpotifyDevicesResponse>
+
+    @PUT("v1/me/player")
+    suspend fun transferPlayback(
+        @Header("Authorization") authHeader: String? = null,
+        @Body body: TransferPlaybackRequestDto
+    ): Response<Unit>
 }
 
 /**

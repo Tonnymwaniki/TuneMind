@@ -52,9 +52,12 @@ import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.voice.AgentState
 import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.ui.DopamineCapsuleState
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.TuneMindAiIntelligenceLoop
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
@@ -89,6 +92,8 @@ fun PulseAgentScreen(
     onOpenNowPlaying: () -> Unit = {},
     onOpenAgentGuide: () -> Unit = {},
     profileInitial: String = "",
+    profileAvatarUrl: String = "",
+    currentTrackSpotifyUri: String? = null,
     currentTrackPlayCount: Int = 0,
     autonomousDjEnabled: Boolean = false
 ) {
@@ -174,29 +179,15 @@ fun PulseAgentScreen(
                     }
                     IconButton(onClick = onOpenProfile) {
                         val cleanInitial = profileInitial.trim().take(1).uppercase()
-                        if (cleanInitial.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(
-                                                Color(0xFF00F0FF).copy(alpha = 0.28f),
-                                                Color(0xFF8A2BE2).copy(alpha = 0.34f)
-                                            )
-                                        )
-                                    )
-                                    .border(1.2.dp, Color(0xFF00F0FF).copy(alpha = 0.72f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = cleanInitial,
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        if (profileAvatarUrl.isNotBlank() || cleanInitial.isNotEmpty()) {
+                            SpotifyAvatarCircle(
+                                imageUrl = profileAvatarUrl,
+                                fallbackInitial = cleanInitial.ifBlank { "T" },
+                                size = 32.dp,
+                                accentColor = Color(0xFF00F0FF),
+                                borderWidth = 1.2.dp,
+                                borderColor = Color(0xFF00F0FF).copy(alpha = 0.72f)
+                            )
                         } else {
                             Box(
                                 modifier = Modifier
@@ -368,6 +359,7 @@ fun PulseAgentScreen(
             NowPlayingCard(
                 trackTitle = currentTrackName,
                 artistName = artistName,
+                spotifyUri = currentTrackSpotifyUri,
                 isMusicPlaying = isMusicPlaying,
                 playCount = currentTrackPlayCount,
                 accentColor = activeAccent,
@@ -817,24 +809,34 @@ private fun ProposedTrackApprovalCard(
 private fun NowPlayingCard(
     trackTitle: String?,
     artistName: String?,
+    spotifyUri: String? = null,
     isMusicPlaying: Boolean,
     playCount: Int,
     accentColor: Color,
     onClick: () -> Unit = {}
 ) {
+    val activeAccent = if (isMusicPlaying) Color(0xFF10B981) else accentColor
+    val media = if (!trackTitle.isNullOrBlank()) {
+        rememberResolvedTrackMedia(
+            title = trackTitle,
+            artist = artistName,
+            spotifyUri = spotifyUri
+        )
+    } else null
+
     SoftGlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
-        accentTint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
+        accentTint = activeAccent,
         cornerRadius = 18.dp,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -849,7 +851,7 @@ private fun NowPlayingCard(
                 Icon(
                     imageVector = if (isMusicPlaying) Icons.Rounded.GraphicEq else Icons.Rounded.MusicNote,
                     contentDescription = null,
-                    tint = if (isMusicPlaying) Color(0xFF10B981) else accentColor,
+                    tint = activeAccent,
                     modifier = Modifier.size(19.dp)
                 )
             }
@@ -885,6 +887,17 @@ private fun NowPlayingCard(
                 tint = Color.White.copy(alpha = 0.45f),
                 modifier = Modifier.size(18.dp)
             )
+
+            if (media != null && !trackTitle.isNullOrBlank()) {
+                LayeredSongArtistBadge(
+                    albumArtUrl = media.albumArtUrl,
+                    artistImageUrl = media.artistImageUrl,
+                    title = trackTitle,
+                    artist = artistName ?: "",
+                    accentColor = activeAccent,
+                    size = 46.dp
+                )
+            }
         }
     }
 }

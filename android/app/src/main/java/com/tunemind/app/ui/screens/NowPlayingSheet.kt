@@ -20,21 +20,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.provider.SpotifyAppRemoteManager
 import com.tunemind.app.provider.TuneMindInAppPlayer
 import com.tunemind.app.ui.DopamineCapsuleState
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
@@ -50,13 +57,20 @@ fun NowPlayingSheet(
     onAskAgentAboutCurrent: (title: String, artist: String) -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
+    val context = LocalContext.current
     val homeState by vm.homeState.collectAsState()
+    val liveSpotify by vm.spotifyLiveState.collectAsState()
+    val spotifyDevices by vm.spotifyDevices.collectAsState()
     val inAppHasTrack by TuneMindInAppPlayer.hasActiveTrackFlow.collectAsState()
     val inAppPlaying by TuneMindInAppPlayer.isPlayingFlow.collectAsState()
     val inAppTitle by TuneMindInAppPlayer.currentTitleFlow.collectAsState()
     val inAppArtist by TuneMindInAppPlayer.currentArtistFlow.collectAsState()
     val inAppPosMs by TuneMindInAppPlayer.positionMsFlow.collectAsState()
     val inAppDurMs by TuneMindInAppPlayer.durationMsFlow.collectAsState()
+
+    LaunchedEffect(Unit) {
+        vm.refreshSpotifyDevices()
+    }
 
     val nowPlaying = homeState.nowPlaying
     val effectiveTitle = (if (inAppHasTrack) inAppTitle else nowPlaying?.title)
@@ -84,6 +98,14 @@ fun NowPlayingSheet(
     val warnAmber = Color(0xFFFFB000)
 
     val hasTrack = effectiveTitle != "Nothing Playing"
+    val activeMedia = if (hasTrack) {
+        rememberResolvedTrackMedia(
+            title = effectiveTitle,
+            artist = effectiveArtist,
+            spotifyUri = liveSpotify?.spotifyUri,
+            fallbackAlbumArtUrl = liveSpotify?.albumArtUrl
+        )
+    } else null
     val durationSafe = effectiveDurationMs.coerceAtLeast(1L)
     val liveFraction = (effectivePosMs.toFloat() / durationSafe.toFloat()).coerceIn(0f, 1f)
     val displayFraction = sliderOverride ?: liveFraction
@@ -145,8 +167,8 @@ fun NowPlayingSheet(
                 IconButton(
                     onClick = {
                         if (hasTrack) {
-                            vm.syncAtmosphereToTrack(effectiveTitle, effectiveArtist)
-                            actionStatus = "Synced theme mood to \"$effectiveTitle\""
+                            vm.syncAtmosphereToTrack(effectiveTitle, effectiveArtist, activeMedia?.albumArtUrl)
+                            actionStatus = "Chromatic sync applied to \"$effectiveTitle\""
                         }
                     }
                 ) {
@@ -160,42 +182,79 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Glowing artwork disc
+            // Glowing artwork disc + mini Artist avatar badge
             Box(
                 modifier = Modifier
-                    .size(210.dp)
+                    .size(214.dp)
                     .graphicsLayer {
                         scaleX = discScale
                         scaleY = discScale
-                    }
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                electricPurple.copy(alpha = 0.45f),
-                                neonCyan.copy(alpha = 0.16f),
-                                Color(0xFF0D0D0D)
-                            )
-                        )
-                    )
-                    .border(
-                        width = 1.5.dp,
-                        brush = Brush.linearGradient(listOf(neonCyan.copy(alpha = 0.7f), electricPurple.copy(alpha = 0.6f))),
-                        shape = CircleShape
-                    ),
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                if (effectivePlaying) {
-                    AnimatedEqualizerBars(
-                        color = neonCyan,
-                        modifier = Modifier.size(64.dp, 52.dp)
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = neonCyan,
-                        modifier = Modifier.size(64.dp)
+                Box(
+                    modifier = Modifier
+                        .size(210.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    electricPurple.copy(alpha = 0.45f),
+                                    neonCyan.copy(alpha = 0.16f),
+                                    Color(0xFF0D0D0D)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.5.dp,
+                            brush = Brush.linearGradient(listOf(neonCyan.copy(alpha = 0.7f), electricPurple.copy(alpha = 0.6f))),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val artUrl = activeMedia?.albumArtUrl?.takeIf { it.startsWith("http") }
+                    if (artUrl != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(artUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "$effectiveTitle album art",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = if (effectivePlaying) 0.28f else 0.16f))
+                        )
+                    }
+                    if (effectivePlaying) {
+                        AnimatedEqualizerBars(
+                            color = neonCyan,
+                            modifier = Modifier.size(64.dp, 52.dp)
+                        )
+                    } else if (artUrl == null) {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = neonCyan,
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
+                }
+
+                if (hasTrack) {
+                    SpotifyAvatarCircle(
+                        imageUrl = activeMedia?.artistImageUrl,
+                        fallbackInitial = effectiveArtist,
+                        size = 48.dp,
+                        accentColor = neonCyan,
+                        borderWidth = 2.dp,
+                        borderColor = Color(0xFF070A12),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = (-6).dp, y = (-6).dp)
                     )
                 }
             }
@@ -375,7 +434,115 @@ fun NowPlayingSheet(
                         }
                     )
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    NowPlayingQuickAction(
+                        icon = Icons.Rounded.PlaylistAdd,
+                        label = "Spotify Queue",
+                        accent = Color(0xFF1DB954),
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, liveSpotify?.spotifyUri)
+                            actionStatus = "Adding \"$effectiveTitle\" to Spotify queue…"
+                        }
+                    )
+                    NowPlayingQuickAction(
+                        icon = Icons.Rounded.FavoriteBorder,
+                        label = "Save Liked",
+                        accent = Color(0xFF1DB954),
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, liveSpotify?.spotifyUri)
+                            actionStatus = "Saving \"$effectiveTitle\" to Liked Songs…"
+                        }
+                    )
+                }
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (spotifyDevices.isNotEmpty()) {
+                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            StudioSectionHeader(title = "Spotify Devices")
+                            IconButton(
+                                onClick = { vm.refreshSpotifyDevices() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = "Refresh devices",
+                                    tint = neonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        spotifyDevices.forEach { dev ->
+                            val isActive = dev.isActive
+                            val devAccent = if (isActive) Color(0xFF1DB954) else Color.White.copy(alpha = 0.6f)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isActive) Color(0xFF1DB954).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.04f))
+                                    .border(
+                                        1.dp,
+                                        if (isActive) Color(0xFF1DB954).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable {
+                                        vm.transferPlaybackToDevice(dev.id)
+                                        actionStatus = "Switching playback to ${dev.name}…"
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when {
+                                        dev.type.contains("Speaker", true) -> Icons.Rounded.Speaker
+                                        dev.type.contains("Computer", true) -> Icons.Rounded.Computer
+                                        else -> Icons.Rounded.Headphones
+                                    },
+                                    contentDescription = null,
+                                    tint = devAccent,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = dev.name,
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (isActive) "Active · ${dev.type}" else dev.type,
+                                        color = devAccent,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+                                if (isActive) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = "Active",
+                                        tint = Color(0xFF1DB954),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
             }
 
             // Up Next Queue (Pending AI Proposal + Dopamine Capsule)
@@ -439,6 +606,11 @@ fun NowPlayingSheet(
                         )
                     } else {
                         dopamineCapsule.tracks.forEachIndexed { idx, capTrack ->
+                            val capMedia = rememberResolvedTrackMedia(
+                                title = capTrack.title,
+                                artist = capTrack.artist,
+                                spotifyUri = capTrack.spotifyUri
+                            )
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -454,17 +626,25 @@ fun NowPlayingSheet(
                                     }
                                     .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(
-                                    text = "${idx + 1}",
-                                    color = neonCyan,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(neonCyan.copy(alpha = 0.14f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play",
+                                        tint = neonCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = capTrack.title,
+                                        text = "${idx + 1}. ${capTrack.title}",
                                         color = Color(0xFFF8FAFC),
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -479,11 +659,13 @@ fun NowPlayingSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Icon(
-                                    imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = "Play",
-                                    tint = neonCyan,
-                                    modifier = Modifier.size(20.dp)
+                                LayeredSongArtistBadge(
+                                    albumArtUrl = capMedia.albumArtUrl,
+                                    artistImageUrl = capMedia.artistImageUrl,
+                                    title = capTrack.title,
+                                    artist = capTrack.artist,
+                                    accentColor = neonCyan,
+                                    size = 44.dp
                                 )
                             }
                             if (idx < dopamineCapsule.tracks.lastIndex) {

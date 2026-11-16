@@ -24,16 +24,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.bouncyClickable
+import com.tunemind.app.ui.components.rememberResolvedArtistPhoto
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import java.util.Locale
 
@@ -58,6 +61,7 @@ fun StatsScreen(
     onOpenMoments: () -> Unit
 ) {
     val stats by vm.listeningStats.collectAsState()
+    val tasteShifts by vm.tasteShiftSummary.collectAsState()
     val nowPlaying = vm.homeState.collectAsState().value.nowPlaying
     val liveSpotify by vm.spotifyLiveState.collectAsState()
 
@@ -116,6 +120,7 @@ fun StatsScreen(
 
             statsDashboardItems(
                 stats = stats,
+                tasteShiftSummary = tasteShifts,
                 resolvePlayCount = { t, a, uri -> vm.resolvePlayCount(t, a, uri) },
                 isTrackCurrentlyPlaying = { t, a, uri ->
                     // Reactive read on nowPlaying & liveSpotify ensures immediate live highlight
@@ -145,7 +150,8 @@ fun StatsDashboardContent(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    onOpenMoments: () -> Unit
+    onOpenMoments: () -> Unit,
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -154,6 +160,7 @@ fun StatsDashboardContent(
     ) {
         statsDashboardItems(
             stats = stats,
+            tasteShiftSummary = tasteShiftSummary,
             resolvePlayCount = resolvePlayCount,
             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
             onPlayTrack = onPlayTrack,
@@ -173,7 +180,8 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    onOpenMoments: () -> Unit
+    onOpenMoments: () -> Unit,
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
     // 1. Single Hero Card: Time Window + Listening Summary
     item(key = "stats_hero_card") {
@@ -531,47 +539,42 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 6. Top Artists (Hairline List)
+    // 6. Top Artists (Hairline List with End Artist Profile Photos)
     if (stats.topArtists.isNotEmpty()) {
         item(key = "stats_top_artists") {
             val theme = LocalAdaptiveTheme.current
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 StudioSectionHeader(title = "Top Artists")
                 stats.topArtists.take(5).forEachIndexed { index, artist ->
+                    val artistPhotoUrl = rememberResolvedArtistPhoto(artist.artistName)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
+                        Text(
+                            text = "${index + 1}",
+                            color = Color.White.copy(alpha = 0.46f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.width(18.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "${index + 1}",
-                                color = Color.White.copy(alpha = 0.46f),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.width(18.dp)
+                                text = artist.artistName,
+                                color = Color(0xFFF8FAFC),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Column {
-                                Text(
-                                    text = artist.artistName,
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${artist.uniqueTrackCount} ${if (artist.uniqueTrackCount == 1) "track" else "tracks"}",
-                                    color = Color.White.copy(alpha = 0.54f),
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Text(
+                                text = "${artist.uniqueTrackCount} ${if (artist.uniqueTrackCount == 1) "track" else "tracks"}",
+                                color = Color.White.copy(alpha = 0.54f),
+                                fontSize = 12.sp
+                            )
                         }
                         Text(
                             text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
@@ -579,8 +582,64 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
+                        SpotifyAvatarCircle(
+                            imageUrl = artistPhotoUrl,
+                            fallbackInitial = artist.artistName,
+                            size = 42.dp,
+                            accentColor = theme.primaryAccent
+                        )
                     }
                     StudioHairlineDivider()
+                }
+            }
+        }
+    }
+
+    // 6b. Real Spotify Genre Breakdown (Zero AI Tokens)
+    if (tasteShiftSummary.topGenres.isNotEmpty()) {
+        item(key = "stats_spotify_genres") {
+            val theme = LocalAdaptiveTheme.current
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = Color(0xFF1DB954)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StudioSectionHeader(
+                        title = "Genre DNA · Spotify",
+                        actionLabel = "Taste Profile",
+                        onActionClick = onOpenMusicProfile
+                    )
+                    tasteShiftSummary.topGenres.take(5).forEach { g ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = g.genre.replaceFirstChar { it.uppercase() },
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "${g.sharePercent}%",
+                                    color = theme.secondaryAccent,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { (g.sharePercent / 100f).coerceIn(0.06f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = Color(0xFF1DB954),
+                                trackColor = Color.White.copy(alpha = 0.08f)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -607,6 +666,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 isCurrentlyPlaying = playingNow,
                 appLabel = track.primaryAppName,
                 leadingIndex = index + 1,
+                spotifyUri = track.spotifyUri,
                 onPlayClick = {
                     onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
                 }

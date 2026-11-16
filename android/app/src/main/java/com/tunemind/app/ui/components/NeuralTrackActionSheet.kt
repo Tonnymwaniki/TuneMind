@@ -18,10 +18,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -72,7 +74,7 @@ fun NeuralSonicActionButton(
 }
 
 /**
- * Full-width native Material 3 ModalBottomSheet for track actions (Play, Ask, Theme, Rest).
+ * Full-width native Material 3 ModalBottomSheet for track actions (Play, Ask, Theme, Spotify Queue/Like, Rest).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,14 +88,26 @@ fun NeuralTrackActionDialog(
     onPlayNow: () -> Unit,
     onAgentNeuralBreakdown: () -> Unit,
     onSyncAtmosphereToTrack: () -> Unit,
-    onToggleCooldownVault: () -> Unit
+    onToggleCooldownVault: () -> Unit,
+    spotifyUri: String? = null,
+    albumArtUrl: String? = null,
+    onAddToSpotifyQueue: (() -> Unit)? = null,
+    onSaveToSpotifyLiked: (() -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val detectedMood = remember(title, artist) {
         AdaptiveThemeEngine.resolveTrackMood(title, artist)
     }
+    val resolvedMedia = rememberResolvedTrackMedia(
+        title = title,
+        artist = artist,
+        spotifyUri = spotifyUri,
+        fallbackAlbumArtUrl = albumArtUrl
+    )
     val ringColor = if (isCoolingDown) Color(0xFFFFB000) else theme.primaryAccent
+    val genreHint = resolvedMedia.genres.take(2).joinToString(" · ")
+        .takeIf { it.isNotBlank() } ?: detectedMood.label
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -112,11 +126,11 @@ fun NeuralTrackActionDialog(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(56.dp)
+                    modifier = Modifier.size(54.dp)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         drawArc(
@@ -153,13 +167,22 @@ fun NeuralTrackActionDialog(
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "${artist.ifBlank { "Unknown Artist" }} · $playCount ${if (playCount == 1) "play" else "plays"} · ${detectedMood.label}",
+                        text = "${artist.ifBlank { "Unknown Artist" }} · $playCount ${if (playCount == 1) "play" else "plays"} · $genreHint",
                         color = Color.White.copy(alpha = 0.62f),
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                LayeredSongArtistBadge(
+                    albumArtUrl = albumArtUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.albumArtUrl,
+                    artistImageUrl = resolvedMedia.artistImageUrl,
+                    title = title,
+                    artist = artist,
+                    accentColor = ringColor,
+                    size = 52.dp
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -177,6 +200,34 @@ fun NeuralTrackActionDialog(
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
 
+            if (onAddToSpotifyQueue != null) {
+                TrackActionRow(
+                    icon = Icons.Rounded.PlaylistAdd,
+                    title = "Add to Spotify queue",
+                    subtitle = "Play next in your active Spotify session",
+                    accent = Color(0xFF1DB954),
+                    onClick = {
+                        onAddToSpotifyQueue()
+                        onDismiss()
+                    }
+                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+            }
+
+            if (onSaveToSpotifyLiked != null) {
+                TrackActionRow(
+                    icon = Icons.Rounded.FavoriteBorder,
+                    title = "Save to Spotify Liked Songs",
+                    subtitle = "Add straight to your Spotify library",
+                    accent = Color(0xFF1DB954),
+                    onClick = {
+                        onSaveToSpotifyLiked()
+                        onDismiss()
+                    }
+                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+            }
+
             TrackActionRow(
                 icon = Icons.Rounded.GraphicEq,
                 title = "Ask TuneMind about this song",
@@ -192,7 +243,7 @@ fun NeuralTrackActionDialog(
             TrackActionRow(
                 icon = Icons.Rounded.Palette,
                 title = "Match colors to this song",
-                subtitle = "Set app tint to ${detectedMood.label.lowercase()} tone",
+                subtitle = "Extract palette from cover art or mood tone",
                 accent = Color(0xFFA855F7),
                 onClick = {
                     onSyncAtmosphereToTrack()

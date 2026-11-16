@@ -152,6 +152,11 @@ class SpotifyOAuthRepository(context: Context) {
             SpotifyRecentlyPlayedSyncWorker.schedulePeriodic15MinSync(appContext)
             syncRecentlyPlayedToLocalRoom()
             syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = true)
+            runCatching {
+                val visualRepo = SpotifyVisualArtworkRepository.getInstance(appContext)
+                visualRepo.syncUserProfileAndTasteIntelligence(force = true)
+                visualRepo.syncFollowedNewReleases(force = true)
+            }
         }
         exchanged
     }
@@ -547,6 +552,12 @@ class SpotifyOAuthRepository(context: Context) {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Podcasts sync note: ${e.message}")
+        }
+
+        runCatching {
+            val visualRepo = SpotifyVisualArtworkRepository.getInstance(appContext)
+            visualRepo.syncUserProfileAndTasteIntelligence(force = false)
+            visualRepo.syncFollowedNewReleases(force = false)
         }
 
         _needsLibraryScopeUpgrade.value = hitPermissionForbidden || !authManager.hasExtendedLibraryScopes()

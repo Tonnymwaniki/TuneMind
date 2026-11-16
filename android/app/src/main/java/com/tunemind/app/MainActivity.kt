@@ -140,6 +140,10 @@ open class MainActivity : ComponentActivity() {
                     val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
                     val forYouLearningState by vm.forYouLearningState.collectAsState()
                     val isDiscovering by vm.isDiscovering.collectAsState()
+                    val spotifyUserProfile by vm.spotifyUserProfile.collectAsState()
+                    val tasteShiftSummary by vm.tasteShiftSummary.collectAsState()
+                    val spotifyNewReleases by vm.spotifyNewReleases.collectAsState()
+                    val spotifyActionFeedback by vm.spotifyActionFeedback.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -669,6 +673,17 @@ open class MainActivity : ComponentActivity() {
                                                         vm.markRecommendationPlayed(rec.id)
                                                         playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
                                                     }
+                                                },
+                                                spotifyNewReleases = spotifyNewReleases,
+                                                onAddToQueue = { title, artist, uri ->
+                                                    vm.addTrackToSpotifyQueue(title, artist, uri)
+                                                },
+                                                onSaveToSpotifyLiked = { title, artist, uri ->
+                                                    vm.saveTrackToSpotifyLiked(title, artist, uri)
+                                                },
+                                                onExportForYouPlaylist = { recs ->
+                                                    val triples = recs.map { Triple(it.title, it.artist, it.spotifyUri) }
+                                                    vm.exportForYouDropAsPlaylist("TuneMind Daily Drop", triples)
                                                 }
                                             )
                                         }
@@ -723,6 +738,8 @@ open class MainActivity : ComponentActivity() {
                                                 } else {
                                                     ""
                                                 },
+                                                profileAvatarUrl = authSession.avatarUrl.ifBlank { spotifyUserProfile?.avatarUrl.orEmpty() },
+                                                currentTrackSpotifyUri = spotifyLiveState?.spotifyUri,
                                                 currentTrackPlayCount = if (trackTitle != null) {
                                                     vm.resolvePlayCount(
                                                         trackTitle,
@@ -796,7 +813,8 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenMoments = { showMomentsScreen = true },
                                                 onOpenAccountAuth = {
                                                     showProfileScreen = true
-                                                }
+                                                },
+                                                tasteShiftSummary = tasteShiftSummary
                                             )
                                         }
                                     }
@@ -884,6 +902,48 @@ open class MainActivity : ComponentActivity() {
                                                 ) {
                                                     Text("Dismiss", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
                                                 }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                val currentSpotifyMsg = spotifyActionFeedback
+                                if (!currentSpotifyMsg.isNullOrBlank()) {
+                                    LaunchedEffect(currentSpotifyMsg) {
+                                        kotlinx.coroutines.delay(4000L)
+                                        vm.clearSpotifyActionFeedback()
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = Color(0xFF0E1D17),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            Color(0xFF1DB954).copy(alpha = 0.65f)
+                                        ),
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .statusBarsPadding()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                                            .fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = currentSpotifyMsg,
+                                                color = Color(0xFFF8FAFC),
+                                                fontSize = 12.5.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            TextButton(
+                                                onClick = { vm.clearSpotifyActionFeedback() },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("Dismiss", fontSize = 11.5.sp, color = Color(0xFF1DB954))
                                             }
                                         }
                                     }

@@ -24,15 +24,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
 import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
@@ -40,6 +47,7 @@ import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.bouncyClickable
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 /**
@@ -139,26 +147,47 @@ fun SpotifyLibrarySection(
                             }
                         }
 
-                        Column {
-                            Text(
-                                text = liveState.title,
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = buildString {
-                                    append(liveState.artistOrShow)
-                                    if (liveState.albumOrSubtitle.isNotBlank()) {
-                                        append(" · ${liveState.albumOrSubtitle}")
-                                    }
-                                },
-                                color = Color.White.copy(alpha = 0.60f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        val liveMedia = rememberResolvedTrackMedia(
+                            title = liveState.title,
+                            artist = liveState.artistOrShow,
+                            spotifyUri = liveState.spotifyUri,
+                            fallbackAlbumArtUrl = liveState.albumArtUrl
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = liveState.title,
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = buildString {
+                                        append(liveState.artistOrShow)
+                                        if (liveState.albumOrSubtitle.isNotBlank()) {
+                                            append(" · ${liveState.albumOrSubtitle}")
+                                        }
+                                    },
+                                    color = Color.White.copy(alpha = 0.60f),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            LayeredSongArtistBadge(
+                                albumArtUrl = liveState.albumArtUrl?.takeIf { it.isNotBlank() } ?: liveMedia.albumArtUrl,
+                                artistImageUrl = liveMedia.artistImageUrl,
+                                title = liveState.title,
+                                artist = liveState.artistOrShow,
+                                accentColor = spotifyGreen,
+                                size = 48.dp
                             )
                         }
 
@@ -318,6 +347,8 @@ fun SpotifyLibrarySection(
                             isCurrentlyPlaying = isPlaying,
                             accentColor = spotifyGreen,
                             leadingIndex = idx + 1,
+                            spotifyUri = item.spotifyUri,
+                            albumArtUrl = item.albumArtUrl,
                             onPlayClick = {
                                 onPlayTrack(item.trackTitle, item.artistName, item.spotifyUri, "com.spotify.music")
                             }
@@ -414,6 +445,8 @@ fun SpotifyLibrarySection(
                                 isCurrentlyPlaying = isPlaying,
                                 accentColor = spotifyGreen,
                                 leadingIndex = idx + 1,
+                                spotifyUri = tr.spotifyUri.ifBlank { null },
+                                albumArtUrl = tr.albumArtUrl,
                                 onPlayClick = {
                                     onPlayTrack(tr.title, tr.artist, tr.spotifyUri.ifBlank { null }, "com.spotify.music")
                                 }
@@ -592,6 +625,13 @@ fun SpotifyLibrarySection(
                                     tint = Color.White.copy(alpha = 0.45f),
                                     modifier = Modifier.size(20.dp)
                                 )
+
+                                SpotifyCoverArtBox(
+                                    imageUrl = pl.imageUrl,
+                                    fallbackIcon = Icons.Rounded.QueueMusic,
+                                    accentColor = spotifyGreen,
+                                    size = 44.dp
+                                )
                             }
                             StudioHairlineDivider(modifier = Modifier.padding(start = 60.dp))
                         }
@@ -661,6 +701,12 @@ fun SpotifyLibrarySection(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
+                                    SpotifyCoverArtBox(
+                                        imageUrl = show.imageUrl,
+                                        fallbackIcon = Icons.Rounded.Podcasts,
+                                        accentColor = theme.secondaryAccent,
+                                        size = 44.dp
+                                    )
                                 }
                                 StudioHairlineDivider(modifier = Modifier.padding(start = 54.dp))
                             }
@@ -741,6 +787,13 @@ fun SpotifyLibrarySection(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+
+                                        SpotifyCoverArtBox(
+                                            imageUrl = ep.imageUrl,
+                                            fallbackIcon = Icons.Rounded.Podcasts,
+                                            accentColor = if (isPlaying) spotifyGreen else theme.primaryAccent,
+                                            size = 44.dp
+                                        )
                                     }
 
                                     if (ep.resumePositionMs > 0L || ep.fullyPlayed || isPlaying) {
@@ -805,6 +858,47 @@ private fun LibraryEmptyBlock(
                 color = Color.White.copy(alpha = 0.62f),
                 fontSize = 13.sp,
                 lineHeight = 18.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpotifyCoverArtBox(
+    imageUrl: String?,
+    fallbackIcon: ImageVector,
+    accentColor: Color,
+    size: Dp = 44.dp
+) {
+    val context = LocalContext.current
+    val cleanUrl = imageUrl?.trim()?.takeIf { it.startsWith("http") }
+    var imageFailed by remember(cleanUrl) { mutableStateOf(false) }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(accentColor.copy(alpha = 0.14f))
+    ) {
+        Icon(
+            imageVector = fallbackIcon,
+            contentDescription = null,
+            tint = accentColor,
+            modifier = Modifier.size((size * 0.45f).coerceIn(16.dp, 24.dp))
+        )
+        if (cleanUrl != null && !imageFailed) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(cleanUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                onError = { imageFailed = true },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(10.dp))
             )
         }
     }

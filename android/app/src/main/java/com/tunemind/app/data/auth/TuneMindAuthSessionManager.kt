@@ -169,6 +169,26 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         editor.apply()
     }
 
+    fun updateSpotifyProfileCache(displayName: String?, avatarUrl: String?) {
+        val editor = prefs.edit()
+        var changed = false
+        val cleanName = displayName?.trim().orEmpty()
+        val currentName = prefs.getString(KEY_DISPLAY_NAME, "").orEmpty()
+        if (cleanName.isNotBlank() && (currentName.isBlank() || currentName == "TuneMind Listener")) {
+            editor.putString(KEY_DISPLAY_NAME, cleanName)
+            changed = true
+        }
+        val cleanAvatar = avatarUrl?.trim().orEmpty()
+        if (cleanAvatar.isNotBlank()) {
+            editor.putString(KEY_AVATAR_URL, cleanAvatar)
+            changed = true
+        }
+        if (changed) {
+            editor.apply()
+            refreshSessionState()
+        }
+    }
+
     // ========================================================================
     // SAVED ACCOUNTS ROSTER (FOR REAL SWITCH ACCOUNTS)
     // ========================================================================

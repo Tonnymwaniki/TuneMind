@@ -236,6 +236,30 @@ class TuneMindViewModel : ViewModel() {
     private val _needsLibraryScopeUpgrade = MutableStateFlow(false)
     val needsLibraryScopeUpgrade: StateFlow<Boolean> = _needsLibraryScopeUpgrade.asStateFlow()
 
+    private val visualRepo by lazy {
+        AppHolder.context?.let { com.tunemind.app.data.ingestion.SpotifyVisualArtworkRepository.getInstance(it) }
+    }
+    private val _spotifyTrackVisuals = MutableStateFlow<Map<String, com.tunemind.app.data.ingestion.ResolvedTrackVisuals>>(emptyMap())
+    val spotifyTrackVisuals: StateFlow<Map<String, com.tunemind.app.data.ingestion.ResolvedTrackVisuals>> = _spotifyTrackVisuals.asStateFlow()
+
+    private val _spotifyArtistProfiles = MutableStateFlow<Map<String, com.tunemind.app.data.ingestion.ArtistProfileCacheEntity>>(emptyMap())
+    val spotifyArtistProfiles: StateFlow<Map<String, com.tunemind.app.data.ingestion.ArtistProfileCacheEntity>> = _spotifyArtistProfiles.asStateFlow()
+
+    private val _spotifyUserProfile = MutableStateFlow<com.tunemind.app.data.ingestion.SpotifyUserProfileSnapshot?>(null)
+    val spotifyUserProfile: StateFlow<com.tunemind.app.data.ingestion.SpotifyUserProfileSnapshot?> = _spotifyUserProfile.asStateFlow()
+
+    private val _tasteShiftSummary = MutableStateFlow(com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary())
+    val tasteShiftSummary: StateFlow<com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary> = _tasteShiftSummary.asStateFlow()
+
+    private val _spotifyNewReleases = MutableStateFlow<List<com.tunemind.app.data.ingestion.SpotifyNewReleaseItem>>(emptyList())
+    val spotifyNewReleases: StateFlow<List<com.tunemind.app.data.ingestion.SpotifyNewReleaseItem>> = _spotifyNewReleases.asStateFlow()
+
+    private val _spotifyDevices = MutableStateFlow<List<com.tunemind.app.data.ingestion.SpotifyDeviceItem>>(emptyList())
+    val spotifyDevices: StateFlow<List<com.tunemind.app.data.ingestion.SpotifyDeviceItem>> = _spotifyDevices.asStateFlow()
+
+    private val _spotifyActionFeedback = MutableStateFlow<String?>(null)
+    val spotifyActionFeedback: StateFlow<String?> = _spotifyActionFeedback.asStateFlow()
+
     fun resolvePlayCount(title: String?, artist: String?, spotifyUri: String? = null): Int {
         val cleanUri = spotifyUri?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
         if (cleanUri != null) {
@@ -666,7 +690,7 @@ class TuneMindViewModel : ViewModel() {
         updateThemePreferences(updated)
     }
 
-    fun syncAtmosphereToTrack(title: String, artist: String) {
+    fun syncAtmosphereToTrack(title: String, artist: String, explicitArtworkUrl: String? = null) {
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(title, artist)
         val targetPaletteId = when (mood) {
             com.tunemind.app.ui.theme.MusicalMood.CALM -> "morning"
@@ -684,6 +708,22 @@ class TuneMindViewModel : ViewModel() {
         _themePreferences.value = updated
         themePrefsRepo?.savePreferences(updated)
         recomputeAdaptiveTheme(overrideTitle = title, overrideArtist = artist)
+
+        // Zero-token Chromatic Sync from album cover artwork
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch {
+            val artUrl = explicitArtworkUrl?.takeIf { it.isNotBlank() }
+                ?: visualRepo?.getCachedTrackVisuals(title, artist, _spotifyLiveState.value?.spotifyUri)?.albumArtUrl
+                ?: _spotifyLiveState.value?.albumArtUrl
+            if (!artUrl.isNullOrBlank()) {
+                val hex = com.tunemind.app.ui.theme.AlbumArtPaletteExtractor.extractDominantAccentHex(ctx, artUrl)
+                if (!hex.isNullOrBlank()) {
+                    setCustomThemeAccentHex(hex, com.tunemind.app.ui.theme.ThemeBehavior.FIXED)
+                }
+            } else {
+                visualRepo?.requestTrackVisuals(title, artist)
+            }
+        }
     }
 
     @Volatile
@@ -1009,6 +1049,34 @@ class TuneMindViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching {
                 spotifyRepo?.needsLibraryScopeUpgrade?.collect { _needsLibraryScopeUpgrade.value = it }
+            }
+        }
+
+        // Observe Spotify Visuals, Profile, Taste Shifts, New Releases & Playback Devices
+        viewModelScope.launch {
+            runCatching { visualRepo?.trackVisualsFlow?.collect { _spotifyTrackVisuals.value = it } }
+        }
+        viewModelScope.launch {
+            runCatching { visualRepo?.artistProfilesFlow?.collect { _spotifyArtistProfiles.value = it } }
+        }
+        viewModelScope.launch {
+            runCatching { visualRepo?.userProfileFlow?.collect { _spotifyUserProfile.value = it } }
+        }
+        viewModelScope.launch {
+            runCatching { visualRepo?.tasteShiftSummaryFlow?.collect { _tasteShiftSummary.value = it } }
+        }
+        viewModelScope.launch {
+            runCatching { visualRepo?.newReleasesFlow?.collect { _spotifyNewReleases.value = it } }
+        }
+        viewModelScope.launch {
+            runCatching { visualRepo?.playbackDevicesFlow?.collect { _spotifyDevices.value = it } }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (spotifyRepo?.isConnectedFlow?.value == true) {
+                    visualRepo?.syncUserProfileAndTasteIntelligence(force = false)
+                    visualRepo?.syncFollowedNewReleases(force = false)
+                }
             }
         }
 
@@ -2110,6 +2178,59 @@ class TuneMindViewModel : ViewModel() {
             suggestedProviderId = explicitProviderId ?: item.suggestedProviderId
         )
         return playRecommendation(context, track, explicitProviderId)
+    }
+
+    fun clearSpotifyActionFeedback() {
+        _spotifyActionFeedback.value = null
+    }
+
+    fun refreshSpotifyIntelligence(force: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            visualRepo?.syncUserProfileAndTasteIntelligence(force = force)
+            visualRepo?.syncFollowedNewReleases(force = force)
+        }
+    }
+
+    fun addTrackToSpotifyQueue(title: String, artist: String, spotifyUri: String? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val res = visualRepo?.addToSpotifyQueue(title, artist, spotifyUri) ?: return@launch
+            _spotifyActionFeedback.value = res.message
+        }
+    }
+
+    fun saveTrackToSpotifyLiked(title: String, artist: String, spotifyUri: String? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val res = visualRepo?.saveTrackToSpotifyLiked(title, artist, spotifyUri) ?: return@launch
+            _spotifyActionFeedback.value = res.message
+        }
+    }
+
+    fun exportForYouDropAsPlaylist(
+        playlistName: String,
+        tracks: List<Triple<String, String, String?>>
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _spotifyActionFeedback.value = "Creating Spotify playlist…"
+            val res = visualRepo?.exportDropAsSpotifyPlaylist(
+                playlistName = playlistName,
+                description = "Curated by TuneMind Daily Drop",
+                tracks = tracks
+            ) ?: return@launch
+            _spotifyActionFeedback.value = res.message
+        }
+    }
+
+    fun refreshSpotifyDevices() {
+        viewModelScope.launch(Dispatchers.IO) {
+            visualRepo?.refreshPlaybackDevices()
+        }
+    }
+
+    fun transferPlaybackToDevice(deviceId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val res = visualRepo?.transferPlaybackToDevice(deviceId, startPlaying = true) ?: return@launch
+            _spotifyActionFeedback.value = res.message
+        }
     }
 }
 

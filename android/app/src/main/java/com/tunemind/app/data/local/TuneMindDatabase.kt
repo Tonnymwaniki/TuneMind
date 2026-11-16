@@ -17,13 +17,16 @@ import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.provider.MusicProviderDao
 import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
+import com.tunemind.app.data.ingestion.ArtistProfileCacheEntity
 import com.tunemind.app.data.ingestion.SpotifyLibraryDao
 import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryDao
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
+import com.tunemind.app.data.ingestion.SpotifyVisualDao
 import com.tunemind.app.data.ingestion.TrackHistoryTelemetryItem
+import com.tunemind.app.data.ingestion.TrackVisualCacheEntity
 import com.tunemind.app.domain.study.StudyEntity
 
 /**
@@ -58,9 +61,11 @@ import com.tunemind.app.domain.study.StudyEntity
         TrackHistoryTelemetryItem::class,
         SpotifyLikedTrackEntity::class,
         SpotifyPlaylistEntity::class,
-        SpotifyPodcastEntity::class
+        SpotifyPodcastEntity::class,
+        TrackVisualCacheEntity::class,
+        ArtistProfileCacheEntity::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -74,6 +79,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
     abstract fun spotifyListeningHistoryDao(): SpotifyListeningHistoryDao
     abstract fun spotifyLibraryDao(): SpotifyLibraryDao
+    abstract fun spotifyVisualDao(): SpotifyVisualDao
 
     companion object {
         private const val DATABASE_NAME = "tunemind.db"
@@ -100,7 +106,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_8_9,
                         MIGRATION_9_10,
                         MIGRATION_10_11,
-                        MIGRATION_11_12
+                        MIGRATION_11_12,
+                        MIGRATION_12_13
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -436,6 +443,48 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN spotifyUri TEXT")
                 db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN previewUrl TEXT")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_ai_recommendation_crate_dropDateKey ON ai_recommendation_crate(dropDateKey)")
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_track_visual_cache (
+                        track_key TEXT PRIMARY KEY NOT NULL,
+                        spotify_track_id TEXT,
+                        spotify_uri TEXT,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        artist_id TEXT,
+                        album_name TEXT,
+                        album_art_url TEXT,
+                        artist_image_url TEXT,
+                        genres_csv TEXT NOT NULL,
+                        popularity INTEGER NOT NULL,
+                        updated_at_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_track_visual_cache_spotify_uri ON spotify_track_visual_cache(spotify_uri)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_track_visual_cache_updated_at_ms ON spotify_track_visual_cache(updated_at_ms)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS spotify_artist_profile_cache (
+                        artist_key TEXT PRIMARY KEY NOT NULL,
+                        artist_id TEXT,
+                        artist_name TEXT NOT NULL,
+                        image_url TEXT,
+                        genres_csv TEXT NOT NULL,
+                        popularity INTEGER NOT NULL,
+                        followers_total INTEGER NOT NULL,
+                        updated_at_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_artist_profile_cache_artist_id ON spotify_artist_profile_cache(artist_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_artist_profile_cache_updated_at_ms ON spotify_artist_profile_cache(updated_at_ms)")
             }
         }
     }

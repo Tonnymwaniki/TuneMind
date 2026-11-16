@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
@@ -81,11 +82,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.data.ingestion.SpotifyNewReleaseItem
 import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.ai.NoonDropSchedule
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
+import com.tunemind.app.ui.components.LayeredSongArtistBadge
+import com.tunemind.app.ui.components.NeuralSonicActionButton
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.TuneMindTrackCard
+import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -223,13 +229,16 @@ fun LazyListScope.forYouDiscoveryItems(
     isDiscovering: Boolean,
     totalWildcardsInCycle: Int = 0,
     lockedWildcardsCount: Int = 0,
+    newReleases: List<SpotifyNewReleaseItem> = emptyList(),
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onRefreshForYou: () -> Unit,
     onPlayTrack: (AiRecommendationEntity) -> Unit,
     onPreviewTrack: (AiRecommendationEntity) -> Unit,
     onSaveTrack: (AiRecommendationEntity, Boolean) -> Unit,
     onDismissTrack: (AiRecommendationEntity) -> Unit,
-    onInspectTrack: (AiRecommendationEntity) -> Unit
+    onInspectTrack: (AiRecommendationEntity) -> Unit,
+    onExportPlaylist: ((List<AiRecommendationEntity>) -> Unit)? = null,
+    onPlayNewRelease: ((SpotifyNewReleaseItem) -> Unit)? = null
 ) {
     // Partition into Global Wildcards (1 deck · 3 songs) vs Per-Genre Picks (2 per active genre)
     val wildcards = activeRecs
@@ -274,7 +283,10 @@ fun LazyListScope.forYouDiscoveryItems(
             genreCount = orderedGenreGroups.size,
             wildcardCount = wildcards.size,
             isDiscovering = isDiscovering,
-            onRefresh = onRefreshForYou
+            onRefresh = onRefreshForYou,
+            onExportPlaylist = if (activeRecs.isNotEmpty() && onExportPlaylist != null) {
+                { onExportPlaylist(activeRecs) }
+            } else null
         )
         Spacer(modifier = Modifier.height(14.dp))
     }
@@ -456,7 +468,60 @@ fun LazyListScope.forYouDiscoveryItems(
         }
     }
 
-    // 4. What AI Learned About You Card (Live Self-Learning Memory Evolution)
+    // 4. Followed Artists New Release Radar (Zero AI Tokens - Direct Spotify Feed)
+    if (newReleases.isNotEmpty()) {
+        item(key = "foryou_new_releases_section") {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "NEW FROM YOUR ARTISTS",
+                            color = Color(0xFF1DB954),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Fresh releases straight from Spotify",
+                            color = Color.White.copy(alpha = 0.62f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    Text(
+                        text = "${newReleases.size} drops",
+                        color = Color(0xFF1DB954),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                newReleases.take(10).forEach { rel ->
+                    TuneMindTrackCard(
+                        title = rel.title,
+                        artist = rel.artistName,
+                        subtitle = "${rel.albumType.replaceFirstChar { it.uppercase() }} · ${rel.releaseDate}",
+                        playCount = 0,
+                        showUnplayedLabel = true,
+                        isCurrentlyPlaying = isTrackCurrentlyPlaying(rel.title, rel.artistName, rel.spotifyUri),
+                        accentColor = Color(0xFF1DB954),
+                        spotifyUri = rel.spotifyUri,
+                        albumArtUrl = rel.imageUrl,
+                        onPlayClick = { onPlayNewRelease?.invoke(rel) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+        }
+    }
+
+    // 5. What AI Learned About You Card (Live Self-Learning Memory Evolution)
     item(key = "foryou_learned_memory") {
         Spacer(modifier = Modifier.height(4.dp))
         AiMemoryEvolutionCard(learningState = learningState)
@@ -470,7 +535,8 @@ private fun ForYouAiHeroCard(
     genreCount: Int,
     wildcardCount: Int,
     isDiscovering: Boolean,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onExportPlaylist: (() -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val aiCyan = Color(0xFF38BDF8)
@@ -662,6 +728,35 @@ private fun ForYouAiHeroCard(
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+
+            if (onExportPlaylist != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1DB954).copy(alpha = 0.14f))
+                        .border(1.dp, Color(0xFF1DB954).copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+                        .clickable { onExportPlaylist() }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlaylistAdd,
+                        contentDescription = null,
+                        tint = Color(0xFF1DB954),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Save Today's Drop as Spotify Playlist",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }
@@ -913,6 +1008,13 @@ private fun WildcardDeckSection(
             val cardShape = RoundedCornerShape(22.dp)
             val isPlaying = isTrackCurrentlyPlaying(currentCard.title, currentCard.artist, currentCard.spotifyUri)
 
+            val cardMedia = rememberResolvedTrackMedia(
+                title = currentCard.title,
+                artist = currentCard.artist,
+                spotifyUri = currentCard.spotifyUri,
+                fallbackAlbumArtUrl = null
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1046,56 +1148,84 @@ private fun WildcardDeckSection(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.08f))
-                                        .clickable { onInspectTrack(currentCard) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.MoreHoriz,
-                                        contentDescription = "Track Options",
-                                        tint = Color.White.copy(alpha = 0.72f),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
 
+                        // Consistent Song Card Visual Row:
+                        // [Start: Play/EQ] -> [Middle: Title & Artist] -> [MoreHoriz gently left] -> [End: Layered Song + Artist]
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            if (isPlaying) {
-                                AnimatedEqualizerBars(
-                                    color = lockGreen,
-                                    modifier = Modifier.size(16.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isPlaying) lockGreen.copy(alpha = 0.18f)
+                                        else amberGold.copy(alpha = 0.16f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isPlaying) lockGreen.copy(alpha = 0.50f) else amberGold.copy(alpha = 0.45f),
+                                        CircleShape
+                                    )
+                                    .clickable { onPlayTrack(currentCard) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isPlaying) {
+                                    AnimatedEqualizerBars(
+                                        color = lockGreen,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play Wildcard",
+                                        tint = Color(0xFFFDE68A),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = currentCard.title,
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = currentCard.artist,
+                                    color = Color(0xFFE2E8F0).copy(alpha = 0.82f),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            Text(
-                                text = currentCard.title,
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
+
+                            NeuralSonicActionButton(
+                                accentColor = amberGold,
+                                secondaryColor = aiCyan,
+                                onClick = { onInspectTrack(currentCard) }
+                            )
+
+                            LayeredSongArtistBadge(
+                                albumArtUrl = cardMedia.albumArtUrl,
+                                artistImageUrl = cardMedia.artistImageUrl,
+                                title = currentCard.title,
+                                artist = currentCard.artist,
+                                accentColor = if (isPlaying) lockGreen else amberGold,
+                                size = 50.dp
                             )
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = currentCard.artist,
-                            color = Color(0xFFE2E8F0).copy(alpha = 0.82f),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -1385,6 +1515,12 @@ private fun ForYouGenreTrackCard(
     val theme = LocalAdaptiveTheme.current
     val accent = if (isPlaying) Color(0xFF10B981) else theme.primaryAccent
     val cardShape = RoundedCornerShape(16.dp)
+    val resolvedMedia = rememberResolvedTrackMedia(
+        title = rec.title,
+        artist = rec.artist,
+        spotifyUri = rec.spotifyUri,
+        fallbackAlbumArtUrl = null
+    )
 
     Box(
         modifier = Modifier
@@ -1403,9 +1539,9 @@ private fun ForYouGenreTrackCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Play / Live Equalizer Ring
+                // Start: Play / Live Equalizer Ring
                 Box(
                     modifier = Modifier
                         .size(42.dp)
@@ -1430,6 +1566,7 @@ private fun ForYouGenreTrackCard(
                     }
                 }
 
+                // Middle: Track Title & Artist
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1467,61 +1604,22 @@ private fun ForYouGenreTrackCard(
                     )
                 }
 
-                // Quick action icons: Optional 30s Preview + Save Bookmark + Dismiss
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!rec.previewUrl.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.14f))
-                                .clickable { onPreviewClick() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.GraphicEq,
-                                contentDescription = "30s Preview",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (rec.isSaved) theme.primaryAccent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f)
-                            )
-                            .clickable { onSaveToggle() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (rec.isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                            contentDescription = "Save Pick",
-                            tint = if (rec.isSaved) theme.primaryAccent else Color.White.copy(alpha = 0.68f),
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .clickable { onDismissClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Dismiss Pick",
-                            tint = Color.White.copy(alpha = 0.56f),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
+                // Gently left of the end photo: Neural Sonic Action button
+                NeuralSonicActionButton(
+                    accentColor = accent,
+                    secondaryColor = theme.secondaryAccent,
+                    onClick = onCardClick
+                )
+
+                // End: Layered Song Art + Mini Circular Artist Profile Photo
+                LayeredSongArtistBadge(
+                    albumArtUrl = resolvedMedia.albumArtUrl,
+                    artistImageUrl = resolvedMedia.artistImageUrl,
+                    title = rec.title,
+                    artist = rec.artist,
+                    accentColor = accent,
+                    size = 46.dp
+                )
             }
 
             if (rec.reason.isNotBlank()) {
@@ -1534,6 +1632,90 @@ private fun ForYouGenreTrackCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!rec.previewUrl.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF38BDF8).copy(alpha = 0.14f))
+                            .clickable { onPreviewClick() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GraphicEq,
+                            contentDescription = "30s Preview",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "Preview",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (rec.isSaved) theme.primaryAccent.copy(alpha = 0.22f)
+                            else Color.White.copy(alpha = 0.06f)
+                        )
+                        .clickable { onSaveToggle() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = if (rec.isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                        contentDescription = "Save Pick",
+                        tint = if (rec.isSaved) theme.primaryAccent else Color.White.copy(alpha = 0.68f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = if (rec.isSaved) "Saved" else "Save",
+                        color = if (rec.isSaved) theme.primaryAccent else Color.White.copy(alpha = 0.72f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .clickable { onDismissClick() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Dismiss Pick",
+                        tint = Color.White.copy(alpha = 0.56f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "Pass",
+                        color = Color.White.copy(alpha = 0.62f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }

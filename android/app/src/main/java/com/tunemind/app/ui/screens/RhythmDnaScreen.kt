@@ -35,6 +35,7 @@ import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
 import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
+import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
 import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
@@ -45,10 +46,12 @@ import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
+import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
 import com.tunemind.app.ui.components.TuneMindTrackCard
+import com.tunemind.app.ui.components.rememberResolvedArtistPhoto
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.ThemeBehavior
 import com.tunemind.app.ui.theme.ThemePreferences
@@ -96,7 +99,8 @@ fun RhythmDnaScreen(
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
     onOpenMoments: () -> Unit = {},
-    onOpenAccountAuth: () -> Unit = {}
+    onOpenAccountAuth: () -> Unit = {},
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -274,6 +278,7 @@ fun RhythmDnaScreen(
                     1 -> {
                         StatsDashboardContent(
                             stats = listeningStats,
+                            tasteShiftSummary = tasteShiftSummary,
                             resolvePlayCount = resolvePlayCount,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                             onPlayTrack = onPlayTrack,
@@ -385,6 +390,7 @@ fun RhythmDnaScreen(
                                             freshnessPercent = track.freshnessPercent,
                                             isCoolingDown = track.isCoolingDown,
                                             leadingIndex = idx + 1,
+                                            spotifyUri = track.spotifyUri,
                                             onPlayClick = {
                                                 onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
                                             },
@@ -452,6 +458,7 @@ fun RhythmDnaScreen(
                                             playCount = plays,
                                             isCurrentlyPlaying = isPlaying,
                                             appLabel = ev.appDisplayName,
+                                            spotifyUri = ev.spotifyUri,
                                             onPlayClick = {
                                                 onPlayTrack(ev.title, ev.artist, ev.spotifyUri, ev.sourcePackage)
                                             },
@@ -558,10 +565,38 @@ fun RhythmDnaScreen(
 
                                         if (topArtists.isNotEmpty()) {
                                             Spacer(modifier = Modifier.height(10.dp))
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+                                                    topArtists.take(3).forEach { artistName ->
+                                                        val avatarUrl = rememberResolvedArtistPhoto(artistName)
+                                                        SpotifyAvatarCircle(
+                                                            imageUrl = avatarUrl,
+                                                            fallbackInitial = artistName,
+                                                            size = 24.dp,
+                                                            accentColor = activePhase.color,
+                                                            borderColor = Color(0xFF0A0F1A)
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    text = topArtists.joinToString(" · "),
+                                                    color = Color.White.copy(alpha = 0.66f),
+                                                    fontSize = 12.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                            }
+                                        }
+                                        if (tasteShiftSummary.topGenres.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "Top artists · ${topArtists.joinToString(" · ")}",
-                                                color = Color.White.copy(alpha = 0.66f),
-                                                fontSize = 12.sp,
+                                                text = "Top genres · ${tasteShiftSummary.topGenres.take(3).joinToString(" · ") { it.genre.replaceFirstChar { c -> c.uppercase() } }}",
+                                                color = activePhase.color.copy(alpha = 0.85f),
+                                                fontSize = 11.5.sp,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -800,6 +835,7 @@ fun RhythmDnaScreen(
                                         appLabel = ListeningPlayDeduplicator.resolveAppDisplayName(track.sourcePackage),
                                         accentColor = activePhase.color,
                                         secondaryAccent = theme.secondaryAccent,
+                                        spotifyUri = uri,
                                         onPlayClick = { onPlayTrack(title, artist, uri, pkg) },
                                         onSyncClick = { activeSyncTrack = track }
                                     )
@@ -895,6 +931,7 @@ fun RhythmDnaScreen(
             freshnessPercent = freshness,
             playCount = plays,
             isCoolingDown = plays >= 4,
+            spotifyUri = uri,
             onDismiss = { activeSyncTrack = null },
             onPlayNow = { onPlayTrack(title, artist, uri, pkg) },
             onAgentNeuralBreakdown = { onAskAgentAboutTrack(title, artist, freshness, uri) },
