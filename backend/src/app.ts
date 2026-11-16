@@ -8,6 +8,7 @@ import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
 import spotifyAuthRouter from './api/v1/spotifyAuth';
 import discoveryRouter from './api/v1/discovery';
+import musicProfilesRouter from './api/v1/musicProfiles';
 import supportRouter from './api/v1/support';
 import accountRouter from './api/v1/account';
 import legalRouter from './api/v1/legalRoutes';
@@ -57,6 +58,7 @@ export function createApp(): express.Express {
   app.use('/api/v1/reasoning', aiComputeLimiter, reasoningRouter);
   app.use('/api/v1/spotify', spotifyAuthRouter);
   app.use('/api/v1/discovery', aiComputeLimiter, discoveryRouter);
+  app.use('/api/v1/music', musicProfilesRouter);
   app.use('/api/v1/support', sensitiveOpsLimiter, supportRouter);
   app.use('/api/v1/account', sensitiveOpsLimiter, accountRouter);
 

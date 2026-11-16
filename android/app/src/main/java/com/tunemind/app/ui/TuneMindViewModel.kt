@@ -1054,7 +1054,15 @@ class TuneMindViewModel : ViewModel() {
 
         // Observe Spotify Visuals, Profile, Taste Shifts, New Releases & Playback Devices
         viewModelScope.launch {
-            runCatching { visualRepo?.trackVisualsFlow?.collect { _spotifyTrackVisuals.value = it } }
+            runCatching {
+                visualRepo?.trackVisualsFlow?.collect { visualsMap ->
+                    _spotifyTrackVisuals.value = visualsMap
+                    val recentPairs = _unifiedTracks.value.take(30).map { it.title to it.artist }
+                    if (recentPairs.isNotEmpty()) {
+                        visualRepo?.refreshUniversalTasteIntelligenceFromResolvedTracks(recentPairs)
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             runCatching { visualRepo?.artistProfilesFlow?.collect { _spotifyArtistProfiles.value = it } }
@@ -1219,6 +1227,20 @@ class TuneMindViewModel : ViewModel() {
                         isLoading = false,
                     )
                     recomputeAdaptiveTheme()
+
+                    // Universal Profile Engine (works for ANY music player — YouTube Music, Boomplay, Apple Music, local MP3, Spotify)
+                    nowPlayingObs?.title?.takeIf { it.isNotBlank() }?.let { activeTitle ->
+                        visualRepo?.requestTrackVisuals(
+                            title = activeTitle,
+                            artist = nowPlayingObs.artist,
+                            spotifyUri = if (nowPlayingObs.sourcePackage == "com.spotify.music") liveSpotify?.spotifyUri else null,
+                            fallbackAlbumArtUrl = if (nowPlayingObs.sourcePackage == "com.spotify.music") liveSpotify?.albumArtUrl else null
+                        )
+                    }
+                    recent.take(15).forEach { entry ->
+                        val t = entry.title?.takeIf { it.isNotBlank() } ?: return@forEach
+                        visualRepo?.requestTrackVisuals(t, entry.artist, entry.providerTrackId)
+                    }
 
                     _historyState.value = HistoryState(
                         tracks = recent,

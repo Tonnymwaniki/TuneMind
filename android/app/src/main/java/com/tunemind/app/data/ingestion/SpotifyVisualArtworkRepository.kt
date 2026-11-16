@@ -1,10 +1,12 @@
 package com.tunemind.app.data.ingestion
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.data.local.TuneMindDatabase
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
+import com.tunemind.app.domain.network.BackendEndpointManager
 import com.tunemind.app.provider.SpotifyTrackUriResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,10 +18,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Central Spotify visual & taste-intelligence repository (Zero Claude AI Tokens).
@@ -46,6 +53,10 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
     private val userApi = SpotifyApiFactory.createWebApiService(tokenManager)
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val universalHttp = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
 
     private val trackCache = ConcurrentHashMap<String, ResolvedTrackVisuals>()
     private val artistCache = ConcurrentHashMap<String, ArtistProfileCacheEntity>()
@@ -233,57 +244,76 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
         }
         if (trackBatch.isEmpty() && artistBatch.isEmpty()) return
 
-        val bearer = SpotifyTrackUriResolver.getSearchBearerToken(appContext) ?: return
-        val authHeader = "Bearer $bearer"
         val now = System.currentTimeMillis()
-
         val trackEntities = mutableListOf<TrackVisualCacheEntity>()
+        val newArtistEntities = mutableListOf<ArtistProfileCacheEntity>()
+        val unresolvedTrackRequests = mutableListOf<PendingTrackLookup>()
+
+        // 0. Universal Backend Profile Engine (/api/v1/music/resolve-batch) — works for ALL music players (0 AI tokens, zero Spotify login required)
+        if (trackBatch.isNotEmpty()) {
+            val resolvedKeys = resolveTrackBatchViaBackend(trackBatch, now, trackEntities, newArtistEntities)
+            trackBatch.forEach { req ->
+                if (req.trackKey in resolvedKeys) {
+                    attemptedKeys[req.trackKey] = now
+                } else {
+                    unresolvedTrackRequests.add(req)
+                }
+            }
+        }
+
+        val bearer = if (unresolvedTrackRequests.isNotEmpty() || artistBatch.isNotEmpty()) {
+            SpotifyTrackUriResolver.getSearchBearerToken(appContext)
+        } else null
+        val authHeader = bearer?.let { "Bearer $it" }
+
         val artistIdsToFetch = linkedSetOf<String>()
         val trackEntitiesNeedingArtistPhoto = mutableListOf<TrackVisualCacheEntity>()
 
         // 1. Batch resolve tracks that already have a spotify:track:<id> URI via /v1/tracks?ids=...
-        val withIds = trackBatch.mapNotNull { item ->
+        val withIds = unresolvedTrackRequests.mapNotNull { item ->
             val trackId = extractSpotifyTrackId(item.spotifyUri)
             if (!trackId.isNullOrBlank()) item to trackId else null
         }
-        val withoutIds = trackBatch.filter { extractSpotifyTrackId(it.spotifyUri).isNullOrBlank() }
+        val withoutIds = unresolvedTrackRequests.filter { extractSpotifyTrackId(it.spotifyUri).isNullOrBlank() }
 
-        withIds.chunked(40).forEach { chunk ->
-            val idsCsv = chunk.joinToString(",") { it.second }
-            runCatching {
-                val resp = directApi.getTracksByIds(idsCsv = idsCsv, authHeader = authHeader)
-                if (resp.isSuccessful) {
-                    val tracksById = resp.body()?.tracks.orEmpty().filterNotNull().associateBy { it.id.orEmpty() }
-                    chunk.forEach { (req, id) ->
-                        attemptedKeys[req.trackKey] = now
-                        val dto = tracksById[id]
-                        if (dto != null) {
-                            val primaryArtist = dto.artists.firstOrNull()
-                            val primaryArtistName = primaryArtist?.name?.takeIf { it.isNotBlank() } ?: req.artist
-                            val aId = primaryArtist?.id
-                            val artUrl = dto.album?.images?.firstOrNull()?.url ?: req.fallbackAlbumArtUrl
-                            val existingArtistImg = lookupCachedArtistPhoto(primaryArtistName)
-                                ?: aId?.let { artistCache["id:$it"]?.imageUrl }
-                            if (existingArtistImg.isNullOrBlank() && !aId.isNullOrBlank()) {
-                                artistIdsToFetch.add(aId)
-                            }
-                            val entity = TrackVisualCacheEntity(
-                                trackKey = req.trackKey,
-                                spotifyTrackId = dto.id,
-                                spotifyUri = dto.uri.ifBlank { req.spotifyUri },
-                                title = dto.name.ifBlank { req.title },
-                                artist = primaryArtistName,
-                                artistId = aId,
-                                albumName = dto.album?.name,
-                                albumArtUrl = artUrl,
-                                artistImageUrl = existingArtistImg,
-                                genresCsv = aId?.let { artistCache["id:$it"]?.genresCsv }.orEmpty(),
-                                popularity = dto.popularity,
-                                updatedAtMs = now
-                            )
-                            trackEntities.add(entity)
-                            if (existingArtistImg.isNullOrBlank()) {
-                                trackEntitiesNeedingArtistPhoto.add(entity)
+        if (authHeader != null) {
+            withIds.chunked(40).forEach { chunk ->
+                val idsCsv = chunk.joinToString(",") { it.second }
+                runCatching {
+                    val resp = directApi.getTracksByIds(idsCsv = idsCsv, authHeader = authHeader)
+                    if (resp.isSuccessful) {
+                        val tracksById = resp.body()?.tracks.orEmpty().filterNotNull().associateBy { it.id.orEmpty() }
+                        chunk.forEach { (req, id) ->
+                            attemptedKeys[req.trackKey] = now
+                            val dto = tracksById[id]
+                            if (dto != null) {
+                                val primaryArtist = dto.artists.firstOrNull()
+                                val primaryArtistName = primaryArtist?.name?.takeIf { it.isNotBlank() } ?: req.artist
+                                val aId = primaryArtist?.id
+                                val artUrl = dto.album?.images?.firstOrNull()?.url ?: req.fallbackAlbumArtUrl
+                                val existingArtistImg = lookupCachedArtistPhoto(primaryArtistName)
+                                    ?: aId?.let { artistCache["id:$it"]?.imageUrl }
+                                if (existingArtistImg.isNullOrBlank() && !aId.isNullOrBlank()) {
+                                    artistIdsToFetch.add(aId)
+                                }
+                                val entity = TrackVisualCacheEntity(
+                                    trackKey = req.trackKey,
+                                    spotifyTrackId = dto.id,
+                                    spotifyUri = dto.uri.ifBlank { req.spotifyUri },
+                                    title = dto.name.ifBlank { req.title },
+                                    artist = primaryArtistName,
+                                    artistId = aId,
+                                    albumName = dto.album?.name,
+                                    albumArtUrl = artUrl,
+                                    artistImageUrl = existingArtistImg,
+                                    genresCsv = aId?.let { artistCache["id:$it"]?.genresCsv }.orEmpty(),
+                                    popularity = dto.popularity,
+                                    updatedAtMs = now
+                                )
+                                trackEntities.add(entity)
+                                if (existingArtistImg.isNullOrBlank()) {
+                                    trackEntitiesNeedingArtistPhoto.add(entity)
+                                }
                             }
                         }
                     }
@@ -291,57 +321,81 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
             }
         }
 
-        // 2. Resolve tracks without URI via /v1/search (capped at 10 per flush to stay snappy & polite)
+        // 2. Resolve tracks without URI via sanitized Spotify /v1/search + Deezer public fallback
         withoutIds.take(10).forEach { req ->
             attemptedKeys[req.trackKey] = now
-            val primaryArtist = extractPrimaryArtistName(req.artist)
-            val q = when {
-                req.title.isNotBlank() && primaryArtist.isNotBlank() -> "track:${req.title} artist:$primaryArtist"
-                req.title.isNotBlank() -> req.title
-                else -> return@forEach
+            val (cleanedTitle, cleanedArtist) = sanitizeNonSpotifyTrackMetadata(req.title, req.artist)
+            var matched = false
+            if (authHeader != null && cleanedTitle.isNotBlank()) {
+                val q = if (cleanedArtist.isNotBlank()) "track:$cleanedTitle artist:$cleanedArtist" else cleanedTitle
+                runCatching {
+                    val resp = directApi.searchCatalog(query = q, type = "track,artist", limit = 2, authHeader = authHeader)
+                    if (resp.isSuccessful) {
+                        val trackDto = resp.body()?.tracks?.items?.firstOrNull()
+                        val artistDto = resp.body()?.artists?.items?.firstOrNull()
+                        if (trackDto != null) {
+                            matched = true
+                            val matchedArtist = trackDto.artists.firstOrNull() ?: artistDto
+                            val aId = matchedArtist?.id ?: artistDto?.id
+                            val artUrl = trackDto.album?.images?.firstOrNull()?.url ?: req.fallbackAlbumArtUrl
+                            val artistImg = artistDto?.images?.firstOrNull()?.url
+                                ?: lookupCachedArtistPhoto(cleanedArtist)
+                                ?: aId?.let { artistCache["id:$it"]?.imageUrl }
+                            if (artistImg.isNullOrBlank() && !aId.isNullOrBlank()) {
+                                artistIdsToFetch.add(aId)
+                            }
+                            if (artistDto != null && !artistDto.images.isNullOrEmpty()) {
+                                saveArtistDto(artistDto, now)?.let { newArtistEntities.add(it) }
+                            }
+                            val entity = TrackVisualCacheEntity(
+                                trackKey = req.trackKey,
+                                spotifyTrackId = trackDto.id,
+                                spotifyUri = trackDto.uri ?: req.spotifyUri,
+                                title = trackDto.name.takeIf { it.isNotBlank() } ?: req.title,
+                                artist = matchedArtist?.name?.takeIf { it.isNotBlank() } ?: req.artist,
+                                artistId = aId,
+                                albumName = trackDto.album?.name,
+                                albumArtUrl = artUrl,
+                                artistImageUrl = artistImg,
+                                genresCsv = artistDto?.genres.orEmpty().joinToString(","),
+                                popularity = trackDto.popularity,
+                                updatedAtMs = now
+                            )
+                            trackEntities.add(entity)
+                            if (artistImg.isNullOrBlank()) {
+                                trackEntitiesNeedingArtistPhoto.add(entity)
+                            }
+                        }
+                    }
+                }
             }
-            runCatching {
-                val resp = directApi.searchCatalog(query = q, type = "track,artist", limit = 2, authHeader = authHeader)
-                if (resp.isSuccessful) {
-                    val trackDto = resp.body()?.tracks?.items?.firstOrNull()
-                    val artistDto = resp.body()?.artists?.items?.firstOrNull()
-                    val matchedArtist = trackDto?.artists?.firstOrNull() ?: artistDto
-                    val aId = matchedArtist?.id ?: artistDto?.id
-                    val artUrl = trackDto?.album?.images?.firstOrNull()?.url ?: req.fallbackAlbumArtUrl
-                    var artistImg = artistDto?.images?.firstOrNull()?.url
-                        ?: lookupCachedArtistPhoto(primaryArtist)
-                        ?: aId?.let { artistCache["id:$it"]?.imageUrl }
-                    if (artistImg.isNullOrBlank() && !aId.isNullOrBlank()) {
-                        artistIdsToFetch.add(aId)
-                    }
-                    if (artistDto != null && !artistDto.images.isNullOrEmpty()) {
-                        saveArtistDto(artistDto, now)
-                    }
-                    val entity = TrackVisualCacheEntity(
-                        trackKey = req.trackKey,
-                        spotifyTrackId = trackDto?.id,
-                        spotifyUri = trackDto?.uri ?: req.spotifyUri,
-                        title = trackDto?.name?.takeIf { it.isNotBlank() } ?: req.title,
-                        artist = matchedArtist?.name?.takeIf { it.isNotBlank() } ?: req.artist,
-                        artistId = aId,
-                        albumName = trackDto?.album?.name,
-                        albumArtUrl = artUrl,
-                        artistImageUrl = artistImg,
-                        genresCsv = artistDto?.genres.orEmpty().joinToString(","),
-                        popularity = trackDto?.popularity ?: 0,
-                        updatedAtMs = now
-                    )
-                    trackEntities.add(entity)
-                    if (artistImg.isNullOrBlank()) {
-                        trackEntitiesNeedingArtistPhoto.add(entity)
+            if (!matched && cleanedTitle.isNotBlank()) {
+                fetchDeezerPublicFallback(req, cleanedTitle, cleanedArtist, now)?.let { dzEntity ->
+                    trackEntities.add(dzEntity)
+                    if (!dzEntity.artistImageUrl.isNullOrBlank()) {
+                        val aName = dzEntity.artist.ifBlank { cleanedArtist }
+                        if (aName.isNotBlank()) {
+                            val aKey = canonicalArtistKey(aName)
+                            val artEntity = ArtistProfileCacheEntity(
+                                artistKey = aKey,
+                                artistId = null,
+                                artistName = aName,
+                                imageUrl = dzEntity.artistImageUrl,
+                                genresCsv = "",
+                                popularity = 0,
+                                followersTotal = 0L,
+                                updatedAtMs = now
+                            )
+                            artistCache[aKey] = artEntity
+                            newArtistEntities.add(artEntity)
+                        }
                     }
                 }
             }
         }
 
         // 3. Batch fetch missing artist photos + genres via /v1/artists?ids=...
-        val newArtistEntities = mutableListOf<ArtistProfileCacheEntity>()
-        if (artistIdsToFetch.isNotEmpty()) {
+        if (authHeader != null && artistIdsToFetch.isNotEmpty()) {
             artistIdsToFetch.chunked(45).forEach { idChunk ->
                 runCatching {
                     val resp = directApi.getArtistsByIds(idsCsv = idChunk.joinToString(","), authHeader = authHeader)
@@ -355,14 +409,16 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
         }
 
         // 4. Standalone artist searches for Stats / Top Artists rows
-        artistBatch.take(8).forEach { (aKey, name) ->
-            attemptedKeys["art:$aKey"] = now
-            if (artistCache[aKey]?.imageUrl != null) return@forEach
-            runCatching {
-                val resp = directApi.searchCatalog(query = name, type = "artist", limit = 1, authHeader = authHeader)
-                if (resp.isSuccessful) {
-                    resp.body()?.artists?.items?.firstOrNull()?.let { dto ->
-                        saveArtistDto(dto, now)?.let { newArtistEntities.add(it) }
+        if (authHeader != null) {
+            artistBatch.take(8).forEach { (aKey, name) ->
+                attemptedKeys["art:$aKey"] = now
+                if (artistCache[aKey]?.imageUrl != null) return@forEach
+                runCatching {
+                    val resp = directApi.searchCatalog(query = name, type = "artist", limit = 1, authHeader = authHeader)
+                    if (resp.isSuccessful) {
+                        resp.body()?.artists?.items?.firstOrNull()?.let { dto ->
+                            saveArtistDto(dto, now)?.let { newArtistEntities.add(it) }
+                        }
                     }
                 }
             }
@@ -420,6 +476,219 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
             artistCache["id:${dto.id}"] = entity
         }
         return entity
+    }
+
+    private fun resolveTrackBatchViaBackend(
+        batch: List<PendingTrackLookup>,
+        now: Long,
+        outTracks: MutableList<TrackVisualCacheEntity>,
+        outArtists: MutableList<ArtistProfileCacheEntity>
+    ): Set<String> {
+        val resolvedKeys = mutableSetOf<String>()
+        val baseUrl = BackendEndpointManager.getActiveHttpBaseUrl(appContext).trimEnd('/')
+        if (baseUrl.isBlank()) return resolvedKeys
+
+        return runCatching {
+            val arr = JSONArray()
+            val byKey = LinkedHashMap<String, PendingTrackLookup>()
+            batch.take(20).forEach { req ->
+                byKey[req.trackKey] = req
+                arr.put(JSONObject().apply {
+                    put("title", req.title)
+                    put("artist", req.artist)
+                    if (!req.spotifyUri.isNullOrBlank()) {
+                        put("spotify_uri", req.spotifyUri)
+                    }
+                })
+            }
+            val payload = JSONObject().put("tracks", arr).toString()
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/music/resolve-batch")
+                .addHeader("Content-Type", "application/json")
+                .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            universalHttp.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@use resolvedKeys
+                val root = JSONObject(resp.body?.string() ?: "{}")
+                val profiles = root.optJSONArray("profiles") ?: return@use resolvedKeys
+                for (i in 0 until profiles.length()) {
+                    val item = profiles.optJSONObject(i) ?: continue
+                    val qTitle = item.optString("query_title")
+                    val qArtist = item.optString("query_artist")
+                    val req = byKey[canonicalTrackKey(qTitle, qArtist)] ?: batch.getOrNull(i) ?: continue
+                    val prof = item.optJSONObject("profile") ?: continue
+
+                    val albumArtUrl = prof.optString("albumArtUrl").takeIf { it.startsWith("http") }
+                        ?: req.fallbackAlbumArtUrl
+                    val artistImg = prof.optString("artistImageUrl").takeIf { it.startsWith("http") }
+                    val cleanTitle = prof.optString("cleanTitle").takeIf { it.isNotBlank() } ?: req.title
+                    val cleanArtist = prof.optString("cleanArtist").takeIf { it.isNotBlank() } ?: req.artist
+                    val artistId = prof.optString("artistId").takeIf { it.isNotBlank() }
+                    val genresArr = prof.optJSONArray("genres")
+                    val genresList = mutableListOf<String>()
+                    if (genresArr != null) {
+                        for (g in 0 until genresArr.length()) {
+                            val gv = genresArr.optString(g).trim()
+                            if (gv.isNotBlank()) genresList.add(gv)
+                        }
+                    }
+                    val genresCsv = genresList.joinToString(",")
+
+                    if (cleanArtist.isNotBlank() && (!artistImg.isNullOrBlank() || genresCsv.isNotBlank())) {
+                        val aKey = canonicalArtistKey(cleanArtist)
+                        val artistEntity = ArtistProfileCacheEntity(
+                            artistKey = aKey,
+                            artistId = artistId,
+                            artistName = cleanArtist,
+                            imageUrl = artistImg ?: artistCache[aKey]?.imageUrl,
+                            genresCsv = genresCsv.ifBlank { artistCache[aKey]?.genresCsv.orEmpty() },
+                            popularity = prof.optInt("popularity", 0),
+                            followersTotal = 0L,
+                            updatedAtMs = now
+                        )
+                        artistCache[aKey] = artistEntity
+                        if (!artistId.isNullOrBlank()) artistCache["id:$artistId"] = artistEntity
+                        outArtists.add(artistEntity)
+                    }
+
+                    val trackEntity = TrackVisualCacheEntity(
+                        trackKey = req.trackKey,
+                        spotifyTrackId = prof.optString("spotifyTrackId").takeIf { it.isNotBlank() },
+                        spotifyUri = prof.optString("spotifyUri").takeIf { it.isNotBlank() } ?: req.spotifyUri,
+                        title = cleanTitle,
+                        artist = cleanArtist,
+                        artistId = artistId,
+                        albumName = prof.optString("albumName").takeIf { it.isNotBlank() },
+                        albumArtUrl = albumArtUrl,
+                        artistImageUrl = artistImg,
+                        genresCsv = genresCsv,
+                        popularity = prof.optInt("popularity", 0),
+                        updatedAtMs = now
+                    )
+                    outTracks.add(trackEntity)
+                    resolvedKeys.add(req.trackKey)
+                }
+                resolvedKeys
+            }
+        }.getOrElse { resolvedKeys }
+    }
+
+    private fun fetchDeezerPublicFallback(
+        req: PendingTrackLookup,
+        cleanedTitle: String,
+        cleanedArtist: String,
+        now: Long
+    ): TrackVisualCacheEntity? {
+        return runCatching {
+            val query = if (cleanedArtist.isNotBlank()) "$cleanedTitle $cleanedArtist" else cleanedTitle
+            val url = Uri.parse("https://api.deezer.com/search").buildUpon()
+                .appendQueryParameter("q", query)
+                .appendQueryParameter("limit", "2")
+                .build()
+                .toString()
+            val request = Request.Builder().url(url).get().build()
+            universalHttp.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val data = JSONObject(resp.body?.string() ?: "{}").optJSONArray("data") ?: return@use null
+                val item = data.optJSONObject(0) ?: return@use null
+                val alb = item.optJSONObject("album")
+                val art = item.optJSONObject("artist")
+                val albumArt = alb?.optString("cover_big")?.takeIf { it.startsWith("http") }
+                    ?: alb?.optString("cover_medium")?.takeIf { it.startsWith("http") }
+                    ?: req.fallbackAlbumArtUrl
+                val artistImg = art?.optString("picture_big")?.takeIf { it.startsWith("http") }
+                    ?: art?.optString("picture_medium")?.takeIf { it.startsWith("http") }
+                TrackVisualCacheEntity(
+                    trackKey = req.trackKey,
+                    spotifyTrackId = null,
+                    spotifyUri = req.spotifyUri,
+                    title = item.optString("title").takeIf { it.isNotBlank() } ?: req.title,
+                    artist = art?.optString("name")?.takeIf { it.isNotBlank() } ?: req.artist,
+                    artistId = null,
+                    albumName = alb?.optString("title")?.takeIf { it.isNotBlank() },
+                    albumArtUrl = albumArt,
+                    artistImageUrl = artistImg,
+                    genresCsv = "",
+                    popularity = 0,
+                    updatedAtMs = now
+                )
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * For users listening via ANY music app (YouTube Music, Apple Music, Boomplay, Audiomack,
+     * local MP3 players) without Spotify OAuth, synthesizes real Genre DNA & Top Artist Profiles
+     * from all resolved TrackVisualCache / ArtistProfileCache items.
+     */
+    fun refreshUniversalTasteIntelligenceFromResolvedTracks(recentTracks: List<Pair<String, String>>) {
+        val current = _tasteShiftSummaryFlow.value
+        if (current.shortTermTopArtists.isNotEmpty()) return // Spotify OAuth personal taste active
+
+        val genreCounts = linkedMapOf<String, Int>()
+        val artistAgg = linkedMapOf<String, Pair<Int, ArtistProfileCacheEntity>>()
+
+        recentTracks.forEach { (title, artist) ->
+            val resolved = getCachedTrackVisuals(title, artist) ?: return@forEach
+            resolved.genres.forEach { g ->
+                val pretty = formatGenreTitle(g)
+                if (pretty.isNotBlank()) {
+                    genreCounts[pretty] = (genreCounts[pretty] ?: 0) + 1
+                }
+            }
+            val primary = extractPrimaryArtistName(artist)
+            if (primary.isNotBlank()) {
+                val aKey = canonicalArtistKey(primary)
+                val cachedArtist = artistCache[aKey]
+                if (cachedArtist != null) {
+                    cachedArtist.genresCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { g ->
+                        val pretty = formatGenreTitle(g)
+                        genreCounts[pretty] = (genreCounts[pretty] ?: 0) + 1
+                    }
+                    val prevCount = artistAgg[aKey]?.first ?: 0
+                    artistAgg[aKey] = (prevCount + 1) to cachedArtist
+                }
+            }
+        }
+
+        if (genreCounts.isEmpty() && artistAgg.isEmpty()) return
+
+        val totalWeight = genreCounts.values.sum().coerceAtLeast(1)
+        val topGenres = genreCounts.entries
+            .sortedByDescending { it.value }
+            .take(8)
+            .map { (g, c) ->
+                SpotifyGenreWeight(
+                    genre = g,
+                    count = c,
+                    sharePercent = ((c.toFloat() / totalWeight.toFloat()) * 100f).toInt().coerceIn(4, 100)
+                )
+            }
+
+        val topArtistInsights = artistAgg.values
+            .sortedByDescending { it.first }
+            .take(8)
+            .map { (_, ent) ->
+                SpotifyArtistInsight(
+                    artistId = ent.artistId.orEmpty(),
+                    name = ent.artistName,
+                    imageUrl = ent.imageUrl,
+                    genres = ent.genresCsv.split(",").map { formatGenreTitle(it) }.filter { it.isNotBlank() },
+                    popularity = ent.popularity,
+                    followersTotal = ent.followersTotal
+                )
+            }
+
+        _tasteShiftSummaryFlow.value = SpotifyTasteShiftSummary(
+            topGenres = topGenres,
+            risingArtists = topArtistInsights.take(4),
+            consistentArtists = topArtistInsights.take(4),
+            emergingGenres = topGenres.take(3).map { it.genre },
+            shortTermTopArtists = topArtistInsights,
+            mediumTermTopArtists = emptyList(),
+            longTermTopArtists = emptyList()
+        )
     }
 
     private suspend fun seedFromLocalRoomTables() {
@@ -1140,6 +1409,55 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
 
         fun canonicalArtistKey(name: String): String {
             return name.lowercase(Locale.ROOT).replace(Regex("\\s+"), " ").trim()
+        }
+
+        fun sanitizeNonSpotifyTrackMetadata(rawTitle: String?, rawArtist: String?): Pair<String, String> {
+            var title = rawTitle.orEmpty()
+                .replace(Regex("\\.(mp3|m4a|flac|wav|ogg|aac|opus)$", RegexOption.IGNORE_CASE), "")
+                .replace(
+                    Regex(
+                        "\\((?:official\\s*(?:music\\s*)?video|official\\s*audio|lyric\\s*video|lyrics|visualizer|hd|4k|hq|live|clean|explicit)\\)",
+                        RegexOption.IGNORE_CASE
+                    ),
+                    " "
+                )
+                .replace(
+                    Regex(
+                        "\\[(?:official\\s*(?:music\\s*)?video|official\\s*audio|lyric\\s*video|lyrics|visualizer|hd|4k|hq|live|clean|explicit)\\]",
+                        RegexOption.IGNORE_CASE
+                    ),
+                    " "
+                )
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            var artist = rawArtist.orEmpty()
+                .replace(Regex("\\s*-\\s*Topic$", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s*VEVO$", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            val lowerArtist = artist.lowercase(Locale.ROOT)
+            val isGeneric = artist.isBlank() ||
+                lowerArtist in setOf("unknown", "unknown artist", "<unknown>", "youtube", "youtube music", "music player")
+
+            if (isGeneric && title.contains(" - ")) {
+                val splitIdx = title.indexOf(" - ")
+                if (splitIdx >= 2) {
+                    artist = title.substring(0, splitIdx).trim()
+                    title = title.substring(splitIdx + 3).trim()
+                }
+            } else if (!isGeneric && title.lowercase(Locale.ROOT).startsWith("$lowerArtist - ")) {
+                title = title.substring(artist.length + 3).trim()
+            }
+
+            val primaryArtist = if (isGeneric && artist.isBlank()) "" else extractPrimaryArtistName(artist)
+            val cleanTitle = title
+                .replace(Regex("\\s*[\\(\\[]\\s*(?:feat\\.?|ft\\.?|featuring)\\s+[^\\)\\]]+[\\)\\]]", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            return cleanTitle to primaryArtist
         }
     }
 }
