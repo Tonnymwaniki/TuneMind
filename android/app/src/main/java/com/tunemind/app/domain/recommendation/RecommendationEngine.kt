@@ -75,7 +75,15 @@ object RecommendationEngine {
                     confidence = 0.90f,
                     category = RecommendationCategory.COOLDOWN_RESTORED,
                     suggestedProviderId = preferredProviderId,
-                    observationCountBasis = 1
+                    observationCountBasis = 0,
+                    trackId = track.trackId.ifBlank {
+                        com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                            spotifyUri = track.spotifyUri,
+                            title = track.title,
+                            artist = track.artist
+                        )
+                    },
+                    spotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.spotifyUri)
                 )
             )
         }
@@ -92,7 +100,11 @@ object RecommendationEngine {
                     confidence = 0.82f,
                     category = RecommendationCategory.EXPLORATION_DISCOVERY,
                     suggestedProviderId = preferredProviderId,
-                    observationCountBasis = validCapturedTracks.first().distinctAppearanceCount
+                    observationCountBasis = validCapturedTracks.first().distinctAppearanceCount.coerceAtLeast(0),
+                    trackId = com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(
+                        title = "Acoustic Horizon Discovery",
+                        artist = topArtist
+                    )
                 )
             )
         }
@@ -117,7 +129,11 @@ object RecommendationEngine {
                 confidence = 0.88f,
                 category = RecommendationCategory.EXPLORATION_DISCOVERY,
                 suggestedProviderId = preferredProviderId,
-                observationCountBasis = 1
+                observationCountBasis = 0,
+                trackId = com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(
+                    title = "Midnight Thoughts",
+                    artist = "Luna Rivers"
+                )
             ),
             RecommendedTrack(
                 id = "starter-2",
@@ -129,7 +145,11 @@ object RecommendationEngine {
                 confidence = 0.85f,
                 category = RecommendationCategory.EXPLORATION_DISCOVERY,
                 suggestedProviderId = preferredProviderId,
-                observationCountBasis = 1
+                observationCountBasis = 0,
+                trackId = com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(
+                    title = "Sunset Drive",
+                    artist = "Solar Pulse"
+                )
             ),
             RecommendedTrack(
                 id = "starter-3",
@@ -140,7 +160,11 @@ object RecommendationEngine {
                 confidence = 0.94f,
                 category = RecommendationCategory.PALATE_CLEANSER,
                 suggestedProviderId = preferredProviderId,
-                observationCountBasis = 1
+                observationCountBasis = 0,
+                trackId = com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(
+                    title = "Weightless",
+                    artist = "Marconi Union"
+                )
             )
         )
     }

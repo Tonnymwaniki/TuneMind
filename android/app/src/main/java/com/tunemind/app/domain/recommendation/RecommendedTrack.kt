@@ -29,5 +29,7 @@ data class RecommendedTrack(
     val category: RecommendationCategory = RecommendationCategory.EXPLORATION_DISCOVERY,
     val suggestedProviderId: String? = "spotify",
     val providerTrackId: String? = null,
-    val observationCountBasis: Int = 1
+    val observationCountBasis: Int = 0,
+    val trackId: String = "",
+    val spotifyUri: String? = null
 )

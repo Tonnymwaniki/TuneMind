@@ -90,9 +90,10 @@ export function createApp(): express.Express {
             os_intent: body.intervention.os_intent || body.intervention.action || 'NONE',
             target_search_query: body.intervention.target_search_query || '',
             action: body.intervention.action,
+            track_id: body.intervention.track_id || body.intervention.trackId,
             track_title: body.intervention.track_title,
             track_artist: body.intervention.track_artist,
-            spotify_uri: body.intervention.spotify_uri,
+            spotify_uri: body.intervention.spotify_uri || body.intervention.spotifyUri,
             circadian_daypart: body.intervention.circadian_daypart
           },
           override

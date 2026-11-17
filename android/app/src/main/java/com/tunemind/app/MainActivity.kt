@@ -229,10 +229,17 @@ open class MainActivity : ComponentActivity() {
                                 vm.skipPrev()
                             }
                             "QUARANTINE_TO_VAULT" -> {
-                                val qTitle = tool.track_title ?: vm.homeState.value.nowPlaying?.title
-                                val qArtist = tool.track_artist ?: vm.homeState.value.nowPlaying?.artist ?: ""
+                                val np = vm.homeState.value.nowPlaying
+                                val qTitle = tool.track_title ?: np?.title
+                                val qArtist = tool.track_artist ?: np?.artist ?: ""
                                 if (!qTitle.isNullOrBlank()) {
-                                    vm.quarantineTrack(qTitle, qArtist)
+                                    vm.quarantineTrack(
+                                        title = qTitle,
+                                        artist = qArtist,
+                                        sourcePackage = np?.sourcePackage,
+                                        spotifyUri = np?.spotifyUri,
+                                        trackId = np?.trackId
+                                    )
                                 }
                             }
                             "RESTORE_FROM_VAULT" -> {
@@ -576,12 +583,23 @@ open class MainActivity : ComponentActivity() {
                                     sourcePkg: String
                                 ) {
                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
-                                    vm.markTrackPlayedFromQueueOrExternal(title, artist, spotifyUri)
-                                    vm.setAgentActiveTrack(title, artist, targetPkg)
+                                    val canonical = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                        spotifyUri = spotifyUri,
+                                        title = title,
+                                        artist = artist
+                                    )
+                                    vm.markTrackPlayedFromQueueOrExternal(title, artist, canonical.spotifyUri)
+                                    vm.setAgentActiveTrack(
+                                        title = title,
+                                        artist = artist,
+                                        sourcePackage = targetPkg,
+                                        spotifyUri = canonical.spotifyUri,
+                                        trackId = canonical.trackId
+                                    )
                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                         title = title,
                                         artist = artist,
-                                        spotifyUri = spotifyUri,
+                                        spotifyUri = canonical.spotifyUri,
                                         targetPlayer = targetPkg
                                     )
                                 }
@@ -767,9 +785,10 @@ open class MainActivity : ComponentActivity() {
                                                 currentTrackSpotifyUri = matchedCurrentSpotifyUri,
                                                 currentTrackPlayCount = if (trackTitle != null) {
                                                     vm.resolvePlayCount(
-                                                        trackTitle,
-                                                        artistName,
-                                                        matchedCurrentSpotifyUri
+                                                        title = trackTitle,
+                                                        artist = artistName,
+                                                        spotifyUri = matchedCurrentSpotifyUri ?: nowPlaying?.spotifyUri,
+                                                        trackId = nowPlaying?.trackId
                                                     )
                                                 } else {
                                                     0
@@ -1036,8 +1055,9 @@ open class MainActivity : ComponentActivity() {
                                                     title = title,
                                                     artist = artist,
                                                     freshnessPercent = 80,
-                                                    spotifyUri = spUri,
-                                                    targetPlayer = selectedTargetPlayer
+                                                    spotifyUri = spUri ?: nowPlaying?.spotifyUri,
+                                                    targetPlayer = selectedTargetPlayer,
+                                                    trackId = nowPlaying?.trackId?.takeIf { it.isNotBlank() }
                                                 )
                                             }
                                         }

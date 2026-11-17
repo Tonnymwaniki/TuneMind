@@ -91,18 +91,28 @@ fun NeuralTrackActionDialog(
     onToggleCooldownVault: () -> Unit,
     spotifyUri: String? = null,
     albumArtUrl: String? = null,
+    trackId: String = "",
     onAddToSpotifyQueue: (() -> Unit)? = null,
     onSaveToSpotifyLiked: (() -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val canonicalIdentity = remember(trackId, spotifyUri, title, artist) {
+        com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = trackId.ifBlank { null },
+            spotifyUri = spotifyUri,
+            title = title,
+            artist = artist
+        )
+    }
+    val safePlayCount = playCount.coerceAtLeast(0)
     val detectedMood = remember(title, artist) {
         AdaptiveThemeEngine.resolveTrackMood(title, artist)
     }
     val resolvedMedia = rememberResolvedTrackMedia(
         title = title,
         artist = artist,
-        spotifyUri = spotifyUri,
+        spotifyUri = canonicalIdentity.spotifyUri,
         fallbackAlbumArtUrl = albumArtUrl
     )
     val ringColor = if (isCoolingDown) Color(0xFFFFB000) else theme.primaryAccent
@@ -167,7 +177,7 @@ fun NeuralTrackActionDialog(
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "${artist.ifBlank { "Unknown Artist" }} · $playCount ${if (playCount == 1) "play" else "plays"} · $genreHint",
+                        text = "${artist.ifBlank { "Unknown Artist" }} · $safePlayCount ${if (safePlayCount == 1) "play" else "plays"} · $genreHint",
                         color = Color.White.copy(alpha = 0.62f),
                         fontSize = 13.sp,
                         maxLines = 1,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.data.local.TuneMindDatabase
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.network.BackendEndpointManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +83,8 @@ object SupabaseIntelligenceSyncManager {
         trackTitle: String? = null,
         trackArtist: String? = null,
         spotifyUri: String? = null,
-        satietyPercent: Int = 24
+        satietyPercent: Int = 24,
+        trackId: String? = null
     ) {
         val appCtx = context.applicationContext
         scope.launch {
@@ -90,10 +92,19 @@ object SupabaseIntelligenceSyncManager {
                 val identity = resolveUserIdentity(appCtx)
                 val cleanTitle = trackTitle?.trim() ?: ""
                 val cleanArtist = trackArtist?.trim() ?: ""
+                val canonical = if (cleanTitle.isNotEmpty() || !trackId.isNullOrBlank() || !spotifyUri.isNullOrBlank()) {
+                    TrackIdentityResolver.resolveCanonicalIdentity(
+                        trackId = trackId,
+                        spotifyUri = spotifyUri,
+                        title = cleanTitle,
+                        artist = cleanArtist
+                    )
+                } else null
+                val resolvedSpotifyUri = canonical?.spotifyUri ?: ""
                 val targetQuery = listOfNotNull(
                     "$cleanTitle $cleanArtist".trim().takeIf { it.isNotEmpty() },
                     "action=$action",
-                    spotifyUri?.takeIf { it.isNotBlank() }?.let { "uri=$it" }
+                    resolvedSpotifyUri.takeIf { it.isNotBlank() }?.let { "uri=$it" }
                 ).joinToString(" | ")
 
                 // 1. Direct write to live Supabase `/rest/v1/agent_interventions` if configured on-device
@@ -126,7 +137,8 @@ object SupabaseIntelligenceSyncManager {
                         put("action", action)
                         put("track_title", cleanTitle)
                         put("track_artist", cleanArtist)
-                        put("spotify_uri", spotifyUri ?: "")
+                        put("track_id", canonical?.trackId ?: "")
+                        put("spotify_uri", resolvedSpotifyUri)
                     })
                 }
 
@@ -157,11 +169,18 @@ object SupabaseIntelligenceSyncManager {
 
             val tracksArr = JSONArray()
             for (item in aggregated) {
+                val canonical = TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = item.trackId,
+                    spotifyUri = item.spotifyUri,
+                    title = item.trackTitle,
+                    artist = item.artistName
+                )
                 tracksArr.put(JSONObject().apply {
                     put("title", item.trackTitle)
                     put("artist", item.artistName)
-                    put("trackId", item.spotifyUri)
-                    put("playCount", item.playCount)
+                    put("trackId", canonical.trackId)
+                    put("spotifyUri", canonical.spotifyUri ?: "")
+                    put("playCount", item.playCount.coerceAtLeast(0))
                     put("source", "com.spotify.music")
                 })
             }

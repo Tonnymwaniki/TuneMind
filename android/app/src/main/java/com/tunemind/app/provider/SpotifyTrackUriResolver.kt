@@ -8,6 +8,7 @@ import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
 import com.tunemind.app.data.ingestion.SpotifyTrackAggregate
 import com.tunemind.app.data.ingestion.parseSpotifyIsoTimestampMs
 import com.tunemind.app.data.local.TuneMindDatabase
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -136,17 +137,23 @@ object SpotifyTrackUriResolver {
                         val artist = mem.artist?.trim() ?: "Unknown Artist"
                         val key = "${title.lowercase()}|${artist.lowercase()}"
                         val existing = mergedMap[key]
-                        val candidateUri = mem.providerTrackId?.takeIf { it.startsWith("spotify:track:") } ?: ""
+                        val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                            trackId = mem.trackId.ifBlank { null },
+                            spotifyUri = mem.providerTrackId,
+                            title = title,
+                            artist = artist
+                        )
+                        val candidateUri = identity.spotifyUri ?: ""
                         if (existing == null) {
                             mergedMap[key] = SpotifyTrackAggregate(
-                                trackId = candidateUri.removePrefix("spotify:track:").ifBlank { key },
+                                trackId = identity.trackId,
                                 spotifyUri = candidateUri,
                                 trackTitle = title,
                                 artistName = artist,
                                 albumName = mem.album ?: "",
                                 albumArtUrl = null,
                                 durationMs = 0L,
-                                playCount = mem.distinctAppearanceCount.coerceAtLeast(1),
+                                playCount = mem.distinctAppearanceCount.coerceAtLeast(0),
                                 firstPlayedEpochMs = mem.firstObservedAppearanceAtMs ?: System.currentTimeMillis(),
                                 lastPlayedEpochMs = mem.lastObservedAppearanceAtMs ?: System.currentTimeMillis()
                             )
@@ -180,22 +187,20 @@ object SpotifyTrackUriResolver {
             withTimeoutOrNull(2400L) {
                 withContext(Dispatchers.IO) {
                     val unified = getUnifiedUserSpotifyTracksBlocking(context, fallbackMemoryTracks)
-                    var bestLocal = unified.maxWithOrNull(
-                        compareBy<SpotifyTrackAggregate> { it.playCount }
-                            .thenBy { it.lastPlayedEpochMs }
-                    )
+                    var bestLocal = unified
+                        .filter { it.playCount > 0 }
+                        .maxWithOrNull(
+                            compareBy<SpotifyTrackAggregate> { it.playCount }
+                                .thenBy { it.lastPlayedEpochMs }
+                        )
 
-                    // If all local tracks have playCount <= 1 and Spotify OAuth is connected, check /v1/me/top/tracks
+                    // Only inspect /v1/me/top/tracks as affinity fallback when no track has > 1 verified play (never fabricates playCount)
                     if ((bestLocal == null || bestLocal.playCount <= 1) && SpotifyAuthManager(context).isAuthenticated()) {
                         val userToken = SpotifyAuthManager(context).getValidAccessToken()
                         if (!userToken.isNullOrBlank()) {
                             val topTrack = fetchUserTopTrackFromWebApi(userToken)
-                            if (topTrack != null) {
-                                bestLocal = if (bestLocal != null && bestLocal.playCount > topTrack.playCount) {
-                                    bestLocal
-                                } else {
-                                    topTrack
-                                }
+                            if (topTrack != null && bestLocal == null) {
+                                bestLocal = topTrack
                             }
                         }
                     }
@@ -414,7 +419,7 @@ object SpotifyTrackUriResolver {
                             albumName = "",
                             albumArtUrl = null,
                             durationMs = trackObj.optLong("duration_ms", 0L),
-                            playCount = 1,
+                            playCount = 0,
                             firstPlayedEpochMs = now,
                             lastPlayedEpochMs = now
                         )
@@ -526,7 +531,7 @@ object SpotifyTrackUriResolver {
                             albumName = albumObj?.optString("name", "") ?: "",
                             albumArtUrl = albumObj?.optJSONArray("images")?.optJSONObject(0)?.optString("url"),
                             durationMs = trackObj.optLong("duration_ms", 0L),
-                            playCount = 1,
+                            playCount = 0,
                             firstPlayedEpochMs = now,
                             lastPlayedEpochMs = now
                         )
@@ -670,7 +675,7 @@ object SpotifyTrackUriResolver {
                             albumName = albumName,
                             albumArtUrl = artUrl,
                             durationMs = durationMs,
-                            playCount = (limit - i).coerceAtLeast(3),
+                            playCount = 0,
                             firstPlayedEpochMs = now - (i * 60_000L),
                             lastPlayedEpochMs = now - (i * 30_000L)
                         )
@@ -740,7 +745,7 @@ object SpotifyTrackUriResolver {
                             albumName = albumName,
                             albumArtUrl = artUrl,
                             durationMs = durationMs,
-                            playCount = 1,
+                            playCount = 0,
                             firstPlayedEpochMs = now,
                             lastPlayedEpochMs = now
                         )

@@ -31,7 +31,15 @@ data class TrackMemoryEntry(
     val evidenceQuality: MemoryEvidenceQuality,
     val historyMayBeIncomplete: Boolean,
     val appearances: List<MemoryAppearanceEvidence>,
-)
+    val trackId: String = "",
+) {
+    fun canonicalTrackId(): String = TrackIdentityResolver.resolveCanonicalTrackId(
+        trackId = trackId.ifBlank { null },
+        spotifyUri = providerTrackId,
+        title = title,
+        artist = artist
+    )
+}
 
 data class MemoryAppearanceEvidence(
     val reconstructedAppearanceId: String,

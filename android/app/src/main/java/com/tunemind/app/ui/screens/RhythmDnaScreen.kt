@@ -93,7 +93,7 @@ fun RhythmDnaScreen(
     loadingPlaylistIds: Set<String> = emptySet(),
     loadedPlaylistIds: Set<String> = emptySet(),
     playlistTrackErrors: Map<String, String> = emptyMap(),
-    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 1 },
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { _, _, _ -> false },
     onRefreshSpotifyLibrary: () -> Unit = {},
     onLoadPlaylistTracks: (playlistId: String) -> Unit = {},
@@ -396,27 +396,37 @@ fun RhythmDnaScreen(
                                         key = { _, t -> "hist_top_${t.trackKey}" }
                                     ) { idx, track ->
                                         val plays = resolvePlayCount(track.title, track.artist, track.spotifyUri)
-                                            .takeIf { it > 0 } ?: track.verifiedPlayCount
+                                            .takeIf { it > 0 } ?: track.verifiedPlayCount.coerceAtLeast(0)
                                         val isPlaying = isTrackCurrentlyPlaying(track.title, track.artist, track.spotifyUri)
+                                        val canonicalId = track.trackId.ifBlank {
+                                            com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                                spotifyUri = track.spotifyUri,
+                                                title = track.title,
+                                                artist = track.artist
+                                            )
+                                        }
+                                        val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.spotifyUri)
                                         TuneMindTrackCard(
                                             title = track.title,
                                             artist = track.artist,
                                             subtitle = track.album,
                                             playCount = plays,
+                                            showUnplayedLabel = true,
                                             isCurrentlyPlaying = isPlaying,
                                             appLabel = track.primaryAppName,
                                             freshnessPercent = track.freshnessPercent,
                                             isCoolingDown = track.isCoolingDown,
                                             leadingIndex = idx + 1,
-                                            spotifyUri = track.spotifyUri,
+                                            spotifyUri = cleanUri,
+                                            trackId = canonicalId,
                                             onPlayClick = {
-                                                onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
+                                                onPlayTrack(track.title, track.artist, cleanUri, track.primarySourcePackage)
                                             },
                                             onSyncClick = {
                                                 activeSyncTrack = TrackMemoryEntry(
                                                     entryId = track.entryId,
                                                     sourcePackage = track.primarySourcePackage,
-                                                    providerTrackId = track.spotifyUri,
+                                                    providerTrackId = cleanUri,
                                                     title = track.title,
                                                     artist = track.artist,
                                                     album = track.album,
@@ -427,7 +437,8 @@ fun RhythmDnaScreen(
                                                     identityBasis = com.tunemind.app.domain.model.TrackIdentityBasis.METADATA_FINGERPRINT,
                                                     evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
                                                     historyMayBeIncomplete = false,
-                                                    appearances = emptyList()
+                                                    appearances = emptyList(),
+                                                    trackId = canonicalId
                                                 )
                                             }
                                         )
@@ -465,26 +476,36 @@ fun RhythmDnaScreen(
                                         key = { _, ev -> ev.playId }
                                     ) { _, ev ->
                                         val isPlaying = ev.isNowPlaying || isTrackCurrentlyPlaying(ev.title, ev.artist, ev.spotifyUri)
-                                        val plays = resolvePlayCount(ev.title, ev.artist, ev.spotifyUri).coerceAtLeast(1)
+                                        val plays = resolvePlayCount(ev.title, ev.artist, ev.spotifyUri).coerceAtLeast(0)
                                         val timeLabel = if (isPlaying) "Now" else formatRelativeAgo(ev.playedAtMs)
                                         val durText = formatMmSs(ev.durationMs)
+                                        val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(ev.spotifyUri)
+                                        val canonicalId = ev.trackId.ifBlank {
+                                            com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                                spotifyUri = cleanUri,
+                                                title = ev.title,
+                                                artist = ev.artist
+                                            )
+                                        }
 
                                         TuneMindTrackCard(
                                             title = ev.title,
                                             artist = ev.artist,
                                             subtitle = listOfNotNull(timeLabel, durText.takeIf { it.isNotBlank() }).joinToString(" · "),
                                             playCount = plays,
+                                            showUnplayedLabel = true,
                                             isCurrentlyPlaying = isPlaying,
                                             appLabel = ev.appDisplayName,
-                                            spotifyUri = ev.spotifyUri,
+                                            spotifyUri = cleanUri,
+                                            trackId = canonicalId,
                                             onPlayClick = {
-                                                onPlayTrack(ev.title, ev.artist, ev.spotifyUri, ev.sourcePackage)
+                                                onPlayTrack(ev.title, ev.artist, cleanUri, ev.sourcePackage)
                                             },
                                             onSyncClick = {
                                                 activeSyncTrack = TrackMemoryEntry(
                                                     entryId = ev.playId,
                                                     sourcePackage = ev.sourcePackage,
-                                                    providerTrackId = ev.spotifyUri,
+                                                    providerTrackId = cleanUri,
                                                     title = ev.title,
                                                     artist = ev.artist,
                                                     album = ev.album,
@@ -495,7 +516,8 @@ fun RhythmDnaScreen(
                                                     identityBasis = com.tunemind.app.domain.model.TrackIdentityBasis.METADATA_FINGERPRINT,
                                                     evidenceQuality = com.tunemind.app.domain.model.MemoryEvidenceQuality.SUPPORTED_IDENTITY,
                                                     historyMayBeIncomplete = false,
-                                                    appearances = emptyList()
+                                                    appearances = emptyList(),
+                                                    trackId = canonicalId
                                                 )
                                             }
                                         )
@@ -836,12 +858,13 @@ fun RhythmDnaScreen(
                                 ) { _, track ->
                                     val title = track.title?.trim() ?: "Unknown Track"
                                     val artist = track.artist?.trim() ?: "Unknown Artist"
-                                    val uri = track.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
+                                    val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.providerTrackId)
+                                    val canonicalId = track.canonicalTrackId()
                                     val pkg = selectedTargetPlayer.ifBlank {
                                         track.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
                                     }
                                     val strictPlays = resolvePlayCount(title, artist, uri)
-                                        .takeIf { it > 0 } ?: track.distinctAppearanceCount.coerceAtLeast(1)
+                                        .takeIf { it > 0 } ?: track.distinctAppearanceCount.coerceAtLeast(0)
                                     val isPlaying = isTrackCurrentlyPlaying(title, artist, uri)
 
                                     TuneMindTrackCard(
@@ -849,11 +872,13 @@ fun RhythmDnaScreen(
                                         artist = artist,
                                         subtitle = track.album,
                                         playCount = strictPlays,
+                                        showUnplayedLabel = true,
                                         isCurrentlyPlaying = isPlaying,
                                         appLabel = ListeningPlayDeduplicator.resolveAppDisplayName(track.sourcePackage),
                                         accentColor = activePhase.color,
                                         secondaryAccent = theme.secondaryAccent,
                                         spotifyUri = uri,
+                                        trackId = canonicalId,
                                         onPlayClick = { onPlayTrack(title, artist, uri, pkg) },
                                         onSyncClick = { activeSyncTrack = track }
                                     )
@@ -935,9 +960,10 @@ fun RhythmDnaScreen(
     activeSyncTrack?.let { selected ->
         val title = selected.title?.trim() ?: "Unknown Track"
         val artist = selected.artist?.trim() ?: "Unknown Artist"
-        val uri = selected.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
+        val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(selected.providerTrackId)
+        val canonicalId = selected.canonicalTrackId()
         val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
-            ?: maxOf(1, selected.distinctAppearanceCount)
+            ?: selected.distinctAppearanceCount.coerceAtLeast(0)
         val freshness = (100 - minOf(94, plays * 19)).coerceIn(15, 98)
         val pkg = selectedTargetPlayer.ifBlank {
             selected.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
@@ -950,6 +976,7 @@ fun RhythmDnaScreen(
             playCount = plays,
             isCoolingDown = plays >= 4,
             spotifyUri = uri,
+            trackId = canonicalId,
             onDismiss = { activeSyncTrack = null },
             onPlayNow = { onPlayTrack(title, artist, uri, pkg) },
             onAgentNeuralBreakdown = { onAskAgentAboutTrack(title, artist, freshness, uri) },

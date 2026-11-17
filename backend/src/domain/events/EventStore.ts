@@ -8,6 +8,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { coerceNonNegativePlayCount, resolveCanonicalTrackIdentity } from '../identity/trackIdentity';
 
 export interface StoredEvent {
   event_id: string;
@@ -23,204 +24,102 @@ export interface StoredEvent {
   ingested_at: string;
 }
 
+interface StoreBucket {
+  events: StoredEvent[];
+  eventIdSet: Set<string>;
+  initialized: boolean;
+}
+
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'tunemind_events.json');
 
 export class EventStore {
-  private static events: StoredEvent[] = [];
-  private static eventIdSet = new Set<string>();
-  private static initialized = false;
+  private static stores = new Map<string, StoreBucket>();
   private readonly dbPath: string;
+  private readonly bucket: StoreBucket;
 
   constructor(dbPath?: string) {
-    this.dbPath = dbPath ?? DATA_FILE;
-    if (!EventStore.initialized) {
-      EventStore.initialized = true;
+    this.dbPath = path.resolve(dbPath ?? DATA_FILE);
+    let existing = EventStore.stores.get(this.dbPath);
+    if (!existing) {
+      existing = {
+        events: [],
+        eventIdSet: new Set<string>(),
+        initialized: false
+      };
+      EventStore.stores.set(this.dbPath, existing);
+    }
+    this.bucket = existing;
+    if (!this.bucket.initialized) {
+      this.bucket.initialized = true;
       this.initStorage();
     }
   }
 
+  private static isLegacySeedEvent(eventId: string): boolean {
+    return (
+      eventId.startsWith('evt-play-') ||
+      eventId.startsWith('evt-meta-') ||
+      eventId.startsWith('evt-sc-') ||
+      eventId.startsWith('evt-stop-')
+    );
+  }
+
   private initStorage(): void {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+      const dir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
       }
 
-      if (fs.existsSync(DATA_FILE)) {
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+      if (fs.existsSync(this.dbPath)) {
+        const raw = fs.readFileSync(this.dbPath, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Cleanse any legacy synthetic synthwave tracks from older builds
           const cleansed = parsed.filter((e: StoredEvent) => {
+            if (!e || EventStore.isLegacySeedEvent(e.event_id || '')) return false;
             const p = e.payload_json || '';
-            return !p.includes('The Neon Hearts') &&
-                   !p.includes('Solar Pulse') &&
-                   !p.includes('Vektor Drift') &&
-                   !p.includes('Luna Rivers') &&
-                   !p.includes('Komorebi');
+            return (
+              !p.includes('The Neon Hearts') &&
+              !p.includes('Solar Pulse') &&
+              !p.includes('Vektor Drift') &&
+              !p.includes('Luna Rivers') &&
+              !p.includes('Komorebi')
+            );
           });
 
           if (cleansed.length !== parsed.length) {
-            console.log(`[EventStore] 🧹 Purged ${parsed.length - cleansed.length} legacy synthetic synthwave events from persistent storage.`);
+            console.log(
+              `[EventStore] Purged ${parsed.length - cleansed.length} legacy seeded events from ${this.dbPath}.`
+            );
           }
 
-          if (cleansed.length > 0) {
-            EventStore.events = cleansed;
-            EventStore.eventIdSet = new Set(cleansed.map(e => e.event_id));
-            console.log(`[EventStore] Restored ${cleansed.length} persistent events from ${DATA_FILE}`);
-            if (cleansed.length !== parsed.length) {
-              this.persistToDisk();
-            }
-            return;
+          this.bucket.events = cleansed;
+          this.bucket.eventIdSet = new Set(cleansed.map(e => e.event_id));
+          if (cleansed.length !== parsed.length) {
+            this.persistToDisk();
           }
+          if (cleansed.length > 0) {
+            console.log(`[EventStore] Restored ${cleansed.length} persistent events from ${this.dbPath}`);
+          }
+          return;
         }
       }
     } catch (err) {
       console.warn('[EventStore] Could not load persisted data:', err);
     }
-
-    if (EventStore.events.length === 0) {
-      this.seedInitialEvents();
-      this.persistToDisk();
-    }
   }
 
   private persistToDisk(): void {
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+      const dir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(DATA_FILE, JSON.stringify(EventStore.events, null, 2), 'utf-8');
+      fs.writeFileSync(this.dbPath, JSON.stringify(this.bucket.events, null, 2), 'utf-8');
     } catch (err) {
       console.error('[EventStore] Error persisting events to disk:', err);
     }
-  }
-
-  private seedInitialEvents(): void {
-    // Seed initial realistic listening observations across authentic genres (Bongo Flava, Afrobeats, Afro-Pop)
-    const baseTime = Date.now() - 7 * 24 * 3600 * 1000;
-    const sampleTracks = [
-      { id: 'trk-1', title: 'Huwezi Jua', artist: 'Mbosso', album: 'Definition of Love', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 102 },
-      { id: 'trk-2', title: 'Komasava', artist: 'Diamond Platnumz', album: 'First Of All', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 112 },
-      { id: 'np-001', title: 'Enjoy', artist: 'Jux & Diamond Platnumz', album: 'King of Hearts', source: 'com.spotify.music', genre: 'Afro-Bongo', bpm: 108 },
-      { id: 'cand-1', title: 'Sikomi', artist: 'Diamond Platnumz', album: 'A Boy From Tandale', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 98 },
-      { id: 'cand-2', title: 'Amepotea', artist: 'Mbosso', album: 'Khan', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 104 },
-      { id: 'cand-3', title: 'Mi Amor', artist: 'Marioo & Jovial', album: 'The Kid You Know', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 106 },
-      { id: 'cand-4', title: 'Single Again', artist: 'Harmonize', album: 'Made For Us', source: 'com.spotify.music', genre: 'Bongo Flava', bpm: 100 },
-      { id: 'cand-5', title: 'Calm Down', artist: 'Rema', album: 'Rave & Climax', source: 'com.spotify.music', genre: 'Afrobeats', bpm: 105 },
-      { id: 'cand-6', title: 'Sawa', artist: 'Otile Brown', album: 'Just In Love', source: 'com.spotify.music', genre: 'Afro-Pop', bpm: 95 }
-    ];
-
-    const users = ['tunemind-dev', 'tonny@tunemind.neuro'];
-
-    users.forEach(userId => {
-      let offset = 0;
-      for (let day = 0; day < 7; day++) {
-        const sessionId = `obs-sess-day-${day}-${userId.slice(0, 5)}`;
-        const dayBase = baseTime + day * 86400 * 1000 + 3600 * 1000 * 10; // 10 AM
-
-        // Session created
-        this.insert(
-          `evt-sc-${day}-${userId}`,
-          userId,
-          sessionId,
-          'pixel-8-pro',
-          '1.0',
-          'SESSION_CREATED',
-          new Date(dayBase).toISOString(),
-          new Date(dayBase + 10).toISOString(),
-          'com.spotify.music',
-          JSON.stringify({ observerSessionId: sessionId, packageName: 'com.spotify.music' })
-        );
-
-        // Observations for tracks
-        sampleTracks.slice(0, 3 + (day % 3)).forEach((trk, idx) => {
-          const trackTime = dayBase + (idx * 240 + 60) * 1000;
-          // State playing
-          this.insert(
-            `evt-play-${day}-${idx}-${userId}`,
-            userId,
-            sessionId,
-            'pixel-8-pro',
-            '1.0',
-            'PLAYBACK_STATE_CHANGED',
-            new Date(trackTime).toISOString(),
-            new Date(trackTime + 20).toISOString(),
-            trk.source,
-            JSON.stringify({
-              playback: {
-                positionMs: 5000,
-                elapsedRealtimeMs: 12000000 + offset,
-                isPlaying: true,
-                playbackSpeed: 1.0,
-                playbackStateCode: 3
-              },
-              track: {
-                trackId: trk.id,
-                title: trk.title,
-                artist: trk.artist,
-                album: trk.album,
-                durationMs: 210000
-              }
-            })
-          );
-
-          // State metadata
-          this.insert(
-            `evt-meta-${day}-${idx}-${userId}`,
-            userId,
-            sessionId,
-            'pixel-8-pro',
-            '1.0',
-            'METADATA_CHANGED',
-            new Date(trackTime + 30000).toISOString(),
-            new Date(trackTime + 30020).toISOString(),
-            trk.source,
-            JSON.stringify({
-              playback: {
-                positionMs: 35000,
-                elapsedRealtimeMs: 12030000 + offset,
-                isPlaying: true,
-                playbackSpeed: 1.0,
-                playbackStateCode: 3
-              },
-              track: {
-                trackId: trk.id,
-                title: trk.title,
-                artist: trk.artist,
-                album: trk.album,
-                durationMs: 210000
-              }
-            })
-          );
-
-          offset += 60000;
-        });
-
-        // Observation stopped
-        const endDayTime = dayBase + 1200 * 1000;
-        this.insert(
-          `evt-stop-${day}-${userId}`,
-          userId,
-          sessionId,
-          'pixel-8-pro',
-          '1.0',
-          'OBSERVATION_STOPPED',
-          new Date(endDayTime).toISOString(),
-          new Date(endDayTime + 15).toISOString(),
-          'com.spotify.music',
-          JSON.stringify({
-            playback: {
-              positionMs: 200000,
-              elapsedRealtimeMs: 12120000 + offset,
-              isPlaying: false,
-              playbackSpeed: 0,
-              playbackStateCode: 2
-            }
-          })
-        );
-      }
-    });
   }
 
   insert(
@@ -233,9 +132,9 @@ export class EventStore {
     occurredAt: string,
     receivedAt: string,
     mediaSource: string,
-    payloadJson: string,
+    payloadJson: string
   ): boolean {
-    if (EventStore.eventIdSet.has(eventId)) {
+    if (this.bucket.eventIdSet.has(eventId)) {
       return false; // Idempotent duplicate
     }
 
@@ -253,14 +152,14 @@ export class EventStore {
       ingested_at: new Date().toISOString()
     };
 
-    EventStore.eventIdSet.add(eventId);
-    EventStore.events.push(event);
+    this.bucket.eventIdSet.add(eventId);
+    this.bucket.events.push(event);
     this.persistToDisk();
     return true;
   }
 
   listAll(): StoredEvent[] {
-    return [...EventStore.events].sort((a, b) => a.ingested_at.localeCompare(b.ingested_at));
+    return [...this.bucket.events].sort((a, b) => a.ingested_at.localeCompare(b.ingested_at));
   }
 
   private static recentAgentTracks: string[] = [];
@@ -278,20 +177,49 @@ export class EventStore {
     return [...EventStore.recentAgentTracks];
   }
 
-  syncClientTracks(tracks: Array<{ title: string; artist: string; source?: string; trackId?: string; playCount?: number }>): void {
-    let added = 0;
+  syncClientTracks(
+    tracks: Array<{
+      title: string;
+      artist: string;
+      source?: string;
+      trackId?: string;
+      spotifyUri?: string;
+      playCount?: number;
+    }>,
+    userId: string = 'tunemind-default-user'
+  ): void {
+    const cleanUserId = (userId || '').trim() || 'tunemind-default-user';
+    const userSlug = cleanUserId.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32) || 'default';
+    let changed = 0;
     for (const t of tracks) {
       if (!t.title || t.title === 'Standing By' || t.title === 'Active Session' || t.title === 'Deep Flow State') continue;
       const cleanTitle = t.title.trim();
       const cleanArtist = (t.artist || 'Unknown Artist').trim();
+      const identity = resolveCanonicalTrackIdentity({
+        trackId: t.trackId,
+        spotifyUri: t.spotifyUri,
+        title: cleanTitle,
+        artist: cleanArtist
+      });
+      const playCount = coerceNonNegativePlayCount(t.playCount);
       const safeKey = `${cleanTitle.toLowerCase()}-${cleanArtist.toLowerCase()}`.replace(/[^a-z0-9-]/g, '_');
-      const eventId = `client-sync-${safeKey}`;
-      if (!EventStore.eventIdSet.has(eventId)) {
-        const now = new Date().toISOString();
-        EventStore.eventIdSet.add(eventId);
-        EventStore.events.push({
+      const eventId = `client-sync-${userSlug}-${safeKey}`;
+      const now = new Date().toISOString();
+      const payloadJson = JSON.stringify({
+        track: {
+          trackId: identity.trackId,
+          spotifyUri: identity.spotifyUri,
+          title: cleanTitle,
+          artist: cleanArtist,
+          playCount
+        }
+      });
+
+      if (!this.bucket.eventIdSet.has(eventId)) {
+        this.bucket.eventIdSet.add(eventId);
+        this.bucket.events.push({
           event_id: eventId,
-          user_id: 'tunemind-default-user',
+          user_id: cleanUserId,
           session_id: 'live-phone-sync',
           device_id: 'android-client',
           schema_version: '1.0',
@@ -299,35 +227,72 @@ export class EventStore {
           occurred_at: now,
           received_at: now,
           media_source: t.source || 'com.spotify.music',
-          payload_json: JSON.stringify({
-            track: {
-              trackId: t.trackId || undefined,
-              title: cleanTitle,
-              artist: cleanArtist,
-              playCount: t.playCount || 1
-            }
-          }),
+          payload_json: payloadJson,
           ingested_at: now
         });
-        added++;
+        changed++;
+      } else {
+        const existingEvt = this.bucket.events.find(e => e.event_id === eventId);
+        if (existingEvt) {
+          try {
+            const parsed = JSON.parse(existingEvt.payload_json);
+            const prevCount = coerceNonNegativePlayCount(parsed?.track?.playCount);
+            const prevTrackId = parsed?.track?.trackId;
+            const prevUri = parsed?.track?.spotifyUri;
+            if (playCount > prevCount || (!prevTrackId && identity.trackId) || (!prevUri && identity.spotifyUri)) {
+              existingEvt.payload_json = JSON.stringify({
+                track: {
+                  trackId: identity.trackId || prevTrackId,
+                  spotifyUri: identity.spotifyUri || prevUri,
+                  title: cleanTitle,
+                  artist: cleanArtist,
+                  playCount: Math.max(prevCount, playCount)
+                }
+              });
+              existingEvt.received_at = now;
+              changed++;
+            }
+          } catch {
+            // Keep existing payload if unparseable
+          }
+        }
       }
     }
-    if (added > 0) {
+    if (changed > 0) {
       this.persistToDisk();
-      console.log(`[EventStore] 💾 Persisted ${added} new tracks from Android phone memory to disk.`);
     }
   }
 
-  getRecentObservedTracks(limit: number = 50): Array<{ title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }> {
-    const tracksMap = new Map<string, { title: string; artist: string; album?: string; trackId?: string; source: string; playCount: number }>();
+  getRecentObservedTracks(
+    limit: number = 50,
+    userId?: string
+  ): Array<{
+    title: string;
+    artist: string;
+    album?: string;
+    trackId: string;
+    spotifyUri?: string;
+    source: string;
+    playCount: number;
+  }> {
+    const targetUser = userId?.trim();
+    const tracksMap = new Map<
+      string,
+      {
+        title: string;
+        artist: string;
+        album?: string;
+        trackId: string;
+        spotifyUri?: string;
+        source: string;
+        playCount: number;
+      }
+    >();
 
-    const isSeedEvent = (id: string) => id.startsWith('evt-play-') || id.startsWith('evt-meta-') || id.startsWith('evt-sc-') || id.startsWith('evt-stop-');
-    const hasRealEvents = EventStore.events.some(e => !isSeedEvent(e.event_id));
-
-    // Scan events in reverse chronological order, ignoring synthetic seed tracks if real user tracks exist
-    const sorted = [...EventStore.events].reverse();
+    const sorted = [...this.bucket.events].reverse();
     for (const evt of sorted) {
-      if (hasRealEvents && isSeedEvent(evt.event_id)) continue;
+      if (EventStore.isLegacySeedEvent(evt.event_id)) continue;
+      if (targetUser && evt.user_id && evt.user_id !== targetUser) continue;
       try {
         const payload = JSON.parse(evt.payload_json);
         const trk = payload.track || payload.current_track || payload.nowPlaying;
@@ -335,24 +300,54 @@ export class EventStore {
           const cleanTitle = String(trk.title).trim();
           const cleanArtist = String(trk.artist || 'Unknown Artist').trim();
           const art = cleanArtist.toLowerCase();
-          if (art.includes('neon hearts') || art.includes('solar pulse') || art.includes('vektor drift') || art.includes('luna rivers') || art.includes('komorebi')) {
+          if (
+            art.includes('neon hearts') ||
+            art.includes('solar pulse') ||
+            art.includes('vektor drift') ||
+            art.includes('luna rivers') ||
+            art.includes('komorebi')
+          ) {
             continue;
           }
+          const identity = resolveCanonicalTrackIdentity({
+            trackId: trk.trackId,
+            spotifyUri: trk.spotifyUri || trk.spotify_uri,
+            title: cleanTitle,
+            artist: cleanArtist
+          });
+          const isClientSync = evt.event_id.startsWith('client-sync-');
+          const hasExplicitPlayCount = trk.playCount !== undefined && trk.playCount !== null;
+          const eventPlayCount = hasExplicitPlayCount
+            ? coerceNonNegativePlayCount(trk.playCount)
+            : isClientSync
+            ? 0
+            : evt.event_type === 'PLAYBACK_STATE_CHANGED' || evt.event_type === 'METADATA_CHANGED'
+            ? 1
+            : 0;
+
           const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
           const existing = tracksMap.get(key);
           if (existing) {
-            existing.playCount++;
-            if (!existing.trackId && trk.trackId) {
-              existing.trackId = trk.trackId;
+            if (isClientSync || hasExplicitPlayCount) {
+              existing.playCount = Math.max(existing.playCount, eventPlayCount);
+            } else {
+              existing.playCount += eventPlayCount;
+            }
+            if (!existing.spotifyUri && identity.spotifyUri) {
+              existing.spotifyUri = identity.spotifyUri;
+            }
+            if ((!existing.trackId || existing.trackId.startsWith('trk:')) && identity.trackId && !identity.trackId.startsWith('trk:')) {
+              existing.trackId = identity.trackId;
             }
           } else {
             tracksMap.set(key, {
               title: cleanTitle,
               artist: cleanArtist,
               album: trk.album,
-              trackId: trk.trackId || undefined,
+              trackId: identity.trackId,
+              spotifyUri: identity.spotifyUri,
               source: evt.media_source || 'com.spotify.music',
-              playCount: trk.playCount || 1
+              playCount: eventPlayCount
             });
           }
           if (tracksMap.size >= limit) break;
@@ -363,11 +358,11 @@ export class EventStore {
   }
 
   count(): number {
-    return EventStore.events.length;
+    return this.bucket.events.length;
   }
 
   private filterEvents(params: unknown[]): StoredEvent[] {
-    let list = [...EventStore.events];
+    let list = [...this.bucket.events];
     if (params.length > 0 && typeof params[0] === 'string') {
       list = list.filter(e => e.user_id === params[0]);
     }
@@ -376,6 +371,12 @@ export class EventStore {
 
   queryRow<T>(sql: string, params: unknown[] = []): T | undefined {
     const list = this.filterEvents(params);
+
+    if (sql.includes('COUNT(DISTINCT session_id)')) {
+      const filtered = sql.includes("session_id != ''") ? list.filter(e => e.session_id !== '') : list;
+      const cnt = new Set(filtered.map(e => e.session_id)).size;
+      return { cnt } as unknown as T;
+    }
 
     if (sql.includes('COUNT(*)')) {
       if (sql.includes("event_type = 'SESSION_CREATED'")) {
@@ -437,6 +438,11 @@ export class EventStore {
       return distinct.map(session_id => ({ session_id })) as unknown as T[];
     }
 
+    if (sql.includes('DISTINCT media_source')) {
+      const distinct = Array.from(new Set(list.map(e => e.media_source))).sort();
+      return distinct.map(media_source => ({ media_source })) as unknown as T[];
+    }
+
     if (sql.includes('ORDER BY occurred_at ASC')) {
       const sorted = [...list].sort((a, b) => {
         const t = a.occurred_at.localeCompare(b.occurred_at);
@@ -449,24 +455,22 @@ export class EventStore {
   }
 
   clear(): void {
-    EventStore.events = [];
-    EventStore.eventIdSet.clear();
+    this.bucket.events = [];
+    this.bucket.eventIdSet.clear();
     this.persistToDisk();
   }
 
   deleteByUserIds(userIds: string[]): number {
-    const targets = new Set(
-      userIds.map(id => id.trim().toLowerCase()).filter(Boolean)
-    );
+    const targets = new Set(userIds.map(id => id.trim().toLowerCase()).filter(Boolean));
     if (targets.size === 0) return 0;
 
-    const before = EventStore.events.length;
-    EventStore.events = EventStore.events.filter(
+    const before = this.bucket.events.length;
+    this.bucket.events = this.bucket.events.filter(
       e => !targets.has((e.user_id || '').trim().toLowerCase())
     );
-    const removed = before - EventStore.events.length;
+    const removed = before - this.bucket.events.length;
     if (removed > 0) {
-      EventStore.eventIdSet = new Set(EventStore.events.map(e => e.event_id));
+      this.bucket.eventIdSet = new Set(this.bucket.events.map(e => e.event_id));
       this.persistToDisk();
     }
     return removed;

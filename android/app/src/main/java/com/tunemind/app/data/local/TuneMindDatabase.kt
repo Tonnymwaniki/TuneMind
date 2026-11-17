@@ -44,7 +44,8 @@ import com.tunemind.app.domain.study.StudyEntity
  *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
  *   10 — Spotify TrackHistoryTelemetryItem table (track_history_telemetry).
  *   11 — Spotify Library tables (spotify_liked_tracks, spotify_playlists, spotify_podcasts).
- *   12 — Self-Learning Daily For You columns on ai_recommendation_crate (dropDateKey, genreTag, outcome telemetry).
+ *   13 — Spotify Visual Metadata caches (spotify_track_visual_cache, spotify_artist_profile_cache).
+ *   14 — Canonical trackId column on ai_recommendation_crate.
  */
 @Database(
     entities = [
@@ -65,7 +66,7 @@ import com.tunemind.app.domain.study.StudyEntity
         TrackVisualCacheEntity::class,
         ArtistProfileCacheEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -107,7 +108,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_9_10,
                         MIGRATION_10_11,
                         MIGRATION_11_12,
-                        MIGRATION_12_13
+                        MIGRATION_12_13,
+                        MIGRATION_13_14
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -485,6 +487,12 @@ abstract class TuneMindDatabase : RoomDatabase() {
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_artist_profile_cache_artist_id ON spotify_artist_profile_cache(artist_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_spotify_artist_profile_cache_updated_at_ms ON spotify_artist_profile_cache(updated_at_ms)")
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN trackId TEXT NOT NULL DEFAULT ''")
             }
         }
     }

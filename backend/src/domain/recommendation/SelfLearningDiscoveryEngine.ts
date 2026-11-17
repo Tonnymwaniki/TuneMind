@@ -4,6 +4,11 @@ import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { getLiveSupabaseClient } from '../../config/supabase';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
+import {
+  buildDeterministicTrackId,
+  coerceNonNegativePlayCount,
+  resolveCanonicalTrackIdentity
+} from '../identity/trackIdentity';
 
 export type RecommendationOutcomeType =
   | 'PENDING'
@@ -15,6 +20,8 @@ export type RecommendationOutcomeType =
   | 'IGNORED';
 
 export interface CrossAppTrackSignal {
+  trackId?: string;
+  spotifyUri?: string;
   title: string;
   artist: string;
   genre?: string;
@@ -29,6 +36,8 @@ export interface CrossAppTrackSignal {
 
 export interface DiscoveryFeedbackEvent {
   userId?: string;
+  trackId?: string;
+  spotifyUri?: string;
   title: string;
   artist: string;
   genre?: string;
@@ -94,6 +103,9 @@ export interface LearningSummary {
 }
 
 export interface ScoredDiscoveryTrack {
+  trackId: string;
+  spotifyUri?: string;
+  playCount?: number;
   title: string;
   artist: string;
   album: string;
@@ -165,7 +177,7 @@ const ARTIST_GENRE_HINTS: Array<{ keywords: string[]; genre: string }> = [
   { keywords: ['khruangbin', 'men i trust', 'tame impala', 'faye webster', 'mac demarco', 'mitski'], genre: 'Alternative Indie' }
 ];
 
-const CURATED_GLOBAL_DISCOVERY_BANK: Array<ScoredDiscoveryTrack> = [
+const CURATED_GLOBAL_DISCOVERY_BANK_RAW: Array<Omit<ScoredDiscoveryTrack, 'trackId'>> = [
   // Afrobeats
   { title: 'Kese (Dance)', artist: 'Wizkid', album: 'Morayo', genre: 'Afrobeats', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Velvety Lagos percussion and hypnotic bassline crafted for effortless repeat listening.', confidence: 0.94, mlScore: 0.94, isWildcard: false },
   { title: 'MMS', artist: 'Asake & Wizkid', album: 'Lungu Boy', genre: 'Afrobeats', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Warm brass accents and smooth mid-tempo Afro-fusion groove.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
@@ -220,6 +232,12 @@ const CURATED_GLOBAL_DISCOVERY_BANK: Array<ScoredDiscoveryTrack> = [
   { title: 'Drive Me Crazy', artist: 'Black Coffee & Msaki', album: 'Subconsciously', genre: 'Electronic & Afro House', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Deep South African house atmosphere crafted for expansive late sessions.', confidence: 0.92, mlScore: 0.92, isWildcard: true },
   { title: 'Amiga da Minha Mulher', artist: 'Seu Jorge', album: 'Músicas para Churrasco', genre: 'Bossa Nova & MPB', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Brazilian samba-soul brass and warm acoustic bounce to refresh your ear.', confidence: 0.89, mlScore: 0.89, isWildcard: true }
 ];
+
+const CURATED_GLOBAL_DISCOVERY_BANK: ScoredDiscoveryTrack[] = CURATED_GLOBAL_DISCOVERY_BANK_RAW.map((item) => ({
+  ...item,
+  trackId: buildDeterministicTrackId(item.title, item.artist, 'disc'),
+  playCount: 0
+}));
 
 export class SelfLearningDiscoveryEngine {
   private static storePath = path.join(os.tmpdir(), 'tunemind-ml-taste-store.json');
@@ -373,7 +391,7 @@ export class SelfLearningDiscoveryEngine {
           sb.from('ml_user_taste_models').select('*').eq('user_id', userId).maybeSingle(),
           sb
             .from('discovery_recommendation_outcomes')
-            .select('drop_date, track_title, artist, genre, sub_tier, outcome_status, reason, confidence, preview_url, album_art_url, track_duration_ms, updated_at')
+            .select('drop_date, track_id, spotify_uri, track_title, artist, genre, sub_tier, outcome_status, reason, confidence, preview_url, album_art_url, track_duration_ms, updated_at')
             .eq('user_id', userId)
             .order('updated_at', { ascending: false })
             .limit(80)
@@ -388,7 +406,17 @@ export class SelfLearningDiscoveryEngine {
             if (!list.some((x) => this.normalizeKey(x.title, x.artist) === this.normalizeKey(row.track_title, row.artist))) {
               const isWild = String(row.sub_tier || '').toUpperCase() === 'GLOBAL_WILDCARD';
               const conf = Number(row.confidence || 0.9);
+              const identity = resolveCanonicalTrackIdentity({
+                trackId: row.track_id,
+                spotifyUri: row.spotify_uri,
+                title: String(row.track_title),
+                artist: String(row.artist),
+                prefix: 'disc'
+              });
               list.push({
+                trackId: identity.trackId,
+                spotifyUri: identity.spotifyUri,
+                playCount: 0,
                 title: String(row.track_title),
                 artist: String(row.artist),
                 album: '',
@@ -607,10 +635,11 @@ export class SelfLearningDiscoveryEngine {
 
     for (const sig of signals.slice(0, 40)) {
       if (!sig.title || !sig.artist) continue;
+      const plays = coerceNonNegativePlayCount(sig.playCount);
+      if (plays <= 0) continue; // Only verified plays reinforce cross-app listening weights
       const genre = SelfLearningDiscoveryEngine.inferGenre(sig.title, sig.artist, sig.genre);
       const entry = this.ensureGenreEntry(model, genre);
       const timeSlot = sig.timeSlot || 'Evening';
-      const plays = Math.max(1, Number(sig.playCount || 1));
 
       const comp =
         typeof sig.completionRatio === 'number' && sig.completionRatio > 0
@@ -799,6 +828,13 @@ export class SelfLearningDiscoveryEngine {
    * and attaches real previewUrl, album, albumArtUrl, and durationMs.
    */
   private async verifyWithCatalog(candidate: ScoredDiscoveryTrack): Promise<ScoredDiscoveryTrack> {
+    const baseIdentity = resolveCanonicalTrackIdentity({
+      trackId: candidate.trackId,
+      spotifyUri: candidate.spotifyUri,
+      title: candidate.title,
+      artist: candidate.artist,
+      prefix: 'disc'
+    });
     try {
       const q = encodeURIComponent(`${candidate.title} ${candidate.artist}`);
       const controller = new AbortController();
@@ -811,8 +847,17 @@ export class SelfLearningDiscoveryEngine {
         const json: any = await resp.json();
         const match = Array.isArray(json?.data) ? json.data[0] : null;
         if (match && match.title) {
+          const verifiedId =
+            baseIdentity.trackId && !baseIdentity.trackId.startsWith('disc:')
+              ? baseIdentity.trackId
+              : match.id
+              ? `deezer:${match.id}`
+              : baseIdentity.trackId;
           return {
             ...candidate,
+            trackId: verifiedId,
+            spotifyUri: baseIdentity.spotifyUri,
+            playCount: 0,
             title: String(match.title || candidate.title).trim(),
             artist: String(match.artist?.name || candidate.artist).trim(),
             album: String(match.album?.title || candidate.album || '').trim(),
@@ -825,7 +870,12 @@ export class SelfLearningDiscoveryEngine {
     } catch {
       // Non-fatal fallback
     }
-    return candidate;
+    return {
+      ...candidate,
+      trackId: baseIdentity.trackId,
+      spotifyUri: baseIdentity.spotifyUri,
+      playCount: 0
+    };
   }
 
   public async recordFeedback(event: DiscoveryFeedbackEvent, supabaseOverride?: { supabaseUrl?: string; supabaseKey?: string }): Promise<LearningSummary> {
@@ -836,6 +886,13 @@ export class SelfLearningDiscoveryEngine {
 
     const dropDate = event.dropDate || SelfLearningDiscoveryEngine.getTodayDateKey();
     const genre = SelfLearningDiscoveryEngine.inferGenre(event.title, event.artist, event.genre);
+    const identity = resolveCanonicalTrackIdentity({
+      trackId: event.trackId,
+      spotifyUri: event.spotifyUri,
+      title: event.title,
+      artist: event.artist,
+      prefix: 'disc'
+    });
     const completionRatio = event.durationMs && event.durationMs > 0 ? Math.min(1, (event.listenedMs || 0) / event.durationMs) : 0;
     const rewardScore =
       event.outcome === 'SAVED' ? 1.4
@@ -859,6 +916,8 @@ export class SelfLearningDiscoveryEngine {
         const rowPayload = {
           user_id: userId,
           drop_date: dropDate,
+          track_id: identity.trackId,
+          spotify_uri: identity.spotifyUri || null,
           track_title: event.title.trim(),
           artist: event.artist.trim(),
           genre,
@@ -895,8 +954,10 @@ export class SelfLearningDiscoveryEngine {
           os_intent: actionTag,
           target_search_query: `${event.title} by ${event.artist}`,
           action: actionTag,
+          track_id: identity.trackId,
           track_title: event.title,
           track_artist: event.artist,
+          spotify_uri: identity.spotifyUri,
           circadian_daypart: event.timeSlot || 'Evening'
         },
         supabaseOverride
@@ -1035,7 +1096,21 @@ export class SelfLearningDiscoveryEngine {
         wildcardCount: existingDropForCycle.recommendations.filter((r) => r.isWildcard).length,
         learningSummary,
         genreAllocation,
-        recommendations: existingDropForCycle.recommendations
+        recommendations: existingDropForCycle.recommendations.map((r) => {
+          const id = resolveCanonicalTrackIdentity({
+            trackId: r.trackId,
+            spotifyUri: r.spotifyUri,
+            title: r.title,
+            artist: r.artist,
+            prefix: 'disc'
+          });
+          return {
+            ...r,
+            trackId: id.trackId,
+            spotifyUri: id.spotifyUri,
+            playCount: coerceNonNegativePlayCount(r.playCount)
+          };
+        })
       };
     }
 
@@ -1137,7 +1212,18 @@ Return ONLY a raw JSON array:
               const llmConf = Math.min(0.99, Math.max(0.75, Number(row.confidence || 0.91)));
               const mlScore = Number((llmConf * 0.55 + learnedGenreScore * 0.45).toFixed(3));
 
+              const identity = resolveCanonicalTrackIdentity({
+                trackId: row.trackId || row.track_id,
+                spotifyUri: row.spotifyUri || row.spotify_uri,
+                title,
+                artist,
+                prefix: 'disc'
+              });
+
               candidates.push({
+                trackId: identity.trackId,
+                spotifyUri: identity.spotifyUri,
+                playCount: 0,
                 title,
                 artist,
                 album: String(row.album || '').trim(),
@@ -1259,6 +1345,8 @@ Return ONLY a raw JSON array:
           .map((item) => ({
             user_id: userId,
             drop_date: dropDate,
+            track_id: item.trackId,
+            spotify_uri: item.spotifyUri || null,
             track_title: item.title,
             artist: item.artist,
             genre: item.genre,

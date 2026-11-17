@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { resolveCanonicalTrackIdentity } from '../../domain/identity/trackIdentity';
 
 const router = Router();
 
 export interface UniversalTrackProfile {
+  trackId: string;
   trackKey: string;
   cleanTitle: string;
   cleanArtist: string;
@@ -385,12 +387,22 @@ export async function resolveUniversalTrackProfile(
     return null;
   }
 
-  const profile: UniversalTrackProfile = {
-    trackKey: key,
-    cleanTitle: sp?.cleanTitle || dz?.cleanTitle || it?.cleanTitle || cleanTitle,
-    cleanArtist: sp?.cleanArtist || dz?.cleanArtist || it?.cleanArtist || cleanArtist,
-    spotifyTrackId: sp?.spotifyTrackId || null,
+  const resolvedCleanTitle = sp?.cleanTitle || dz?.cleanTitle || it?.cleanTitle || cleanTitle;
+  const resolvedCleanArtist = sp?.cleanArtist || dz?.cleanArtist || it?.cleanArtist || cleanArtist;
+  const canonical = resolveCanonicalTrackIdentity({
+    trackId: sp?.spotifyTrackId || null,
     spotifyUri: sp?.spotifyUri || explicitUri || null,
+    title: resolvedCleanTitle,
+    artist: resolvedCleanArtist
+  });
+
+  const profile: UniversalTrackProfile = {
+    trackId: canonical.trackId,
+    trackKey: key,
+    cleanTitle: resolvedCleanTitle,
+    cleanArtist: resolvedCleanArtist,
+    spotifyTrackId: sp?.spotifyTrackId || null,
+    spotifyUri: canonical.spotifyUri || null,
     artistId: sp?.artistId || null,
     albumName: sp?.albumName || dz?.albumName || it?.albumName || null,
     releaseDate: sp?.releaseDate || it?.releaseDate || null,

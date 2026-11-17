@@ -333,6 +333,12 @@ fun SpotifyLibrarySection(
                         items = likedTracks,
                         key = { _, item -> "liked_${item.trackId}" }
                     ) { idx, item ->
+                        val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                            trackId = item.trackId,
+                            spotifyUri = item.spotifyUri,
+                            title = item.trackTitle,
+                            artist = item.artistName
+                        )
                         val plays = resolvePlayCount(item.trackTitle, item.artistName, item.spotifyUri)
                         val isPlaying = isTrackCurrentlyPlaying(item.trackTitle, item.artistName, item.spotifyUri)
                         val durLabel = formatTrackMinutesSeconds(item.durationMs)
@@ -350,6 +356,7 @@ fun SpotifyLibrarySection(
                             leadingIndex = idx + 1,
                             spotifyUri = item.spotifyUri,
                             albumArtUrl = item.albumArtUrl,
+                            trackId = canonicalId,
                             onPlayClick = {
                                 onPlayTrack(item.trackTitle, item.artistName, item.spotifyUri, "com.spotify.music")
                             }
@@ -431,6 +438,12 @@ fun SpotifyLibrarySection(
                             items = playlistTracks,
                             key = { idx, tr -> "pl_${selectedPlaylist.playlistId}_${tr.trackId}_$idx" }
                         ) { idx, tr ->
+                            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                trackId = tr.trackId,
+                                spotifyUri = tr.spotifyUri,
+                                title = tr.title,
+                                artist = tr.artist
+                            )
                             val plays = resolvePlayCount(tr.title, tr.artist, tr.spotifyUri)
                             val isPlaying = isTrackCurrentlyPlaying(tr.title, tr.artist, tr.spotifyUri)
                             val durLabel = formatTrackMinutesSeconds(tr.durationMs)
@@ -448,6 +461,7 @@ fun SpotifyLibrarySection(
                                 leadingIndex = idx + 1,
                                 spotifyUri = tr.spotifyUri.ifBlank { null },
                                 albumArtUrl = tr.albumArtUrl,
+                                trackId = canonicalId,
                                 onPlayClick = {
                                     onPlayTrack(tr.title, tr.artist, tr.spotifyUri.ifBlank { null }, "com.spotify.music")
                                 }

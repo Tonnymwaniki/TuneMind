@@ -744,15 +744,24 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 track.album?.takeIf { it.isNotBlank() },
                 formatListeningDuration(track.totalListeningMs)
             ).joinToString(" · ")
+            val canonicalId = track.trackId.ifBlank {
+                com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                    spotifyUri = track.spotifyUri,
+                    title = track.title,
+                    artist = track.artist
+                )
+            }
             TuneMindTrackCard(
                 title = track.title,
                 artist = track.artist,
                 subtitle = windowSubtitle.ifBlank { track.album },
                 playCount = track.verifiedPlayCount,
+                showUnplayedLabel = true,
                 isCurrentlyPlaying = playingNow,
                 appLabel = track.primaryAppName,
                 leadingIndex = index + 1,
                 spotifyUri = track.spotifyUri,
+                trackId = canonicalId,
                 onPlayClick = {
                     onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
                 }

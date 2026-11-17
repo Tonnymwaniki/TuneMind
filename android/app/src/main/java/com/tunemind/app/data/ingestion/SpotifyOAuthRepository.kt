@@ -10,6 +10,7 @@ import com.tunemind.app.data.local.EventBufferRepository
 import com.tunemind.app.data.local.TuneMindDatabase
 import com.tunemind.app.domain.event.ObservationEventType
 import com.tunemind.app.domain.model.PlaybackObservation
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.sync.SyncConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -256,8 +257,9 @@ class SpotifyOAuthRepository(context: Context) {
         }
         refreshScopeStatus()
 
-        // Purge any legacy CURRENTLY_PLAYING poll duplicates from earlier app versions
+        // Purge any legacy CURRENTLY_PLAYING or synthetic TOP_TRACKS rows from earlier app versions
         runCatching { historyDao.deletePollingDuplicates() }
+        runCatching { historyDao.deleteSyntheticTopTracks() }
 
         val bearerHeader = "Bearer $validToken"
         val nowMs = System.currentTimeMillis()
@@ -278,9 +280,6 @@ class SpotifyOAuthRepository(context: Context) {
                 for (dto in items) {
                     telemetryItemsToInsert.add(dto.toTrackHistoryTelemetryItem(nowMs))
                     entitiesToInsert.add(dto.toHistoryEntity(nowMs))
-                }
-                if (items.isNotEmpty()) {
-                    historyDao.deleteSyntheticTopTracks()
                 }
                 Log.i(TAG, "Fetched ${items.size} recently-played tracks from Spotify Web API (after=$latestCursorMs)")
             } else if (response.code() in 500..599 || response.code() == 429) {
@@ -325,27 +324,7 @@ class SpotifyOAuthRepository(context: Context) {
             Log.d(TAG, "Currently-playing fetch note: ${e.message}")
         }
 
-        // C. If user truly has zero real RECENTLY_PLAYED tracks, seed once from /v1/me/top/tracks
-        try {
-            val existingReal = historyDao.getRecentHistorySnapshot(limit = 10)
-            if (existingReal.isEmpty() && entitiesToInsert.isEmpty()) {
-                val topResp = webApiService.getTopTracks(authHeader = bearerHeader, timeRange = "short_term", limit = 20)
-                if (topResp.isSuccessful) {
-                    val topItems = topResp.body()?.items.orEmpty()
-                    topItems.forEachIndexed { idx, trackDto ->
-                        val syntheticTimestamp = nowMs - ((idx + 1) * 3_600_000L)
-                        entitiesToInsert.add(
-                            trackDto.toHistoryEntity(
-                                playedAtMs = syntheticTimestamp,
-                                ingestionSource = "TOP_TRACKS"
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "Top-tracks bootstrap note: ${e.message}")
-        }
+        // C. Insert verified RECENTLY_PLAYED telemetry into Local-First Room Database (never invent synthetic plays from TOP_TRACKS)
 
         // D. Insert into Local-First Room Database while ignoring duplicates
         if (telemetryItemsToInsert.isNotEmpty()) {
@@ -733,14 +712,30 @@ class SpotifyOAuthRepository(context: Context) {
             val artUrl = t.album?.images?.firstOrNull()?.url
                 ?: t.images?.firstOrNull()?.url
                 ?: t.show?.images?.firstOrNull()?.url
-            val id = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${artist.lowercase()}" }
-            val fallbackUri = if (t.show != null && t.artists.isEmpty()) "spotify:episode:$id" else "spotify:track:$id"
+            val isEpisode = t.show != null && t.artists.isEmpty()
+            val identity = if (isEpisode) {
+                val cleanEpId = t.id?.trim()?.takeIf { Regex("^[A-Za-z0-9]{10,}$").matches(it) }
+                val cleanEpUri = t.uri.trim().takeIf { it.startsWith("spotify:episode:") }
+                    ?: cleanEpId?.let { "spotify:episode:$it" }
+                    ?: ""
+                com.tunemind.app.domain.model.CanonicalTrackIdentity(
+                    trackId = cleanEpId ?: TrackIdentityResolver.buildDeterministicTrackId(t.name, artist, "ep"),
+                    spotifyUri = cleanEpUri.ifBlank { null }
+                )
+            } else {
+                TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = t.id,
+                    spotifyUri = t.uri,
+                    title = t.name,
+                    artist = artist
+                )
+            }
             SpotifyPlaylistTrackEntry(
-                trackId = id,
+                trackId = identity.trackId,
                 title = t.name.trim(),
                 artist = artist.trim(),
                 album = album,
-                spotifyUri = t.uri.ifBlank { fallbackUri },
+                spotifyUri = identity.spotifyUri.orEmpty(),
                 durationMs = t.durationMs,
                 albumArtUrl = artUrl
             )
@@ -756,13 +751,19 @@ class SpotifyOAuthRepository(context: Context) {
     ) {
         for (entity in entities) {
             try {
+                val canonicalId = TrackIdentityResolver.resolveCanonicalTrackId(
+                    trackId = entity.trackId,
+                    spotifyUri = entity.spotifyUri,
+                    title = entity.trackTitle,
+                    artist = entity.artistName
+                )
                 val obs = PlaybackObservation(
                     eventId = "spotify_api_${entity.historyId}",
                     observerSessionId = "spotify_web_api_ingestion",
                     eventType = ObservationEventType.METADATA_CHANGED,
                     eventTimeMs = entity.playedAtEpochMs,
                     sourcePackage = "com.spotify.music",
-                    trackId = entity.spotifyUri,
+                    trackId = entity.spotifyUri.ifBlank { canonicalId },
                     trackTitle = entity.trackTitle,
                     trackArtist = entity.artistName,
                     trackAlbum = entity.albumName.ifBlank { null },

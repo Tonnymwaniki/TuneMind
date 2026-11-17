@@ -143,11 +143,12 @@ fun NowPlayingSheet(
             )
         }
     }
+    val activeSpotifyUri = matchedLiveSpotify?.spotifyUri ?: nowPlaying?.spotifyUri
     val activeMedia = if (hasTrack) {
         rememberResolvedTrackMedia(
             title = effectiveTitle,
             artist = effectiveArtist,
-            spotifyUri = matchedLiveSpotify?.spotifyUri,
+            spotifyUri = activeSpotifyUri,
             fallbackAlbumArtUrl = matchedLiveSpotify?.albumArtUrl
         )
     } else null
@@ -460,7 +461,7 @@ fun NowPlayingSheet(
                                 sourcePkg = nowPlaying?.sourcePackage,
                                 startMs = start,
                                 endMs = end,
-                                spotifyUri = matchedLiveSpotify?.spotifyUri
+                                spotifyUri = activeSpotifyUri
                             )
                             actionStatus = "Saved moment from \"$effectiveTitle\""
                         }
@@ -471,7 +472,13 @@ fun NowPlayingSheet(
                         accent = warnAmber,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.quarantineTrack(effectiveTitle, effectiveArtist)
+                            vm.quarantineTrack(
+                                title = effectiveTitle,
+                                artist = effectiveArtist,
+                                sourcePackage = nowPlaying?.sourcePackage,
+                                spotifyUri = activeSpotifyUri,
+                                trackId = nowPlaying?.trackId
+                            )
                             actionStatus = "Moved \"$effectiveTitle\" to Cooldown Vault"
                         }
                     )
@@ -497,7 +504,7 @@ fun NowPlayingSheet(
                         accent = Color(0xFF1DB954),
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, matchedLiveSpotify?.spotifyUri)
+                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, activeSpotifyUri)
                             actionStatus = "Adding \"$effectiveTitle\" to Spotify queue…"
                         }
                     )
@@ -507,7 +514,7 @@ fun NowPlayingSheet(
                         accent = Color(0xFF1DB954),
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, matchedLiveSpotify?.spotifyUri)
+                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, activeSpotifyUri)
                             actionStatus = "Saving \"$effectiveTitle\" to Liked Songs…"
                         }
                     )

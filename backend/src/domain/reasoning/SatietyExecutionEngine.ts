@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { normalizeSpotifyUri, resolveCanonicalTrackIdentity } from '../identity/trackIdentity';
 
 // ============================================================================
 // 1. INPUT & OUTPUT SCHEMAS FOR THE SATIETY REASONING ENGINE
@@ -263,7 +264,7 @@ export class SatietyExecutionEngine {
         .find(
           t =>
             t.artist_name !== dominantArtist &&
-            (trackCounts.get((t.track_title || '').trim().toLowerCase()) || 1) <= 1
+            (trackCounts.get((t.track_title || '').trim().toLowerCase()) || 0) <= 1
         ) || window[window.length - 1];
 
     return {
@@ -310,16 +311,25 @@ You MUST invoke all three tools in your response:
     const last50 = (request.tracks || []).slice(0, 50);
     const metrics = this.computeTelemetryMetrics(last50);
 
-    const compactTracks = last50.map((t, idx) => ({
-      index: idx + 1,
-      title: t.track_title,
-      artist: t.artist_name,
-      uri: t.spotify_uri || `spotify:track:${t.track_id}`,
-      played_at_ms: t.played_at_epoch_ms,
-      duration_ms: t.duration_ms,
-      skip_duration_ms: t.skip_duration_ms ?? null,
-      was_skipped: Boolean(t.was_skipped)
-    }));
+    const compactTracks = last50.map((t, idx) => {
+      const identity = resolveCanonicalTrackIdentity({
+        trackId: t.track_id,
+        spotifyUri: t.spotify_uri,
+        title: t.track_title,
+        artist: t.artist_name
+      });
+      return {
+        index: idx + 1,
+        track_id: identity.trackId,
+        title: t.track_title,
+        artist: t.artist_name,
+        uri: identity.spotifyUri,
+        played_at_ms: t.played_at_epoch_ms,
+        duration_ms: t.duration_ms,
+        skip_duration_ms: t.skip_duration_ms ?? null,
+        was_skipped: Boolean(t.was_skipped)
+      };
+    });
 
     const userPrompt = JSON.stringify({
       circadian_daypart: request.circadian_daypart || 'Active Session',
@@ -421,7 +431,7 @@ You MUST invoke all three tools in your response:
               command: action === 'maintain' ? 'maintain' : action,
               target_uri:
                 decisionBlock?.recommended_uri ||
-                metrics.fresh_candidate?.spotify_uri ||
+                normalizeSpotifyUri(metrics.fresh_candidate?.spotify_uri || metrics.fresh_candidate?.track_id) ||
                 'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO',
               search_query: decisionBlock?.recommended_query || fallbackQuery,
               target_genre: decisionBlock?.target_genre || 'Acoustic Flow',
@@ -507,7 +517,8 @@ You MUST invoke all three tools in your response:
       ? `${freshTrack.track_title} ${freshTrack.artist_name}`.trim()
       : 'Chill Afro Acoustic Reset';
     const recommendedUri =
-      freshTrack?.spotify_uri || 'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO';
+      normalizeSpotifyUri(freshTrack?.spotify_uri || freshTrack?.track_id) ||
+      'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO';
 
     const reasoning =
       action === 'change_genre'

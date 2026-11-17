@@ -4,11 +4,16 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Core Listening Telemetry
 CREATE TABLE IF NOT EXISTS listening_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_id TEXT UNIQUE,
     user_id TEXT NOT NULL,
     session_id TEXT,
+    device_id TEXT,
     event_type TEXT NOT NULL, -- e.g., 'PLAY', 'SKIP', 'PAUSE'
+    track_id TEXT,
     track_title TEXT NOT NULL,
     artist TEXT NOT NULL,
+    spotify_uri TEXT,
+    play_count INTEGER NOT NULL DEFAULT 0,
     media_source TEXT, -- e.g., 'com.spotify.music'
     occurred_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -16,7 +21,7 @@ CREATE TABLE IF NOT EXISTS listening_events (
 
 -- Acoustic Telemetry (Biological Impact)
 CREATE TABLE IF NOT EXISTS acoustic_telemetry (
-    track_id TEXT PRIMARY KEY, -- e.g., "title::artist"
+    track_id TEXT PRIMARY KEY, -- e.g., canonical track_id
     bpm INT,
     energy FLOAT,
     musical_key TEXT,
@@ -33,11 +38,14 @@ CREATE TABLE IF NOT EXISTS agent_interventions (
     agent_tts_response TEXT,
     os_intent TEXT,
     target_search_query TEXT,
+    track_id TEXT,
+    spotify_uri TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Indexes for fast Claude lookups
 CREATE INDEX IF NOT EXISTS idx_listening_user ON listening_events(user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_listening_track_id ON listening_events(track_id);
 CREATE INDEX IF NOT EXISTS idx_interventions_user ON agent_interventions(user_id, created_at DESC);
 
 -- Self-Learning Discovery: Per-User Contextual Genre/Time/Volume Taste Weights
@@ -57,8 +65,10 @@ CREATE TABLE IF NOT EXISTS discovery_recommendation_outcomes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id TEXT NOT NULL,
     drop_date DATE NOT NULL,
+    track_id TEXT,
     track_title TEXT NOT NULL,
     artist TEXT NOT NULL,
+    spotify_uri TEXT,
     genre TEXT NOT NULL,
     sub_tier TEXT NOT NULL,
     outcome_status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING | PLAYED | COMPLETED | SAVED | SKIPPED | DISMISSED | IGNORED

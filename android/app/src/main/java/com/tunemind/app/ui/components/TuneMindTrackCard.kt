@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 @Composable
@@ -106,11 +107,20 @@ fun TuneMindTrackCard(
     spotifyUri: String? = null,
     albumArtUrl: String? = null,
     artistImageUrl: String? = null,
+    trackId: String = "",
+    zeroPlayLabel: String = "0 plays",
     onSyncClick: (() -> Unit)? = null,
     onCardClick: (() -> Unit)? = null
 ) {
     val liveGreen = Color(0xFF10B981)
     val coolingAmber = Color(0xFFFFB000)
+    val canonicalTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
+        trackId = trackId.ifBlank { null },
+        spotifyUri = spotifyUri,
+        title = title,
+        artist = artist
+    )
+    val normalizedSpotifyUri = TrackIdentityResolver.normalizeSpotifyUri(spotifyUri)
 
     val effectiveAccent = when {
         isCurrentlyPlaying -> liveGreen
@@ -121,15 +131,16 @@ fun TuneMindTrackCard(
     val resolvedMedia = rememberResolvedTrackMedia(
         title = title,
         artist = artist,
-        spotifyUri = spotifyUri,
+        spotifyUri = normalizedSpotifyUri,
         fallbackAlbumArtUrl = albumArtUrl
     )
     val effectiveAlbumUrl = albumArtUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.albumArtUrl
     val effectiveArtistUrl = artistImageUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.artistImageUrl
 
+    val safePlayCount = playCount.coerceAtLeast(0)
     val playSummary = when {
-        playCount > 0 -> "$playCount ${if (playCount == 1) "play" else "plays"}"
-        showUnplayedLabel -> "New"
+        safePlayCount > 0 -> "$safePlayCount ${if (safePlayCount == 1) "play" else "plays"}"
+        showUnplayedLabel -> zeroPlayLabel.ifBlank { "0 plays" }
         else -> null
     }
     val freshnessSummary = freshnessPercent?.let {

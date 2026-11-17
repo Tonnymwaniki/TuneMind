@@ -16,6 +16,7 @@ data class AgentToolCallPayload(
     val action: String = "ADVISE_ONLY",
     val track_title: String? = null,
     val track_artist: String? = null,
+    val track_id: String? = null,
     val spotify_uri: String? = null,
     val target_player: String? = null,
     val volume_percent: Int? = null,
@@ -38,6 +39,7 @@ data class OsExecutionCommand(
     val suggested_bpm_target: Int? = null,
     val track_title: String? = null,
     val track_artist: String? = null,
+    val track_id: String? = null,
     val spotify_uri: String? = null,
     val never_open_external_app: Boolean = false
 )
@@ -144,6 +146,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                             searchQuery = response.os_execution_command.search_query,
                             trackTitle = response.os_execution_command.track_title,
                             trackArtist = response.os_execution_command.track_artist,
+                            trackId = response.os_execution_command.track_id ?: response.agent_tool_call?.track_id,
                             spotifyUri = response.os_execution_command.spotify_uri,
                             neverOpenExternalApp = response.os_execution_command.never_open_external_app,
                             onLaunchResult = onLaunchResult
@@ -392,13 +395,14 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         searchQuery: String,
         trackTitle: String? = null,
         trackArtist: String? = null,
+        trackId: String? = null,
         spotifyUri: String? = null,
         neverOpenExternalApp: Boolean = false,
         onLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
     ) {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
-                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' uri: '$spotifyUri' neverOpenExternalApp=$neverOpenExternalApp")
+                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' id: '$trackId' uri: '$spotifyUri' neverOpenExternalApp=$neverOpenExternalApp")
 
                 val cleanQuery = searchQuery.trim()
                 val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
@@ -414,9 +418,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 }
 
                 // Resolve exact spotify:track:<22-char-id> URI on IO thread so we NEVER fall back to a static search screen
-                var canonicalSpotifyUri = spotifyUri?.trim()?.takeIf {
-                    it.startsWith("spotify:track:") || it.startsWith("https://open.spotify.com/track/")
-                }
+                var canonicalSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(spotifyUri)
                 if (canonicalSpotifyUri.isNullOrBlank() && targetPackage.contains("spotify", ignoreCase = true)) {
                     canonicalSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
                         context = context,
@@ -426,12 +428,21 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     )
                 }
 
+                val canonicalIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = trackId,
+                    spotifyUri = canonicalSpotifyUri,
+                    title = resolvedTitle,
+                    artist = resolvedArtist
+                )
+
                 val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
-                    id = canonicalSpotifyUri ?: cleanQuery,
+                    id = canonicalIdentity.trackId,
                     title = resolvedTitle,
                     artist = resolvedArtist,
                     reason = "Autonomous neuro-acoustic flow match",
-                    confidence = 0.98f
+                    confidence = 0.98f,
+                    trackId = canonicalIdentity.trackId,
+                    spotifyUri = canonicalIdentity.spotifyUri
                 )
 
                 val launchRes = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
@@ -441,7 +452,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     packageName = targetPackage,
                     track = targetTrack,
                     query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
-                    deepLinkUri = canonicalSpotifyUri,
+                    deepLinkUri = canonicalIdentity.spotifyUri,
                     neverOpenExternalApp = neverOpenExternalApp
                 )
                 mainHandler.post {

@@ -66,6 +66,8 @@ router.post('/feedback', async (req: Request, res: Response) => {
     const body = req.body || {};
     const event: DiscoveryFeedbackEvent = {
       userId: req.authUser?.id || body.userId || body.user_id,
+      trackId: body.trackId || body.track_id,
+      spotifyUri: body.spotifyUri || body.spotify_uri,
       title: String(body.title || ''),
       artist: String(body.artist || ''),
       genre: body.genre,

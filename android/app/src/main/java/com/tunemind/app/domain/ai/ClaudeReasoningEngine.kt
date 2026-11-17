@@ -6,6 +6,7 @@ import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.domain.execution.OsExecutionCommand
 import com.tunemind.app.domain.execution.ReasoningResponse
 import com.tunemind.app.domain.execution.TuneMindExecutionEngine
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.network.BackendEndpointManager
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
@@ -305,11 +306,28 @@ object ClaudeReasoningEngine {
                 val rootJson = JSONObject(text)
 
                 val cmdJson = rootJson.optJSONObject("os_execution_command")
+                val rawCmdUri = cmdJson?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                val rawCmdTitle = cmdJson?.optString("track_title", "")?.takeIf { it.isNotBlank() }
+                val rawCmdArtist = cmdJson?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+                val rawCmdTrackId = cmdJson?.optString("track_id", "")?.takeIf { it.isNotBlank() }
+                    ?: cmdJson?.optString("trackId", "")?.takeIf { it.isNotBlank() }
+                val cmdIdentity = if (!rawCmdTitle.isNullOrBlank() || !rawCmdTrackId.isNullOrBlank() || !rawCmdUri.isNullOrBlank()) {
+                    TrackIdentityResolver.resolveCanonicalIdentity(
+                        trackId = rawCmdTrackId,
+                        spotifyUri = rawCmdUri,
+                        title = rawCmdTitle,
+                        artist = rawCmdArtist
+                    )
+                } else null
                 val osCommand = OsExecutionCommand(
                     intent = cmdJson?.optString("intent", "NONE") ?: "NONE",
                     target_player = cmdJson?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
                     search_query = cmdJson?.optString("search_query", "") ?: "",
-                    suggested_bpm_target = if (cmdJson?.has("suggested_bpm_target") == true) cmdJson.optInt("suggested_bpm_target") else null
+                    suggested_bpm_target = if (cmdJson?.has("suggested_bpm_target") == true) cmdJson.optInt("suggested_bpm_target") else null,
+                    track_title = rawCmdTitle,
+                    track_artist = rawCmdArtist,
+                    track_id = cmdIdentity?.trackId,
+                    spotify_uri = cmdIdentity?.spotifyUri
                 )
 
                 val tagsArray = rootJson.optJSONArray("database_tags")
@@ -365,11 +383,19 @@ object ClaudeReasoningEngine {
             }
             val tracksArray = JSONArray()
             recentTracks.take(6).forEach { t ->
+                val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = t.trackId.ifBlank { null },
+                    spotifyUri = t.providerTrackId,
+                    title = t.title,
+                    artist = t.artist
+                )
                 tracksArray.put(JSONObject().apply {
+                    put("trackId", identity.trackId)
+                    identity.spotifyUri?.let { put("spotifyUri", it) }
                     put("title", t.title)
                     put("artist", t.artist)
-                    put("plays", t.distinctAppearanceCount)
-                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                    put("plays", t.distinctAppearanceCount.coerceAtLeast(0))
+                    put("satiety", minOf(95, (t.distinctAppearanceCount.coerceAtLeast(0) * 22)))
                 })
             }
             put("recentTracks", tracksArray)
@@ -429,7 +455,9 @@ object ClaudeReasoningEngine {
                 confidence = rec.confidence,
                 category = cat,
                 suggestedProviderId = preferredProviderId,
-                observationCountBasis = 1
+                observationCountBasis = 0,
+                trackId = rec.resolvedCanonicalTrackId(),
+                spotifyUri = rec.spotifyUri
             )
         }.takeIf { it.isNotEmpty() }
     }
@@ -445,22 +473,26 @@ object ClaudeReasoningEngine {
         satietyPercent: Int
     ): Result<String> = withContext(Dispatchers.IO) {
         val satiety = satietyPercent.coerceIn(0, 100)
+        val safePlayCount = playCount.coerceAtLeast(0)
+        val canonicalId = TrackIdentityResolver.buildDeterministicTrackId(title, artist)
         val payload = JSONObject().apply {
             put("timeSlot", "Track Profile")
-            put("eventCount", maxOf(1, playCount))
+            put("eventCount", safePlayCount)
             put("topSourceApp", "Spotify")
             put("nowPlaying", JSONObject().apply {
+                put("trackId", canonicalId)
                 put("title", title)
                 put("artist", artist)
-                put("isPlaying", true)
+                put("isPlaying", safePlayCount > 0)
             })
             put(
                 "recentTracks",
                 JSONArray().put(
                     JSONObject().apply {
+                        put("trackId", canonicalId)
                         put("title", title)
                         put("artist", artist)
-                        put("plays", maxOf(1, playCount))
+                        put("plays", safePlayCount)
                         put("satiety", satiety)
                     }
                 )
@@ -616,12 +648,21 @@ object ClaudeReasoningEngine {
 
             val tracksArray = JSONArray()
             recentTracks.take(16).forEach { t ->
+                val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = t.trackId.ifBlank { null },
+                    spotifyUri = t.providerTrackId,
+                    title = t.title,
+                    artist = t.artist
+                )
+                val safeCount = t.distinctAppearanceCount.coerceAtLeast(0)
                 tracksArray.put(JSONObject().apply {
+                    put("trackId", identity.trackId)
+                    identity.spotifyUri?.let { put("spotifyUri", it) }
                     put("title", t.title)
                     put("artist", t.artist)
-                    put("playCount", maxOf(1, t.distinctAppearanceCount))
-                    put("plays", maxOf(1, t.distinctAppearanceCount))
-                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                    put("playCount", safeCount)
+                    put("plays", safeCount)
+                    put("satiety", minOf(95, safeCount * 22))
                     put("sourceApp", t.sourcePackage ?: "Spotify")
                 })
             }
@@ -714,6 +755,14 @@ object ClaudeReasoningEngine {
                             val confidence = item.optDouble("confidence", 0.91).toFloat().coerceIn(0.65f, 0.99f)
                             val mlScoreRaw = item.optDouble("mlScore", confidence.toDouble())
                             val matchPercent = (mlScoreRaw * 100.0).roundToInt().coerceIn(72, 99)
+                            val recTrackIdRaw = item.optString("trackId", "").ifBlank { item.optString("track_id", "") }
+                            val recSpotifyUriRaw = item.optString("spotifyUri", "").ifBlank { item.optString("spotify_uri", "") }
+                            val recIdentity = TrackIdentityResolver.resolveCanonicalIdentity(
+                                trackId = recTrackIdRaw.ifBlank { null },
+                                spotifyUri = recSpotifyUriRaw.ifBlank { null },
+                                title = title,
+                                artist = artist
+                            )
                             val previewUrl = item.optString("previewUrl", "").trim().takeIf { it.startsWith("http") }
 
                             list.add(
@@ -735,8 +784,10 @@ object ClaudeReasoningEngine {
                                     dropDateKey = noonCycleKey,
                                     matchScorePercent = matchPercent,
                                     isWildcard = isWildcard,
+                                    spotifyUri = recIdentity.spotifyUri,
                                     previewUrl = previewUrl,
-                                    trackDurationMs = item.optLong("durationMs", 0L)
+                                    trackDurationMs = item.optLong("durationMs", 0L),
+                                    trackId = recIdentity.trackId
                                 )
                             )
                         }
@@ -846,7 +897,8 @@ object ClaudeReasoningEngine {
                 genreTag = item.genre,
                 dropDateKey = noonCycleKey,
                 matchScorePercent = item.matchPercent,
-                isWildcard = item.isWildcard
+                isWildcard = item.isWildcard,
+                trackId = TrackIdentityResolver.buildDeterministicTrackId(item.title, item.artist)
             )
         }
     }
@@ -956,8 +1008,8 @@ object ClaudeReasoningEngine {
         }
 
         val currentTrackName = nowPlaying?.title ?: recentTracks.firstOrNull()?.title
-        val currentTrackPlays = recentTracks.firstOrNull()?.distinctAppearanceCount ?: 1
-        val estSatiety = minOf(95, maxOf(15, currentTrackPlays * 22))
+        val currentTrackPlays = recentTracks.firstOrNull()?.distinctAppearanceCount ?: 0
+        val estSatiety = minOf(95, currentTrackPlays * 22)
 
         val payload = JSONObject().apply {
             put("timeSlot", timeSlot)
@@ -973,11 +1025,19 @@ object ClaudeReasoningEngine {
             }
             val tracksArray = JSONArray()
             recentTracks.take(8).forEach { t ->
+                val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = t.trackId.ifBlank { null },
+                    spotifyUri = t.providerTrackId,
+                    title = t.title,
+                    artist = t.artist
+                )
                 tracksArray.put(JSONObject().apply {
+                    put("trackId", identity.trackId)
+                    identity.spotifyUri?.let { put("spotifyUri", it) }
                     put("title", t.title)
                     put("artist", t.artist)
-                    put("plays", t.distinctAppearanceCount)
-                    put("satiety", minOf(95, maxOf(10, t.distinctAppearanceCount * 22)))
+                    put("plays", t.distinctAppearanceCount.coerceAtLeast(0))
+                    put("satiety", minOf(95, t.distinctAppearanceCount.coerceAtLeast(0) * 22))
                 })
             }
             put("recentTracks", tracksArray)
@@ -1012,7 +1072,7 @@ object ClaudeReasoningEngine {
                 val report = ReasoningReport(
                     id = UUID.randomUUID().toString(),
                     generatedAtMs = System.currentTimeMillis(),
-                    analyzedEventCount = maxOf(eventCount, 1),
+                    analyzedEventCount = eventCount.coerceAtLeast(0),
                     topSourceApp = topSourceApp,
                     receptorPotencyScore = score.coerceIn(5, 100),
                     fatigueRiskLevel = state,

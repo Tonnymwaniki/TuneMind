@@ -195,17 +195,26 @@ fun WeeklyReportScreen(
                             formatListeningDuration(track.totalListeningMs)
                         ).joinToString(" · ")
 
+                        val canonicalId = track.trackId.ifBlank {
+                            com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                spotifyUri = track.spotifyUri,
+                                title = track.title,
+                                artist = track.artist
+                            )
+                        }
                         TuneMindTrackCard(
                             title = track.title,
                             artist = track.artist,
                             subtitle = weekSubtitle.ifBlank { track.album },
                             playCount = track.verifiedPlayCount,
+                            showUnplayedLabel = true,
                             isCurrentlyPlaying = isPlaying,
                             appLabel = track.primaryAppName,
                             freshnessPercent = track.freshnessPercent,
                             isCoolingDown = track.isCoolingDown,
                             leadingIndex = index + 1,
                             spotifyUri = track.spotifyUri,
+                            trackId = canonicalId,
                             onPlayClick = {
                                 onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
                             }

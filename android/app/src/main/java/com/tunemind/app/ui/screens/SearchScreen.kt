@@ -59,7 +59,8 @@ private data class UniversalSearchItem(
     val origin: SearchOrigin,
     val playCount: Int = 0,
     val vaultId: String? = null,
-    val localMatch: LocalAudioMatch? = null
+    val localMatch: LocalAudioMatch? = null,
+    val trackId: String = ""
 )
 
 @Composable
@@ -125,54 +126,82 @@ fun SearchScreen(
         recents.forEachIndexed { idx, entry ->
             val t = entry.title?.trim().orEmpty()
             if (t.isNotBlank()) {
+                val a = entry.artist?.trim()?.ifBlank { "Unknown Artist" } ?: "Unknown Artist"
+                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(entry.providerTrackId)
+                val canonicalId = entry.canonicalTrackId()
+                val truePlays = vm.resolvePlayCount(t, a, cleanUri, canonicalId)
+                    .takeIf { it > 0 } ?: entry.distinctAppearanceCount.coerceAtLeast(0)
                 list.add(
                     UniversalSearchItem(
                         id = "hist_${entry.entryId}_$idx",
                         title = t,
-                        artist = entry.artist?.trim()?.ifBlank { "Unknown Artist" } ?: "Unknown Artist",
+                        artist = a,
                         subtitle = entry.album?.takeIf { it.isNotBlank() } ?: "History",
-                        spotifyUri = entry.providerTrackId?.takeIf { it.startsWith("spotify:") },
+                        spotifyUri = cleanUri,
                         sourcePkg = entry.sourcePackage ?: selectedTargetPlayer,
                         origin = SearchOrigin.HISTORY,
-                        playCount = entry.distinctAppearanceCount
+                        playCount = truePlays,
+                        trackId = canonicalId
                     )
                 )
             }
         }
 
         likedTracks.forEach { lt ->
+            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(lt.spotifyUri)
+            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                trackId = lt.trackId,
+                spotifyUri = cleanUri,
+                title = lt.trackTitle,
+                artist = lt.artistName
+            )
             list.add(
                 UniversalSearchItem(
                     id = "sp_like_${lt.trackId}",
                     title = lt.trackTitle,
                     artist = lt.artistName,
                     subtitle = "Spotify Liked",
-                    spotifyUri = lt.spotifyUri,
+                    spotifyUri = cleanUri,
                     sourcePkg = "com.spotify.music",
                     origin = SearchOrigin.SPOTIFY,
-                    playCount = vm.resolvePlayCount(lt.trackTitle, lt.artistName, lt.spotifyUri)
+                    playCount = vm.resolvePlayCount(lt.trackTitle, lt.artistName, cleanUri, canonicalId),
+                    trackId = canonicalId
                 )
             )
         }
 
         playlists.forEach { pl ->
             pl.decodeTracks().forEachIndexed { i, pt ->
+                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(pt.spotifyUri)
+                val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                    trackId = pt.trackId,
+                    spotifyUri = cleanUri,
+                    title = pt.title,
+                    artist = pt.artist
+                )
                 list.add(
                     UniversalSearchItem(
                         id = "sp_pl_${pl.playlistId}_${pt.trackId}_$i",
                         title = pt.title,
                         artist = pt.artist,
                         subtitle = "Playlist · ${pl.name}",
-                        spotifyUri = pt.spotifyUri.ifBlank { null },
+                        spotifyUri = cleanUri,
                         sourcePkg = "com.spotify.music",
                         origin = SearchOrigin.SPOTIFY,
-                        playCount = vm.resolvePlayCount(pt.title, pt.artist, pt.spotifyUri)
+                        playCount = vm.resolvePlayCount(pt.title, pt.artist, cleanUri, canonicalId),
+                        trackId = canonicalId
                     )
                 )
             }
         }
 
         podcasts.filter { !it.isShowSummary }.forEach { pod ->
+            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                trackId = pod.itemId,
+                spotifyUri = pod.uri,
+                title = pod.episodeTitle,
+                artist = pod.showName
+            )
             list.add(
                 UniversalSearchItem(
                     id = "sp_pod_${pod.itemId}",
@@ -181,53 +210,69 @@ fun SearchScreen(
                     subtitle = "Podcast",
                     spotifyUri = pod.uri,
                     sourcePkg = "com.spotify.music",
-                    origin = SearchOrigin.SPOTIFY
+                    origin = SearchOrigin.SPOTIFY,
+                    playCount = vm.resolvePlayCount(pod.episodeTitle, pod.showName, pod.uri, canonicalId),
+                    trackId = canonicalId
                 )
             )
         }
 
         vaultTracks.forEach { vt ->
             val pct = (vt.recoveryProgress * 100).toInt().coerceIn(0, 100)
+            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(vt.spotifyUri)
+            val canonicalId = vt.resolvedCanonicalTrackId()
             list.add(
                 UniversalSearchItem(
                     id = "vault_${vt.id}",
                     title = vt.title,
                     artist = vt.artist,
                     subtitle = "Vault · $pct% recovered",
-                    spotifyUri = vt.spotifyUri,
+                    spotifyUri = cleanUri,
                     sourcePkg = vt.sourcePackage.ifBlank { selectedTargetPlayer },
                     origin = SearchOrigin.VAULT,
-                    playCount = vm.resolvePlayCount(vt.title, vt.artist, vt.spotifyUri),
-                    vaultId = vt.id
+                    playCount = vm.resolvePlayCount(vt.title, vt.artist, cleanUri, canonicalId),
+                    vaultId = vt.id,
+                    trackId = canonicalId
                 )
             )
         }
 
         aiCrate.filter { !it.isDismissed }.forEach { ai ->
+            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(ai.spotifyUri)
+            val canonicalId = ai.resolvedCanonicalTrackId()
             list.add(
                 UniversalSearchItem(
                     id = "ai_${ai.id}",
                     title = ai.title,
                     artist = ai.artist,
                     subtitle = "For You Pick",
-                    spotifyUri = ai.spotifyUri,
+                    spotifyUri = cleanUri,
                     sourcePkg = selectedTargetPlayer,
-                    origin = SearchOrigin.DISCOVERY
+                    origin = SearchOrigin.DISCOVERY,
+                    playCount = vm.resolvePlayCount(ai.title, ai.artist, cleanUri, canonicalId),
+                    trackId = canonicalId
                 )
             )
         }
 
         localAudioTracks.forEachIndexed { i, local ->
+            val localArtist = local.artist.ifBlank { "Device Audio" }
+            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(
+                title = local.title,
+                artist = localArtist
+            )
             list.add(
                 UniversalSearchItem(
                     id = "loc_${local.contentUri}_$i",
                     title = local.title,
-                    artist = local.artist.ifBlank { "Device Audio" },
+                    artist = localArtist,
                     subtitle = local.album.ifBlank { "Local Audio" },
                     spotifyUri = null,
                     sourcePkg = context.packageName,
                     origin = SearchOrigin.LOCAL,
-                    localMatch = local
+                    playCount = vm.resolvePlayCount(local.title, localArtist, null, canonicalId),
+                    localMatch = local,
+                    trackId = canonicalId
                 )
             )
         }
@@ -266,7 +311,12 @@ fun SearchScreen(
                 expectedDurationMs = item.localMatch.durationMs
             )
             if (played) {
-                vm.setAgentActiveTrack(item.localMatch.title, item.localMatch.artist, context.packageName)
+                vm.setAgentActiveTrack(
+                    title = item.localMatch.title,
+                    artist = item.localMatch.artist,
+                    sourcePackage = context.packageName,
+                    trackId = item.trackId
+                )
                 feedbackBanner = "Playing \"${item.title}\" in TuneMind"
                 return
             }
@@ -550,9 +600,11 @@ fun SearchScreen(
                                 artist = item.artist,
                                 subtitle = item.subtitle,
                                 playCount = item.playCount,
+                                showUnplayedLabel = true,
                                 isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
                                 accentColor = accent,
                                 spotifyUri = item.spotifyUri,
+                                trackId = item.trackId,
                                 onPlayClick = { playUniversalItem(item) },
                                 onSyncClick = {
                                     onAskAgentAboutTrack(item.title, item.artist, 85, item.spotifyUri)

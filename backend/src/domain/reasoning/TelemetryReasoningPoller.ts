@@ -276,43 +276,52 @@ export class TelemetryReasoningPoller {
         if (trackTitle) {
           const key = `${trackTitle} - ${trackArtist}`;
           const current = trackPlays.get(key) || { count: 0, completions: [] as number[], durationMs: duration };
-          current.count += 1;
-          const comp = duration > 0 ? Math.min(100, Math.round((pos / duration) * 100)) : 80;
-          current.completions.push(comp);
+          if (evt.event_type === 'PLAYBACK_STATE_CHANGED' || evt.event_type === 'METADATA_CHANGED') {
+            current.count += 1;
+          }
+          if (pos > 0 && duration > 0) {
+            const comp = Math.min(100, Math.round((pos / duration) * 100));
+            current.completions.push(comp);
+          }
           trackPlays.set(key, current);
-          totalListeningMs += pos > 0 ? pos : 30000;
+          if (pos > 0) {
+            totalListeningMs += pos;
+          }
         }
       } catch {
         // Skip unparseable payloads
       }
     }
 
-    const uniqueTracks = Math.max(1, trackPlays.size);
-    const avgCompletion = trackPlays.size > 0
-      ? Array.from(trackPlays.values()).flatMap(v => v.completions).reduce((a, b) => a + b, 0) /
-        Math.max(1, Array.from(trackPlays.values()).flatMap(v => v.completions).length)
-      : 82;
+    const uniqueTracks = trackPlays.size;
+    const allCompletions = Array.from(trackPlays.values()).flatMap(v => v.completions);
+    const avgCompletion = allCompletions.length > 0
+      ? allCompletions.reduce((a, b) => a + b, 0) / allCompletions.length
+      : 0;
 
     const stats: ListeningStats = {
       userId,
       periodStart,
       periodEnd,
-      totalListeningMs: Math.max(totalListeningMs, playCount * 60000),
+      totalListeningMs,
       uniqueTracksPlayed: uniqueTracks,
-      totalPlayEvents: Math.max(playCount, 1),
+      totalPlayEvents: playCount,
       totalSkipEvents: skipCount,
       averageCompletionPercent: Math.round(avgCompletion)
     };
 
     // Synthesize Track Fatigue Signals
     const fatigueSignals: TrackFatigueSignal[] = Array.from(trackPlays.entries())
+      .filter(([, val]) => val.count > 0)
       .slice(0, 8)
       .map(([trackKey, val]) => {
         const playRatio = val.count;
         const estFatigue = Math.min(0.95, Math.max(0.1, playRatio * 0.22));
-        const avgComp = val.completions.reduce((a, b) => a + b, 0) / Math.max(1, val.completions.length);
+        const avgComp = val.completions.length > 0
+          ? val.completions.reduce((a, b) => a + b, 0) / val.completions.length
+          : 0;
         const trend: 'STABLE' | 'DECLINING' | 'RECOVERING' =
-          avgComp < 50 ? 'DECLINING' : playRatio >= 4 ? 'DECLINING' : 'STABLE';
+          avgComp > 0 && avgComp < 50 ? 'DECLINING' : playRatio >= 4 ? 'DECLINING' : 'STABLE';
 
         return {
           trackKey,
@@ -335,7 +344,7 @@ export class TelemetryReasoningPoller {
       grooveRhythm: grooveScore,
       vocalMelody: vocalScore,
       dropStructuralDynamics: dropScore,
-      signalConfidence: Math.min(0.95, 0.6 + uniqueTracks * 0.05)
+      signalConfidence: uniqueTracks > 0 ? Math.min(0.95, 0.6 + uniqueTracks * 0.05) : 0
     };
 
     return {

@@ -45,7 +45,8 @@ data class PendingProposedTrack(
     val artist: String,
     val trackId: String? = null,
     val source: String = "com.spotify.music",
-    val neverOpenExternalApp: Boolean = false
+    val neverOpenExternalApp: Boolean = false,
+    val spotifyUri: String? = null
 )
 
 class AgentVoiceManager(
@@ -890,12 +891,19 @@ class AgentVoiceManager(
 
                     val historyArr = org.json.JSONArray()
                     for (u in unifiedTracks.take(60)) {
+                        val identity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                            trackId = u.trackId,
+                            spotifyUri = u.spotifyUri,
+                            title = u.trackTitle,
+                            artist = u.artistName
+                        )
                         historyArr.put(JSONObject().apply {
                             put("title", u.trackTitle)
                             put("artist", u.artistName)
                             put("source_player", "com.spotify.music")
-                            put("playCount", u.playCount)
-                            put("trackId", u.spotifyUri)
+                            put("playCount", u.playCount.coerceAtLeast(0))
+                            put("trackId", identity.trackId)
+                            put("spotifyUri", identity.spotifyUri ?: "")
                         })
                     }
                     put("rolling_history", historyArr)
@@ -927,10 +935,16 @@ class AgentVoiceManager(
                     if (capsule != null && capsule.tracks.isNotEmpty()) {
                         val capArr = org.json.JSONArray()
                         for (ct in capsule.tracks) {
+                            val capIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                spotifyUri = ct.spotifyUri,
+                                title = ct.title,
+                                artist = ct.artist
+                            )
                             capArr.put(JSONObject().apply {
                                 put("title", ct.title)
                                 put("artist", ct.artist)
-                                put("trackId", ct.spotifyUri ?: "")
+                                put("trackId", capIdentity.trackId)
+                                put("spotifyUri", capIdentity.spotifyUri ?: "")
                                 put("freshness_percent", ct.freshnessPercent)
                                 put("reason", ct.reason)
                             })
@@ -1038,6 +1052,12 @@ class AgentVoiceManager(
     fun approvePendingProposedTrack() {
         val pending = clientPendingProposedTrack ?: return
         updatePendingProposedTrack(null)
+        val canonical = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = pending.trackId,
+            spotifyUri = pending.spotifyUri,
+            title = pending.title,
+            artist = pending.artist
+        )
         com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.recordVoiceOrTrackDecisionAsync(
             context = context,
             triggerTranscript = "User approved proposed song: ${pending.title}",
@@ -1046,13 +1066,14 @@ class AgentVoiceManager(
             osIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
             trackTitle = pending.title,
             trackArtist = pending.artist,
-            spotifyUri = pending.trackId,
-            satietyPercent = 18
+            spotifyUri = canonical.spotifyUri,
+            satietyPercent = 18,
+            trackId = canonical.trackId
         )
         playTrackImmediatelyWithVoice(
             title = pending.title,
             artist = pending.artist,
-            spotifyUri = pending.trackId,
+            spotifyUri = canonical.spotifyUri,
             targetPlayer = pending.source.ifBlank { "com.spotify.music" },
             neverOpenExternalApp = pending.neverOpenExternalApp
         )
@@ -1065,6 +1086,12 @@ class AgentVoiceManager(
         val rejected = clientPendingProposedTrack
         updatePendingProposedTrack(null)
         if (rejected != null) {
+            val canonical = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = rejected.trackId,
+                spotifyUri = rejected.spotifyUri,
+                title = rejected.title,
+                artist = rejected.artist
+            )
             recordAgentSuggestedTrack(rejected.title)
             com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.recordVoiceOrTrackDecisionAsync(
                 context = context,
@@ -1074,8 +1101,9 @@ class AgentVoiceManager(
                 osIntent = "NONE",
                 trackTitle = rejected.title,
                 trackArtist = rejected.artist,
-                spotifyUri = rejected.trackId,
-                satietyPercent = _agentSatietyFlow.value
+                spotifyUri = canonical.spotifyUri,
+                satietyPercent = _agentSatietyFlow.value,
+                trackId = canonical.trackId
             )
         }
         errorResetJob?.cancel()
@@ -1097,7 +1125,8 @@ class AgentVoiceManager(
         artist: String,
         freshnessPercent: Int = 92,
         spotifyUri: String? = null,
-        targetPlayer: String = "com.spotify.music"
+        targetPlayer: String = "com.spotify.music",
+        trackId: String? = null
     ) {
         errorResetJob?.cancel()
         stopMicrophoneStream()
@@ -1107,13 +1136,20 @@ class AgentVoiceManager(
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().takeIf { !it.equals("Unknown Artist", ignoreCase = true) } ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(cleanTitle, cleanArtist)
+        val canonical = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = trackId,
+            spotifyUri = spotifyUri,
+            title = cleanTitle,
+            artist = cleanArtist
+        )
 
         updatePendingProposedTrack(
             PendingProposedTrack(
                 title = cleanTitle,
                 artist = cleanArtist,
-                trackId = spotifyUri,
-                source = targetPlayer
+                trackId = canonical.trackId,
+                source = targetPlayer,
+                spotifyUri = canonical.spotifyUri
             )
         )
 
@@ -1148,12 +1184,18 @@ class AgentVoiceManager(
             return
         }
 
+        val leadIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+            spotifyUri = lead.spotifyUri,
+            title = lead.title,
+            artist = lead.artist
+        )
         updatePendingProposedTrack(
             PendingProposedTrack(
                 title = lead.title,
                 artist = lead.artist,
-                trackId = lead.spotifyUri,
-                source = targetPlayer
+                trackId = leadIdentity.trackId,
+                source = targetPlayer,
+                spotifyUri = leadIdentity.spotifyUri
             )
         )
 
@@ -1231,27 +1273,41 @@ class AgentVoiceManager(
 
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
-                        val currentTrackId = np?.let { cur ->
-                            unifiedTracks.firstOrNull { t -> t.trackTitle.equals(cur.title, ignoreCase = true) }?.spotifyUri
-                                ?: recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }?.providerTrackId
-                        } ?: ""
+                        val currentIdentity = np?.let { cur ->
+                            val matchedUnified = unifiedTracks.firstOrNull { t -> t.trackTitle.equals(cur.title, ignoreCase = true) }
+                            val matchedRecent = recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }
+                            com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                trackId = matchedUnified?.trackId ?: matchedRecent?.trackId?.ifBlank { null },
+                                spotifyUri = matchedUnified?.spotifyUri ?: matchedRecent?.providerTrackId,
+                                title = cur.title,
+                                artist = cur.artist
+                            )
+                        }
                         val currentObj = JSONObject().apply {
                             put("title", np?.title ?: "Standing By")
                             put("artist", np?.artist ?: "")
                             put("source_player", np?.sourcePackage ?: "com.spotify.music")
-                            put("trackId", currentTrackId)
+                            put("trackId", currentIdentity?.trackId ?: "")
+                            put("spotifyUri", currentIdentity?.spotifyUri ?: "")
                             put("is_playing", np?.isPlaying == true)
                         }
                         put("current_track", currentObj)
 
                         val historyArr = org.json.JSONArray()
                         for (u in unifiedTracks.take(60)) {
+                            val uIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                trackId = u.trackId,
+                                spotifyUri = u.spotifyUri,
+                                title = u.trackTitle,
+                                artist = u.artistName
+                            )
                             historyArr.put(JSONObject().apply {
                                 put("title", u.trackTitle)
                                 put("artist", u.artistName)
                                 put("source", "com.spotify.music")
-                                put("playCount", u.playCount)
-                                put("trackId", u.spotifyUri)
+                                put("playCount", u.playCount.coerceAtLeast(0))
+                                put("trackId", uIdentity.trackId)
+                                put("spotifyUri", uIdentity.spotifyUri ?: "")
                             })
                         }
                         put("recent_tracks", historyArr)
@@ -1283,10 +1339,16 @@ class AgentVoiceManager(
                         if (capsule != null && capsule.tracks.isNotEmpty()) {
                             val capArr = org.json.JSONArray()
                             for (ct in capsule.tracks) {
+                                val capId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                    spotifyUri = ct.spotifyUri,
+                                    title = ct.title,
+                                    artist = ct.artist
+                                )
                                 capArr.put(JSONObject().apply {
                                     put("title", ct.title)
                                     put("artist", ct.artist)
-                                    put("trackId", ct.spotifyUri ?: "")
+                                    put("trackId", capId.trackId)
+                                    put("spotifyUri", capId.spotifyUri ?: "")
                                     put("freshness_percent", ct.freshnessPercent)
                                     put("reason", ct.reason)
                                 })
@@ -1295,10 +1357,17 @@ class AgentVoiceManager(
                         }
 
                         if (pendingProp != null) {
+                            val propId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                trackId = pendingProp.trackId,
+                                spotifyUri = pendingProp.spotifyUri,
+                                title = pendingProp.title,
+                                artist = pendingProp.artist
+                            )
                             put("pending_proposed_track", JSONObject().apply {
                                 put("title", pendingProp.title)
                                 put("artist", pendingProp.artist)
-                                put("trackId", pendingProp.trackId ?: "")
+                                put("trackId", propId.trackId)
+                                put("spotifyUri", propId.spotifyUri ?: "")
                                 put("source", pendingProp.source)
                             })
                         }
@@ -1444,14 +1513,23 @@ class AgentVoiceManager(
             ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
         var rawTrackArtist = cmdObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("track_artist", "")?.takeIf { it.isNotBlank() }
+        var rawTrackId = cmdObj?.optString("track_id", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("track_id", "")?.takeIf { it.isNotBlank() }
+            ?: cmdObj?.optString("trackId", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("trackId", "")?.takeIf { it.isNotBlank() }
         var rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
-        var resolvedSpotifyUri = cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
-            ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+        var resolvedSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+            cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+                ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
+        )
 
         if (isApprovingPending && pendingBeforeTurn != null) {
             rawTrackTitle = pendingBeforeTurn.title
             rawTrackArtist = pendingBeforeTurn.artist
-            resolvedSpotifyUri = pendingBeforeTurn.trackId ?: resolvedSpotifyUri
+            rawTrackId = pendingBeforeTurn.trackId ?: rawTrackId
+            resolvedSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+                pendingBeforeTurn.spotifyUri ?: pendingBeforeTurn.trackId
+            ) ?: resolvedSpotifyUri
             rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
         }
 
@@ -1466,6 +1544,7 @@ class AgentVoiceManager(
         if (rawAction == "ADVISE_ONLY" && !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && !wantsNewOrRecommend) {
             rawTrackTitle = null
             rawTrackArtist = null
+            rawTrackId = null
             resolvedSpotifyUri = null
             rawSearchQuery = ""
         }
@@ -1560,6 +1639,17 @@ class AgentVoiceManager(
             (toolObj?.optBoolean("never_open_external_app", false) == true) ||
             (cmdObj?.optBoolean("never_open_external_app", false) == true)
 
+        val resolvedIdentity = if (!rawTrackTitle.isNullOrBlank()) {
+            com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = rawTrackId,
+                spotifyUri = resolvedSpotifyUri,
+                title = rawTrackTitle,
+                artist = rawTrackArtist
+            )
+        } else null
+        val finalCanonicalTrackId = resolvedIdentity?.trackId
+        resolvedSpotifyUri = resolvedIdentity?.spotifyUri ?: resolvedSpotifyUri
+
         if (isApprovingPending && pendingBeforeTurn != null) {
             effectiveAction = "PLAY_TRACK_NOW"
             effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
@@ -1586,9 +1676,10 @@ class AgentVoiceManager(
                 PendingProposedTrack(
                     title = rawTrackTitle!!,
                     artist = rawTrackArtist ?: "",
-                    trackId = resolvedSpotifyUri,
+                    trackId = finalCanonicalTrackId,
                     source = targetPlayerPkg,
-                    neverOpenExternalApp = resolvedNeverOpenExternalApp
+                    neverOpenExternalApp = resolvedNeverOpenExternalApp,
+                    spotifyUri = resolvedSpotifyUri
                 )
             )
             // Ensure spoken TTS asks the user for approval instead of claiming it is already spinning
@@ -1624,6 +1715,11 @@ class AgentVoiceManager(
                             action = act,
                             track_title = item.optString("track_title", "").takeIf { it.isNotBlank() },
                             track_artist = item.optString("track_artist", "").takeIf { it.isNotBlank() },
+                            track_id = item.optString("track_id", "").takeIf { it.isNotBlank() }
+                                ?: item.optString("trackId", "").takeIf { it.isNotBlank() },
+                            spotify_uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+                                item.optString("spotify_uri", "").takeIf { it.isNotBlank() }
+                            ),
                             volume_percent = if (item.has("volume_percent")) item.optInt("volume_percent", 60) else null,
                             palette_id = item.optString("palette_id", "").takeIf { it.isNotBlank() },
                             custom_accent_hex = item.optString("custom_accent_hex", "").takeIf { it.isNotBlank() },
@@ -1643,6 +1739,7 @@ class AgentVoiceManager(
             action = effectiveAction,
             track_title = rawTrackTitle,
             track_artist = rawTrackArtist,
+            track_id = finalCanonicalTrackId,
             spotify_uri = resolvedSpotifyUri,
             target_player = targetPlayerPkg,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
@@ -1678,6 +1775,7 @@ class AgentVoiceManager(
                 suggested_bpm_target = cmdObj?.optInt("suggested_bpm_target"),
                 track_title = rawTrackTitle,
                 track_artist = rawTrackArtist,
+                track_id = finalCanonicalTrackId,
                 spotify_uri = resolvedSpotifyUri,
                 never_open_external_app = resolvedNeverOpenExternalApp
             ),
@@ -1700,7 +1798,8 @@ class AgentVoiceManager(
             trackTitle = rawTrackTitle,
             trackArtist = rawTrackArtist,
             spotifyUri = resolvedSpotifyUri,
-            satietyPercent = responseObj.calculated_satiety_percentage
+            satietyPercent = responseObj.calculated_satiety_percentage,
+            trackId = finalCanonicalTrackId
         )
 
         mainHandler.post {
@@ -1844,12 +1943,19 @@ class AgentVoiceManager(
 
                     val historyArr = org.json.JSONArray()
                     for (u in unifiedTracks.take(60)) {
+                        val uId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                            trackId = u.trackId,
+                            spotifyUri = u.spotifyUri,
+                            title = u.trackTitle,
+                            artist = u.artistName
+                        )
                         historyArr.put(JSONObject().apply {
                             put("title", u.trackTitle)
                             put("artist", u.artistName)
                             put("source_player", "com.spotify.music")
-                            put("playCount", u.playCount)
-                            put("trackId", u.spotifyUri)
+                            put("playCount", u.playCount.coerceAtLeast(0))
+                            put("trackId", uId.trackId)
+                            put("spotifyUri", uId.spotifyUri ?: "")
                         })
                     }
                     put("rolling_history", historyArr)
@@ -1881,10 +1987,16 @@ class AgentVoiceManager(
                     if (capsule != null && capsule.tracks.isNotEmpty()) {
                         val capArr = org.json.JSONArray()
                         for (ct in capsule.tracks) {
+                            val capId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                                spotifyUri = ct.spotifyUri,
+                                title = ct.title,
+                                artist = ct.artist
+                            )
                             capArr.put(JSONObject().apply {
                                 put("title", ct.title)
                                 put("artist", ct.artist)
-                                put("trackId", ct.spotifyUri ?: "")
+                                put("trackId", capId.trackId)
+                                put("spotifyUri", capId.spotifyUri ?: "")
                                 put("freshness_percent", ct.freshnessPercent)
                                 put("reason", ct.reason)
                             })
@@ -1893,10 +2005,17 @@ class AgentVoiceManager(
                     }
 
                     if (pendingProp != null) {
+                        val propId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                            trackId = pendingProp.trackId,
+                            spotifyUri = pendingProp.spotifyUri,
+                            title = pendingProp.title,
+                            artist = pendingProp.artist
+                        )
                         put("pending_proposed_track", JSONObject().apply {
                             put("title", pendingProp.title)
                             put("artist", pendingProp.artist)
-                            put("trackId", pendingProp.trackId ?: "")
+                            put("trackId", propId.trackId)
+                            put("spotifyUri", propId.spotifyUri ?: "")
                             put("source", pendingProp.source)
                         })
                     }
@@ -1990,6 +2109,12 @@ class AgentVoiceManager(
             !Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\\b").containsMatchIn(lower)
         ) {
             val artistPart = if (pending.artist.isNotBlank() && pending.artist != "Unknown Artist") " by ${pending.artist}" else ""
+            val pendingId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = pending.trackId,
+                spotifyUri = pending.spotifyUri,
+                title = pending.title,
+                artist = pending.artist
+            )
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 20)
                 put("reasoning_mode", "DIRECT_EXECUTION")
@@ -1999,7 +2124,8 @@ class AgentVoiceManager(
                     put("action", "PLAY_TRACK_NOW")
                     put("track_title", pending.title)
                     put("track_artist", pending.artist)
-                    put("spotify_uri", pending.trackId ?: "")
+                    put("track_id", pendingId.trackId)
+                    put("spotify_uri", pendingId.spotifyUri ?: "")
                     put("target_player", pending.source)
                     put("never_open_external_app", pending.neverOpenExternalApp)
                     put("expect_follow_up", false)
@@ -2010,7 +2136,8 @@ class AgentVoiceManager(
                     put("search_query", "${pending.title} ${pending.artist}".trim())
                     put("track_title", pending.title)
                     put("track_artist", pending.artist)
-                    put("spotify_uri", pending.trackId ?: "")
+                    put("track_id", pendingId.trackId)
+                    put("spotify_uri", pendingId.spotifyUri ?: "")
                     put("never_open_external_app", pending.neverOpenExternalApp)
                 })
             }

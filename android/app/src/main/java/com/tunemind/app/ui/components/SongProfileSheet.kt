@@ -67,11 +67,11 @@ data class SongProfileData(
     val artist: String,
     val album: String? = null,
     val sourcePackage: String? = null,
-    val appearanceCount: Int = 1,
-    val satietyScore: Int = 30,
+    val appearanceCount: Int = 0,
+    val satietyScore: Int = 0,
     val firstObservedMs: Long? = null,
     val lastObservedMs: Long? = null,
-    val estimatedPlaybackMs: Long = 180_000L,
+    val estimatedPlaybackMs: Long = 0L,
     val isInVault: Boolean = false,
     val recoveryProgress: Float = 0f,
     val cooldownDaysRemaining: Float = 0f,
@@ -80,7 +80,8 @@ data class SongProfileData(
     val vibeTag: String = "Fresh Flow",
     val anchorWeights: List<TrackAnchorWeight> = emptyList(),
     val satietyTrends: List<SatietyTrendPoint> = emptyList(),
-    val fatigueHistory: List<FatigueHistoryEntry> = emptyList()
+    val fatigueHistory: List<FatigueHistoryEntry> = emptyList(),
+    val spotifyUri: String? = null
 ) {
     companion object {
         fun pickEmoji(title: String, artist: String): String {
@@ -176,9 +177,10 @@ data class SongProfileData(
             firstMs: Long?,
             lastMs: Long?
         ): List<FatigueHistoryEntry> {
+            val count = playCount.coerceAtLeast(0)
+            if (count <= 0) return emptyList()
             val now = lastMs ?: System.currentTimeMillis()
             val entries = mutableListOf<FatigueHistoryEntry>()
-            val count = maxOf(1, playCount)
 
             for (i in 0 until minOf(4, count)) {
                 val offset = (count - 1 - i) * 7_200_000L
@@ -200,11 +202,16 @@ data class SongProfileData(
         fun fromTrackMemory(track: TrackMemoryEntry, isInVault: Boolean = false): SongProfileData {
             val title = track.title ?: "Unknown Track"
             val artist = track.artist ?: "Unknown Artist"
-            val count = maxOf(1, track.distinctAppearanceCount)
-            val satiety = minOf(95, maxOf(15, count * 22))
-            val estDuration = (track.appearances.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * count
+            val count = track.distinctAppearanceCount.coerceAtLeast(0)
+            val satiety = if (count <= 0) 0 else minOf(95, maxOf(15, count * 22))
+            val estDuration = if (count <= 0) {
+                0L
+            } else {
+                (track.appearances.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 195_000L) * count
+            }
             val firstMs = track.firstObservedAppearanceAtMs
             val lastMs = track.lastObservedAppearanceAtMs
+            val resolvedUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.providerTrackId)
 
             return SongProfileData(
                 title = title,
@@ -217,12 +224,13 @@ data class SongProfileData(
                 lastObservedMs = lastMs,
                 estimatedPlaybackMs = estDuration,
                 isInVault = isInVault,
-                trackId = track.entryId,
+                trackId = track.canonicalTrackId(),
                 emoji = pickEmoji(title, artist),
                 vibeTag = pickVibeTag(title, artist, satiety),
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
                 satietyTrends = generateSatietyTrend(satiety, count),
-                fatigueHistory = generateFatigueHistory(title, artist, count, firstMs, lastMs)
+                fatigueHistory = generateFatigueHistory(title, artist, count, firstMs, lastMs),
+                spotifyUri = resolvedUri
             )
         }
 
@@ -235,11 +243,17 @@ data class SongProfileData(
             val artist = np?.artist?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.artist ?: "Observed Player"
             val album = np?.album ?: latestRecentTrack?.album
             val sourcePackage = np?.sourcePackage ?: latestRecentTrack?.sourcePackage ?: "com.spotify.music"
-            val plays = maxOf(1, latestRecentTrack?.distinctAppearanceCount ?: 1)
-            val satiety = minOf(95, maxOf(18, plays * 22))
-            val duration = if ((np?.durationMs ?: 0L) > 0L) np!!.durationMs else (latestRecentTrack?.appearances?.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 180_000L)
-            val firstMs = latestRecentTrack?.firstObservedAppearanceAtMs ?: np?.updatedAtMs ?: System.currentTimeMillis()
-            val lastMs = np?.updatedAtMs ?: latestRecentTrack?.lastObservedAppearanceAtMs ?: System.currentTimeMillis()
+            val plays = latestRecentTrack?.distinctAppearanceCount?.coerceAtLeast(0) ?: 0
+            val satiety = if (plays <= 0) 0 else minOf(95, maxOf(18, plays * 22))
+            val duration = if ((np?.durationMs ?: 0L) > 0L) np!!.durationMs else if (plays > 0) (latestRecentTrack?.appearances?.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 180_000L) else 0L
+            val firstMs = latestRecentTrack?.firstObservedAppearanceAtMs ?: np?.updatedAtMs
+            val lastMs = np?.updatedAtMs ?: latestRecentTrack?.lastObservedAppearanceAtMs
+            val resolvedIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = np?.trackId?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.trackId?.takeIf { it.isNotBlank() },
+                spotifyUri = np?.spotifyUri ?: latestRecentTrack?.providerTrackId,
+                title = title,
+                artist = artist
+            )
 
             return SongProfileData(
                 title = title,
@@ -252,61 +266,79 @@ data class SongProfileData(
                 lastObservedMs = lastMs,
                 estimatedPlaybackMs = duration,
                 isInVault = isInVault,
-                trackId = latestRecentTrack?.entryId,
+                trackId = resolvedIdentity.trackId,
                 emoji = pickEmoji(title, artist),
                 vibeTag = pickVibeTag(title, artist, satiety),
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
                 satietyTrends = generateSatietyTrend(satiety, plays),
-                fatigueHistory = generateFatigueHistory(title, artist, plays, firstMs, lastMs)
+                fatigueHistory = generateFatigueHistory(title, artist, plays, firstMs, lastMs),
+                spotifyUri = resolvedIdentity.spotifyUri
             )
         }
 
         fun fromRecommendedTrack(rec: RecommendedTrack, isInVault: Boolean = false): SongProfileData {
             val title = rec.title
             val artist = rec.artist
-            val satiety = 8
+            val plays = rec.observationCountBasis.coerceAtLeast(0)
+            val satiety = if (plays <= 0) 8 else minOf(95, maxOf(15, plays * 20))
+            val resolvedIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = rec.trackId.ifBlank { rec.id },
+                spotifyUri = rec.spotifyUri ?: rec.providerTrackId,
+                title = title,
+                artist = artist
+            )
             return SongProfileData(
                 title = title,
                 artist = artist,
                 album = rec.album ?: rec.category.name,
                 sourcePackage = "com.spotify.music",
-                appearanceCount = 0,
+                appearanceCount = plays,
                 satietyScore = satiety,
-                firstObservedMs = System.currentTimeMillis(),
-                lastObservedMs = System.currentTimeMillis(),
-                estimatedPlaybackMs = 210_000L,
+                firstObservedMs = if (plays > 0) System.currentTimeMillis() else null,
+                lastObservedMs = if (plays > 0) System.currentTimeMillis() else null,
+                estimatedPlaybackMs = if (plays > 0) 210_000L * plays else 0L,
                 isInVault = isInVault,
+                trackId = resolvedIdentity.trackId,
                 emoji = pickEmoji(title, artist),
-                vibeTag = "Fresh Pick",
+                vibeTag = if (plays <= 0) "Fresh Pick" else pickVibeTag(title, artist, satiety),
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
-                satietyTrends = generateSatietyTrend(satiety, 1),
-                fatigueHistory = emptyList()
+                satietyTrends = generateSatietyTrend(satiety, plays),
+                fatigueHistory = emptyList(),
+                spotifyUri = resolvedIdentity.spotifyUri
             )
         }
 
-        fun fromVaultTrack(vault: VaultTrack): SongProfileData {
+        fun fromVaultTrack(vault: VaultTrack, verifiedPlayCount: Int = 0): SongProfileData {
             val title = vault.title
             val artist = vault.artist
+            val count = verifiedPlayCount.coerceAtLeast(0)
             val satiety = vault.satietyScore
+            val resolvedIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                trackId = vault.trackId.ifBlank { null },
+                spotifyUri = vault.spotifyUri,
+                title = title,
+                artist = artist
+            )
             return SongProfileData(
                 title = title,
                 artist = artist,
                 album = "Resting Vault",
                 sourcePackage = vault.sourcePackage.ifBlank { "com.spotify.music" },
-                appearanceCount = 4,
+                appearanceCount = count,
                 satietyScore = satiety,
                 firstObservedMs = vault.quarantinedAtMs,
                 lastObservedMs = vault.quarantinedAtMs,
-                estimatedPlaybackMs = 200_000L * 4,
+                estimatedPlaybackMs = if (count > 0) 200_000L * count else 0L,
                 isInVault = true,
                 recoveryProgress = vault.recoveryProgress,
                 cooldownDaysRemaining = vault.cooldownDaysRemaining,
-                trackId = vault.id,
+                trackId = resolvedIdentity.trackId,
                 emoji = pickEmoji(title, artist),
                 vibeTag = "Resting in Vault",
                 anchorWeights = generateAnchorWeights(title, artist, satiety),
-                satietyTrends = generateSatietyTrend(satiety, 4),
-                fatigueHistory = generateFatigueHistory(title, artist, 4, vault.quarantinedAtMs, vault.quarantinedAtMs)
+                satietyTrends = generateSatietyTrend(satiety, count),
+                fatigueHistory = generateFatigueHistory(title, artist, count, vault.quarantinedAtMs, vault.quarantinedAtMs),
+                spotifyUri = resolvedIdentity.spotifyUri
             )
         }
     }
@@ -352,7 +384,7 @@ fun SongProfile(
     val resolvedMedia = rememberResolvedTrackMedia(
         title = profile.title,
         artist = profile.artist,
-        spotifyUri = profile.trackId?.takeIf { it.startsWith("spotify:track:") },
+        spotifyUri = profile.spotifyUri ?: profile.trackId?.takeIf { it.startsWith("spotify:track:") },
         fallbackAlbumArtUrl = null
     )
     val badgeAccent = when {
@@ -398,7 +430,11 @@ fun SongProfile(
                 Text(
                     text = buildString {
                         append(if (profile.isInVault) "Resting in Vault" else profile.vibeTag)
-                        append(" · ${profile.appearanceCount}x plays · ${playMinutes}m ${playSeconds}s")
+                        if (profile.appearanceCount <= 0) {
+                            append(" · 0 plays")
+                        } else {
+                            append(" · ${profile.appearanceCount} ${if (profile.appearanceCount == 1) "play" else "plays"} · ${playMinutes}m ${playSeconds}s")
+                        }
                         if (spotifyGenresLine.isNotBlank()) append(" · $spotifyGenresLine")
                     },
                     fontSize = 12.sp,
@@ -779,7 +815,13 @@ fun SongProfile(
                 }
                 OutlinedButton(
                     onClick = {
-                        vm.quarantineTrack(profile.title, profile.artist, selectedQuarantineDays)
+                        vm.quarantineTrack(
+                            title = profile.title,
+                            artist = profile.artist,
+                            durationDays = selectedQuarantineDays,
+                            spotifyUri = profile.spotifyUri,
+                            trackId = profile.trackId
+                        )
                         onDismiss?.invoke()
                         onQuarantineSuccess("Resting '${profile.title}' for ${selectedQuarantineDays.toInt()} days.")
                     },
@@ -798,14 +840,24 @@ fun SongProfile(
 
         Button(
             onClick = {
+                val resolvedIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = profile.trackId,
+                    spotifyUri = profile.spotifyUri,
+                    title = profile.title,
+                    artist = profile.artist
+                )
                 val rec = RecommendedTrack(
-                    id = "rec-${System.currentTimeMillis()}",
+                    id = resolvedIdentity.trackId,
                     title = profile.title,
                     artist = profile.artist,
                     album = profile.album,
                     category = RecommendationCategory.PALATE_CLEANSER,
                     reason = profile.vibeTag,
-                    confidence = 0.95f
+                    confidence = 0.95f,
+                    providerTrackId = resolvedIdentity.spotifyUri,
+                    observationCountBasis = profile.appearanceCount.coerceAtLeast(0),
+                    trackId = resolvedIdentity.trackId,
+                    spotifyUri = resolvedIdentity.spotifyUri
                 )
                 vm.playRecommendation(context, rec)
                 onDismiss?.invoke()

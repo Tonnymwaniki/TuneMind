@@ -47,7 +47,8 @@ data class DopamineSongItem(
     val spotifyUri: String?,
     val sourcePackage: String,
     val isCoolingDown: Boolean,
-    val isFromVault: Boolean = false
+    val isFromVault: Boolean = false,
+    val trackId: String = ""
 )
 
 @Composable
@@ -104,7 +105,9 @@ fun DopamineVaultScreen(
             val safeId = v.id.takeIf { it.isNotBlank() && seenIds.add(it) } ?: "vault_${list.size}"
             seenIds.add(safeId)
             val freshness = (v.recoveryProgress * 100f).toInt().coerceIn(15, 75)
-            val resolvedPlays = resolvePlayCount(v.title, v.artist, v.spotifyUri).takeIf { it > 0 } ?: 1
+            val canonicalId = v.resolvedCanonicalTrackId()
+            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(v.spotifyUri)
+            val resolvedPlays = resolvePlayCount(v.title, v.artist, cleanUri).coerceAtLeast(0)
             list.add(
                 DopamineSongItem(
                     id = safeId,
@@ -112,10 +115,11 @@ fun DopamineVaultScreen(
                     artist = v.artist,
                     freshnessPercent = freshness,
                     playCount = resolvedPlays,
-                    spotifyUri = v.spotifyUri,
+                    spotifyUri = cleanUri,
                     sourcePackage = v.sourcePackage.ifBlank { "com.spotify.music" },
                     isCoolingDown = true,
-                    isFromVault = true
+                    isFromVault = true,
+                    trackId = canonicalId
                 )
             )
         }
@@ -128,10 +132,11 @@ fun DopamineVaultScreen(
 
             val safeId = t.entryId.takeIf { it.isNotBlank() && seenIds.add(it) }
                 ?: "track_${key.hashCode()}_${list.size}".also { seenIds.add(it) }
-            val uri = t.providerTrackId?.takeIf { it.startsWith("spotify:track:") }
+            val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t.providerTrackId)
+            val canonicalId = t.canonicalTrackId()
             val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
-                ?: maxOf(1, t.distinctAppearanceCount)
-            val satiety = minOf(94, plays * satietyPerPlay)
+                ?: t.distinctAppearanceCount.coerceAtLeast(0)
+            val satiety = if (plays <= 0) 0 else minOf(94, plays * satietyPerPlay)
             val freshness = (100 - satiety).coerceIn(12, 98)
             val cooling = plays >= coolingPlayThreshold || freshness < 45
 
@@ -145,7 +150,8 @@ fun DopamineVaultScreen(
                     spotifyUri = uri,
                     sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
                     isCoolingDown = cooling,
-                    isFromVault = false
+                    isFromVault = false,
+                    trackId = canonicalId
                 )
             )
         }
@@ -347,16 +353,18 @@ fun DopamineVaultScreen(
                             onSaveTrack = onSaveForYou,
                             onDismissTrack = onDismissForYou,
                             onInspectTrack = { rec ->
+                                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
                                 activeSyncSong = DopamineSongItem(
                                     id = rec.id,
                                     title = rec.title,
                                     artist = rec.artist,
                                     freshnessPercent = rec.matchScorePercent.coerceIn(72, 99),
-                                    playCount = resolvePlayCount(rec.title, rec.artist, rec.spotifyUri),
-                                    spotifyUri = rec.spotifyUri,
+                                    playCount = resolvePlayCount(rec.title, rec.artist, cleanUri).coerceAtLeast(0),
+                                    spotifyUri = cleanUri,
                                     sourcePackage = "com.spotify.music",
                                     isCoolingDown = false,
-                                    isFromVault = false
+                                    isFromVault = false,
+                                    trackId = rec.resolvedCanonicalTrackId()
                                 )
                             },
                             onExportPlaylist = onExportForYouPlaylist,
@@ -398,12 +406,14 @@ fun DopamineVaultScreen(
                                 title = song.title,
                                 artist = song.artist,
                                 playCount = accurateCount,
+                                showUnplayedLabel = true,
                                 isCurrentlyPlaying = isCurrentlyPlaying,
                                 freshnessPercent = song.freshnessPercent,
                                 isCoolingDown = song.isCoolingDown,
                                 accentColor = theme.primaryAccent,
                                 secondaryAccent = theme.secondaryAccent,
                                 spotifyUri = song.spotifyUri,
+                                trackId = song.trackId,
                                 onPlayClick = {
                                     onPlayTrack(song.title, song.artist, song.spotifyUri, song.sourcePackage)
                                 },
@@ -426,6 +436,7 @@ fun DopamineVaultScreen(
             playCount = selectedSong.playCount,
             isCoolingDown = selectedSong.isCoolingDown,
             spotifyUri = selectedSong.spotifyUri,
+            trackId = selectedSong.trackId,
             onDismiss = { activeSyncSong = null },
             onPlayNow = {
                 onPlayTrack(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri, selectedSong.sourcePackage)

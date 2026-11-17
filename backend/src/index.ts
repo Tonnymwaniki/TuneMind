@@ -94,8 +94,8 @@ wss.on('connection', async (ws: WebSocket) => {
   };
 
   let clientContext: {
-    current_track?: { title: string; artist: string; trackId?: string; source_player?: string; is_playing?: boolean };
-    recent_tracks?: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>;
+    current_track?: { title: string; artist: string; trackId?: string; spotifyUri?: string; source_player?: string; is_playing?: boolean };
+    recent_tracks?: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>;
     recently_played_by_agent?: string[];
     hearing_telemetry?: {
       estimated_db: number;
@@ -116,6 +116,7 @@ wss.on('connection', async (ws: WebSocket) => {
       title: string;
       artist: string;
       trackId?: string;
+      spotifyUri?: string;
       freshness_percent: number;
       reason: string;
     }>;
@@ -123,6 +124,7 @@ wss.on('connection', async (ws: WebSocket) => {
       title: string;
       artist: string;
       trackId?: string;
+      spotifyUri?: string;
       source?: string;
       never_open_external_app?: boolean;
     } | null;
@@ -194,6 +196,8 @@ wss.on('connection', async (ws: WebSocket) => {
         ? {
             title: liveCurrent.title,
             artist: liveCurrent.artist || '',
+            trackId: liveCurrent.trackId,
+            spotifyUri: liveCurrent.spotifyUri,
             source_player: liveCurrent.source_player || 'com.spotify.music',
             is_playing: liveCurrent.is_playing
           }
@@ -208,6 +212,7 @@ wss.on('connection', async (ws: WebSocket) => {
             title: t.title,
             artist: t.artist,
             trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
             playCount: t.playCount,
             source_player: t.source || 'com.spotify.music'
           }))
@@ -215,6 +220,7 @@ wss.on('connection', async (ws: WebSocket) => {
             title: t.title,
             artist: t.artist,
             trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
             playCount: t.playCount,
             source_player: t.source
           }));
@@ -231,6 +237,8 @@ wss.on('connection', async (ws: WebSocket) => {
         current_track: {
           title: effectiveCurrentTrack.title,
           artist: effectiveCurrentTrack.artist,
+          trackId: (effectiveCurrentTrack as any).trackId,
+          spotifyUri: (effectiveCurrentTrack as any).spotifyUri,
           source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music',
           is_playing: (effectiveCurrentTrack as any).is_playing
         },

@@ -1,5 +1,10 @@
 import { getLiveSupabaseClient, isSupabaseLive } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
+import {
+  coerceNonNegativePlayCount,
+  normalizeSpotifyUri,
+  resolveCanonicalTrackIdentity
+} from '../identity/trackIdentity';
 
 export interface SupabaseConnectionOverride {
   supabaseUrl?: string;
@@ -7,6 +12,7 @@ export interface SupabaseConnectionOverride {
 }
 
 export interface LearnedTrackEntry {
+  trackId: string;
   title: string;
   artist: string;
   spotifyUri?: string;
@@ -23,6 +29,7 @@ export interface AgentInterventionRecord {
   os_intent: string;
   target_search_query: string;
   action?: string;
+  track_id?: string;
   track_title?: string;
   track_artist?: string;
   spotify_uri?: string;
@@ -36,8 +43,8 @@ export interface LongTermIntelligenceSummary {
   intelligenceMaturityLevel: 'SEEDING' | 'DEVELOPING' | 'CALIBRATED' | 'DEEP_NEURAL_SYNC';
   totalHistoricalInterventions: number;
   totalTracksLearned: number;
-  approvedTracks: Array<{ title: string; artist: string; spotifyUri?: string; approvedAt: string }>;
-  rejectedTracks: Array<{ title: string; artist: string; rejectedAt: string }>;
+  approvedTracks: Array<{ trackId?: string; title: string; artist: string; spotifyUri?: string; approvedAt: string }>;
+  rejectedTracks: Array<{ trackId?: string; title: string; artist: string; rejectedAt: string }>;
   topArtistsOverTime: Array<{ artist: string; totalPlays: number }>;
   topTracksOverTime: LearnedTrackEntry[];
   recentInterventions: Array<{
@@ -55,10 +62,18 @@ export interface LongTermIntelligenceSummary {
 
 export class SupabaseIntelligenceStore {
   private static inMemoryInterventions: AgentInterventionRecord[] = [];
-  private static inMemoryApprovedTracks = new Map<string, { title: string; artist: string; spotifyUri?: string; approvedAt: string }>();
-  private static inMemoryRejectedTracks = new Map<string, { title: string; artist: string; rejectedAt: string }>();
+  private static inMemoryApprovedTracks = new Map<string, { trackId?: string; title: string; artist: string; spotifyUri?: string; approvedAt: string }>();
+  private static inMemoryRejectedTracks = new Map<string, { trackId?: string; title: string; artist: string; rejectedAt: string }>();
   private static inMemoryLearnedTracks = new Map<string, LearnedTrackEntry>();
   private static lastSupabaseHydrationMs = 0;
+
+  public static clearInMemoryStateForTests(): void {
+    this.inMemoryInterventions = [];
+    this.inMemoryApprovedTracks.clear();
+    this.inMemoryRejectedTracks.clear();
+    this.inMemoryLearnedTracks.clear();
+    this.lastSupabaseHydrationMs = 0;
+  }
 
   public static normalizeUserId(rawUserId?: string, rawEmail?: string): string {
     const email = (rawEmail || '').trim().toLowerCase();
@@ -75,7 +90,7 @@ export class SupabaseIntelligenceStore {
    */
   public static async syncTracksAndTelemetryToSupabase(
     userId: string,
-    tracks: Array<{ title: string; artist: string; trackId?: string; playCount?: number; source?: string }>,
+    tracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; playCount?: number; source?: string }>,
     options?: {
       hearingTelemetry?: {
         estimated_db?: number;
@@ -101,22 +116,34 @@ export class SupabaseIntelligenceStore {
     const nowIso = new Date().toISOString();
 
     for (const t of validTracks) {
-      const key = `${t.title.toLowerCase().trim()}::${(t.artist || '').toLowerCase().trim()}`;
+      const cleanTitle = t.title.trim();
+      const cleanArtist = (t.artist || 'Unknown Artist').trim();
+      const identity = resolveCanonicalTrackIdentity({
+        trackId: t.trackId,
+        spotifyUri: t.spotifyUri,
+        title: cleanTitle,
+        artist: cleanArtist
+      });
+      const count = coerceNonNegativePlayCount(t.playCount);
+      const key = `${cleanUserId}::${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
       const existing = this.inMemoryLearnedTracks.get(key);
-      const count = Math.max(1, Number(t.playCount || 1));
       if (!existing) {
         this.inMemoryLearnedTracks.set(key, {
-          title: t.title.trim(),
-          artist: (t.artist || 'Unknown Artist').trim(),
-          spotifyUri: t.trackId && t.trackId.startsWith('spotify:track:') ? t.trackId : undefined,
+          trackId: identity.trackId,
+          title: cleanTitle,
+          artist: cleanArtist,
+          spotifyUri: identity.spotifyUri,
           playCount: count,
           source: t.source || 'com.spotify.music',
           lastPlayedAt: nowIso
         });
       } else {
         existing.playCount = Math.max(existing.playCount, count);
-        if (!existing.spotifyUri && t.trackId && t.trackId.startsWith('spotify:track:')) {
-          existing.spotifyUri = t.trackId;
+        if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+          existing.trackId = identity.trackId;
+        }
+        if (!existing.spotifyUri && identity.spotifyUri) {
+          existing.spotifyUri = identity.spotifyUri;
         }
         existing.lastPlayedAt = nowIso;
       }
@@ -126,13 +153,23 @@ export class SupabaseIntelligenceStore {
     try {
       const eventStore = new EventStore();
       eventStore.syncClientTracks(
-        validTracks.map(t => ({
-          title: t.title,
-          artist: t.artist,
-          source: t.source || 'com.spotify.music',
-          playCount: t.playCount || 1,
-          trackId: t.trackId
-        }))
+        validTracks.map(t => {
+          const identity = resolveCanonicalTrackIdentity({
+            trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
+            title: t.title,
+            artist: t.artist
+          });
+          return {
+            title: t.title,
+            artist: t.artist,
+            source: t.source || 'com.spotify.music',
+            playCount: coerceNonNegativePlayCount(t.playCount),
+            trackId: identity.trackId,
+            spotifyUri: identity.spotifyUri
+          };
+        }),
+        cleanUserId
       );
     } catch (e) {
       console.warn('[SupabaseIntelligenceStore] Local EventStore mirror notice:', e);
@@ -148,16 +185,25 @@ export class SupabaseIntelligenceStore {
     // 1. Try upserting into `listening_events` table if present in Supabase
     if (validTracks.length > 0) {
       try {
-        const rows = validTracks.slice(0, 40).map((t, idx) => ({
-          event_id: `sync_${cleanUserId}_${t.title.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}_${(t.artist || '').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20)}`,
-          user_id: cleanUserId,
-          track_title: t.title.trim(),
-          track_artist: (t.artist || 'Unknown Artist').trim(),
-          spotify_uri: t.trackId || null,
-          play_count: Math.max(1, Number(t.playCount || 1)),
-          media_source: t.source || 'com.spotify.music',
-          observed_at: new Date(Date.now() - idx * 1000).toISOString()
-        }));
+        const rows = validTracks.slice(0, 40).map((t, idx) => {
+          const identity = resolveCanonicalTrackIdentity({
+            trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
+            title: t.title,
+            artist: t.artist
+          });
+          return {
+            event_id: `sync_${cleanUserId}_${t.title.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}_${(t.artist || '').toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20)}`,
+            user_id: cleanUserId,
+            track_id: identity.trackId,
+            track_title: t.title.trim(),
+            track_artist: (t.artist || 'Unknown Artist').trim(),
+            spotify_uri: identity.spotifyUri || null,
+            play_count: coerceNonNegativePlayCount(t.playCount),
+            media_source: t.source || 'com.spotify.music',
+            observed_at: new Date(Date.now() - idx * 1000).toISOString()
+          };
+        });
         const { error } = await client.from('listening_events').upsert(rows, { onConflict: 'event_id' });
         if (!error) {
           storedToSupabase = true;
@@ -169,10 +215,14 @@ export class SupabaseIntelligenceStore {
 
     // 2. Try upserting aggregated Taste Genome into `user_taste_genome` table if present
     try {
-      const allLearned = Array.from(this.inMemoryLearnedTracks.values()).sort((a, b) => b.playCount - a.playCount);
+      const userPrefix = `${cleanUserId}::`;
+      const allLearned = Array.from(this.inMemoryLearnedTracks.entries())
+        .filter(([k]) => k.startsWith(userPrefix))
+        .map(([, v]) => v)
+        .sort((a, b) => b.playCount - a.playCount);
       const topArtistsMap = new Map<string, number>();
       for (const trk of allLearned) {
-        if (trk.artist && trk.artist !== 'Unknown Artist') {
+        if (trk.artist && trk.artist !== 'Unknown Artist' && trk.playCount > 0) {
           topArtistsMap.set(trk.artist, (topArtistsMap.get(trk.artist) || 0) + trk.playCount);
         }
       }
@@ -181,13 +231,22 @@ export class SupabaseIntelligenceStore {
         .slice(0, 15)
         .map(([artist, plays]) => ({ artist, plays }));
 
+      const approvedForUser = Array.from(this.inMemoryApprovedTracks.entries())
+        .filter(([k]) => k.startsWith(userPrefix))
+        .map(([, v]) => v)
+        .slice(-30);
+      const rejectedForUser = Array.from(this.inMemoryRejectedTracks.entries())
+        .filter(([k]) => k.startsWith(userPrefix))
+        .map(([, v]) => v)
+        .slice(-30);
+
       const { error } = await client.from('user_taste_genome').upsert(
         {
           user_id: cleanUserId,
           top_tracks_json: JSON.stringify(allLearned.slice(0, 40)),
           top_artists_json: JSON.stringify(topArtists),
-          approved_tracks_json: JSON.stringify(Array.from(this.inMemoryApprovedTracks.values()).slice(-30)),
-          rejected_tracks_json: JSON.stringify(Array.from(this.inMemoryRejectedTracks.values()).slice(-30)),
+          approved_tracks_json: JSON.stringify(approvedForUser),
+          rejected_tracks_json: JSON.stringify(rejectedForUser),
           hearing_telemetry_json: options?.hearingTelemetry ? JSON.stringify(options.hearingTelemetry) : null,
           vault_tracks_json: options?.vaultTracks ? JSON.stringify(options.vaultTracks) : null,
           updated_at: nowIso
@@ -209,7 +268,18 @@ export class SupabaseIntelligenceStore {
       try {
         const topSummary = validTracks
           .slice(0, 10)
-          .map(t => `${t.title} by ${t.artist} (${t.playCount || 1}x)${t.trackId ? ` [${t.trackId}]` : ''}`)
+          .map(t => {
+            const identity = resolveCanonicalTrackIdentity({
+              trackId: t.trackId,
+              spotifyUri: t.spotifyUri,
+              title: t.title,
+              artist: t.artist
+            });
+            const plays = coerceNonNegativePlayCount(t.playCount);
+            const idTag = ` [id:${identity.trackId}]`;
+            const uriTag = identity.spotifyUri ? ` [${identity.spotifyUri}]` : '';
+            return `${t.title} by ${t.artist} (${plays}x)${idTag}${uriTag}`;
+          })
           .join(' | ');
 
         const { error } = await client.from('agent_interventions').insert({
@@ -243,9 +313,22 @@ export class SupabaseIntelligenceStore {
     const cleanUserId = this.normalizeUserId(record.user_id);
     const nowIso = new Date().toISOString();
 
+    const cleanTitle = (record.track_title || '').trim();
+    const cleanArtist = (record.track_artist || '').trim();
+    const identity = cleanTitle
+      ? resolveCanonicalTrackIdentity({
+          trackId: record.track_id,
+          spotifyUri: record.spotify_uri,
+          title: cleanTitle,
+          artist: cleanArtist
+        })
+      : null;
+
     const enrichedRecord: AgentInterventionRecord = {
       ...record,
       user_id: cleanUserId,
+      track_id: identity?.trackId || record.track_id,
+      spotify_uri: identity?.spotifyUri || normalizeSpotifyUri(record.spotify_uri),
       created_at: nowIso
     };
 
@@ -255,20 +338,20 @@ export class SupabaseIntelligenceStore {
     }
 
     // Track approvals vs rejections for long-term reinforcement learning
-    const cleanTitle = (record.track_title || '').trim();
-    const cleanArtist = (record.track_artist || '').trim();
     if (cleanTitle && cleanTitle !== 'Standing By') {
-      const trackKey = `${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
+      const trackKey = `${cleanUserId}::${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
       if (record.action === 'PLAY_TRACK_NOW' || record.os_intent === 'OS_MEDIA_NEXT_AND_DEEP_LINK' || record.action === 'APPROVED_TRACK') {
         this.inMemoryApprovedTracks.set(trackKey, {
+          trackId: identity?.trackId,
           title: cleanTitle,
           artist: cleanArtist,
-          spotifyUri: record.spotify_uri,
+          spotifyUri: identity?.spotifyUri,
           approvedAt: nowIso
         });
         this.inMemoryRejectedTracks.delete(trackKey);
       } else if (record.action === 'REJECTED_TRACK') {
         this.inMemoryRejectedTracks.set(trackKey, {
+          trackId: identity?.trackId,
           title: cleanTitle,
           artist: cleanArtist,
           rejectedAt: nowIso
@@ -281,11 +364,12 @@ export class SupabaseIntelligenceStore {
       return false;
     }
 
-    // Encode structured action & URI metadata inside target_search_query so even basic 6-column `agent_interventions` schemas preserve 100% of intelligence!
+    // Encode structured action, track_id & URI metadata inside target_search_query so even basic `agent_interventions` schemas preserve 100% of intelligence!
     const structuredTargetQuery = [
       record.target_search_query || `${cleanTitle} ${cleanArtist}`.trim(),
       record.action ? `action=${record.action}` : '',
-      record.spotify_uri ? `uri=${record.spotify_uri}` : '',
+      identity?.trackId ? `track_id=${identity.trackId}` : '',
+      identity?.spotifyUri ? `uri=${identity.spotifyUri}` : '',
       record.circadian_daypart ? `daypart=${record.circadian_daypart}` : ''
     ]
       .filter(Boolean)
@@ -299,7 +383,9 @@ export class SupabaseIntelligenceStore {
         computed_satiety: Math.round(Number(record.computed_satiety || 25)),
         agent_tts_response: (record.agent_tts_response || '').slice(0, 1000),
         os_intent: record.os_intent || record.action || 'NONE',
-        target_search_query: structuredTargetQuery
+        target_search_query: structuredTargetQuery,
+        track_id: identity?.trackId || null,
+        spotify_uri: identity?.spotifyUri || null
       });
 
       if (error) {
@@ -326,6 +412,7 @@ export class SupabaseIntelligenceStore {
     override?: SupabaseConnectionOverride
   ): Promise<LongTermIntelligenceSummary> {
     const cleanUserId = this.normalizeUserId(userId);
+    const userPrefix = `${cleanUserId}::`;
     const client = getLiveSupabaseClient(override?.supabaseUrl, override?.supabaseKey);
     const liveConnected = Boolean(client && isSupabaseLive(override?.supabaseUrl, override?.supabaseKey));
 
@@ -333,13 +420,11 @@ export class SupabaseIntelligenceStore {
 
     if (client) {
       try {
-        // Fetch up to 35 most recent rows from live Supabase `agent_interventions`
-        // Query both the specific user_id and 'tunemind-default-user' so historical rows are always included
-        const userCandidates = Array.from(new Set([cleanUserId, 'tunemind-default-user']));
+        // Strictly scope Supabase queries to the effective userId (no cross-user leak into authenticated accounts)
         const { data, error } = await client
           .from('agent_interventions')
-          .select('user_id, trigger_transcript, computed_satiety, agent_tts_response, os_intent, target_search_query, created_at')
-          .in('user_id', userCandidates)
+          .select('user_id, trigger_transcript, computed_satiety, agent_tts_response, os_intent, target_search_query, track_id, spotify_uri, created_at')
+          .eq('user_id', cleanUserId)
           .order('created_at', { ascending: false })
           .limit(80);
 
@@ -352,32 +437,45 @@ export class SupabaseIntelligenceStore {
 
       // Also check `listening_events` table in Supabase if it exists (up to 500 daily/historical events)
       try {
-        const userCandidates = Array.from(new Set([cleanUserId, 'tunemind-default-user']));
         const { data: eventRows, error: eventErr } = await client
           .from('listening_events')
-          .select('track_title, track_artist, spotify_uri, play_count, media_source, observed_at')
-          .in('user_id', userCandidates)
+          .select('track_id, track_title, track_artist, spotify_uri, play_count, media_source, observed_at')
+          .eq('user_id', cleanUserId)
           .order('observed_at', { ascending: false })
           .limit(500);
 
         if (!eventErr && Array.isArray(eventRows)) {
           for (const row of eventRows) {
             if (row.track_title) {
-              const key = `${String(row.track_title).toLowerCase().trim()}::${String(row.track_artist || '').toLowerCase().trim()}`;
+              const cleanTitle = String(row.track_title).trim();
+              const cleanArtist = String(row.track_artist || 'Unknown Artist').trim();
+              const identity = resolveCanonicalTrackIdentity({
+                trackId: row.track_id,
+                spotifyUri: row.spotify_uri,
+                title: cleanTitle,
+                artist: cleanArtist
+              });
+              const key = `${userPrefix}${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
               const existing = this.inMemoryLearnedTracks.get(key);
-              const count = Math.max(1, Number(row.play_count || 1));
+              const count = coerceNonNegativePlayCount(row.play_count);
               if (!existing) {
                 this.inMemoryLearnedTracks.set(key, {
-                  title: String(row.track_title).trim(),
-                  artist: String(row.track_artist || 'Unknown Artist').trim(),
-                  spotifyUri: row.spotify_uri || undefined,
+                  trackId: identity.trackId,
+                  title: cleanTitle,
+                  artist: cleanArtist,
+                  spotifyUri: identity.spotifyUri,
                   playCount: count,
                   source: row.media_source || 'com.spotify.music',
                   lastPlayedAt: row.observed_at
                 });
               } else {
                 existing.playCount = Math.max(existing.playCount, count);
-                if (!existing.spotifyUri && row.spotify_uri) existing.spotifyUri = row.spotify_uri;
+                if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+                  existing.trackId = identity.trackId;
+                }
+                if (!existing.spotifyUri && identity.spotifyUri) {
+                  existing.spotifyUri = identity.spotifyUri;
+                }
               }
             }
           }
@@ -401,21 +499,35 @@ export class SupabaseIntelligenceStore {
             if (Array.isArray(topTracks)) {
               for (const t of topTracks) {
                 if (!t?.title) continue;
-                const key = `${String(t.title).toLowerCase().trim()}::${String(t.artist || '').toLowerCase().trim()}`;
+                const cleanTitle = String(t.title).trim();
+                const cleanArtist = String(t.artist || 'Unknown Artist').trim();
+                const identity = resolveCanonicalTrackIdentity({
+                  trackId: t.trackId,
+                  spotifyUri: t.spotifyUri,
+                  title: cleanTitle,
+                  artist: cleanArtist
+                });
+                const key = `${userPrefix}${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
                 const existing = this.inMemoryLearnedTracks.get(key);
-                const count = Math.max(1, Number(t.playCount || 1));
+                const count = coerceNonNegativePlayCount(t.playCount);
                 if (!existing) {
                   this.inMemoryLearnedTracks.set(key, {
-                    title: String(t.title).trim(),
-                    artist: String(t.artist || 'Unknown Artist').trim(),
-                    spotifyUri: t.spotifyUri || undefined,
+                    trackId: identity.trackId,
+                    title: cleanTitle,
+                    artist: cleanArtist,
+                    spotifyUri: identity.spotifyUri,
                     playCount: count,
                     source: t.source || 'com.spotify.music',
                     lastPlayedAt: t.lastPlayedAt
                   });
                 } else {
                   existing.playCount = Math.max(existing.playCount, count);
-                  if (!existing.spotifyUri && t.spotifyUri) existing.spotifyUri = t.spotifyUri;
+                  if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+                    existing.trackId = identity.trackId;
+                  }
+                  if (!existing.spotifyUri && identity.spotifyUri) {
+                    existing.spotifyUri = identity.spotifyUri;
+                  }
                 }
               }
             }
@@ -425,7 +537,7 @@ export class SupabaseIntelligenceStore {
             if (Array.isArray(approved)) {
               for (const a of approved) {
                 if (!a?.title) continue;
-                const key = `${String(a.title).toLowerCase().trim()}::${String(a.artist || '').toLowerCase().trim()}`;
+                const key = `${userPrefix}${String(a.title).toLowerCase().trim()}::${String(a.artist || '').toLowerCase().trim()}`;
                 if (!this.inMemoryApprovedTracks.has(key)) {
                   this.inMemoryApprovedTracks.set(key, a);
                 }
@@ -437,7 +549,7 @@ export class SupabaseIntelligenceStore {
             if (Array.isArray(rejected)) {
               for (const r of rejected) {
                 if (!r?.title) continue;
-                const key = `${String(r.title).toLowerCase().trim()}::${String(r.artist || '').toLowerCase().trim()}`;
+                const key = `${userPrefix}${String(r.title).toLowerCase().trim()}::${String(r.artist || '').toLowerCase().trim()}`;
                 if (!this.inMemoryRejectedTracks.has(key)) {
                   this.inMemoryRejectedTracks.set(key, r);
                 }
@@ -456,7 +568,7 @@ export class SupabaseIntelligenceStore {
 
     const combinedInterventions = [
       ...supabaseInterventions,
-      ...this.inMemoryInterventions.slice(0, 15)
+      ...this.inMemoryInterventions.filter(i => i.user_id === cleanUserId).slice(0, 15)
     ];
 
     const seenTimestamps = new Set<string>();
@@ -473,18 +585,24 @@ export class SupabaseIntelligenceStore {
       if (trigger === 'SPOTIFY_HISTORY_TELEMETRY_SYNC' || intentRaw === 'TELEMETRY_SYNC') {
         const parts = targetRaw.split('|').map(s => s.trim()).filter(Boolean);
         for (const p of parts) {
-          const match = p.match(/^(.+?)\s+by\s+(.+?)\s+\((\d+)x\)(?:\s+\[(spotify:track:[^\]]+)\])?$/i);
+          const match = p.match(/^(.+?)\s+by\s+(.+?)\s+\((\d+)x\)(?:\s+\[id:([^\]]+)\])?(?:\s+\[(spotify:track:[^\]]+)\])?$/i);
           if (match) {
             const title = match[1].trim();
             const artist = match[2].trim();
-            const plays = parseInt(match[3], 10) || 1;
-            const uri = match[4];
-            const key = `${title.toLowerCase()}::${artist.toLowerCase()}`;
+            const plays = coerceNonNegativePlayCount(match[3]);
+            const identity = resolveCanonicalTrackIdentity({
+              trackId: match[4],
+              spotifyUri: match[5],
+              title,
+              artist
+            });
+            const key = `${userPrefix}${title.toLowerCase()}::${artist.toLowerCase()}`;
             if (!this.inMemoryLearnedTracks.has(key)) {
               this.inMemoryLearnedTracks.set(key, {
+                trackId: identity.trackId,
                 title,
                 artist,
-                spotifyUri: uri,
+                spotifyUri: identity.spotifyUri,
                 playCount: plays,
                 source: 'com.spotify.music'
               });
@@ -496,24 +614,29 @@ export class SupabaseIntelligenceStore {
 
       const cleanTarget = targetRaw.split('|')[0]?.trim() || '';
       const actionMatch = targetRaw.match(/action=([A-Z_]+)/);
+      const trackIdMatch = targetRaw.match(/track_id=([^\s|]+)/);
       const uriMatch = targetRaw.match(/uri=(spotify:track:[A-Za-z0-9]+)/);
       const daypartMatch = targetRaw.match(/daypart=([A-Za-z\s]+)/);
       const effectiveAction = actionMatch?.[1] || intentRaw;
+      const effectiveTrackId = row.track_id || trackIdMatch?.[1];
+      const effectiveUri = normalizeSpotifyUri(row.spotify_uri || uriMatch?.[1]);
 
       if (cleanTarget && (effectiveAction === 'PLAY_TRACK_NOW' || intentRaw === 'OS_MEDIA_NEXT_AND_DEEP_LINK' || effectiveAction === 'APPROVED_TRACK')) {
-        const key = cleanTarget.toLowerCase();
+        const key = `${userPrefix}${cleanTarget.toLowerCase()}`;
         if (!this.inMemoryApprovedTracks.has(key)) {
           this.inMemoryApprovedTracks.set(key, {
+            trackId: effectiveTrackId,
             title: cleanTarget,
             artist: '',
-            spotifyUri: uriMatch?.[1],
+            spotifyUri: effectiveUri,
             approvedAt: row.created_at || new Date().toISOString()
           });
         }
       } else if (cleanTarget && effectiveAction === 'REJECTED_TRACK') {
-        const key = cleanTarget.toLowerCase();
+        const key = `${userPrefix}${cleanTarget.toLowerCase()}`;
         if (!this.inMemoryRejectedTracks.has(key)) {
           this.inMemoryRejectedTracks.set(key, {
+            trackId: effectiveTrackId,
             title: cleanTarget,
             artist: '',
             rejectedAt: row.created_at || new Date().toISOString()
@@ -539,10 +662,13 @@ export class SupabaseIntelligenceStore {
       }
     }
 
-    const allLearnedTracks = Array.from(this.inMemoryLearnedTracks.values()).sort((a, b) => b.playCount - a.playCount);
+    const allLearnedTracks = Array.from(this.inMemoryLearnedTracks.entries())
+      .filter(([k]) => k.startsWith(userPrefix))
+      .map(([, v]) => v)
+      .sort((a, b) => b.playCount - a.playCount);
     const artistTotals = new Map<string, number>();
     for (const t of allLearnedTracks) {
-      if (t.artist && t.artist !== 'Unknown Artist') {
+      if (t.artist && t.artist !== 'Unknown Artist' && t.playCount > 0) {
         artistTotals.set(t.artist, (artistTotals.get(t.artist) || 0) + t.playCount);
       }
     }
@@ -563,6 +689,13 @@ export class SupabaseIntelligenceStore {
       }
     }
 
+    const userApproved = Array.from(this.inMemoryApprovedTracks.entries())
+      .filter(([k]) => k.startsWith(userPrefix))
+      .map(([, v]) => v);
+    const userRejected = Array.from(this.inMemoryRejectedTracks.entries())
+      .filter(([k]) => k.startsWith(userPrefix))
+      .map(([, v]) => v);
+
     const totalInterventions = Math.max(supabaseInterventions.length, recentInterventionsFormatted.length);
     const totalTracks = allLearnedTracks.length;
     const maturity: LongTermIntelligenceSummary['intelligenceMaturityLevel'] =
@@ -577,12 +710,12 @@ export class SupabaseIntelligenceStore {
     const allListenedTitlesSet = new Set<string>();
     const allListenedUrisSet = new Set<string>();
     for (const trk of allLearnedTracks) {
-      if (trk.title) allListenedTitlesSet.add(trk.title.toLowerCase().trim());
-      if (trk.spotifyUri && trk.spotifyUri.startsWith('spotify:track:')) {
+      if (trk.playCount > 0 && trk.title) allListenedTitlesSet.add(trk.title.toLowerCase().trim());
+      if (trk.playCount > 0 && trk.spotifyUri && trk.spotifyUri.startsWith('spotify:track:')) {
         allListenedUrisSet.add(trk.spotifyUri.trim());
       }
     }
-    for (const app of this.inMemoryApprovedTracks.values()) {
+    for (const app of userApproved) {
       if (app.title) allListenedTitlesSet.add(app.title.toLowerCase().trim());
       if (app.spotifyUri && app.spotifyUri.startsWith('spotify:track:')) {
         allListenedUrisSet.add(app.spotifyUri.trim());
@@ -595,8 +728,8 @@ export class SupabaseIntelligenceStore {
       intelligenceMaturityLevel: maturity,
       totalHistoricalInterventions: totalInterventions,
       totalTracksLearned: totalTracks,
-      approvedTracks: Array.from(this.inMemoryApprovedTracks.values()).slice(-15),
-      rejectedTracks: Array.from(this.inMemoryRejectedTracks.values()).slice(-15),
+      approvedTracks: userApproved.slice(-15),
+      rejectedTracks: userRejected.slice(-15),
       topArtistsOverTime,
       topTracksOverTime: allLearnedTracks.slice(0, 20),
       recentInterventions: recentInterventionsFormatted,

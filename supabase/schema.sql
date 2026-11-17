@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS public.agent_interventions (
     agent_tts_response TEXT NOT NULL DEFAULT '',
     os_intent TEXT NOT NULL DEFAULT 'NONE',
     target_search_query TEXT NOT NULL DEFAULT '',
+    track_id TEXT,
+    spotify_uri TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -217,6 +219,8 @@ ALTER TABLE public.agent_interventions
     ADD COLUMN IF NOT EXISTS agent_tts_response TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS os_intent TEXT NOT NULL DEFAULT 'NONE',
     ADD COLUMN IF NOT EXISTS target_search_query TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS track_id TEXT,
+    ADD COLUMN IF NOT EXISTS spotify_uri TEXT,
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE INDEX IF NOT EXISTS idx_agent_interventions_user_created
@@ -226,10 +230,11 @@ CREATE INDEX IF NOT EXISTS idx_agent_interventions_user_created
 CREATE TABLE IF NOT EXISTS public.listening_events (
     event_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'tunemind-default-user',
+    track_id TEXT,
     track_title TEXT NOT NULL DEFAULT 'Unknown Track',
     track_artist TEXT NOT NULL DEFAULT 'Unknown Artist',
     spotify_uri TEXT,
-    play_count INTEGER NOT NULL DEFAULT 1,
+    play_count INTEGER NOT NULL DEFAULT 0,
     media_source TEXT NOT NULL DEFAULT 'com.spotify.music',
     observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -237,15 +242,22 @@ CREATE TABLE IF NOT EXISTS public.listening_events (
 ALTER TABLE public.listening_events
     ADD COLUMN IF NOT EXISTS event_id TEXT,
     ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'tunemind-default-user',
+    ADD COLUMN IF NOT EXISTS track_id TEXT,
     ADD COLUMN IF NOT EXISTS track_title TEXT NOT NULL DEFAULT 'Unknown Track',
     ADD COLUMN IF NOT EXISTS track_artist TEXT NOT NULL DEFAULT 'Unknown Artist',
     ADD COLUMN IF NOT EXISTS spotify_uri TEXT,
-    ADD COLUMN IF NOT EXISTS play_count INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS play_count INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS media_source TEXT NOT NULL DEFAULT 'com.spotify.music',
     ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+ALTER TABLE public.listening_events
+    ALTER COLUMN play_count SET DEFAULT 0;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_events_event_id_unique
     ON public.listening_events (event_id);
+
+CREATE INDEX IF NOT EXISTS idx_listening_events_track_id
+    ON public.listening_events (track_id);
 
 CREATE INDEX IF NOT EXISTS idx_listening_events_user_plays
     ON public.listening_events (user_id, play_count DESC);
@@ -369,8 +381,10 @@ CREATE TABLE IF NOT EXISTS public.discovery_recommendation_outcomes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id TEXT NOT NULL,
     drop_date TEXT NOT NULL,
+    track_id TEXT,
     track_title TEXT NOT NULL,
     artist TEXT NOT NULL,
+    spotify_uri TEXT,
     genre TEXT NOT NULL DEFAULT 'Discovery',
     sub_tier TEXT NOT NULL DEFAULT 'GENRE_PICK',
     outcome_status TEXT NOT NULL DEFAULT 'PENDING',
@@ -391,8 +405,10 @@ CREATE TABLE IF NOT EXISTS public.discovery_recommendation_outcomes (
 ALTER TABLE public.discovery_recommendation_outcomes
     ADD COLUMN IF NOT EXISTS user_id TEXT,
     ADD COLUMN IF NOT EXISTS drop_date TEXT,
+    ADD COLUMN IF NOT EXISTS track_id TEXT,
     ADD COLUMN IF NOT EXISTS track_title TEXT,
     ADD COLUMN IF NOT EXISTS artist TEXT,
+    ADD COLUMN IF NOT EXISTS spotify_uri TEXT,
     ADD COLUMN IF NOT EXISTS genre TEXT NOT NULL DEFAULT 'Discovery',
     ADD COLUMN IF NOT EXISTS sub_tier TEXT NOT NULL DEFAULT 'GENRE_PICK',
     ADD COLUMN IF NOT EXISTS outcome_status TEXT NOT NULL DEFAULT 'PENDING',

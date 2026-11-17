@@ -4,6 +4,11 @@ import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 import {
+  coerceNonNegativePlayCount,
+  normalizeSpotifyUri,
+  resolveCanonicalTrackIdentity
+} from '../identity/trackIdentity';
+import {
   MusicReasoningProvider,
   UserMusicContext,
   ReasoningResult,
@@ -34,6 +39,7 @@ export interface AgentToolCall {
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
     | 'ADVISE_ONLY';
+  track_id?: string;
   track_title?: string;
   track_artist?: string;
   spotify_uri?: string;
@@ -58,6 +64,7 @@ export interface TuneMindTelemetryContext {
     title: string;
     artist: string;
     trackId?: string;
+    spotifyUri?: string;
     source_player: string;
     is_playing?: boolean;
     acoustic_features?: {
@@ -67,7 +74,7 @@ export interface TuneMindTelemetryContext {
     };
   };
   user_command?: string;
-  rolling_history: Array<{ title: string; artist: string; trackId?: string; playCount?: number; source_player?: string; bpm?: number }>;
+  rolling_history: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; playCount?: number; source_player?: string; bpm?: number }>;
   recently_played_by_agent?: string[];
   current_satiety_percentage: number;
   hearing_telemetry?: {
@@ -89,6 +96,7 @@ export interface TuneMindTelemetryContext {
     title: string;
     artist: string;
     trackId?: string;
+    spotifyUri?: string;
     freshness_percent: number;
     reason: string;
   }>;
@@ -96,6 +104,7 @@ export interface TuneMindTelemetryContext {
     title: string;
     artist: string;
     trackId?: string;
+    spotifyUri?: string;
     source?: string;
     never_open_external_app?: boolean;
   } | null;
@@ -131,6 +140,7 @@ export interface TuneMindReasoningResponse {
     intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'OS_MEDIA_RESUME' | 'OS_MEDIA_NEXT' | 'OS_MEDIA_PREV' | 'NONE';
     target_player: string;
     search_query: string;
+    track_id?: string;
     track_title?: string;
     track_artist?: string;
     spotify_uri?: string;
@@ -157,7 +167,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
   private static pendingProposedTracksByUser = new Map<
     string,
-    { title: string; artist: string; trackId?: string; source?: string; never_open_external_app?: boolean }
+    { title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; never_open_external_app?: boolean }
   >();
   private static recentDialogueTurnsByUser = new Map<
     string,
@@ -166,7 +176,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static rotationIndex: number = 0;
 
   public static setPendingProposedTrack(
-    track: { title: string; artist: string; trackId?: string; source?: string; never_open_external_app?: boolean } | null,
+    track: { title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; never_open_external_app?: boolean } | null,
     userId: string = 'tunemind-default-user'
   ) {
     const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
@@ -869,14 +879,14 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       if (!Array.isArray(items)) return [];
       return items
         .filter((item: any) => item && typeof item.uri === 'string' && item.uri.startsWith('spotify:track:'))
-        .map((item: any, idx: number) => ({
+        .map((item: any) => ({
           trackId: item.id,
           uri: item.uri,
           title: item.name,
           artist: item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
           album: item.album?.name || '',
           popularity: Number(item.popularity || 60),
-          playCount: Math.max(3, limit - idx)
+          playCount: 0
         }));
     } catch {
       return [];
@@ -918,7 +928,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         title: t.title,
         artist: t.artist,
         trackId: t.trackId,
-        playCount: t.playCount,
+        spotifyUri: t.spotifyUri,
+        playCount: coerceNonNegativePlayCount(t.playCount),
         source: t.source_player
       })),
       {
@@ -931,25 +942,39 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
     const supabaseMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
 
     // ─── 1. MERGE REAL LISTENING HISTORY: LIVE CLIENT + SUPABASE + EVENTSTORE ─
-    const historyMap = new Map<string, { title: string; artist: string; trackId?: string; source: string; playCount: number }>();
+    const historyMap = new Map<string, { title: string; artist: string; trackId: string; spotifyUri?: string; source: string; playCount: number }>();
 
     if (Array.isArray(context.rolling_history)) {
       for (const t of context.rolling_history) {
         if (t.title && t.title !== 'Active Session' && t.title !== 'Standing By' && t.title !== 'Deep Flow State') {
-          const key = `${t.title.toLowerCase().trim()} - ${(t.artist || '').toLowerCase().trim()}`;
+          const cleanTitle = t.title.trim();
+          const cleanArtist = (t.artist || 'Unknown Artist').trim();
+          const identity = resolveCanonicalTrackIdentity({
+            trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
+            title: cleanTitle,
+            artist: cleanArtist
+          });
+          const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
           const existing = historyMap.get(key);
-          const count = Number(t.playCount || 1);
+          const count = coerceNonNegativePlayCount(t.playCount);
           if (!existing) {
             historyMap.set(key, {
-              title: t.title.trim(),
-              artist: (t.artist || 'Unknown Artist').trim(),
-              trackId: t.trackId || undefined,
+              title: cleanTitle,
+              artist: cleanArtist,
+              trackId: identity.trackId,
+              spotifyUri: identity.spotifyUri,
               source: (t as any).source_player || 'com.spotify.music',
               playCount: count
             });
           } else {
             existing.playCount = Math.max(existing.playCount, count);
-            if (!existing.trackId && t.trackId) existing.trackId = t.trackId;
+            if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+              existing.trackId = identity.trackId;
+            }
+            if (!existing.spotifyUri && identity.spotifyUri) {
+              existing.spotifyUri = identity.spotifyUri;
+            }
           }
         }
       }
@@ -958,39 +983,68 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
     // Merge historical tracks stored in Supabase Taste Genome across sessions
     for (const supaTrk of supabaseMemory.topTracksOverTime) {
       if (supaTrk.title) {
-        const key = `${supaTrk.title.toLowerCase().trim()} - ${(supaTrk.artist || '').toLowerCase().trim()}`;
+        const cleanTitle = supaTrk.title.trim();
+        const cleanArtist = (supaTrk.artist || 'Unknown Artist').trim();
+        const identity = resolveCanonicalTrackIdentity({
+          trackId: supaTrk.trackId,
+          spotifyUri: supaTrk.spotifyUri,
+          title: cleanTitle,
+          artist: cleanArtist
+        });
+        const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
         const existing = historyMap.get(key);
+        const supaCount = coerceNonNegativePlayCount(supaTrk.playCount);
         if (!existing) {
           historyMap.set(key, {
-            title: supaTrk.title,
-            artist: supaTrk.artist || 'Unknown Artist',
-            trackId: supaTrk.spotifyUri,
+            title: cleanTitle,
+            artist: cleanArtist,
+            trackId: identity.trackId,
+            spotifyUri: identity.spotifyUri,
             source: supaTrk.source || 'com.spotify.music',
-            playCount: supaTrk.playCount || 1
+            playCount: supaCount
           });
         } else {
-          existing.playCount = Math.max(existing.playCount, supaTrk.playCount || 1);
-          if (!existing.trackId && supaTrk.spotifyUri) existing.trackId = supaTrk.spotifyUri;
+          existing.playCount = Math.max(existing.playCount, supaCount);
+          if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+            existing.trackId = identity.trackId;
+          }
+          if (!existing.spotifyUri && identity.spotifyUri) existing.spotifyUri = identity.spotifyUri;
         }
       }
     }
 
     try {
-      const storedTracks = eventStore.getRecentObservedTracks(50);
+      const storedTracks = eventStore.getRecentObservedTracks(50, userId);
       for (const t of storedTracks) {
         if (t.title) {
-          const key = `${t.title.toLowerCase().trim()} - ${(t.artist || '').toLowerCase().trim()}`;
+          const cleanTitle = t.title.trim();
+          const cleanArtist = (t.artist || 'Unknown Artist').trim();
+          const identity = resolveCanonicalTrackIdentity({
+            trackId: t.trackId,
+            spotifyUri: t.spotifyUri,
+            title: cleanTitle,
+            artist: cleanArtist
+          });
+          const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
           const existing = historyMap.get(key);
+          const storedCount = coerceNonNegativePlayCount(t.playCount);
           if (!existing) {
             historyMap.set(key, {
-              title: t.title,
-              artist: t.artist || 'Unknown Artist',
-              trackId: t.trackId,
+              title: cleanTitle,
+              artist: cleanArtist,
+              trackId: identity.trackId,
+              spotifyUri: identity.spotifyUri,
               source: t.source || 'com.spotify.music',
-              playCount: Number(t.playCount || 1)
+              playCount: storedCount
             });
-          } else if (!existing.trackId && t.trackId) {
-            existing.trackId = t.trackId;
+          } else {
+            existing.playCount = Math.max(existing.playCount, storedCount);
+            if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+              existing.trackId = identity.trackId;
+            }
+            if (!existing.spotifyUri && identity.spotifyUri) {
+              existing.spotifyUri = identity.spotifyUri;
+            }
           }
         }
       }
@@ -1018,7 +1072,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       if (rej.title) excludedSet.add(rej.title.toLowerCase().trim());
     }
 
-    let freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()) && (t.playCount || 1) <= 4);
+    let freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()) && t.playCount <= 4);
     if (freshTracks.length === 0) {
       freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()));
     }
@@ -1027,19 +1081,20 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
     }
 
     const overplayedTracks = [...allUserTracks]
-      .filter(t => (t.playCount || 1) >= 3)
-      .sort((a, b) => (b.playCount || 1) - (a.playCount || 1))
+      .filter(t => t.playCount >= 3)
+      .sort((a, b) => b.playCount - a.playCount)
       .slice(0, 8);
 
     const mostPlayedTracks = [...allUserTracks]
-      .sort((a, b) => (b.playCount || 1) - (a.playCount || 1))
+      .filter(t => t.playCount > 0)
+      .sort((a, b) => b.playCount - a.playCount)
       .slice(0, 10);
 
     const topUserArtists = Array.from(
       allUserTracks.reduce((acc, t) => {
         const primaryArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(t.artist);
-        if (primaryArtist) {
-          acc.set(primaryArtist, (acc.get(primaryArtist) || 0) + (t.playCount || 1));
+        if (primaryArtist && t.playCount > 0) {
+          acc.set(primaryArtist, (acc.get(primaryArtist) || 0) + t.playCount);
         }
         return acc;
       }, new Map<string, number>()).entries()
@@ -1054,7 +1109,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           title: t.title,
           artist: t.artist,
           trackId: t.trackId,
-          freshness_percent: Math.max(76, 94 - (t.playCount || 1) * 6 - idx * 3),
+          spotifyUri: t.spotifyUri,
+          freshness_percent: Math.max(76, 94 - t.playCount * 6 - idx * 3),
           reason: idx === 0
             ? `Peak ${context.circadian_daypart} dopamine anchor with low receptor habituation`
             : `Harmonic cadence match from your personal rotation`
@@ -1141,7 +1197,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
     };
 
     let submittedTurnDecision: any = null;
-    let lastDiscoveredOrSearchedTrack: { title: string; artist: string; uri: string } | null = null;
+    let lastDiscoveredOrSearchedTrack: { title: string; artist: string; uri: string; trackId?: string } | null = null;
     let providerTag = 'autonomous-tool-agent';
 
     const available = await this.isAvailable();
@@ -1179,6 +1235,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
                   flow_state_analysis: parsed.flow_state_analysis || 'Autonomous Studio Reasoning complete.',
                   calculated_satiety_percentage: parsed.calculated_satiety_percentage ?? 28,
                   action: parsed.agent_tool_call?.action || parsed.action || 'ADVISE_ONLY',
+                  track_id: parsed.agent_tool_call?.track_id || parsed.track_id,
                   track_title: parsed.agent_tool_call?.track_title || parsed.track_title,
                   track_artist: parsed.agent_tool_call?.track_artist || parsed.track_artist,
                   spotify_uri: parsed.agent_tool_call?.spotify_uri || parsed.spotify_uri,
@@ -1264,12 +1321,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
                     combinedPool.push({
                       title: topItem.title,
                       artist: topItem.artist,
-                      trackId: topItem.uri,
+                      trackId: topItem.trackId,
+                      spotifyUri: topItem.uri,
                       source: 'com.spotify.music',
                       playCount: topItem.playCount
                     });
-                  } else if (!exists.trackId && topItem.uri) {
-                    exists.trackId = topItem.uri;
+                  } else {
+                    if (!exists.spotifyUri && topItem.uri) exists.spotifyUri = topItem.uri;
+                    if ((!exists.trackId || exists.trackId.startsWith('trk:')) && topItem.trackId) {
+                      exists.trackId = topItem.trackId;
+                    }
                   }
                 }
               }
@@ -1283,27 +1344,31 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
               }
 
               if (sortBy === 'most_played' || sortBy === 'overplayed_fatigued') {
-                combinedPool.sort((a, b) => (b.playCount || 1) - (a.playCount || 1));
+                combinedPool.sort((a, b) => coerceNonNegativePlayCount(b.playCount) - coerceNonNegativePlayCount(a.playCount));
               } else if (sortBy === 'least_played_fresh') {
-                combinedPool.sort((a, b) => (a.playCount || 1) - (b.playCount || 1));
+                combinedPool.sort((a, b) => coerceNonNegativePlayCount(a.playCount) - coerceNonNegativePlayCount(b.playCount));
               }
 
               const topSlice = combinedPool.slice(0, limit);
-              if (topSlice[0] && (!topSlice[0].trackId || !topSlice[0].trackId.startsWith('spotify:track:'))) {
+              if (topSlice[0] && !topSlice[0].spotifyUri) {
                 const resolved = await this.lookupSpotifyTrack(
                   topSlice[0].title,
                   topSlice[0].artist,
                   context.spotify_access_token
                 );
                 if (resolved) {
-                  topSlice[0].trackId = resolved.uri;
+                  topSlice[0].spotifyUri = resolved.uri;
+                  if ((!topSlice[0].trackId || topSlice[0].trackId.startsWith('trk:')) && resolved.trackId) {
+                    topSlice[0].trackId = resolved.trackId;
+                  }
                 }
               }
               if (topSlice[0]) {
                 lastDiscoveredOrSearchedTrack = {
                   title: topSlice[0].title,
                   artist: topSlice[0].artist,
-                  uri: topSlice[0].trackId || ''
+                  uri: topSlice[0].spotifyUri || '',
+                  trackId: topSlice[0].trackId
                 };
               }
 
@@ -1313,14 +1378,18 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
                 content: JSON.stringify({
                   sort_by: sortBy,
                   total_matched: combinedPool.length,
-                  tracks: topSlice.map((t, idx) => ({
-                    rank: idx + 1,
-                    title: t.title,
-                    artist: t.artist,
-                    play_count: t.playCount || 1,
-                    spotify_uri: t.trackId || '',
-                    freshness_percent: Math.max(15, 96 - (t.playCount || 1) * 8)
-                  }))
+                  tracks: topSlice.map((t, idx) => {
+                    const plays = coerceNonNegativePlayCount(t.playCount);
+                    return {
+                      rank: idx + 1,
+                      track_id: t.trackId,
+                      title: t.title,
+                      artist: t.artist,
+                      play_count: plays,
+                      spotify_uri: t.spotifyUri || '',
+                      freshness_percent: Math.max(15, 96 - plays * 8)
+                    };
+                  })
                 })
               });
             } else if (toolName === 'discover_and_recommend_spotify_tracks') {
@@ -1340,10 +1409,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
               );
 
               if (discovered[0]) {
+                const discIdentity = resolveCanonicalTrackIdentity({
+                  spotifyUri: discovered[0].spotify_uri,
+                  title: discovered[0].title,
+                  artist: discovered[0].artist
+                });
                 lastDiscoveredOrSearchedTrack = {
                   title: discovered[0].title,
                   artist: discovered[0].artist,
-                  uri: discovered[0].spotify_uri
+                  uri: discIdentity.spotifyUri || discovered[0].spotify_uri,
+                  trackId: discIdentity.trackId
                 };
               }
 
@@ -1360,10 +1435,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
               const artist = input.artist ? String(input.artist).trim() : undefined;
               const hits = await this.searchSpotifyCatalogTracks(q, artist, 6, context.spotify_access_token);
               if (hits[0]) {
+                const hitIdentity = resolveCanonicalTrackIdentity({
+                  spotifyUri: hits[0].uri,
+                  title: hits[0].title,
+                  artist: hits[0].artist
+                });
                 lastDiscoveredOrSearchedTrack = {
                   title: hits[0].title,
                   artist: hits[0].artist,
-                  uri: hits[0].uri
+                  uri: hitIdentity.spotifyUri || hits[0].uri,
+                  trackId: hitIdentity.trackId
                 };
               }
               toolResults.push({
@@ -1465,11 +1546,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           (trackTitle && pending.title.toLowerCase() === trackTitle.toLowerCase() && /\b(yes|yeah|yep|sure|ok|okay|play|go ahead|do it|spin|approve|ndio|sawa)\b/i.test(userCommandRaw)))
       );
 
+      let candidateTrackId: string | undefined = isTrackBearingAction
+        ? (submittedTurnDecision.track_id || lastDiscoveredOrSearchedTrack?.trackId || undefined)
+        : undefined;
+
       if (isAutoCurateNextTrack) {
         if (!trackTitle && freshTracks[0]) {
           trackTitle = freshTracks[0].title;
           trackArtist = freshTracks[0].artist;
-          spotifyUri = freshTracks[0].trackId || spotifyUri;
+          spotifyUri = freshTracks[0].spotifyUri || normalizeSpotifyUri(freshTracks[0].trackId) || spotifyUri;
+          candidateTrackId = freshTracks[0].trackId || candidateTrackId;
         }
         if (trackTitle) {
           action = 'PLAY_TRACK_NOW';
@@ -1489,7 +1575,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         action = 'PLAY_TRACK_NOW';
         trackTitle = pending.title;
         trackArtist = pending.artist;
-        spotifyUri = pending.trackId || spotifyUri;
+        spotifyUri = pending.spotifyUri || normalizeSpotifyUri(pending.trackId) || spotifyUri;
+        candidateTrackId = pending.trackId || candidateTrackId;
       }
 
       // Resolve Spotify URI if we are playing or proposing a track and spotifyUri is still empty
@@ -1498,6 +1585,9 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         const resolved = await this.lookupSpotifyTrack(trackTitle, cleanArtist, context.spotify_access_token);
         if (resolved) {
           spotifyUri = resolved.uri;
+          if (!candidateTrackId && resolved.trackId) {
+            candidateTrackId = resolved.trackId;
+          }
           if (!trackArtist || trackArtist === 'Unknown Artist') {
             trackArtist = resolved.artist;
           }
@@ -1508,6 +1598,19 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       const cleanArtistForSearch = trackArtist ? ClaudeMusicReasoningProvider.sanitizeArtistName(trackArtist) : '';
       const cleanSearchQuery = trackTitle ? `${cleanTitleForSearch} ${cleanArtistForSearch}`.trim() : '';
       const targetPlayer = targetPlayerDefault;
+      const trackIdentity = trackTitle
+        ? resolveCanonicalTrackIdentity({
+            trackId: candidateTrackId || pending?.trackId,
+            spotifyUri: spotifyUri || pending?.spotifyUri,
+            title: cleanTitleForSearch || trackTitle,
+            artist: cleanArtistForSearch || trackArtist
+          })
+        : null;
+      const resolvedTrackId = trackIdentity?.trackId;
+      if (trackIdentity?.spotifyUri && !spotifyUri) {
+        spotifyUri = trackIdentity.spotifyUri;
+      }
+
       const requestedNeverOpenExternal = Boolean(
         submittedTurnDecision.never_open_external_app === true ||
         pending?.never_open_external_app === true ||
@@ -1530,7 +1633,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
               {
                 title: cleanTitleForSearch || trackTitle,
                 artist: cleanArtistForSearch || trackArtist,
-                trackId: spotifyUri || undefined,
+                trackId: resolvedTrackId,
+                spotifyUri: spotifyUri || undefined,
                 source: targetPlayer,
                 never_open_external_app: requestedNeverOpenExternal
               },
@@ -1589,6 +1693,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           os_intent: resolvedIntent,
           target_search_query: cleanSearchQuery,
           action,
+          track_id: resolvedTrackId,
           track_title: (cleanTitleForSearch || trackTitle) || undefined,
           track_artist: (cleanArtistForSearch || trackArtist) || undefined,
           spotify_uri: spotifyUri || undefined,
@@ -1621,6 +1726,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
 
       const finalToolCall: AgentToolCall = {
         action,
+        track_id: resolvedTrackId,
         track_title: (cleanTitleForSearch || trackTitle) || undefined,
         track_artist: (cleanArtistForSearch || trackArtist) || undefined,
         spotify_uri: spotifyUri || undefined,
@@ -1662,6 +1768,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           intent: resolvedIntent,
           target_player: targetPlayer,
           search_query: cleanSearchQuery,
+          track_id: resolvedTrackId,
           track_title: (cleanTitleForSearch || trackTitle) || undefined,
           track_artist: (cleanArtistForSearch || trackArtist) || undefined,
           spotify_uri: spotifyUri || undefined,
@@ -1694,6 +1801,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         os_intent: fb.os_execution_command?.intent || 'NONE',
         target_search_query: fb.os_execution_command?.search_query || '',
         action: fb.agent_tool_call?.action,
+        track_id: fb.agent_tool_call?.track_id,
         track_title: fb.agent_tool_call?.track_title,
         track_artist: fb.agent_tool_call?.track_artist,
         spotify_uri: fb.agent_tool_call?.spotify_uri,
@@ -1946,15 +2054,15 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
   private async tryClaudeSingleShotJsonDecision(
     context: TuneMindTelemetryContext,
     initialContextPayload: any,
-    allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
-    mostPlayedTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
+    allUserTracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>,
+    mostPlayedTracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>,
     topUserArtists: string[],
     excludedSet: Set<string>
-  ): Promise<{ decision: any; fallbackTrack: { title: string; artist: string; uri: string } | null; providerTag: string } | null> {
+  ): Promise<{ decision: any; fallbackTrack: { title: string; artist: string; uri: string; trackId?: string } | null; providerTag: string } | null> {
     const userMsg = (context.user_command || '').trim();
     const lowerMsg = userMsg.toLowerCase();
 
-    let fallbackTrack: { title: string; artist: string; uri: string } | null = null;
+    let fallbackTrack: { title: string; artist: string; uri: string; trackId?: string } | null = null;
     let liveSpotifyDiscovery: any[] = [];
     let liveSpotifySearchHits: any[] = [];
 
@@ -1964,11 +2072,18 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
 
     if (wantsMostPlayed && mostPlayedTracks[0]) {
       const top = mostPlayedTracks[0];
-      if (!top.trackId || !top.trackId.startsWith('spotify:track:')) {
+      let uri = normalizeSpotifyUri(top.spotifyUri || top.trackId) || '';
+      if (!uri) {
         const resolved = await this.lookupSpotifyTrack(top.title, top.artist, context.spotify_access_token);
-        if (resolved) top.trackId = resolved.uri;
+        if (resolved) uri = resolved.uri;
       }
-      fallbackTrack = { title: top.title, artist: top.artist, uri: top.trackId || '' };
+      const topIdentity = resolveCanonicalTrackIdentity({
+        trackId: top.trackId,
+        spotifyUri: uri,
+        title: top.title,
+        artist: top.artist
+      });
+      fallbackTrack = { title: top.title, artist: top.artist, uri: topIdentity.spotifyUri || uri, trackId: topIdentity.trackId };
     } else if (wantsDiscoveryOrNew) {
       liveSpotifyDiscovery = await this.discoverSpotifyTracksForContext(
         context,
@@ -1979,10 +2094,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         true
       );
       if (liveSpotifyDiscovery[0]) {
+        const discIdentity = resolveCanonicalTrackIdentity({
+          spotifyUri: liveSpotifyDiscovery[0].spotify_uri,
+          title: liveSpotifyDiscovery[0].title,
+          artist: liveSpotifyDiscovery[0].artist
+        });
         fallbackTrack = {
           title: liveSpotifyDiscovery[0].title,
           artist: liveSpotifyDiscovery[0].artist,
-          uri: liveSpotifyDiscovery[0].spotify_uri
+          uri: discIdentity.spotifyUri || liveSpotifyDiscovery[0].spotify_uri,
+          trackId: discIdentity.trackId
         };
       }
     } else if (explicitPlayMatch && explicitPlayMatch[1]) {
@@ -1993,10 +2114,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       if (queryTarget.length >= 2) {
         liveSpotifySearchHits = await this.searchSpotifyCatalogTracks(queryTarget, undefined, 5, context.spotify_access_token);
         if (liveSpotifySearchHits[0]) {
+          const hitIdentity = resolveCanonicalTrackIdentity({
+            spotifyUri: liveSpotifySearchHits[0].uri,
+            title: liveSpotifySearchHits[0].title,
+            artist: liveSpotifySearchHits[0].artist
+          });
           fallbackTrack = {
             title: liveSpotifySearchHits[0].title,
             artist: liveSpotifySearchHits[0].artist,
-            uri: liveSpotifySearchHits[0].uri
+            uri: hitIdentity.spotifyUri || liveSpotifySearchHits[0].uri,
+            trackId: hitIdentity.trackId
           };
         }
       }
@@ -2068,9 +2195,9 @@ Respond ONLY with a single valid JSON object:
 
   private async buildSmartHistoryFallbackResponse(
     context: TuneMindTelemetryContext,
-    freshTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
-    allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
-    overplayedTracks: Array<{ title: string; artist: string; playCount?: number }>,
+    freshTracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>,
+    allUserTracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>,
+    overplayedTracks: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; playCount?: number }>,
     compactedCapsule: Array<{ title: string; artist: string; trackId?: string; freshness_percent: number; reason: string }>,
     explicitlyNamedQuery: string | null,
     matchedExplicitLibraryTrack: any | null,
@@ -2110,22 +2237,25 @@ Respond ONLY with a single valid JSON object:
         '',
         true
       );
-      const chosen = discovered[0]
+      const chosen: { title: string; artist: string; uri: string; trackId?: string } = discovered[0]
         ? {
             title: discovered[0].title,
             artist: discovered[0].artist,
-            uri: discovered[0].spotify_uri
+            uri: normalizeSpotifyUri(discovered[0].spotify_uri) || '',
+            trackId: undefined
           }
         : freshTracks[0]
         ? {
             title: freshTracks[0].title,
             artist: freshTracks[0].artist,
-            uri: freshTracks[0].trackId || ''
+            uri: normalizeSpotifyUri(freshTracks[0].spotifyUri || freshTracks[0].trackId) || '',
+            trackId: freshTracks[0].trackId
           }
         : {
             title: 'Midnight City',
             artist: 'M83',
-            uri: ''
+            uri: '',
+            trackId: undefined
           };
       if (!chosen.uri && chosen.title) {
         const resolved = await this.lookupSpotifyTrack(chosen.title, chosen.artist, context.spotify_access_token);
@@ -2133,6 +2263,13 @@ Respond ONLY with a single valid JSON object:
       }
       const cleanTitle = ClaudeMusicReasoningProvider.sanitizeTrackTitle(chosen.title) || chosen.title;
       const cleanArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(chosen.artist) || chosen.artist;
+      const chosenIdentity = resolveCanonicalTrackIdentity({
+        trackId: chosen.trackId,
+        spotifyUri: chosen.uri,
+        title: cleanTitle,
+        artist: cleanArtist
+      });
+      const resolvedUri = chosenIdentity.spotifyUri || normalizeSpotifyUri(chosen.uri) || undefined;
       const artistPart = cleanArtist && cleanArtist !== 'Unknown Artist' ? ` by ${cleanArtist}` : '';
       eventStore.recordAgentTrackAction(cleanTitle);
       return {
@@ -2142,9 +2279,10 @@ Respond ONLY with a single valid JSON object:
         voice_agent_tts: `Up next for your flow, playing "${cleanTitle}"${artistPart} right now.`,
         agent_tool_call: {
           action: 'PLAY_TRACK_NOW',
+          track_id: chosenIdentity.trackId,
           track_title: cleanTitle,
           track_artist: cleanArtist,
-          spotify_uri: chosen.uri || undefined,
+          spotify_uri: resolvedUri,
           target_player: targetPlayer,
           never_open_external_app: fallbackNeverOpenExternal,
           expect_follow_up: false
@@ -2153,9 +2291,10 @@ Respond ONLY with a single valid JSON object:
           intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
           target_player: targetPlayer,
           search_query: `${cleanTitle} ${cleanArtist}`.trim(),
+          track_id: chosenIdentity.trackId,
           track_title: cleanTitle,
           track_artist: cleanArtist,
-          spotify_uri: chosen.uri || undefined,
+          spotify_uri: resolvedUri,
           never_open_external_app: fallbackNeverOpenExternal,
           suggested_bpm_target: 108
         },
@@ -2208,6 +2347,13 @@ Respond ONLY with a single valid JSON object:
     ) {
       ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
       const artistPart = pending.artist && pending.artist !== 'Unknown Artist' ? ` by ${pending.artist}` : '';
+      const approvedIdentity = resolveCanonicalTrackIdentity({
+        trackId: pending.trackId,
+        spotifyUri: pending.spotifyUri || normalizeSpotifyUri(pending.trackId),
+        title: pending.title,
+        artist: pending.artist
+      });
+      const approvedSpotifyUri = approvedIdentity.spotifyUri || normalizeSpotifyUri(pending.spotifyUri) || '';
       return {
         calculated_satiety_percentage: 20,
         reasoning_mode: 'DIRECT_EXECUTION',
@@ -2217,9 +2363,10 @@ Respond ONLY with a single valid JSON object:
           : `Awesome, playing "${pending.title}"${artistPart} inside TuneMind right now.`,
         agent_tool_call: {
           action: 'PLAY_TRACK_NOW',
+          track_id: approvedIdentity.trackId,
           track_title: pending.title,
           track_artist: pending.artist,
-          spotify_uri: pending.trackId || '',
+          spotify_uri: approvedSpotifyUri || undefined,
           target_player: pending.source || targetPlayer,
           never_open_external_app: fallbackNeverOpenExternal,
           expect_follow_up: false
@@ -2228,9 +2375,10 @@ Respond ONLY with a single valid JSON object:
           intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK',
           target_player: pending.source || targetPlayer,
           search_query: `${pending.title} ${pending.artist || ''}`.trim(),
+          track_id: approvedIdentity.trackId,
           track_title: pending.title,
           track_artist: pending.artist,
-          spotify_uri: pending.trackId || '',
+          spotify_uri: approvedSpotifyUri || undefined,
           never_open_external_app: fallbackNeverOpenExternal,
           suggested_bpm_target: 108
         },
@@ -2286,6 +2434,12 @@ Respond ONLY with a single valid JSON object:
         : (overplayedTracks[0] || allUserTracks[0]);
       const title = targetTrack?.title || 'Current Track';
       const artist = targetTrack?.artist || '';
+      const vaultIdentity = resolveCanonicalTrackIdentity({
+        trackId: (targetTrack as any)?.trackId,
+        spotifyUri: (targetTrack as any)?.spotifyUri || normalizeSpotifyUri((targetTrack as any)?.trackId),
+        title,
+        artist
+      });
       const tts = `I have locked "${title}" into your Cooldown Vault for 5 days so its dopamine impact can fully recover.`;
       return {
         calculated_satiety_percentage: 30,
@@ -2294,16 +2448,20 @@ Respond ONLY with a single valid JSON object:
         voice_agent_tts: tts,
         agent_tool_call: {
           action: 'QUARANTINE_TO_VAULT',
+          track_id: vaultIdentity.trackId,
           track_title: title,
           track_artist: artist,
+          spotify_uri: vaultIdentity.spotifyUri,
           expect_follow_up: false
         },
         os_execution_command: {
           intent: 'NONE',
           target_player: targetPlayer,
           search_query: '',
+          track_id: vaultIdentity.trackId,
           track_title: title,
           track_artist: artist,
+          spotify_uri: vaultIdentity.spotifyUri,
           suggested_bpm_target: 100
         },
         database_tags: ['vault-quarantine']
@@ -2459,11 +2617,19 @@ Respond ONLY with a single valid JSON object:
     if (
       /\b(most\s+(played|listened|heard)|listened\s+(to\s+)?(the\s+)?most|listen\s+(to\s+)?(the\s+)?most|played\s+(the\s+)?most|favorite\s+(song|track)|favourite\s+(song|track)|top\s+(song|track)|number\s+one\s+(song|track))\b/i.test(userCommandLower)
     ) {
-      const sortedMost = [...allUserTracks].sort((a, b) => (b.playCount || 1) - (a.playCount || 1));
+      const sortedMost = [...allUserTracks].sort(
+        (a, b) => coerceNonNegativePlayCount(b.playCount) - coerceNonNegativePlayCount(a.playCount)
+      );
       const topTrack = sortedMost[0];
       if (topTrack) {
-        let uri = topTrack.trackId || '';
-        if (!uri.startsWith('spotify:track:')) {
+        const identity = resolveCanonicalTrackIdentity({
+          trackId: topTrack.trackId,
+          spotifyUri: (topTrack as any).spotifyUri,
+          title: topTrack.title,
+          artist: topTrack.artist
+        });
+        let uri = identity.spotifyUri || '';
+        if (!uri) {
           const resolved = await this.lookupSpotifyTrack(topTrack.title, topTrack.artist, context.spotify_access_token);
           if (resolved) uri = resolved.uri;
         }
@@ -2471,20 +2637,29 @@ Respond ONLY with a single valid JSON object:
           {
             title: topTrack.title,
             artist: topTrack.artist,
-            trackId: uri || undefined,
+            trackId: identity.trackId,
+            spotifyUri: uri || undefined,
             source: targetPlayer
           },
           userId
         );
+        const topPlays = coerceNonNegativePlayCount(topTrack.playCount);
         const artistPart = topTrack.artist && topTrack.artist !== 'Unknown Artist' ? ` by ${topTrack.artist}` : '';
-        const countPart = (topTrack.playCount || 1) > 1 ? ` with ${topTrack.playCount} plays in your history` : ' at the top of your rotation';
+        const countPart = topPlays > 1
+          ? ` with ${topPlays} plays in your history`
+          : topPlays === 1
+          ? ' with 1 play in your history'
+          : ' saved in your library (0 plays yet)';
         return {
           calculated_satiety_percentage: 24,
           reasoning_mode: 'SONIC_CURATOR',
-          flow_state_analysis: `Top Played Track: "${topTrack.title}"${artistPart} (${topTrack.playCount || 1}x plays).`,
-          voice_agent_tts: `Your most-listened song is "${topTrack.title}"${artistPart}${countPart}. Would you like me to play it right now?`,
+          flow_state_analysis: `Top Played Track: "${topTrack.title}"${artistPart} (${topPlays}x plays).`,
+          voice_agent_tts: topPlays > 0
+            ? `Your most-listened song is "${topTrack.title}"${artistPart}${countPart}. Would you like me to play it right now?`
+            : `You don't have any verified play counts yet, but "${topTrack.title}"${artistPart} is ready in your library. Would you like me to play it right now?`,
           agent_tool_call: {
             action: 'PROPOSE_TRACK',
+            track_id: identity.trackId,
             track_title: topTrack.title,
             track_artist: topTrack.artist,
             spotify_uri: uri,
@@ -2495,6 +2670,7 @@ Respond ONLY with a single valid JSON object:
             intent: 'NONE',
             target_player: targetPlayer,
             search_query: `${topTrack.title} ${topTrack.artist !== 'Unknown Artist' ? topTrack.artist : ''}`.trim(),
+            track_id: identity.trackId,
             track_title: topTrack.title,
             track_artist: topTrack.artist,
             spotify_uri: uri,
@@ -2512,7 +2688,9 @@ Respond ONLY with a single valid JSON object:
 
     if (!isExplicitMusicRequest) {
       // OPEN CONVERSATIONAL TURN -> Respond naturally with ADVISE_ONLY (NEVER force a song proposal!)
-      const topTrack = [...allUserTracks].sort((a, b) => (b.playCount || 1) - (a.playCount || 1))[0];
+      const topTrack = [...allUserTracks].sort(
+        (a, b) => coerceNonNegativePlayCount(b.playCount) - coerceNonNegativePlayCount(a.playCount)
+      )[0];
       const curPlaying = context.current_track?.title && context.current_track.title !== 'Standing By'
         ? `"${context.current_track.title}"${context.current_track.artist ? ` by ${context.current_track.artist}` : ''}`
         : null;
@@ -2582,12 +2760,12 @@ Respond ONLY with a single valid JSON object:
       if (s) excludedTitlesSet.add(String(s).toLowerCase().trim());
     }
 
-    let chosen: { title: string; artist: string; trackId?: string; source?: string } | null = null;
+    let chosen: { title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string } | null = null;
 
     if (explicitlyNamedQuery) {
       const hits = await this.searchSpotifyCatalogTracks(explicitlyNamedQuery, undefined, 4, context.spotify_access_token);
       if (hits[0]) {
-        chosen = { title: hits[0].title, artist: hits[0].artist, trackId: hits[0].uri, source: targetPlayer };
+        chosen = { title: hits[0].title, artist: hits[0].artist, spotifyUri: hits[0].uri, source: targetPlayer };
       } else if (matchedExplicitLibraryTrack) {
         chosen = matchedExplicitLibraryTrack;
       }
@@ -2606,7 +2784,7 @@ Respond ONLY with a single valid JSON object:
         chosen = {
           title: discovered[0].title,
           artist: discovered[0].artist,
-          trackId: discovered[0].spotify_uri,
+          spotifyUri: discovered[0].spotify_uri,
           source: targetPlayer
         };
       }
@@ -2618,29 +2796,30 @@ Respond ONLY with a single valid JSON object:
         title: 'Calm Down',
         artist: 'Rema',
         trackId: undefined,
+        spotifyUri: undefined,
         source: targetPlayer
       };
     }
 
-    let spotifyUri = '';
-    if (chosen.trackId) {
-      const tid = String(chosen.trackId).trim();
-      if (tid.startsWith('spotify:track:') || tid.startsWith('https://open.spotify.com/track/')) {
-        spotifyUri = tid;
-      } else if (/^[A-Za-z0-9]{22}$/.test(tid)) {
-        spotifyUri = `spotify:track:${tid}`;
-      }
-    }
+    let spotifyUri = normalizeSpotifyUri(chosen.spotifyUri || chosen.trackId) || '';
     if (!spotifyUri && chosen.title) {
       const resolved = await this.lookupSpotifyTrack(chosen.title, chosen.artist, context.spotify_access_token);
       if (resolved) spotifyUri = resolved.uri;
     }
+    const chosenIdentity = resolveCanonicalTrackIdentity({
+      trackId: chosen.trackId,
+      spotifyUri: spotifyUri || chosen.spotifyUri,
+      title: chosen.title,
+      artist: chosen.artist
+    });
+    const resolvedSpotifyUri = spotifyUri || chosenIdentity.spotifyUri || '';
 
     ClaudeMusicReasoningProvider.setPendingProposedTrack(
       {
         title: chosen.title,
         artist: chosen.artist,
-        trackId: spotifyUri || undefined,
+        trackId: chosenIdentity.trackId,
+        spotifyUri: resolvedSpotifyUri || undefined,
         source: chosen.source || targetPlayer,
         never_open_external_app: fallbackNeverOpenExternal
       },
@@ -2658,9 +2837,10 @@ Respond ONLY with a single valid JSON object:
       voice_agent_tts: tts,
       agent_tool_call: {
         action: 'PROPOSE_TRACK',
+        track_id: chosenIdentity.trackId,
         track_title: chosen.title,
         track_artist: chosen.artist,
-        spotify_uri: spotifyUri,
+        spotify_uri: resolvedSpotifyUri || undefined,
         target_player: chosen.source || targetPlayer,
         never_open_external_app: fallbackNeverOpenExternal,
         expect_follow_up: true
@@ -2669,9 +2849,10 @@ Respond ONLY with a single valid JSON object:
         intent: 'NONE',
         target_player: chosen.source || targetPlayer,
         search_query: `${chosen.title} ${chosen.artist !== 'Unknown Artist' ? chosen.artist : ''}`.trim(),
+        track_id: chosenIdentity.trackId,
         track_title: chosen.title,
         track_artist: chosen.artist,
-        spotify_uri: spotifyUri,
+        spotify_uri: resolvedSpotifyUri || undefined,
         never_open_external_app: fallbackNeverOpenExternal,
         suggested_bpm_target: 105
       },
@@ -3064,7 +3245,21 @@ Respond ONLY with a JSON array:
             status: 'ok',
             isAiGenerated: true,
             modelUsed: this.activeModelUsed,
-            recommendations: parsed.slice(0, 10)
+            recommendations: parsed.slice(0, 10).map((item: any) => {
+              const identity = resolveCanonicalTrackIdentity({
+                trackId: item?.trackId || item?.track_id,
+                spotifyUri: item?.spotifyUri || item?.spotify_uri,
+                title: item?.title,
+                artist: item?.artist,
+                prefix: 'disc'
+              });
+              return {
+                ...item,
+                trackId: identity.trackId,
+                spotifyUri: identity.spotifyUri,
+                playCount: 0
+              };
+            })
           };
         }
       } catch (err) {
@@ -3078,6 +3273,8 @@ Respond ONLY with a JSON array:
       modelUsed: 'claude-haiku-baseline',
       recommendations: [
         {
+          trackId: resolveCanonicalTrackIdentity({ title: 'Huwezi Jua', artist: 'Mbosso', prefix: 'disc' }).trackId,
+          playCount: 0,
           title: 'Huwezi Jua',
           artist: 'Mbosso',
           album: 'Khan',
@@ -3087,6 +3284,8 @@ Respond ONLY with a JSON array:
           confidence: 0.98
         },
         {
+          trackId: resolveCanonicalTrackIdentity({ title: 'Mi Amor', artist: 'Marioo & Jovial', prefix: 'disc' }).trackId,
+          playCount: 0,
           title: 'Mi Amor',
           artist: 'Marioo & Jovial',
           album: 'The Kid You Know',
@@ -3096,6 +3295,8 @@ Respond ONLY with a JSON array:
           confidence: 0.96
         },
         {
+          trackId: resolveCanonicalTrackIdentity({ title: 'Calm Down', artist: 'Rema', prefix: 'disc' }).trackId,
+          playCount: 0,
           title: 'Calm Down',
           artist: 'Rema',
           album: 'Rave & Climax',
@@ -3105,6 +3306,8 @@ Respond ONLY with a JSON array:
           confidence: 0.95
         },
         {
+          trackId: resolveCanonicalTrackIdentity({ title: 'Single Again', artist: 'Harmonize', prefix: 'disc' }).trackId,
+          playCount: 0,
           title: 'Single Again',
           artist: 'Harmonize',
           album: 'Made For Us',
@@ -3127,17 +3330,28 @@ Respond ONLY with a JSON array:
       current_track: {
         title: typeof currentPlaying === 'string' ? currentPlaying : (currentPlaying?.title || 'Standing By'),
         artist: typeof currentPlaying === 'object' ? (currentPlaying?.artist || '') : '',
+        trackId: typeof currentPlaying === 'object' ? (currentPlaying?.trackId || undefined) : undefined,
+        spotifyUri: typeof currentPlaying === 'object' ? (currentPlaying?.spotifyUri || undefined) : undefined,
         source_player: 'com.spotify.music'
       },
       user_command: query,
       rolling_history: Array.isArray(tracks)
-        ? tracks.map((t: any) => ({
-            title: t.title || '',
-            artist: t.artist || '',
-            trackId: t.trackId || t.id || '',
-            playCount: Number(t.playCount || t.distinctAppearanceCount || 1),
-            source_player: 'com.spotify.music'
-          }))
+        ? tracks.map((t: any) => {
+            const identity = resolveCanonicalTrackIdentity({
+              trackId: t.trackId || t.id,
+              spotifyUri: t.spotifyUri || t.spotify_uri,
+              title: t.title || '',
+              artist: t.artist || ''
+            });
+            return {
+              title: t.title || '',
+              artist: t.artist || '',
+              trackId: identity.trackId,
+              spotifyUri: identity.spotifyUri,
+              playCount: coerceNonNegativePlayCount(t.playCount ?? t.distinctAppearanceCount ?? 0),
+              source_player: 'com.spotify.music'
+            };
+          })
         : [],
       current_satiety_percentage: 25,
       user_id: userName || 'tunemind-dev'
@@ -3147,6 +3361,8 @@ Respond ONLY with a JSON array:
     const isPlayOrPropose = toolAction === 'PLAY_TRACK_NOW' || toolAction === 'PROPOSE_TRACK' || toolAction === 'LAUNCH_DOPAMINE_CAPSULE';
     const recTitle = evalResult.agent_tool_call?.track_title || evalResult.os_execution_command?.track_title || '';
     const recArtist = evalResult.agent_tool_call?.track_artist || evalResult.os_execution_command?.track_artist || '';
+    const recTrackId = evalResult.agent_tool_call?.track_id || evalResult.os_execution_command?.track_id || null;
+    const recSpotifyUri = normalizeSpotifyUri(evalResult.agent_tool_call?.spotify_uri) || null;
 
     return {
       reply: evalResult.voice_agent_tts,
@@ -3155,8 +3371,9 @@ Respond ONLY with a JSON array:
       suggestedAction: isPlayOrPropose && recTitle ? 'PLAY' : toolAction === 'PAUSE_PLAYBACK' ? 'PAUSE' : 'NONE',
       suggestedTitle: recTitle || null,
       suggestedArtist: recArtist || null,
-      matchedTrackId: evalResult.agent_tool_call?.spotify_uri || null,
-      recommendedTrack: recTitle ? { title: recTitle, artist: recArtist, spotifyUri: evalResult.agent_tool_call?.spotify_uri } : null,
+      matchedTrackId: recTrackId,
+      matchedSpotifyUri: recSpotifyUri,
+      recommendedTrack: recTitle ? { trackId: recTrackId, title: recTitle, artist: recArtist, spotifyUri: recSpotifyUri } : null,
       agent_tool_call: evalResult.agent_tool_call,
       os_execution_command: evalResult.os_execution_command
     };

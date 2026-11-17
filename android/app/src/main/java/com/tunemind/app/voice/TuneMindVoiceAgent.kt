@@ -479,9 +479,10 @@ class TuneMindVoiceAgent(
 
     private fun calculateDynamicSatiety(): Int {
         val history = vm.historyState.value.tracks
-        if (history.isEmpty()) return 35
-        val topPlays = history.maxOfOrNull { it.distinctAppearanceCount } ?: 1
-        return (topPlays * 16).coerceIn(20, 92)
+        if (history.isEmpty()) return 0
+        val topPlays = history.maxOfOrNull { it.distinctAppearanceCount } ?: 0
+        if (topPlays <= 0) return 0
+        return (topPlays * 16).coerceIn(16, 92)
     }
 
     private fun addAgentMessage(msg: String) {

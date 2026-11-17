@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 import com.google.gson.annotations.SerializedName
 import com.tunemind.app.domain.model.MemoryEvidenceQuality
 import com.tunemind.app.domain.model.TrackIdentityBasis
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import java.time.Instant
 
@@ -478,13 +479,17 @@ fun SpotifyPlayHistoryItemDto.toTrackHistoryTelemetryItem(
 ): TrackHistoryTelemetryItem {
     val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
     val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-    val cleanId = track.id.orEmpty().ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
-    val cleanUri = track.uri.ifBlank { "spotify:track:$cleanId" }
+    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+        trackId = track.id,
+        spotifyUri = track.uri,
+        title = track.name,
+        artist = primaryArtist
+    )
 
     return TrackHistoryTelemetryItem(
-        telemetryId = "${cleanId}_$playedMs",
-        trackId = cleanId,
-        spotifyUri = cleanUri,
+        telemetryId = "${identity.trackId}_$playedMs",
+        trackId = identity.trackId,
+        spotifyUri = identity.spotifyUri.orEmpty(),
         trackTitle = track.name.trim(),
         artistName = primaryArtist.trim(),
         albumName = track.album?.name?.trim() ?: "",
@@ -501,13 +506,17 @@ fun SpotifyPlayHistoryItemDto.toHistoryEntity(nowMs: Long = System.currentTimeMi
     val playedMs = parseSpotifyIsoTimestampMs(playedAtIso)
     val primaryArtist = track.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
     val artistIds = track.artists.mapNotNull { it.id }.joinToString(",")
-    val cleanId = track.id.orEmpty().ifBlank { "${track.name.lowercase()}_${primaryArtist.lowercase()}" }
-    val cleanUri = track.uri.ifBlank { "spotify:track:$cleanId" }
+    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+        trackId = track.id,
+        spotifyUri = track.uri,
+        title = track.name,
+        artist = primaryArtist
+    )
 
     return SpotifyListeningHistoryEntity(
-        historyId = "${cleanId}_$playedMs",
-        trackId = cleanId,
-        spotifyUri = cleanUri,
+        historyId = "${identity.trackId}_$playedMs",
+        trackId = identity.trackId,
+        spotifyUri = identity.spotifyUri.orEmpty(),
         trackTitle = track.name.trim(),
         artistName = primaryArtist.trim(),
         artistIdsCsv = artistIds,
@@ -530,14 +539,18 @@ fun SpotifyTrackDto.toHistoryEntity(
 ): SpotifyListeningHistoryEntity {
     val primaryArtist = artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
     val artistIds = artists.mapNotNull { it.id }.joinToString(",")
-    val cleanId = id.orEmpty().ifBlank { "${name.lowercase()}_${primaryArtist.lowercase()}" }
-    val cleanUri = uri.ifBlank { "spotify:track:$cleanId" }
+    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+        trackId = id,
+        spotifyUri = uri,
+        title = name,
+        artist = primaryArtist
+    )
     val iso = Instant.ofEpochMilli(playedAtMs).toString()
 
     return SpotifyListeningHistoryEntity(
-        historyId = "${cleanId}_$playedAtMs",
-        trackId = cleanId,
-        spotifyUri = cleanUri,
+        historyId = "${identity.trackId}_$playedAtMs",
+        trackId = identity.trackId,
+        spotifyUri = identity.spotifyUri.orEmpty(),
         trackTitle = name.trim(),
         artistName = primaryArtist.trim(),
         artistIdsCsv = artistIds,
@@ -557,12 +570,16 @@ fun SpotifySavedTrackItemDto.toLikedTrackEntity(nowMs: Long = System.currentTime
     val t = track ?: return null
     if (t.name.isBlank()) return null
     val primaryArtist = t.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-    val cleanId = t.id.orEmpty().ifBlank { "${t.name.lowercase()}_${primaryArtist.lowercase()}" }
-    val cleanUri = t.uri.ifBlank { "spotify:track:$cleanId" }
+    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+        trackId = t.id,
+        spotifyUri = t.uri,
+        title = t.name,
+        artist = primaryArtist
+    )
     val addedMs = parseSpotifyIsoTimestampMs(addedAtIso)
     return SpotifyLikedTrackEntity(
-        trackId = cleanId,
-        spotifyUri = cleanUri,
+        trackId = identity.trackId,
+        spotifyUri = identity.spotifyUri.orEmpty(),
         trackTitle = t.name.trim(),
         artistName = primaryArtist.trim(),
         albumName = t.album?.name?.trim() ?: "",
@@ -607,14 +624,29 @@ fun SpotifyCurrentlyPlayingResponse.toLiveTrackState(nowMs: Long = System.curren
     } else {
         dto.artists.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
     }
-    val cleanId = dto.id.orEmpty().ifBlank { "${dto.name.lowercase()}_${primaryArtistOrShow.lowercase()}" }
-    val fallbackUri = if (isEp) "spotify:episode:$cleanId" else "spotify:track:$cleanId"
+    val identity = if (isEp) {
+        val rawEpId = dto.id?.trim()?.takeIf { Regex("^[A-Za-z0-9]{10,}$").matches(it) }
+        val resolvedEpUri = dto.uri.trim().takeIf { it.startsWith("spotify:episode:") }
+            ?: rawEpId?.let { "spotify:episode:$it" }
+            ?: ""
+        com.tunemind.app.domain.model.CanonicalTrackIdentity(
+            trackId = rawEpId ?: TrackIdentityResolver.buildDeterministicTrackId(dto.name, primaryArtistOrShow, "ep"),
+            spotifyUri = resolvedEpUri.ifBlank { null }
+        )
+    } else {
+        TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = dto.id,
+            spotifyUri = dto.uri,
+            title = dto.name,
+            artist = primaryArtistOrShow
+        )
+    }
     return SpotifyLiveTrackState(
-        id = cleanId,
+        id = identity.trackId,
         title = dto.name.trim(),
         artistOrShow = primaryArtistOrShow.trim(),
         albumOrSubtitle = if (isEp) (dto.show?.publisher ?: "Spotify Podcast") else (dto.album?.name?.trim() ?: ""),
-        spotifyUri = dto.uri.ifBlank { fallbackUri },
+        spotifyUri = identity.spotifyUri.orEmpty(),
         albumArtUrl = dto.album?.images?.firstOrNull()?.url ?: dto.show?.images?.firstOrNull()?.url,
         durationMs = dto.durationMs,
         progressMs = progressMs ?: 0L,
@@ -626,20 +658,27 @@ fun SpotifyCurrentlyPlayingResponse.toLiveTrackState(nowMs: Long = System.curren
 }
 
 fun SpotifyTrackAggregate.toTrackMemoryEntry(): TrackMemoryEntry {
+    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+        trackId = trackId,
+        spotifyUri = spotifyUri,
+        title = trackTitle,
+        artist = artistName
+    )
     return TrackMemoryEntry(
-        entryId = "spotify:$trackId",
+        entryId = "spotify:${identity.trackId}",
         sourcePackage = "com.spotify.music",
-        providerTrackId = spotifyUri.ifBlank { "spotify:track:$trackId" },
+        providerTrackId = identity.spotifyUri,
         title = trackTitle,
         artist = artistName,
         album = albumName.ifBlank { null },
-        distinctAppearanceCount = playCount.coerceAtLeast(1),
+        distinctAppearanceCount = playCount.coerceAtLeast(0),
         firstObservedAppearanceAtMs = firstPlayedEpochMs,
         lastObservedAppearanceAtMs = lastPlayedEpochMs,
-        supportingObservationIds = listOf("spotify_api:$trackId"),
-        identityBasis = TrackIdentityBasis.PROVIDER_TRACK_ID,
+        supportingObservationIds = listOf("spotify_api:${identity.trackId}"),
+        identityBasis = if (identity.spotifyUri != null) TrackIdentityBasis.PROVIDER_TRACK_ID else TrackIdentityBasis.METADATA_FINGERPRINT,
         evidenceQuality = MemoryEvidenceQuality.SUPPORTED_IDENTITY,
         historyMayBeIncomplete = false,
-        appearances = emptyList()
+        appearances = emptyList(),
+        trackId = identity.trackId
     )
 }

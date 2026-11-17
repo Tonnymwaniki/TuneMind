@@ -503,16 +503,24 @@ fun LazyListScope.forYouDiscoveryItems(
                 }
 
                 newReleases.take(10).forEach { rel ->
+                    val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                        trackId = rel.id,
+                        spotifyUri = rel.spotifyUri,
+                        title = rel.title,
+                        artist = rel.artistName
+                    )
                     TuneMindTrackCard(
                         title = rel.title,
                         artist = rel.artistName,
                         subtitle = "${rel.albumType.replaceFirstChar { it.uppercase() }} · ${rel.releaseDate}",
                         playCount = 0,
                         showUnplayedLabel = true,
+                        zeroPlayLabel = "New",
                         isCurrentlyPlaying = isTrackCurrentlyPlaying(rel.title, rel.artistName, rel.spotifyUri),
                         accentColor = Color(0xFF1DB954),
                         spotifyUri = rel.spotifyUri,
                         albumArtUrl = rel.imageUrl,
+                        trackId = canonicalId,
                         onPlayClick = { onPlayNewRelease?.invoke(rel) }
                     )
                 }
