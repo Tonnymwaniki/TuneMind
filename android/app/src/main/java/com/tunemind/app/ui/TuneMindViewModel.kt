@@ -869,6 +869,9 @@ class TuneMindViewModel : ViewModel() {
         playedOrConsumedQueueKeys.contains(key)
     }
 
+    val currentTimeSlot: TimeSlot
+        get() = TimeSlot.currentSlot()
+
     private fun buildFreshQueueCandidates(): List<DopamineCapsuleTrack> {
         val slot = currentTimeSlot
         val vault = _vaultState.value
@@ -919,7 +922,7 @@ class TuneMindViewModel : ViewModel() {
 
         // 2. Fresh For You AI Discovery picks (unplayed / non-dismissed)
         _aiDiscoveryCrate.value
-            .filter { !it.isDismissed && !it.isPlayed }
+            .filter { !it.isDismissed && !it.wasPlayed }
             .forEach { rec ->
                 addCandidateIfEligible(
                     DopamineCapsuleTrack(
