@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
+import { SelfLearningDiscoveryEngine } from '../recommendation/SelfLearningDiscoveryEngine';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 import {
   coerceNonNegativePlayCount,
@@ -924,6 +925,8 @@ FULL APP-WIDE CONTROL ACTIONS:
 - Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
+- East African & Global Genre Precision: Never misclassify local or international tracks! Know East African genres fluently (e.g. Gikuyu / Mugithi & Benga like Samidoh, Salim, De'Mathew, Joyce Wa Mamaa, Jose Gatutura; Bongo Flava like Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Kusah, Jay Melody; Kenyan Pop & Gengetone like Sauti Sol, Nyashinski, Bien, Wakadinali, Khaligraph Jones, Mejja; Kenyan & East African Gospel like Mercy Masika, Guardian Angel, Evelyn Wanjiru, Christina Shusho, Reuben Kigame; Ohangla like Prince Indah; Lingala/Rumba like Fally Ipupa, Koffi Olomide; plus Afrobeats, Amapiano, Hip-Hop, R&B, Dancehall, Pop, Nu-Jazz, Bossa Nova). Use the inferred 'genre' labels on tracks accurately when asked or recommending.
+
 Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken text (1-3 sentences).`;
   }
 
@@ -1443,11 +1446,25 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             discovery_rate_percent: context.listening_stats.discovery_rate_percent
           }
         : null,
-      current_track: context.current_track,
+      current_track: context.current_track
+        ? {
+            ...context.current_track,
+            genre: SelfLearningDiscoveryEngine.inferGenre(
+              context.current_track.title || '',
+              context.current_track.artist || ''
+            )
+          }
+        : context.current_track,
       pending_proposed_track_awaiting_user_approval: pending,
-      top_most_played_user_tracks: mostPlayedTracks.slice(0, 6),
+      top_most_played_user_tracks: mostPlayedTracks.slice(0, 6).map(t => ({
+        ...t,
+        genre: SelfLearningDiscoveryEngine.inferGenre(t.title, t.artist)
+      })),
       top_user_artists: topUserArtists,
-      fresh_low_satiety_user_tracks: freshTracks.slice(0, 12),
+      fresh_low_satiety_user_tracks: freshTracks.slice(0, 12).map(t => ({
+        ...t,
+        genre: SelfLearningDiscoveryEngine.inferGenre(t.title, t.artist)
+      })),
       overplayed_high_satiety_tracks: overplayedTracks,
       dopamine_capsule: compactedCapsule,
       vault_tracks: context.vault_tracks || [],

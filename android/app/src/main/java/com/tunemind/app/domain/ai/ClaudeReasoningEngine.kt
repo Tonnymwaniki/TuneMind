@@ -600,13 +600,16 @@ object ClaudeReasoningEngine {
         avgVolumeRatio: Float? = null,
         yesterdayOutcomes: List<AiRecommendationEntity> = emptyList(),
         forceRefresh: Boolean = false,
+        genreDistribution: Map<String, Int> = emptyMap(),
+        artistGenres: Map<String, String> = emptyMap(),
+        cleanPlayEvents: List<com.tunemind.app.domain.memory.UnifiedPlayEvent> = emptyList(),
         onLearningSummaryUpdated: ((ForYouLearningSummary) -> Unit)? = null
     ): List<AiRecommendationEntity> = withContext(Dispatchers.IO) {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
             .filter { it.isNotBlank() }
             .distinct()
         val allArtists = (userTasteAnchors + observedArtists).distinct().filter { it.isNotBlank() }
-        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Afrobeats, Hip-Hop, R&B, Pop" }
+        val artistsSummary = allArtists.take(8).joinToString(", ").ifEmpty { "Bongo Flava, Gikuyu / Mugithi, Gospel, Afrobeats" }
         val calendar = Calendar.getInstance()
         val noonCycleKey = NoonDropSchedule.getNoonCycleKey(calendar)
         val timezoneId = calendar.timeZone.id ?: TimeZone.getDefault().id
@@ -626,8 +629,23 @@ object ClaudeReasoningEngine {
                 put("avgVolumeRatio", avgVolumeRatio.toDouble().coerceIn(0.05, 1.0))
             }
 
+            if (genreDistribution.isNotEmpty()) {
+                val distObj = JSONObject()
+                genreDistribution.forEach { (g, cnt) ->
+                    if (g.isNotBlank() && cnt > 0) distObj.put(g, cnt)
+                }
+                put("genreDistribution", distObj)
+            }
+            if (artistGenres.isNotEmpty()) {
+                val agObj = JSONObject()
+                artistGenres.entries.take(80).forEach { (art, g) ->
+                    if (art.isNotBlank() && g.isNotBlank()) agObj.put(art, g)
+                }
+                put("artistGenres", agObj)
+            }
+
             val artistsArray = JSONArray()
-            allArtists.take(10).forEach { artistsArray.put(it) }
+            allArtists.take(12).forEach { artistsArray.put(it) }
             put("topArtists", artistsArray)
 
             val anchorsArray = JSONArray()
@@ -635,7 +653,7 @@ object ClaudeReasoningEngine {
             put("userTasteAnchors", anchorsArray)
 
             val excludeArray = JSONArray()
-            excludeTitles.distinct().take(120).forEach { excludeArray.put(it) }
+            excludeTitles.distinct().take(150).forEach { excludeArray.put(it) }
             put("excludeTitles", excludeArray)
 
             val playedArray = JSONArray()
@@ -646,8 +664,11 @@ object ClaudeReasoningEngine {
             dismissedSignals.take(15).forEach { dismissedArray.put(it) }
             put("dismissedFeedback", dismissedArray)
 
+            val playEventByKey = cleanPlayEvents.associateBy {
+                "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}"
+            }
             val tracksArray = JSONArray()
-            recentTracks.take(16).forEach { t ->
+            recentTracks.take(40).forEach { t ->
                 val identity = TrackIdentityResolver.resolveCanonicalIdentity(
                     trackId = t.trackId.ifBlank { null },
                     spotifyUri = t.providerTrackId,
@@ -655,15 +676,42 @@ object ClaudeReasoningEngine {
                     artist = t.artist
                 )
                 val safeCount = t.distinctAppearanceCount.coerceAtLeast(0)
+                val evKey = "${t.title.orEmpty().trim().lowercase()}|${t.artist.orEmpty().trim().lowercase()}"
+                val matchedEv = playEventByKey[evKey]
+                val primaryArtistKey = t.artist.orEmpty().trim().lowercase().split(Regex("[,&]|feat\\.?|ft\\.?", RegexOption.IGNORE_CASE)).firstOrNull()?.trim().orEmpty()
+                val explicitGenre = artistGenres[primaryArtistKey] ?: artistGenres[t.artist.orEmpty().trim().lowercase()]
+                val evSlot = if (matchedEv != null && matchedEv.playedAtMs > 0L) {
+                    val cal = Calendar.getInstance().apply { timeInMillis = matchedEv.playedAtMs }
+                    when (cal.get(Calendar.HOUR_OF_DAY)) {
+                        in 6..11 -> "Morning"
+                        in 12..16 -> "Midday"
+                        in 17..21 -> "Evening"
+                        else -> "Late Night"
+                    }
+                } else timeSlotLabel
+
                 tracksArray.put(JSONObject().apply {
                     put("trackId", identity.trackId)
                     identity.spotifyUri?.let { put("spotifyUri", it) }
                     put("title", t.title)
                     put("artist", t.artist)
+                    if (!explicitGenre.isNullOrBlank()) put("genre", explicitGenre)
                     put("playCount", safeCount)
                     put("plays", safeCount)
                     put("satiety", minOf(95, safeCount * 22))
                     put("sourceApp", t.sourcePackage ?: "Spotify")
+                    put("timeSlot", evSlot)
+                    if (matchedEv != null) {
+                        put("listenedMs", matchedEv.listenedMs)
+                        put("durationMs", matchedEv.durationMs)
+                        put("playedAtMs", matchedEv.playedAtMs)
+                        if (matchedEv.durationMs > 0L) {
+                            put("completionRatio", (matchedEv.listenedMs.toDouble() / matchedEv.durationMs.toDouble()).coerceIn(0.05, 1.0))
+                        }
+                    }
+                    if (avgVolumeRatio != null && avgVolumeRatio > 0f) {
+                        put("volumeRatio", avgVolumeRatio.toDouble().coerceIn(0.05, 1.0))
+                    }
                 })
             }
             put("recentTracks", tracksArray)

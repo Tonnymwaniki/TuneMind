@@ -89,13 +89,34 @@ class ForYouDailyDropWorker(
             }
 
             val knownFromCrate = dao.getAllKnownTitles()
-            val historyTitles = recentTracks.mapNotNull { it.title }
+            val historyTitles = recentTracks.filter { it.distinctAppearanceCount > 0 }.mapNotNull { it.title }
             val vaultTitles = vaultTracks.map { it.title }
             val combinedExclusions = (knownFromCrate + historyTitles + vaultTitles).distinct()
 
             val playedSignals = dao.getPositiveFeedbackSignals()
             val dismissedSignals = dao.getDismissedSignals()
             val previousOutcomes = dao.getPreviousDropsForEvaluation(todayNoonKey, 30)
+
+            val visualRepo = com.tunemind.app.data.ingestion.SpotifyVisualArtworkRepository.getInstance(applicationContext)
+            val tasteSum = visualRepo.tasteShiftSummaryFlow.value
+            val genreDist = linkedMapOf<String, Int>()
+            tasteSum.topGenres.forEach { gw ->
+                if (gw.genre.isNotBlank() && gw.count > 0) genreDist[gw.genre] = gw.count
+            }
+            val artistGenreMap = linkedMapOf<String, String>()
+            tasteSum.shortTermTopArtists.forEach { sa ->
+                if (sa.name.isNotBlank() && sa.genres.isNotEmpty()) {
+                    artistGenreMap[sa.name.lowercase()] = sa.genres.first()
+                }
+            }
+            val dedupSnap = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildSnapshot(
+                rawObservations = observations,
+                spotifyHistory = emptyList(),
+                nowPlayingTitle = null,
+                nowPlayingArtist = null,
+                nowPlayingSourcePkg = null,
+                isMusicPlayingNow = false
+            )
 
             val slot = TimeSlot.currentSlot()
             val prefProvider = MusicProviderRegistry.getInstance(applicationContext).getPreferredProviderId()
@@ -126,7 +147,10 @@ class ForYouDailyDropWorker(
                 userEmail = authSession.email,
                 avgVolumeRatio = avgVol,
                 yesterdayOutcomes = previousOutcomes,
-                forceRefresh = false
+                forceRefresh = false,
+                genreDistribution = genreDist,
+                artistGenres = artistGenreMap,
+                cleanPlayEvents = dedupSnap.cleanPlayHistory
             )
 
             if (newRecs.isNotEmpty()) {

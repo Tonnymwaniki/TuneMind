@@ -364,7 +364,6 @@ fun DopamineVaultScreen(
                             isDiscovering = isDiscovering,
                             totalWildcardsInCycle = allWildcardsInCycle.size,
                             lockedWildcardsCount = allWildcardsInCycle.count { it.isSaved && !it.isDismissed },
-                            newReleases = spotifyNewReleases,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                             onRefreshForYou = onRefreshForYou,
                             onPlayTrack = onPlayForYouTrack,
@@ -386,10 +385,7 @@ fun DopamineVaultScreen(
                                     trackId = rec.resolvedCanonicalTrackId()
                                 )
                             },
-                            onExportPlaylist = onExportForYouPlaylist,
-                            onPlayNewRelease = { rel ->
-                                onPlayTrack(rel.title, rel.artistName, rel.spotifyUri, "com.spotify.music")
-                            }
+                            onExportPlaylist = onExportForYouPlaylist
                         )
                     } else if (displayedSongs.isEmpty()) {
                         item(key = "vault_empty") {

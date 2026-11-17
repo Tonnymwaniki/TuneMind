@@ -3460,17 +3460,43 @@ class TuneMindViewModel : ViewModel() {
 
                 val (allKnownTitles, playedSignals, dismissedSignals, previousOutcomes) = withContext(Dispatchers.IO) {
                     val knownFromCrate = aiRecDao?.getAllKnownTitles() ?: emptyList()
-                    val likedTitles = _spotifyLikedTracks.value.map { it.trackTitle }
-                    val historyTitles = _historyState.value.tracks.mapNotNull { it.title }
+                    val playedUnifiedTitles = _unifiedTracks.value
+                        .filter { it.verifiedPlayCount > 0 }
+                        .map { it.title }
+                    val historyTitles = _historyState.value.tracks
+                        .filter { it.distinctAppearanceCount > 0 }
+                        .mapNotNull { it.title }
                     val vaultTitles = _vaultState.value.map { it.title }
-                    // Strictly never repeat yesterday's or previously suggested songs even on manual refresh
-                    val combinedExclusions = (knownFromCrate + likedTitles + historyTitles + vaultTitles).distinct()
+                    // Strict Never-Played Rule: exclude only played tracks (playCount > 0), Vault tracks, and past suggestions;
+                    // unplayed tracks in Liked/Playlists with playCount == 0 remain eligible.
+                    val combinedExclusions = (knownFromCrate + playedUnifiedTitles + historyTitles + vaultTitles).distinct()
                     DataQuad(
                         combinedExclusions,
                         aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
                         aiRecDao?.getDismissedSignals() ?: emptyList(),
                         aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 30) ?: emptyList()
                     )
+                }
+
+                val tasteSum = _tasteShiftSummary.value
+                val genreDist = linkedMapOf<String, Int>()
+                tasteSum.topGenres.forEach { gw ->
+                    if (gw.genre.isNotBlank() && gw.count > 0) {
+                        genreDist[gw.genre] = (genreDist[gw.genre] ?: 0) + gw.count
+                    }
+                }
+                val artistGenreMap = linkedMapOf<String, String>()
+                _spotifyArtistProfiles.value.values.forEach { ap ->
+                    val genres = ap.genresCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    if (ap.artistName.isNotBlank() && genres.isNotEmpty()) {
+                        artistGenreMap[ap.artistName.lowercase()] = genres.first()
+                        genres.forEach { g -> genreDist[g] = (genreDist[g] ?: 0) + 1 }
+                    }
+                }
+                tasteSum.shortTermTopArtists.forEach { sa ->
+                    if (sa.name.isNotBlank() && sa.genres.isNotEmpty()) {
+                        artistGenreMap.putIfAbsent(sa.name.lowercase(), sa.genres.first())
+                    }
                 }
 
                 val avgVolume = resolveCurrentVolumeRatio(ctx)
@@ -3501,6 +3527,9 @@ class TuneMindViewModel : ViewModel() {
                     avgVolumeRatio = avgVolume,
                     yesterdayOutcomes = previousOutcomes,
                     forceRefresh = forceRefresh,
+                    genreDistribution = genreDist,
+                    artistGenres = artistGenreMap,
+                    cleanPlayEvents = _cleanPlayHistory.value,
                     onLearningSummaryUpdated = { summary ->
                         _forYouLearningState.value = summary
                     }

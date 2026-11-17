@@ -37,6 +37,9 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       genreDistribution: body.genreDistribution && typeof body.genreDistribution === 'object'
         ? body.genreDistribution
         : undefined,
+      artistGenres: body.artistGenres && typeof body.artistGenres === 'object'
+        ? body.artistGenres
+        : undefined,
       recentTracks: Array.isArray(body.recentTracks) ? body.recentTracks : [],
       vaultTracks: Array.isArray(body.vaultTracks) ? body.vaultTracks : [],
       excludeTitles: Array.isArray(body.excludeTitles) ? body.excludeTitles : [],

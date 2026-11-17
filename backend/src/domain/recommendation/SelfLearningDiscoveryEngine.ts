@@ -32,6 +32,7 @@ export interface CrossAppTrackSignal {
   volumeRatio?: number;
   timeSlot?: string;
   sourceApp?: string;
+  playedAtMs?: number;
 }
 
 export interface DiscoveryFeedbackEvent {
@@ -70,6 +71,13 @@ export interface DailyDropRecord {
   recommendations: ScoredDiscoveryTrack[];
 }
 
+export interface AcousticCentroid {
+  targetBpm: number;
+  targetDurationSec: number;
+  preferredVolumeRatio: number;
+  sampleCount: number;
+}
+
 export interface UserTasteModel {
   userId: string;
   learningIterations: number;
@@ -78,6 +86,8 @@ export interface UserTasteModel {
   genreWeights: Record<string, GenreWeightEntry>;
   timeSlotGenreAffinity: Record<string, Record<string, number>>;
   volumeByTimeSlot: Record<string, number>;
+  artistGenreMap?: Record<string, string>;
+  acousticByTimeSlot?: Record<string, AcousticCentroid>;
   recentDrops: DailyDropRecord[];
   updatedAtMs: number;
 }
@@ -119,6 +129,8 @@ export interface ScoredDiscoveryTrack {
   previewUrl?: string;
   albumArtUrl?: string;
   durationMs?: number;
+  bpm?: number;
+  acousticCosineScore?: number;
 }
 
 export interface DailyDropRequest {
@@ -135,6 +147,7 @@ export interface DailyDropRequest {
   topArtists?: string[];
   userTasteAnchors?: string[];
   genreDistribution?: Record<string, number>;
+  artistGenres?: Record<string, string>;
   recentTracks?: CrossAppTrackSignal[];
   vaultTracks?: Array<{ title?: string; artist?: string; cooldownDaysRemaining?: number }>;
   excludeTitles?: string[];
@@ -160,21 +173,152 @@ export interface DailyDropResponse {
 const DEFAULT_FALLBACK_GENRES = ['Afrobeats', 'Bongo Flava', 'Hip-Hop', 'R&B', 'Pop'];
 
 const ARTIST_GENRE_HINTS: Array<{ keywords: string[]; genre: string }> = [
-  { keywords: ['samidoh', 'salim', 'demathew', 'de\'mathew', 'joyce wa mamaa', 'gatutura', 'kigia', 'kamaru', 'mike rua', 'kamande', 'musaimo', 'tony young', 'mugithi', 'wendo wi cama', 'murata'], genre: 'Gikuyu / Mugithi' },
-  { keywords: ['mbosso', 'diamond', 'platnumz', 'harmonize', 'zuchu', 'marioo', 'rayvanny', 'alikiba', 'jux', 'nandy', 'otile', 'lavalava', 'kusah'], genre: 'Bongo Flava' },
-  { keywords: ['burna', 'wizkid', 'rema', 'asake', 'ayra', 'tems', 'omah lay', 'davido', 'ckay', 'fireboy', 'tiwa', 'kizz daniel', 'victony', 'oxlade', 'ruger', 'buju', 'bnxn', 'olamide', 'shallipopi'], genre: 'Afrobeats' },
-  { keywords: ['tyler icu', 'kabza', 'dj maphorisa', 'uncle waffles', 'tyla', 'sha sha', 'vigro', 'focalistic', 'kelvin momo', 'musa keys'], genre: 'Amapiano' },
-  { keywords: ['kendrick', 'drake', 'j. cole', 'cole', 'travis scott', '21 savage', 'future', 'metro boomin', 'kanye', 'eminem', 'nas', 'baby keem', 'jid', 'lil baby', 'gunna', 'central cee', 'nyashinski', 'khaligraph'], genre: 'Hip-Hop' },
-  { keywords: ['sza', 'frank ocean', 'the weeknd', 'weeknd', 'brent faiyaz', 'h.e.r.', 'daniel caesar', 'giveon', 'summer walker', 'khalid', 'ariana', 'chris brown', 'usher', 'bruno mars', 'chloe'], genre: 'R&B' },
-  { keywords: ['maverick city', 'kirk franklin', 'tasha cobbs', 'sinach', 'mercy chinwo', 'nathaniel bassey', 'elevation worship', 'hillsong', 'dunsin', 'mercy masika', 'reuben kigame', 'guardian angel', 'evelyn wanjiru', 'christina shusho', 'gloria muliro', 'paul mwai', 'florence andenyi', 'eunice njeri'], genre: 'Gospel' },
-  { keywords: ['dua lipa', 'taylor swift', 'billie eilish', 'sabrina carpenter', 'olivia rodrigo', 'harry styles', 'ed sheeran', 'doja cat', 'justin bieber', 'post malone'], genre: 'Pop' },
-  { keywords: ['burnaboy', 'popcaan', 'vibes kartel', 'shenseea', 'koffee', 'chronixx', 'bob marley', 'sean paul', 'alkaline'], genre: 'Dancehall & Reggae' },
-  { keywords: ['fally ipupa', 'koffi olomide', 'innoss', 'ferre gola', 'dadju', 'aya nakamura', 'maitre gims', 'tayc'], genre: 'Afro-Francophone' },
-  { keywords: ['bad bunny', 'karol g', 'feid', 'rauw alejandro', 'rosalia', 'anitta'], genre: 'Latin & Urbano' },
-  { keywords: ['black coffee', 'fred again', 'kaytranada', 'disclosure', 'calvin harris', 'rufus du sol', 'peggy gou'], genre: 'Electronic & Afro House' },
-  { keywords: ['yussef dayes', 'robert glasper', 'kamasi washington', 'alfa mist', 'ezra collective', 'badbadnotgood'], genre: 'Nu-Jazz & Neo-Soul' },
-  { keywords: ['ana frango', 'seu jorge', 'joao gilberto', 'tim maia', 'gilberto gil', 'marisa monte'], genre: 'Bossa Nova & MPB' },
-  { keywords: ['khruangbin', 'men i trust', 'tame impala', 'faye webster', 'mac demarco', 'mitski'], genre: 'Alternative Indie' }
+  {
+    keywords: [
+      'samidoh', 'salim', 'mighty salim', 'salim junior', 'salim young', 'demathew', "de'mathew",
+      'joyce wa mamaa', 'gatutura', 'kigia', 'kamaru', 'mike rua', 'kamande', 'musaimo', 'tony young',
+      'mugithi', 'wendo', 'murata', 'shiro wa gp', 'carol wanjiku', 'jose gatutura', 'ndung\'u',
+      'timmy tdat kikuyu', 'muigai wa njoroge', 'wanjiku wa kamau', 'karangu muraya', 'waithaka',
+      'benga', 'gikuyu', 'kikuyu', 'ruracio', 'matharaiti', 'ciothe', 'kigooco'
+    ],
+    genre: 'Gikuyu / Mugithi'
+  },
+  {
+    keywords: [
+      'mbosso', 'diamond', 'platnumz', 'harmonize', 'zuchu', 'marioo', 'rayvanny', 'alikiba',
+      'jux', 'juma jux', 'nandy', 'otile', 'lavalava', 'lava lava', 'kusah', 'jay melody',
+      'barnaba', 'aslay', 'd voice', 'yammi', 'kontawa', 'chino kidd', 'macvoice', 'ibraah',
+      'darassa', 'roma mkatoliki', 'maua sama', 'stamina', 'bongo'
+    ],
+    genre: 'Bongo Flava'
+  },
+  {
+    keywords: [
+      'mercy masika', 'reuben kigame', 'guardian angel', 'evelyn wanjiru', 'christina shusho',
+      'gloria muliro', 'paul mwai', 'florence andenyi', 'eunice njeri', 'moji shortbabaa',
+      'jabidii', 'solomon mkubwa', 'rose muhando', 'bahati', 'willy paul', 'ambassada',
+      'size 8', 'kambua', 'ringtone', 'angel benard', 'goodluck gozbert', 'joel lwaga',
+      'maverick city', 'kirk franklin', 'tasha cobbs', 'sinach', 'mercy chinwo', 'nathaniel bassey',
+      'elevation worship', 'hillsong', 'dunsin', 'moses bliss', 'joe mettle', 'gospel', 'worship',
+      'tenzi', 'kwaya', 'injili', 'sifa', 'yesu', 'baba yetu'
+    ],
+    genre: 'Gospel'
+  },
+  {
+    keywords: [
+      'nyashinski', 'khaligraph', 'wakadinali', 'sauti sol', 'bien', 'bensoul', 'nviiri',
+      'buruklyn boyz', 'boutross', 'trio mio', 'mejja', 'sailors', 'ethic', 'matata',
+      'breeder lw', 'scar mkadinali', 'domani munga', 'sewer sydaa', 'ochungulo', 'boondocks',
+      'mbithi', 'savara', 'chimano', 'fancy fingers', 'bridget blue', 'karun', 'nikita kering',
+      'xenia manasseh', 'njerae', 'maandy', 'ssaru', 'femi one', 'muthoni drummer queen',
+      'gengetone', 'arbantone', 'kenyan'
+    ],
+    genre: 'Kenyan Pop & Gengetone'
+  },
+  {
+    keywords: [
+      'ohangla', 'prince indah', 'emma jalamo', 'odongo swagg', 'tony nyadundo', 'osogo winyo',
+      'luo', 'musa jakadalla', 'freddy jakadongo'
+    ],
+    genre: 'Ohangla & Benga'
+  },
+  {
+    keywords: [
+      'fally ipupa', 'koffi olomide', 'innoss', 'ferre gola', 'awilo', 'werrason', 'papa wemba',
+      'franco luambo', 'tabu ley', 'zaiko langa', 'hearitier watanabe', 'lingala', 'rumba', 'soukous'
+    ],
+    genre: 'Lingala & Rumba'
+  },
+  {
+    keywords: [
+      'burna', 'wizkid', 'rema', 'asake', 'ayra', 'tems', 'omah lay', 'davido', 'ckay',
+      'fireboy', 'tiwa', 'kizz daniel', 'victony', 'oxlade', 'ruger', 'buju', 'bnxn',
+      'olamide', 'shallipopi', 'seyi vibez', 'joeboy', 'tekno', 'yemi alade', 'patoranking',
+      'simi', 'adekunle gold', 'mayorkun', 'young jonn', 'flavour', 'phyno', 'afrobeat'
+    ],
+    genre: 'Afrobeats'
+  },
+  {
+    keywords: [
+      'tyler icu', 'kabza', 'dj maphorisa', 'uncle waffles', 'tyla', 'sha sha', 'vigro',
+      'focalistic', 'kelvin momo', 'musa keys', 'mthunzi', 'de mthuda', 'samthing soweto',
+      'daliwonga', 'young stunna', 'ami faku', 'boohle', 'amapiano'
+    ],
+    genre: 'Amapiano'
+  },
+  {
+    keywords: [
+      'kendrick', 'drake', 'j. cole', 'travis scott', '21 savage', 'future', 'metro boomin',
+      'kanye', 'eminem', 'nas', 'baby keem', 'jid', 'lil baby', 'gunna', 'central cee',
+      'playboi carti', 'tyler, the creator', 'asap rocky', 'jay-z', 'lil wayne', 'nicki minaj',
+      'migos', 'offset', 'don toliver', 'dave', 'stormzy', 'skepta', 'little simz'
+    ],
+    genre: 'Hip-Hop'
+  },
+  {
+    keywords: [
+      'sza', 'frank ocean', 'the weeknd', 'weeknd', 'brent faiyaz', 'h.e.r.', 'daniel caesar',
+      'giveon', 'summer walker', 'khalid', 'ariana', 'chris brown', 'usher', 'bruno mars',
+      'kehlani', 'tory lanez', 'bryson tiller', 'snoh aalegra', 'jorja smith', 'victoria monet',
+      'steve lacy', 'erykah badu', 'd\'angelo', 'miguel', 'alicia keys'
+    ],
+    genre: 'R&B'
+  },
+  {
+    keywords: [
+      'dua lipa', 'taylor swift', 'billie eilish', 'sabrina carpenter', 'olivia rodrigo',
+      'harry styles', 'ed sheeran', 'doja cat', 'justin bieber', 'post malone', 'chappell roan',
+      'adele', 'coldplay', 'maroon 5', 'beyonce', 'rihanna', 'katy perry', 'charlie puth'
+    ],
+    genre: 'Pop'
+  },
+  {
+    keywords: [
+      'popcaan', 'vybz kartel', 'shenseea', 'koffee', 'chronixx', 'bob marley', 'sean paul',
+      'alkaline', 'spice', 'shaggy', 'damian marley', 'protoje', 'busysignal', 'skillibeng',
+      'masicka', 'reggae', 'dancehall'
+    ],
+    genre: 'Dancehall & Reggae'
+  },
+  {
+    keywords: [
+      'dadju', 'aya nakamura', 'maitre gims', 'tayc', 'franglish', 'niska', 'stromae', 'tiakola'
+    ],
+    genre: 'Afro-Francophone'
+  },
+  {
+    keywords: [
+      'bad bunny', 'karol g', 'feid', 'rauw alejandro', 'rosalia', 'anitta', 'j balvin',
+      'maluma', 'shakira', 'peso pluma', 'ozuna'
+    ],
+    genre: 'Latin & Urbano'
+  },
+  {
+    keywords: [
+      'black coffee', 'fred again', 'kaytranada', 'disclosure', 'calvin harris', 'rufus du sol',
+      'peggy gou', 'keinemusik', 'anyma', 'shimza', 'sun-el musician', 'da capo'
+    ],
+    genre: 'Electronic & Afro House'
+  },
+  {
+    keywords: [
+      'yussef dayes', 'robert glasper', 'kamasi washington', 'alfa mist', 'ezra collective',
+      'badbadnotgood', 'tom misch', 'hiatus kaiyote'
+    ],
+    genre: 'Nu-Jazz & Neo-Soul'
+  },
+  {
+    keywords: [
+      'ana frango', 'seu jorge', 'joao gilberto', 'tim maia', 'gilberto gil', 'marisa monte', 'laufey'
+    ],
+    genre: 'Bossa Nova & MPB'
+  },
+  {
+    keywords: [
+      'khruangbin', 'men i trust', 'tame impala', 'faye webster', 'mac demarco', 'mitski', 'glass animals'
+    ],
+    genre: 'Alternative Indie'
+  }
 ];
 
 const CURATED_GLOBAL_DISCOVERY_BANK_RAW: Array<Omit<ScoredDiscoveryTrack, 'trackId'>> = [
@@ -221,6 +365,21 @@ const CURATED_GLOBAL_DISCOVERY_BANK_RAW: Array<Omit<ScoredDiscoveryTrack, 'track
   { title: 'Murata Wa Thiururuka', artist: 'Samidoh', album: 'Mugithi Essentials', genre: 'Gikuyu / Mugithi', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Crisp acoustic Kikuyu guitar plucking tuned to your East African melodic cadence.', confidence: 0.95, mlScore: 0.95, isWildcard: false },
   { title: 'Wendo Ni Uriru', artist: 'Joyce Wa Mamaa', album: 'Gikuyu Classics', genre: 'Gikuyu / Mugithi', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Warm high-life bassline and vocal storytelling that reset overplayed rotations.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
   { title: 'Nindacokia Ngatho', artist: 'John De\'Mathew', album: 'Timeless Mugithi', genre: 'Gikuyu / Mugithi', category: 'PALATE_CLEANSER', subTier: 'GENRE_PICK', reason: 'Classic Benga-Mugithi chord progression with steady restorative groove.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
+  { title: 'Mumbi', artist: 'Jose Gatutura', album: 'Mugithi Live', genre: 'Gikuyu / Mugithi', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Rhythmic acoustic guitar pocket crafted for steady Mugithi flow.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
+
+  // Kenyan Pop & Gengetone
+  { title: 'Malaika', artist: 'Nyashinski', album: 'Lucky You', genre: 'Kenyan Pop & Gengetone', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Silky Kenyan Afro-pop phrasing balancing warm chords and crisp percussion.', confidence: 0.94, mlScore: 0.94, isWildcard: false },
+  { title: 'Suzanna', artist: 'Sauti Sol', album: 'Midnight Train', genre: 'Kenyan Pop & Gengetone', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Warm Nairobi harmonies and live guitar groove for effortless full listens.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
+  { title: 'Inauma', artist: 'Bien', album: 'Alusa Why Are You Topless', genre: 'Kenyan Pop & Gengetone', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Sharp Nairobi groove paired with expressive East African vocal depth.', confidence: 0.92, mlScore: 0.92, isWildcard: false },
+  { title: 'Siskii', artist: 'Wakadinali', album: 'Ndani Ya Cockpit 3', genre: 'Kenyan Pop & Gengetone', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Punchy Kenyan hip-hop rhythm built for high-focus energy bursts.', confidence: 0.91, mlScore: 0.91, isWildcard: false },
+
+  // Lingala & Rumba
+  { title: 'Eloko Oyo', artist: 'Fally Ipupa', album: 'Tokooos', genre: 'Lingala & Rumba', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Crisp Congolese sebene guitars paired with modern Afro-urban groove.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
+  { title: 'Maboko Pamba', artist: 'Koffi Olomide', album: 'Légende', genre: 'Lingala & Rumba', category: 'CHRONO_RESTORE', subTier: 'GENRE_PICK', reason: 'Lush golden-era Kinshasa rumba harmonies with warm horn swells.', confidence: 0.91, mlScore: 0.91, isWildcard: false },
+
+  // Ohangla & Benga
+  { title: 'Girwa Ni', artist: 'Prince Indah', album: 'Puonj Maghera', genre: 'Ohangla & Benga', category: 'DOPAMINE_FLOW', subTier: 'GENRE_PICK', reason: 'Energetic lakeside Ohangla accordion and percussion groove.', confidence: 0.93, mlScore: 0.93, isWildcard: false },
+  { title: 'Nyako Miya', artist: 'Emma Jalamo', album: 'Ohangla Hits', genre: 'Ohangla & Benga', category: 'PALATE_CLEANSER', subTier: 'GENRE_PICK', reason: 'Deep traditional Benga bassline and festive lakeside rhythm.', confidence: 0.91, mlScore: 0.91, isWildcard: false },
 
   // Global Frontier Wildcards (distinct non-overlapping global scenes)
   { title: 'N\'y Pense Plus', artist: 'Tayc', album: 'Fleur Froide', genre: 'Afro-Francophone', category: 'NOVEL_EXPLORATION', subTier: 'GLOBAL_WILDCARD', reason: 'Genre Leap: Parisian Afro-lovin grooves merging silky French vocals with warm percussive swing.', confidence: 0.91, mlScore: 0.91, isWildcard: true },
@@ -314,9 +473,18 @@ export class SelfLearningDiscoveryEngine {
     return `${baseDate.toISOString().slice(0, 10)}@12PM`;
   }
 
-  public static inferGenre(title: string, artist: string, explicitGenre?: string): string {
-    if (explicitGenre && explicitGenre.trim().length > 1 && explicitGenre.toLowerCase() !== 'unknown') {
+  public static inferGenre(
+    title: string,
+    artist: string,
+    explicitGenre?: string,
+    cachedArtistGenreMap?: Record<string, string>
+  ): string {
+    if (explicitGenre && explicitGenre.trim().length > 1 && explicitGenre.toLowerCase() !== 'unknown' && explicitGenre.toLowerCase() !== 'pop & global') {
       return this.canonicalGenreName(explicitGenre);
+    }
+    const cleanArtistKey = artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim();
+    if (cachedArtistGenreMap && cleanArtistKey && cachedArtistGenreMap[cleanArtistKey]) {
+      return cachedArtistGenreMap[cleanArtistKey];
     }
     const combined = `${artist} ${title}`.toLowerCase();
     for (const rule of ARTIST_GENRE_HINTS) {
@@ -329,18 +497,21 @@ export class SelfLearningDiscoveryEngine {
 
   public static canonicalGenreName(raw: string): string {
     const lower = raw.trim().toLowerCase();
+    if (lower.includes('ohangla') || lower.includes('luo')) return 'Ohangla & Benga';
     if (lower.includes('gikuyu') || lower.includes('kikuyu') || lower.includes('mugithi') || lower.includes('benga')) return 'Gikuyu / Mugithi';
-    if (lower.includes('bongo') || lower.includes('swahili')) return 'Bongo Flava';
+    if (lower.includes('gengetone') || lower.includes('arbantone') || lower.includes('kenyan pop') || lower.includes('kenyan hip')) return 'Kenyan Pop & Gengetone';
+    if (lower.includes('lingala') || lower.includes('rumba') || lower.includes('soukous') || lower.includes('congolese')) return 'Lingala & Rumba';
+    if (lower.includes('bongo') || lower.includes('swahili pop') || lower.includes('tanzanian')) return 'Bongo Flava';
     if (lower.includes('amapiano')) return 'Amapiano';
     if (lower.includes('afro') && (lower.includes('house') || lower.includes('electronic'))) return 'Electronic & Afro House';
     if (lower.includes('afro') && lower.includes('franc')) return 'Afro-Francophone';
-    if (lower.includes('afro')) return 'Afrobeats';
+    if (lower.includes('afro') || lower.includes('alté') || lower.includes('alte')) return 'Afrobeats';
     if (lower.includes('jazz') || lower.includes('neo-soul') || lower.includes('neo soul')) return 'Nu-Jazz & Neo-Soul';
     if (lower.includes('bossa') || lower.includes('mpb') || lower.includes('samba')) return 'Bossa Nova & MPB';
     if (lower.includes('indie') || lower.includes('alt')) return 'Alternative Indie';
     if (lower.includes('hip') || lower.includes('rap') || lower.includes('trap') || lower.includes('drill')) return 'Hip-Hop';
     if (lower.includes('r&b') || lower.includes('rnb') || lower.includes('soul')) return 'R&B';
-    if (lower.includes('gospel') || lower.includes('worship')) return 'Gospel';
+    if (lower.includes('gospel') || lower.includes('worship') || lower.includes('ccm')) return 'Gospel';
     if (lower.includes('latin') || lower.includes('reggaeton') || lower.includes('urbano')) return 'Latin & Urbano';
     if (lower.includes('reggae') || lower.includes('dancehall')) return 'Dancehall & Reggae';
     if (lower.includes('pop')) return 'Pop';
@@ -630,47 +801,111 @@ export class SelfLearningDiscoveryEngine {
     model.learningIterations += 1;
   }
 
-  public applyCrossAppSignals(model: UserTasteModel, signals: CrossAppTrackSignal[]): void {
+  public applyCrossAppSignals(
+    model: UserTasteModel,
+    signals: CrossAppTrackSignal[],
+    artistGenresMap?: Record<string, string>
+  ): void {
     if (!signals || signals.length === 0) return;
+    if (!model.artistGenreMap) model.artistGenreMap = {};
+    if (artistGenresMap) {
+      for (const [k, v] of Object.entries(artistGenresMap)) {
+        const cleanK = k.trim().toLowerCase();
+        const cleanV = SelfLearningDiscoveryEngine.canonicalGenreName(v);
+        if (cleanK && cleanV && cleanV.toLowerCase() !== 'pop & global') {
+          model.artistGenreMap[cleanK] = cleanV;
+        }
+      }
+    }
+    if (!model.acousticByTimeSlot) model.acousticByTimeSlot = {};
 
-    for (const sig of signals.slice(0, 40)) {
+    const nowMs = Date.now();
+    for (const sig of signals.slice(0, 60)) {
       if (!sig.title || !sig.artist) continue;
       const plays = coerceNonNegativePlayCount(sig.playCount);
-      if (plays <= 0) continue; // Only verified plays reinforce cross-app listening weights
-      const genre = SelfLearningDiscoveryEngine.inferGenre(sig.title, sig.artist, sig.genre);
+      if (plays <= 0) continue; // Only actually played tracks (playCount > 0) shape taste weights
+
+      const genre = SelfLearningDiscoveryEngine.inferGenre(
+        sig.title,
+        sig.artist,
+        sig.genre,
+        model.artistGenreMap
+      );
+      if (genre === 'Pop & Global') continue;
+
       const entry = this.ensureGenreEntry(model, genre);
       const timeSlot = sig.timeSlot || 'Evening';
 
       const comp =
         typeof sig.completionRatio === 'number' && sig.completionRatio > 0
-          ? Math.min(1.0, Math.max(0.1, sig.completionRatio))
+          ? Math.min(1.0, Math.max(0.05, sig.completionRatio))
           : sig.durationMs && sig.durationMs > 0 && sig.listenedMs && sig.listenedMs > 0
-            ? Math.min(1.0, Math.max(0.1, sig.listenedMs / sig.durationMs))
+            ? Math.min(1.0, Math.max(0.05, sig.listenedMs / sig.durationMs))
             : 0.78;
 
       const vol =
         typeof sig.volumeRatio === 'number' && sig.volumeRatio > 0
-          ? Math.min(1.0, Math.max(0.1, sig.volumeRatio))
+          ? Math.min(1.0, Math.max(0.05, sig.volumeRatio))
           : entry.avgVolumeRatio;
 
-      // Natural organic listening across apps reinforces that genre + volume + time slot
-      const signalBoost = Math.min(0.95, 0.22 * Math.log2(plays + 1) * (0.6 + 0.4 * comp) + (vol >= 0.65 ? 0.1 : 0));
-      entry.alpha = Math.min(80, entry.alpha + signalBoost * 0.45);
-      entry.emaScore = Math.min(0.99, entry.emaScore * 0.85 + Math.min(0.96, 0.58 + signalBoost * 0.35) * 0.15);
+      // Exponential time-decay half-life (14 days) so current taste beats stale history
+      const ageDays = sig.playedAtMs && sig.playedAtMs > 0
+        ? Math.max(0, (nowMs - sig.playedAtMs) / (24 * 3600 * 1000))
+        : 0;
+      const recencyWeight = Math.exp((-Math.LN2 * ageDays) / 14);
+
+      // Piecewise engagement quality weight: finishing tracks to the end (+1.25) vs skipping early (-0.75)
+      const engagementQuality =
+        comp >= 0.80 ? 1.25
+        : comp >= 0.60 ? 0.85
+        : comp >= 0.25 ? 0.25
+        : -0.75;
+
+      const slotBaselineVol = model.volumeByTimeSlot[timeSlot] ?? 0.62;
+      const volumeFactor = vol >= slotBaselineVol ? 1.15 : vol < 0.30 ? 0.65 : 1.0;
+
+      const weightedDelta = Math.log2(plays + 1) * engagementQuality * volumeFactor * recencyWeight;
+      if (weightedDelta >= 0) {
+        const boost = Math.min(1.15, 0.24 * weightedDelta);
+        entry.alpha = Math.min(90, entry.alpha + boost * 0.55);
+        entry.emaScore = Math.min(0.99, entry.emaScore * 0.84 + Math.min(0.97, 0.60 + boost * 0.32) * 0.16);
+      } else {
+        const penalty = Math.min(0.85, Math.abs(weightedDelta) * 0.45);
+        entry.beta = Math.min(90, entry.beta + penalty);
+        entry.emaScore = Math.max(0.10, entry.emaScore * 0.88 + 0.22 * 0.12);
+        entry.skips += 1;
+      }
+
       entry.plays += 1;
       if (comp >= 0.68) entry.completions += 1;
-      entry.avgVolumeRatio = entry.avgVolumeRatio * 0.82 + vol * 0.18;
-      entry.avgCompletionRatio = entry.avgCompletionRatio * 0.82 + comp * 0.18;
-      entry.lastUpdatedMs = Date.now();
+      entry.avgVolumeRatio = entry.avgVolumeRatio * 0.80 + vol * 0.20;
+      entry.avgCompletionRatio = entry.avgCompletionRatio * 0.80 + comp * 0.20;
+      entry.lastUpdatedMs = nowMs;
 
       if (!model.timeSlotGenreAffinity[timeSlot]) {
         model.timeSlotGenreAffinity[timeSlot] = {};
       }
-      const prevSlot = model.timeSlotGenreAffinity[timeSlot][genre] ?? 0.5;
-      model.timeSlotGenreAffinity[timeSlot][genre] = Math.min(0.99, prevSlot * 0.82 + 0.85 * 0.18);
+      const prevSlot = model.timeSlotGenreAffinity[timeSlot][genre] ?? 0.52;
+      const slotTarget = weightedDelta >= 0 ? Math.min(0.98, 0.64 + comp * 0.30) : Math.max(0.12, 0.35 - Math.abs(weightedDelta) * 0.15);
+      model.timeSlotGenreAffinity[timeSlot][genre] = prevSlot * 0.80 + slotTarget * 0.20;
 
       const prevVol = model.volumeByTimeSlot[timeSlot] ?? vol;
-      model.volumeByTimeSlot[timeSlot] = prevVol * 0.82 + vol * 0.18;
+      model.volumeByTimeSlot[timeSlot] = prevVol * 0.80 + vol * 0.20;
+
+      // Update per-timeSlot acoustic centroid from completed plays
+      if (comp >= 0.60 && sig.durationMs && sig.durationMs >= 60_000) {
+        const durSec = Math.round(sig.durationMs / 1000);
+        const existingCent = model.acousticByTimeSlot[timeSlot] || {
+          targetBpm: timeSlot.toLowerCase().includes('morning') ? 108 : timeSlot.toLowerCase().includes('night') ? 90 : 102,
+          targetDurationSec: durSec,
+          preferredVolumeRatio: vol,
+          sampleCount: 0
+        };
+        existingCent.targetDurationSec = Math.round(existingCent.targetDurationSec * 0.78 + durSec * 0.22);
+        existingCent.preferredVolumeRatio = existingCent.preferredVolumeRatio * 0.78 + vol * 0.22;
+        existingCent.sampleCount += 1;
+        model.acousticByTimeSlot[timeSlot] = existingCent;
+      }
     }
 
     model.learningIterations += 1;
@@ -772,56 +1007,108 @@ export class SelfLearningDiscoveryEngine {
   /**
    * Selects top active user genres and assigns 2 songs per genre (8-10 total) + 2 Global Frontier wildcards.
    */
+  /**
+   * Minimum-Evidence Entrance Gate + Proportional 12-Slot Dominance Allocation.
+   * Ensures a single exploratory/accidental play in a new genre cannot prematurely hijack the 12 picks,
+   * and distributes 12 picks proportionally across qualified genres (fewer or more than 6 depending on user taste).
+   */
   public computeGenreAllocation(
     model: UserTasteModel,
     payload: DailyDropRequest,
     timeSlot: string
   ): Array<{ genre: string; slots: number; score: number }> {
-    const observedGenres = new Set<string>();
+    const evidenceMap = new Map<string, { evidence: number; completions: number; plays: number }>();
+    const bumpEvidence = (rawGenre: string, weight: number, completed = false, playInc = 1) => {
+      const g = SelfLearningDiscoveryEngine.canonicalGenreName(rawGenre);
+      if (!g || g === 'Pop & Global') return;
+      const cur = evidenceMap.get(g) || { evidence: 0, completions: 0, plays: 0 };
+      cur.evidence += weight;
+      if (completed) cur.completions += 1;
+      cur.plays += playInc;
+      evidenceMap.set(g, cur);
+    };
 
     if (payload.genreDistribution) {
       for (const [g, count] of Object.entries(payload.genreDistribution)) {
-        if (count > 0) observedGenres.add(SelfLearningDiscoveryEngine.canonicalGenreName(g));
+        if (count > 0) bumpEvidence(g, Math.min(8, count * 0.6), count >= 2, Math.max(1, Math.round(count)));
       }
     }
+
     for (const t of payload.recentTracks || []) {
-      observedGenres.add(SelfLearningDiscoveryEngine.inferGenre(t.title, t.artist, t.genre));
+      const plays = coerceNonNegativePlayCount(t.playCount);
+      if (plays <= 0) continue;
+      const g = SelfLearningDiscoveryEngine.inferGenre(t.title, t.artist, t.genre, model.artistGenreMap);
+      const comp = typeof t.completionRatio === 'number' && t.completionRatio > 0
+        ? t.completionRatio
+        : (t.durationMs && t.listenedMs && t.durationMs > 0 ? t.listenedMs / t.durationMs : 0.78);
+      const qualityWeight = (comp >= 0.65 ? 1.2 : comp >= 0.25 ? 0.5 : 0.1) * Math.log2(plays + 1);
+      bumpEvidence(g, qualityWeight, comp >= 0.65, plays);
     }
+
     for (const a of [...(payload.topArtists || []), ...(payload.userTasteAnchors || [])]) {
-      const inferred = SelfLearningDiscoveryEngine.inferGenre('', a);
-      if (inferred !== 'Pop & Global') observedGenres.add(inferred);
-    }
-    for (const g of Object.keys(model.genreWeights)) {
-      observedGenres.add(g);
+      const inferred = SelfLearningDiscoveryEngine.inferGenre('', a, undefined, model.artistGenreMap);
+      if (inferred !== 'Pop & Global') bumpEvidence(inferred, 1.4, true, 1);
     }
 
-    const candidates = observedGenres.size > 0
-      ? Array.from(observedGenres).filter((g) => g !== 'Pop & Global')
-      : DEFAULT_FALLBACK_GENRES;
+    for (const [g, entry] of Object.entries(model.genreWeights)) {
+      if (entry.plays > 0 || entry.completions > 0) {
+        bumpEvidence(g, Math.max(0.5, entry.completions * 1.1 + entry.plays * 0.4), entry.completions > 0, entry.plays);
+      }
+    }
 
-    const finalPool = candidates.length > 0 ? candidates : DEFAULT_FALLBACK_GENRES;
-    const ranked = finalPool
-      .map((genre) => ({
-        genre,
-        score: Number(this.scoreGenreForContext(model, genre, timeSlot).toFixed(3))
-      }))
+    // Apply Entrance Gate: exclude single-play experimental blips unless overall pool is tiny
+    const allEntries = Array.from(evidenceMap.entries());
+    const qualifiedEntries = allEntries.filter(
+      ([, stats]) => stats.evidence >= 1.6 || stats.completions >= 2 || stats.plays >= 2
+    );
+    const activeEntries = qualifiedEntries.length > 0
+      ? qualifiedEntries
+      : (allEntries.length > 0 ? allEntries : DEFAULT_FALLBACK_GENRES.map((g, i) => [g, { evidence: 4 - i * 0.5, completions: 2, plays: 2 }] as const));
+
+    const maxEvidence = Math.max(1, ...activeEntries.map(([, s]) => s.evidence));
+    const ranked = activeEntries
+      .map(([genre, stats]) => {
+        const banditScore = this.scoreGenreForContext(model, genre, timeSlot);
+        const evidenceShare = stats.evidence / maxEvidence;
+        const dominanceScore = Number((banditScore * 0.52 + evidenceShare * 0.48).toFixed(3));
+        return { genre, score: dominanceScore };
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, 6);
 
-    // Distribute exactly 12 personalized slots across all active user genres
+    // Proportional Hamilton Apportionment strictly summing to 12 picks
     const targetTotalGenreSlots = 12;
-    const basePerGenre = Math.floor(targetTotalGenreSlots / ranked.length);
-    let remainder = targetTotalGenreSlots % ranked.length;
-
-    return ranked.map((r) => {
-      const extra = remainder > 0 ? 1 : 0;
-      if (remainder > 0) remainder -= 1;
-      return {
-        genre: r.genre,
-        slots: basePerGenre + extra,
-        score: r.score
-      };
+    const weightSum = Math.max(0.01, ranked.reduce((s, r) => s + Math.pow(r.score, 1.35), 0));
+    const exactQuotas = ranked.map((r) => {
+      const raw = (Math.pow(r.score, 1.35) / weightSum) * targetTotalGenreSlots;
+      const floored = Math.max(1, Math.floor(raw));
+      return { ...r, floored, remainder: raw - Math.floor(raw) };
     });
+
+    // Adjust down if min-1 caused > 12, then distribute remaining slots by largest fractional remainder
+    while (exactQuotas.reduce((s, q) => s + q.floored, 0) > targetTotalGenreSlots) {
+      const idx = exactQuotas.length - 1;
+      if (exactQuotas[idx].floored > 1) {
+        exactQuotas[idx].floored -= 1;
+      } else {
+        exactQuotas.pop();
+      }
+    }
+
+    let remaining = targetTotalGenreSlots - exactQuotas.reduce((s, q) => s + q.floored, 0);
+    const byRemainder = [...exactQuotas].sort((a, b) => b.remainder - a.remainder);
+    let ptr = 0;
+    while (remaining > 0 && byRemainder.length > 0) {
+      byRemainder[ptr % byRemainder.length].floored += 1;
+      remaining -= 1;
+      ptr += 1;
+    }
+
+    return exactQuotas.map((q) => ({
+      genre: q.genre,
+      slots: q.floored,
+      score: q.score
+    }));
   }
 
   private normalizeKey(title: string, artist: string): string {
@@ -837,8 +1124,46 @@ export class SelfLearningDiscoveryEngine {
   }
 
   /**
-   * Ground candidate songs against Deezer's public catalog so TuneMind never serves fake/hallucinated songs
-   * and attaches real previewUrl, album, albumArtUrl, and durationMs.
+   * Computes multi-factor Mathematical Acoustic Cosine Similarity + Satiety Readiness score.
+   */
+  public scoreCandidateAcousticCosine(
+    model: UserTasteModel,
+    candidate: ScoredDiscoveryTrack,
+    timeSlot: string,
+    highPlayArtistsLower: Set<string>
+  ): number {
+    const genreScore = this.scoreGenreForContext(model, candidate.genre, timeSlot);
+    const cent = model.acousticByTimeSlot?.[timeSlot];
+    const targetBpm = cent?.targetBpm || (timeSlot.toLowerCase().includes('morning') ? 108 : timeSlot.toLowerCase().includes('night') ? 90 : 102);
+    const targetDurSec = cent?.targetDurationSec || 205;
+
+    let acousticFit = 0.84;
+    if (candidate.bpm && candidate.bpm > 40) {
+      const candDurSec = candidate.durationMs ? candidate.durationMs / 1000 : targetDurSec;
+      const uVec = [targetBpm / 180, targetDurSec / 360];
+      const cVec = [candidate.bpm / 180, candDurSec / 360];
+      const dot = uVec[0] * cVec[0] + uVec[1] * cVec[1];
+      const mag = Math.sqrt(uVec[0] ** 2 + uVec[1] ** 2) * Math.sqrt(cVec[0] ** 2 + cVec[1] ** 2);
+      const cos = mag > 0 ? Math.min(1, Math.max(0.4, dot / mag)) : 0.85;
+      const bpmDeltaPenalty = Math.min(0.18, Math.abs(candidate.bpm - targetBpm) / 220);
+      acousticFit = Math.max(0.55, cos - bpmDeltaPenalty);
+    }
+
+    const artistLower = candidate.artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim();
+    const artistSatietyPenalty = highPlayArtistsLower.has(artistLower) ? 0.08 : 0;
+
+    const combined =
+      0.40 * genreScore +
+      0.32 * acousticFit +
+      0.28 * Math.min(0.99, candidate.confidence || 0.90) -
+      artistSatietyPenalty;
+
+    return Number(Math.min(0.99, Math.max(0.60, combined)).toFixed(3));
+  }
+
+  /**
+   * Grounds candidate songs against Deezer's catalog AND enriches real BPM (`tempo`),
+   * duration, previewUrl, and artwork for mathematical acoustic vector ranking.
    */
   private async verifyWithCatalog(candidate: ScoredDiscoveryTrack): Promise<ScoredDiscoveryTrack> {
     const baseIdentity = resolveCanonicalTrackIdentity({
@@ -851,7 +1176,7 @@ export class SelfLearningDiscoveryEngine {
     try {
       const q = encodeURIComponent(`${candidate.title} ${candidate.artist}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
+      const timer = setTimeout(() => controller.abort(), 2400);
       const resp = await fetch(`https://api.deezer.com/search?q=${q}&limit=2`, {
         signal: controller.signal
       });
@@ -860,6 +1185,23 @@ export class SelfLearningDiscoveryEngine {
         const json: any = await resp.json();
         const match = Array.isArray(json?.data) ? json.data[0] : null;
         if (match && match.title) {
+          let realBpm: number | undefined;
+          if (match.id) {
+            try {
+              const bpmCtrl = new AbortController();
+              const bpmTimer = setTimeout(() => bpmCtrl.abort(), 1400);
+              const detailRes = await fetch(`https://api.deezer.com/track/${match.id}`, { signal: bpmCtrl.signal });
+              clearTimeout(bpmTimer);
+              if (detailRes.ok) {
+                const detail: any = await detailRes.json();
+                if (typeof detail?.bpm === 'number' && detail.bpm > 40) {
+                  realBpm = Math.round(detail.bpm);
+                }
+              }
+            } catch {
+              // Non-fatal optional BPM enrichment
+            }
+          }
           const verifiedId =
             baseIdentity.trackId && !baseIdentity.trackId.startsWith('disc:')
               ? baseIdentity.trackId
@@ -871,6 +1213,7 @@ export class SelfLearningDiscoveryEngine {
             trackId: verifiedId,
             spotifyUri: baseIdentity.spotifyUri,
             playCount: 0,
+            bpm: realBpm,
             title: String(match.title || candidate.title).trim(),
             artist: String(match.artist?.name || candidate.artist).trim(),
             album: String(match.album?.title || candidate.album || '').trim(),
@@ -1077,17 +1420,69 @@ export class SelfLearningDiscoveryEngine {
     const dropDate = payload.dropDate || SelfLearningDiscoveryEngine.getNoonDropCycleKey(payload.timezone, payload.localHour);
     const timeSlot = payload.timeSlot || 'Evening';
 
-    // 1. Online Self-Learning Step: evaluate yesterday's outcomes + passive cross-app telemetry first
+    // 1. Online Self-Learning Step: cache real genres + evaluate outcomes + cross-app telemetry
+    if (!model.artistGenreMap) model.artistGenreMap = {};
+    if (payload.artistGenres) {
+      for (const [k, v] of Object.entries(payload.artistGenres)) {
+        const cleanK = k.trim().toLowerCase();
+        const cleanV = SelfLearningDiscoveryEngine.canonicalGenreName(v);
+        if (cleanK && cleanV && cleanV.toLowerCase() !== 'pop & global') {
+          model.artistGenreMap[cleanK] = cleanV;
+        }
+      }
+    }
+
+    // Batch-classify any unknown played regional/global artists ONCE and cache persistently
+    if (this.anthropic && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
+      const unknownArtists = Array.from(
+        new Set(
+          payload.recentTracks
+            .filter((t) => coerceNonNegativePlayCount(t.playCount) > 0 && t.artist && !t.artist.toLowerCase().includes('unknown'))
+            .map((t) => t.artist.trim().split(/[,&]|feat\.?|ft\.?/i)[0].trim())
+            .filter((a) => a.length >= 2 && SelfLearningDiscoveryEngine.inferGenre('', a, undefined, model.artistGenreMap) === 'Pop & Global')
+        )
+      ).slice(0, 14);
+      if (unknownArtists.length > 0) {
+        try {
+          const models = await this.getCandidateClaudeModels();
+          const fastModel = models[0] || 'claude-haiku-5-5';
+          const clsResp = await this.anthropic.messages.create({
+            model: fastModel,
+            max_tokens: 260,
+            messages: [
+              {
+                role: 'user',
+                content: `Classify each music artist into ONE primary canonical genre (prefer exact East African/African & global labels like "Gikuyu / Mugithi", "Bongo Flava", "Gospel", "Kenyan Pop & Gengetone", "Ohangla & Benga", "Lingala & Rumba", "Afrobeats", "Amapiano", "Hip-Hop", "R&B", "Dancehall & Reggae", "Pop"). Return ONLY JSON object {"artist":"genre"}:\n${unknownArtists.join(', ')}`
+              }
+            ]
+          });
+          const clsText = clsResp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+          const objMatch = clsText.match(/\{[\s\S]*\}/);
+          const mapParsed = JSON.parse(objMatch ? objMatch[0] : clsText);
+          if (mapParsed && typeof mapParsed === 'object') {
+            for (const [art, gen] of Object.entries(mapParsed)) {
+              const canon = SelfLearningDiscoveryEngine.canonicalGenreName(String(gen || ''));
+              if (canon && canon !== 'Pop & Global') {
+                model.artistGenreMap[art.trim().toLowerCase()] = canon;
+              }
+            }
+          }
+        } catch {
+          // Non-fatal fallback
+        }
+      }
+    }
+
     if (Array.isArray(payload.yesterdayOutcomes) && payload.yesterdayOutcomes.length > 0) {
       for (const out of payload.yesterdayOutcomes) {
         this.applyOutcomeUpdate(model, { ...out, userId });
       }
     }
     if (Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
-      this.applyCrossAppSignals(model, payload.recentTracks);
+      this.applyCrossAppSignals(model, payload.recentTracks, payload.artistGenres);
     }
 
-    // 2. Build genre allocation (2 songs per active user genre + 3 Global Wildcards from DIFFERENT genres)
+    // 2. Build Proportional Genre Allocation (Entrance Gate + strictly 12 songs weighted by true dominance)
     const genreAllocation = this.computeGenreAllocation(model, payload, timeSlot);
     const learningSummary = this.buildLearningSummary(model, timeSlot);
 
@@ -1129,16 +1524,23 @@ export class SelfLearningDiscoveryEngine {
 
     const activeGenresLower = new Set(genreAllocation.map((g) => g.genre.toLowerCase()));
 
-    // 3. Build strict zero-repeat exclusion set from library/history/vault/past drops
+    // 3. Strict Never-Played Zero-Repeat Exclusion Set (`playCount > 0` strictly barred; `playCount == 0` allowed)
     const excludedTitlesLower = new Set<string>();
     const excludedKeys = new Set<string>();
+    const highPlayArtistsLower = new Set<string>();
     for (const t of payload.excludeTitles || []) {
       const clean = t.trim().toLowerCase();
       if (clean) excludedTitlesLower.add(clean);
     }
     for (const r of payload.recentTracks || []) {
-      if (r.title) excludedTitlesLower.add(r.title.trim().toLowerCase());
-      if (r.title && r.artist) excludedKeys.add(this.normalizeKey(r.title, r.artist));
+      const plays = coerceNonNegativePlayCount(r.playCount);
+      if (plays > 0) {
+        if (r.title) excludedTitlesLower.add(r.title.trim().toLowerCase());
+        if (r.title && r.artist) excludedKeys.add(this.normalizeKey(r.title, r.artist));
+        if (plays >= 3 && r.artist) {
+          highPlayArtistsLower.add(r.artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim());
+        }
+      }
     }
     for (const v of payload.vaultTracks || []) {
       if (v.title) excludedTitlesLower.add(v.title.trim().toLowerCase());
@@ -1344,8 +1746,23 @@ Return ONLY a raw JSON array:
 
     const assembled = [...finalGenrePicks, ...finalWildcards];
 
-    // 6. Real-catalog verification (parallel with tight 3s timeout per track)
-    const verified = await Promise.all(assembled.map((c) => this.verifyWithCatalog(c)));
+    // 6. Real-catalog verification + Deezer BPM enrichment + Mathematical Acoustic Cosine Scoring
+    const verifiedRaw = await Promise.all(assembled.map((c) => this.verifyWithCatalog(c)));
+    const verified = verifiedRaw
+      .filter((tr) => !this.isExcludedTrack(tr.title, tr.artist, excludedTitlesLower, excludedKeys))
+      .map((tr) => {
+        const cosineScore = this.scoreCandidateAcousticCosine(model, tr, timeSlot, highPlayArtistsLower);
+        return {
+          ...tr,
+          acousticCosineScore: cosineScore,
+          mlScore: cosineScore,
+          confidence: cosineScore
+        };
+      })
+      .sort((a, b) => {
+        if (a.isWildcard !== b.isWildcard) return a.isWildcard ? 1 : -1;
+        return b.mlScore - a.mlScore;
+      });
 
     // Record daily drop into model history + save updated model & Supabase slate snapshot
     model.recentDrops = [

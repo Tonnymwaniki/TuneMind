@@ -62,7 +62,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.data.ingestion.SpotifyNewReleaseItem
 import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.ai.NoonDropSchedule
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
@@ -71,7 +70,6 @@ import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.NeuralSonicActionButton
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioHairlineDivider
-import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import kotlinx.coroutines.delay
@@ -181,8 +179,8 @@ fun AiNeuralCoreEmblem(
  * Populates the LazyColumn inside DopamineVaultScreen's "For You" tab with:
  * 1. Compact Daily Discovery Hero + 12:00 PM schedule ticker + Export CTA
  * 2. 1 Unified Wildcard Showcase Card holding all 3 completely new-genre songs together
- * 3. 12 Unheard Picks grouped across all active genres you listen to
- * 4. Optional Spotify New Releases + Self-Learning Taste Insights footer
+ * 3. 12 Unheard Picks grouped across your qualified listening genres
+ * 4. Self-Learning Taste Evolution Footer
  */
 fun LazyListScope.forYouDiscoveryItems(
     activeRecs: List<AiRecommendationEntity>,
@@ -190,7 +188,6 @@ fun LazyListScope.forYouDiscoveryItems(
     isDiscovering: Boolean,
     totalWildcardsInCycle: Int = 0,
     lockedWildcardsCount: Int = 0,
-    newReleases: List<SpotifyNewReleaseItem> = emptyList(),
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onRefreshForYou: () -> Unit,
     onPlayTrack: (AiRecommendationEntity) -> Unit,
@@ -198,8 +195,7 @@ fun LazyListScope.forYouDiscoveryItems(
     onSaveTrack: (AiRecommendationEntity, Boolean) -> Unit,
     onDismissTrack: (AiRecommendationEntity) -> Unit,
     onInspectTrack: (AiRecommendationEntity) -> Unit,
-    onExportPlaylist: ((List<AiRecommendationEntity>) -> Unit)? = null,
-    onPlayNewRelease: ((SpotifyNewReleaseItem) -> Unit)? = null
+    onExportPlaylist: ((List<AiRecommendationEntity>) -> Unit)? = null
 ) {
     val wildcards = activeRecs
         .filter { it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true) }
@@ -419,60 +415,7 @@ fun LazyListScope.forYouDiscoveryItems(
         }
     }
 
-    // 4. Optional New Releases Radar
-    if (newReleases.isNotEmpty()) {
-        item(key = "foryou_new_releases_section") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                StudioHairlineDivider()
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "New Releases",
-                        color = Color(0xFF1DB954),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${newReleases.size} drops",
-                        color = Color(0xFF1DB954),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                newReleases.take(6).forEach { rel ->
-                    val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                        spotifyUri = rel.spotifyUri,
-                        title = rel.title,
-                        artist = rel.artistName
-                    )
-                    TuneMindTrackCard(
-                        title = rel.title,
-                        artist = rel.artistName,
-                        subtitle = "${rel.albumType.replaceFirstChar { it.uppercase() }} · ${rel.releaseDate}",
-                        playCount = 0,
-                        showUnplayedLabel = true,
-                        zeroPlayLabel = "New",
-                        isCurrentlyPlaying = isTrackCurrentlyPlaying(rel.title, rel.artistName, rel.spotifyUri),
-                        accentColor = Color(0xFF1DB954),
-                        spotifyUri = rel.spotifyUri,
-                        albumArtUrl = rel.imageUrl,
-                        trackId = canonicalId,
-                        onPlayClick = { onPlayNewRelease?.invoke(rel) }
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-        }
-    }
-
-    // 5. Self-Learning Taste Evolution Footer
+    // 4. Self-Learning Taste Evolution Footer
     item(key = "foryou_learned_memory") {
         Spacer(modifier = Modifier.height(4.dp))
         AiMemoryEvolutionCard(learningState = learningState)
