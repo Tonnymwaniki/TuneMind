@@ -432,13 +432,18 @@ open class MainActivity : ComponentActivity() {
                             getRecentTracks = {
                                 vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks }
                             },
-                            getHearingInsights = { vm.hearingInsightsState.value },
+                            getHearingInsights = { vm.getFreshHearingInsightsNow() },
                             getVaultTracks = { vm.vaultState.value },
                             getDopamineCapsule = { vm.compileDopamineCapsule() },
                             getForYouPicks = { vm.aiDiscoveryCrate.value },
                             getSpotifyPlaylists = { vm.spotifyPlaylists.value },
                             getSpotifyLikedTracks = { vm.spotifyLikedTracks.value },
-                            getListeningStats = { vm.listeningStats.value },
+                            getListeningStats = {
+                                vm.refreshLiveListeningStatsNow()
+                                vm.listeningStats.value
+                            },
+                            getCleanPlayHistory = { vm.cleanPlayHistory.value },
+                            getMomentsCount = { vm.musicalMomentsState.value.confirmedMoments.size },
                             getAppState = {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {

@@ -83,7 +83,12 @@ export interface TuneMindTelemetryContext {
     estimated_db: number;
     safe_headroom_db: number;
     daily_exposure_minutes: number;
+    daily_exposure_seconds?: number;
+    sound_dose_percent?: number;
+    safe_hours_remaining?: number;
+    risk_level?: string;
     output_device: string;
+    transducer_category?: string;
     safety_guidance: string;
   };
   vault_tracks?: Array<{
@@ -156,12 +161,21 @@ export interface TuneMindTelemetryContext {
     total_verified_plays?: number;
     unique_tracks?: number;
     unique_artists?: number;
+    skipped_count?: number;
     completion_rate_percent?: number;
     discovery_rate_percent?: number;
     peak_window_label?: string;
+    moments_count?: number;
+    windows?: {
+      today?: { minutes: number; plays: number; unique_tracks: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number; peak_window?: string };
+      seven_days?: { minutes: number; plays: number; unique_tracks: number; unique_artists: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number; peak_window?: string; range_label?: string };
+      thirty_days?: { minutes: number; plays: number; unique_tracks: number; unique_artists: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number };
+      all_time?: { minutes: number; plays: number; unique_tracks: number; unique_artists: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number };
+    };
     top_artists?: Array<{ artist: string; plays: number; minutes: number }>;
-    top_tracks?: Array<{ title: string; artist: string; plays: number; freshness_percent?: number; app?: string }>;
-    app_breakdown?: Array<{ app: string; plays: number; share_percent: number }>;
+    top_tracks?: Array<{ title: string; artist: string; plays: number; freshness_percent?: number; is_cooling_down?: boolean; app?: string }>;
+    app_breakdown?: Array<{ app: string; plays: number; minutes?: number; share_percent: number }>;
+    recent_play_history?: Array<{ title: string; artist: string; app: string; played_at_utc?: string; listened_minutes?: number }>;
   };
   player_preferences?: {
     has_explicit_default_player: boolean;
@@ -873,8 +887,10 @@ CORE IDENTITY & CONVERSATIONAL FREEDOM:
 FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
 - FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful.
 - COOLDOWN VAULT & FRESH POOL: When the user says "play for me a song in the vault", asks what's resting in the Vault, wants to un-vault/restore a track, or asks for a fresh song from their rotation -> call 'inspect_vault_tracks' first! Never invent Vault songs. You can propose playing/restoring a real Vault track (with RESTORE_FROM_VAULT or PROPOSE_TRACK) or pick from 'fresh_low_satiety_user_tracks'.
-- STATS, WEEKLY RECAP & HEARING HEALTH: When the user asks about listening time, top artists, completion rate, fresh mix %, skips, peak hours, or safe ear headroom -> call 'query_listening_stats'! Give exact numbers from telemetry cleanly in spoken form, and optionally navigate to "STATS", "WEEKLY_REPORT", or "HEARING_HEALTH".
-- SPOTIFY LIBRARY PLAYLISTS & LIKED SONGS: When the user asks about their playlists ("play my workout playlist", "what's in my Spotify library?", "play from my liked songs") -> call 'query_spotify_library'! Match the exact playlist or liked song and pass its exact canonical spotify_uri (e.g. spotify:playlist:... or spotify:track:...) with exact track_title and track_artist. If they ask to view it, include NAVIGATE_SCREEN("SPOTIFY_LIBRARY") in extra_actions.
+- STATS, WEEKLY RECAP & HEARING HEALTH (UNIFIED SCREEN ACCESS):
+  Whenever the user asks "how are my listening stats", asks about listening time, top artists/tracks, skips, completion rate, fresh mix %, app share, OR ear/hearing safety -> ALWAYS call 'query_listening_stats'! That tool returns BOTH the complete Stats Screen windows (Today, 7 Days, 30 Days, All Time, top artists, top tracks, app breakdown, recent plays) AND the live Hearing Health Screen metrics (estimated_db, safe_headroom_db, daily_exposure_minutes, sound_dose_percent, safe_hours_remaining, risk_level, output_device). Combine key listening stats AND ear safety headroom naturally in your response, and navigate to "STATS" or "HEARING_HEALTH" if they ask to open the screen.
+- SPOTIFY LIBRARY PLAYLISTS & LIKED SONGS:
+  Whenever the user asks about their playlists ("play a song in my playlists", "play from our playlist", "what's in my Spotify library?", "play from my liked songs") -> ALWAYS call 'query_spotify_library'! It inspects both cached TuneMind library playlists AND fetches live Spotify Web API playlists & tracks when connected. NEVER tell the user their playlists aren't synced or to restart TuneMind when 'spotify_playlists_count' > 0 or 'app_state.spotify_connected' is true! Pick a verified song from that playlist (or launch the playlist's canonical spotify:playlist:<id> URI directly if they ask for the whole playlist), fill track_title, track_artist, and spotify_uri, and propose it cleanly with PROPOSE_TRACK!
 - DIRECT SONG REQUEST FROM TUNEMIND TO SPOTIFY: When the user asks for any specific track or artist ("request Calm Down by Rema on Spotify", "play Blinding Lights by The Weeknd", or a new artist discovery) -> ALWAYS call 'search_spotify_catalog' (for specific artist/song) or 'discover_and_recommend_spotify_tracks' (for fresh unseen recommendations) so you get an exact verified title, artist, and canonical spotify:track:<id> URI with zero typos or hallucinations!
 
 SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
@@ -1035,6 +1051,88 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           album: item.album?.name || '',
           popularity: Number(item.popularity || 60),
           playCount: 0
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private async fetchSpotifyUserPlaylistsLive(
+    userOAuthToken?: string,
+    limit: number = 50
+  ): Promise<Array<{ playlist_id: string; name: string; owner?: string; track_count: number; spotify_uri: string }>> {
+    if (!userOAuthToken || userOAuthToken.trim().length < 10) return [];
+    try {
+      const res = await fetch(
+        `https://api.spotify.com/v1/me/playlists?limit=${Math.min(50, Math.max(1, limit))}`,
+        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      const items = Array.isArray(data?.items) ? data.items : [];
+      return items
+        .filter((pl: any) => pl && typeof pl.id === 'string' && typeof pl.name === 'string')
+        .map((pl: any) => ({
+          playlist_id: pl.id,
+          name: pl.name,
+          owner: pl.owner?.display_name || pl.owner?.id || '',
+          track_count: Number(pl.tracks?.total || 0),
+          spotify_uri: pl.uri || `spotify:playlist:${pl.id}`
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private async fetchSpotifyPlaylistTracksLive(
+    userOAuthToken: string | undefined,
+    playlistId: string,
+    limit: number = 50
+  ): Promise<Array<{ title: string; artist: string; spotify_uri: string; track_id: string }>> {
+    if (!userOAuthToken || userOAuthToken.trim().length < 10 || !playlistId) return [];
+    try {
+      const res = await fetch(
+        `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=${Math.min(50, Math.max(1, limit))}&fields=items(track(id,name,uri,artists(name)))`,
+        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      const items = Array.isArray(data?.items) ? data.items : [];
+      return items
+        .map((it: any) => it?.track)
+        .filter((tr: any) => tr && typeof tr.name === 'string' && typeof tr.uri === 'string' && tr.uri.startsWith('spotify:track:'))
+        .map((tr: any) => ({
+          title: tr.name,
+          artist: tr.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+          spotify_uri: tr.uri,
+          track_id: tr.id || tr.uri
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private async fetchSpotifyLikedTracksLive(
+    userOAuthToken?: string,
+    limit: number = 50
+  ): Promise<Array<{ title: string; artist: string; spotify_uri: string; track_id: string }>> {
+    if (!userOAuthToken || userOAuthToken.trim().length < 10) return [];
+    try {
+      const res = await fetch(
+        `https://api.spotify.com/v1/me/tracks?limit=${Math.min(50, Math.max(1, limit))}`,
+        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
+      );
+      if (!res.ok) return [];
+      const data = (await res.json()) as any;
+      const items = Array.isArray(data?.items) ? data.items : [];
+      return items
+        .map((it: any) => it?.track)
+        .filter((tr: any) => tr && typeof tr.name === 'string' && typeof tr.uri === 'string' && tr.uri.startsWith('spotify:track:'))
+        .map((tr: any) => ({
+          title: tr.name,
+          artist: tr.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+          spotify_uri: tr.uri,
+          track_id: tr.id || tr.uri
         }));
     } catch {
       return [];
@@ -1324,9 +1422,27 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         available_players: []
       },
       for_you_picks_count: Array.isArray(context.for_you_picks) ? context.for_you_picks.length : 0,
+      spotify_token_available: Boolean(context.spotify_access_token),
       spotify_playlists_count: Array.isArray(context.spotify_playlists) ? context.spotify_playlists.length : 0,
+      spotify_playlists_preview: Array.isArray(context.spotify_playlists)
+        ? context.spotify_playlists.slice(0, 12).map(pl => ({
+            name: pl.name,
+            track_count: pl.track_count,
+            hydrated_tracks_count: Array.isArray(pl.tracks) ? pl.tracks.length : 0,
+            spotify_uri: pl.spotify_uri || `spotify:playlist:${pl.playlist_id}`
+          }))
+        : [],
       spotify_liked_tracks_count: Array.isArray(context.spotify_liked_tracks) ? context.spotify_liked_tracks.length : 0,
       has_listening_stats: Boolean(context.listening_stats),
+      listening_stats_preview: context.listening_stats
+        ? {
+            today_minutes: context.listening_stats.today_minutes,
+            seven_day_minutes: context.listening_stats.seven_day_minutes,
+            total_verified_plays: context.listening_stats.total_verified_plays,
+            completion_rate_percent: context.listening_stats.completion_rate_percent,
+            discovery_rate_percent: context.listening_stats.discovery_rate_percent
+          }
+        : null,
       current_track: context.current_track,
       pending_proposed_track_awaiting_user_approval: pending,
       top_most_played_user_tracks: mostPlayedTracks.slice(0, 6),
@@ -1650,25 +1766,92 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             } else if (toolName === 'query_spotify_library') {
               const scope = String(input.scope || 'all');
               const q = String(input.query || '').toLowerCase().trim();
-              let playlists = Array.isArray(context.spotify_playlists) ? [...context.spotify_playlists] : [];
+              let playlists = Array.isArray(context.spotify_playlists)
+                ? context.spotify_playlists.map(pl => ({
+                    ...pl,
+                    tracks: Array.isArray(pl.tracks) ? [...pl.tracks] : []
+                  }))
+                : [];
               let liked = Array.isArray(context.spotify_liked_tracks) ? [...context.spotify_liked_tracks] : [];
-              if (q) {
-                playlists = playlists.filter(pl =>
+
+              // Live Spotify Web API fallback if Room hasn't populated playlists yet or matches are missing
+              if (scope !== 'liked_tracks' && context.spotify_access_token && playlists.length === 0) {
+                const livePls = await this.fetchSpotifyUserPlaylistsLive(context.spotify_access_token, 50);
+                playlists = livePls.map(lp => ({
+                  ...lp,
+                  tracks: []
+                }));
+              }
+
+              let matchedPlaylists = q
+                ? playlists.filter(pl =>
+                    pl.name.toLowerCase().includes(q) ||
+                    (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                  )
+                : [...playlists];
+
+              if (q && matchedPlaylists.length === 0 && context.spotify_access_token && playlists.length > 0) {
+                // Retry after fetching live list in case Room was stale
+                const livePls = await this.fetchSpotifyUserPlaylistsLive(context.spotify_access_token, 50);
+                for (const lp of livePls) {
+                  if (!playlists.some(p => p.playlist_id === lp.playlist_id)) {
+                    playlists.push({ ...lp, tracks: [] });
+                  }
+                }
+                matchedPlaylists = playlists.filter(pl =>
                   pl.name.toLowerCase().includes(q) ||
                   (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
                 );
-                liked = liked.filter(t =>
-                  t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q)
-                );
               }
+
+              // Hydrate tracks via Spotify Web API for matching playlists (or top 2 non-empty playlists) that still have tracks=[]
+              const toHydrate = (matchedPlaylists.length > 0 ? matchedPlaylists : playlists)
+                .filter(pl => (pl.tracks || []).length === 0 && (pl.track_count || 0) > 0 && pl.playlist_id)
+                .slice(0, 3);
+              if (context.spotify_access_token && toHydrate.length > 0) {
+                for (const pl of toHydrate) {
+                  const fetchedTracks = await this.fetchSpotifyPlaylistTracksLive(
+                    context.spotify_access_token,
+                    pl.playlist_id,
+                    50
+                  );
+                  if (fetchedTracks.length > 0) {
+                    pl.tracks = fetchedTracks;
+                  }
+                }
+              }
+
+              if (scope !== 'playlists' && liked.length === 0 && context.spotify_access_token) {
+                liked = await this.fetchSpotifyLikedTracksLive(context.spotify_access_token, 50);
+              }
+              const matchedLiked = q
+                ? liked.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                : liked;
+
+              // Prefer hydrated playlists first, avoiding repeating recently played tracks
+              const candidateTrack = matchedPlaylists
+                .flatMap(pl => pl.tracks || [])
+                .find(t => t.title && !excludedSet.has(t.title.toLowerCase().trim()))
+                || matchedPlaylists.flatMap(pl => pl.tracks || [])[0]
+                || matchedLiked[0];
+              if (candidateTrack && candidateTrack.spotify_uri) {
+                lastDiscoveredOrSearchedTrack = {
+                  title: candidateTrack.title,
+                  artist: candidateTrack.artist,
+                  uri: candidateTrack.spotify_uri,
+                  trackId: candidateTrack.track_id
+                };
+              }
+
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolCall.id,
                 content: JSON.stringify({
-                  playlists: scope === 'liked_tracks' ? [] : playlists.slice(0, 12),
-                  liked_tracks: scope === 'playlists' ? [] : liked.slice(0, 15),
-                  total_playlists: Array.isArray(context.spotify_playlists) ? context.spotify_playlists.length : 0,
-                  total_liked_tracks: Array.isArray(context.spotify_liked_tracks) ? context.spotify_liked_tracks.length : 0
+                  spotify_connected: Boolean(context.spotify_access_token || context.app_state?.spotify_connected),
+                  playlists: scope === 'liked_tracks' ? [] : (matchedPlaylists.length > 0 ? matchedPlaylists : playlists).slice(0, 15),
+                  liked_tracks: scope === 'playlists' ? [] : matchedLiked.slice(0, 20),
+                  total_playlists: playlists.length,
+                  total_liked_tracks: liked.length
                 })
               });
             } else if (toolName === 'query_listening_stats') {

@@ -13,6 +13,7 @@ import os from 'os';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import app from './app';
 import { EventStore } from './domain/events/EventStore';
+import type { TuneMindTelemetryContext } from './domain/reasoning/ClaudeMusicReasoningProvider';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -24,7 +25,7 @@ const server = http.createServer(app);
 // ─── 2. Create the WebSocket server (detached from auto-handling) ────────────
 const wss = new WebSocketServer({
   noServer: true,
-  maxPayload: 256 * 1024 // 256 KB frame guard
+  maxPayload: 1024 * 1024 // 1 MB frame guard for full studio library/stats context
 });
 
 // ─── 3. Intercept the network upgrade request ────────────────────────────────
@@ -93,62 +94,9 @@ wss.on('connection', async (ws: WebSocket) => {
     return cleaned;
   };
 
-  let clientContext: {
-    current_track?: { title: string; artist: string; trackId?: string; spotifyUri?: string; source_player?: string; is_playing?: boolean };
+  let clientContext: (Partial<TuneMindTelemetryContext> & {
     recent_tracks?: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>;
-    recently_played_by_agent?: string[];
-    hearing_telemetry?: {
-      estimated_db: number;
-      safe_headroom_db: number;
-      daily_exposure_minutes: number;
-      output_device: string;
-      safety_guidance: string;
-    };
-    vault_tracks?: Array<{
-      id: string;
-      title: string;
-      artist: string;
-      cooldown_days_remaining: number;
-      recovery_percent: number;
-      satiety_score: number;
-    }>;
-    dopamine_capsule?: Array<{
-      title: string;
-      artist: string;
-      trackId?: string;
-      spotifyUri?: string;
-      freshness_percent: number;
-      reason: string;
-    }>;
-    pending_proposed_track?: {
-      title: string;
-      artist: string;
-      trackId?: string;
-      spotifyUri?: string;
-      source?: string;
-      never_open_external_app?: boolean;
-    } | null;
-    spotify_access_token?: string;
-    dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
-    user_id?: string;
-    user_email?: string;
-    supabase_url?: string;
-    supabase_anon_key?: string;
-    app_state?: {
-      current_screen?: string;
-      theme_behavior?: string;
-      palette_id?: string;
-      custom_accent_hex?: string;
-      autonomous_dj_enabled?: boolean;
-      stay_in_tunemind_enabled?: boolean;
-      strict_no_app_switch_enabled?: boolean;
-      prefer_in_app_player_enabled?: boolean;
-      has_overlay_permission?: boolean;
-      spotify_connected?: boolean;
-      app_remote_connected?: boolean;
-      inapp_player_active?: boolean;
-    };
-  } | null = null;
+  }) | null = null;
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
     const finalText = normalizeMusicTranscript(rawFinalText);
@@ -256,6 +204,11 @@ wss.on('connection', async (ws: WebSocket) => {
         user_email: clientContext?.user_email,
         supabase_url: clientContext?.supabase_url,
         supabase_anon_key: clientContext?.supabase_anon_key,
+        for_you_picks: clientContext?.for_you_picks,
+        spotify_playlists: clientContext?.spotify_playlists,
+        spotify_liked_tracks: clientContext?.spotify_liked_tracks,
+        listening_stats: clientContext?.listening_stats,
+        player_preferences: clientContext?.player_preferences,
         app_state: clientContext?.app_state
       });
 

@@ -2062,9 +2062,21 @@ class TuneMindViewModel : ViewModel() {
         }
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                refreshLiveListeningStatsNow()
                 if (spotifyRepo?.isConnectedFlow?.value == true) {
                     visualRepo?.syncUserProfileAndTasteIntelligence(force = false)
                     visualRepo?.syncFollowedNewReleases(force = false)
+                    if (_spotifyPlaylists.value.isEmpty() || _spotifyLikedTracks.value.isEmpty()) {
+                        spotifyRepo?.syncRecentlyPlayedToLocalRoom()
+                        spotifyRepo?.syncFullSpotifyLibraryToLocalRoom(forcePlaylistTracks = false)
+                    }
+                    // Pre-hydrate playlist tracks for up to 6 unhydrated playlists so the Voice Agent always sees songs immediately
+                    val unhydrated = _spotifyPlaylists.value
+                        .filter { it.trackCount > 0 && it.decodeTracks().isEmpty() }
+                        .take(6)
+                    for (pl in unhydrated) {
+                        runCatching { spotifyRepo?.loadPlaylistTracksDetailed(pl.playlistId) }
+                    }
                 }
             }
         }
@@ -3083,6 +3095,11 @@ class TuneMindViewModel : ViewModel() {
             safeHoursRemaining = safeHoursLeft,
             safetyGuidance = guidance
         )
+    }
+
+    fun getFreshHearingInsightsNow(): HearingInsightsState {
+        refreshHearingInsights()
+        return _hearingInsightsState.value
     }
 
     fun refreshClaudeState() {

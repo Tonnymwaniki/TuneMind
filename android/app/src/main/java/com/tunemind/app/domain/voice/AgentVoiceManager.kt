@@ -60,6 +60,8 @@ class AgentVoiceManager(
     private val getSpotifyPlaylists: (() -> List<com.tunemind.app.data.ingestion.SpotifyPlaylistEntity>)? = null,
     private val getSpotifyLikedTracks: (() -> List<com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity>)? = null,
     private val getListeningStats: (() -> com.tunemind.app.domain.memory.OverallListeningStats)? = null,
+    private val getCleanPlayHistory: (() -> List<com.tunemind.app.domain.memory.UnifiedPlayEvent>)? = null,
+    private val getMomentsCount: (() -> Int)? = null,
     private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
@@ -437,6 +439,253 @@ class AgentVoiceManager(
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun JSONObject.appendHearingTelemetryJson(hearing: com.tunemind.app.ui.HearingInsightsState?) {
+        if (hearing == null) return
+        val estDb = hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0
+        val headroomDb = hearing.currentHeadroomDb.toDouble().takeIf { !it.isNaN() } ?: 17.0
+        val riskLevel = when {
+            estDb >= 92.0 -> "High Risk"
+            estDb >= 85.0 -> "Loud"
+            estDb >= 80.0 -> "Moderate"
+            else -> "Safe"
+        }
+        val cleanDevice = com.tunemind.app.domain.audio.AudioDeviceObserver.sanitizeOutputDeviceLabel(
+            raw = hearing.activeSnapshot?.productName ?: hearing.activeAudioDevice?.deviceName,
+            transducerCategory = hearing.activeSnapshot?.transducerCategory
+        )
+        put("hearing_telemetry", JSONObject().apply {
+            put("estimated_db", estDb)
+            put("safe_headroom_db", headroomDb)
+            put("daily_exposure_minutes", hearing.dailyExposureMinutes)
+            put("daily_exposure_seconds", (hearing.dailyExposureMs / 1000L).toInt())
+            put("sound_dose_percent", (hearing.soundDoseFraction * 100f).toInt().coerceIn(0, 200))
+            put("safe_hours_remaining", String.format(java.util.Locale.US, "%.1f", hearing.safeHoursRemaining).toDoubleOrNull() ?: 24.0)
+            put("risk_level", riskLevel)
+            put("output_device", cleanDevice)
+            put("transducer_category", hearing.activeSnapshot?.transducerCategory?.takeIf { it.isNotBlank() } ?: "AUDIO")
+            put("safety_guidance", hearing.safetyGuidance)
+        })
+    }
+
+    private fun JSONObject.appendStudioContextJson() {
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+            context,
+            registry.getInstalledProviders()
+        )
+        val hasExplicitPlayer = registry.hasExplicitDefault()
+        val preferredId = registry.getPreferredProviderId()
+        val preferredProvider = registry.getProvider(preferredId)
+        put("player_preferences", JSONObject().apply {
+            put("has_explicit_default_player", hasExplicitPlayer)
+            put("default_player_id", preferredId)
+            put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
+            put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
+            put("available_players", org.json.JSONArray().apply {
+                installedPlayers.take(8).forEach { p ->
+                    put(JSONObject().apply {
+                        put("id", p.providerId)
+                        put("name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p))
+                        put("package_name", p.packageName.ifBlank { p.providerId })
+                    })
+                }
+            })
+        })
+
+        val forYouList = getForYouPicks?.invoke()?.filter { !it.isDismissed }.orEmpty()
+        if (forYouList.isNotEmpty()) {
+            put("for_you_picks", org.json.JSONArray().apply {
+                forYouList.take(15).forEach { rec ->
+                    put(JSONObject().apply {
+                        put("title", rec.title)
+                        put("artist", rec.artist)
+                        put("match_percent", rec.matchScorePercent)
+                        put("category", rec.category)
+                        put("sub_tier", rec.subTier)
+                        put("genre_tag", rec.genreTag)
+                        put("is_wildcard", rec.isWildcard)
+                        put("is_saved", rec.isSaved)
+                        put("reason", rec.reason)
+                        put("spotify_uri", rec.spotifyUri ?: "")
+                        put("track_id", rec.resolvedCanonicalTrackId())
+                    })
+                }
+            })
+        }
+
+        val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
+        if (playlistsList.isNotEmpty()) {
+            put("spotify_playlists", org.json.JSONArray().apply {
+                playlistsList.take(25).forEach { pl ->
+                    val decoded = pl.decodeTracks()
+                    put(JSONObject().apply {
+                        put("playlist_id", pl.playlistId)
+                        put("name", pl.name)
+                        put("owner", pl.ownerName)
+                        put("track_count", maxOf(pl.trackCount, decoded.size))
+                        put("spotify_uri", "spotify:playlist:${pl.playlistId}")
+                        put("tracks", org.json.JSONArray().apply {
+                            decoded.take(30).forEach { tr ->
+                                put(JSONObject().apply {
+                                    put("title", tr.title)
+                                    put("artist", tr.artist)
+                                    put("spotify_uri", tr.spotifyUri)
+                                    put("track_id", tr.trackId)
+                                })
+                            }
+                        })
+                    })
+                }
+            })
+        }
+
+        val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
+        if (likedList.isNotEmpty()) {
+            put("spotify_liked_tracks", org.json.JSONArray().apply {
+                likedList.take(25).forEach { lk ->
+                    put(JSONObject().apply {
+                        put("title", lk.trackTitle)
+                        put("artist", lk.artistName)
+                        put("spotify_uri", lk.spotifyUri)
+                        put("track_id", lk.trackId)
+                    })
+                }
+            })
+        }
+
+        val statsSnapshot = getListeningStats?.invoke()
+        val cleanHistory = getCleanPlayHistory?.invoke().orEmpty()
+        if (statsSnapshot != null) {
+            val todayWin = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildWindowedStats(
+                cleanPlayHistory = cleanHistory,
+                overallStats = statsSnapshot,
+                window = com.tunemind.app.domain.memory.StatsTimeWindow.TODAY
+            )
+            val sevenWin = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildWindowedStats(
+                cleanPlayHistory = cleanHistory,
+                overallStats = statsSnapshot,
+                window = com.tunemind.app.domain.memory.StatsTimeWindow.SEVEN_DAYS
+            )
+            val thirtyWin = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildWindowedStats(
+                cleanPlayHistory = cleanHistory,
+                overallStats = statsSnapshot,
+                window = com.tunemind.app.domain.memory.StatsTimeWindow.THIRTY_DAYS
+            )
+            val allWin = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildWindowedStats(
+                cleanPlayHistory = cleanHistory,
+                overallStats = statsSnapshot,
+                window = com.tunemind.app.domain.memory.StatsTimeWindow.ALL_TIME
+            )
+
+            put("listening_stats", JSONObject().apply {
+                put("today_minutes", (statsSnapshot.todayListeningMs / 60_000L).toInt())
+                put("seven_day_minutes", (statsSnapshot.sevenDayListeningMs / 60_000L).toInt())
+                put("thirty_day_minutes", (statsSnapshot.thirtyDayListeningMs / 60_000L).toInt())
+                put("all_time_minutes", (statsSnapshot.allTimeListeningMs / 60_000L).toInt())
+                put("total_verified_plays", statsSnapshot.totalVerifiedPlays)
+                put("unique_tracks", statsSnapshot.uniqueTrackCount)
+                put("unique_artists", statsSnapshot.uniqueArtistCount)
+                put("skipped_count", statsSnapshot.skippedCount)
+                put("completion_rate_percent", statsSnapshot.completionRatePercent)
+                put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
+                put("peak_window_label", statsSnapshot.peakWindowLabel)
+                put("moments_count", getMomentsCount?.invoke() ?: 0)
+                put("windows", JSONObject().apply {
+                    put("today", JSONObject().apply {
+                        put("minutes", (todayWin.totalListeningMs / 60_000L).toInt())
+                        put("plays", todayWin.totalVerifiedPlays)
+                        put("unique_tracks", todayWin.uniqueTrackCount)
+                        put("skipped", todayWin.skippedCount)
+                        put("completion_rate_percent", todayWin.completionRatePercent)
+                        put("discovery_rate_percent", todayWin.discoveryRatePercent)
+                        put("peak_window", todayWin.peakWindowLabel)
+                    })
+                    put("seven_days", JSONObject().apply {
+                        put("minutes", (sevenWin.totalListeningMs / 60_000L).toInt())
+                        put("plays", sevenWin.totalVerifiedPlays)
+                        put("unique_tracks", sevenWin.uniqueTrackCount)
+                        put("unique_artists", sevenWin.uniqueArtistCount)
+                        put("skipped", sevenWin.skippedCount)
+                        put("completion_rate_percent", sevenWin.completionRatePercent)
+                        put("discovery_rate_percent", sevenWin.discoveryRatePercent)
+                        put("peak_window", sevenWin.peakWindowLabel)
+                        put("range_label", sevenWin.windowRangeLabel)
+                    })
+                    put("thirty_days", JSONObject().apply {
+                        put("minutes", (thirtyWin.totalListeningMs / 60_000L).toInt())
+                        put("plays", thirtyWin.totalVerifiedPlays)
+                        put("unique_tracks", thirtyWin.uniqueTrackCount)
+                        put("unique_artists", thirtyWin.uniqueArtistCount)
+                        put("skipped", thirtyWin.skippedCount)
+                        put("completion_rate_percent", thirtyWin.completionRatePercent)
+                        put("discovery_rate_percent", thirtyWin.discoveryRatePercent)
+                    })
+                    put("all_time", JSONObject().apply {
+                        put("minutes", (allWin.totalListeningMs / 60_000L).toInt())
+                        put("plays", allWin.totalVerifiedPlays)
+                        put("unique_tracks", allWin.uniqueTrackCount)
+                        put("unique_artists", allWin.uniqueArtistCount)
+                        put("skipped", allWin.skippedCount)
+                        put("completion_rate_percent", allWin.completionRatePercent)
+                        put("discovery_rate_percent", allWin.discoveryRatePercent)
+                    })
+                })
+                put("top_artists", org.json.JSONArray().apply {
+                    statsSnapshot.topArtists.take(8).forEach { a ->
+                        put(JSONObject().apply {
+                            put("artist", a.artistName)
+                            put("plays", a.playCount)
+                            put("minutes", (a.listeningMs / 60_000L).toInt())
+                        })
+                    }
+                })
+                put("top_tracks", org.json.JSONArray().apply {
+                    statsSnapshot.topTracks.take(10).forEach { tr ->
+                        put(JSONObject().apply {
+                            put("title", tr.title)
+                            put("artist", tr.artist)
+                            put("plays", tr.verifiedPlayCount)
+                            put("freshness_percent", tr.freshnessPercent)
+                            put("is_cooling_down", tr.isCoolingDown)
+                            put("app", tr.primaryAppName)
+                        })
+                    }
+                })
+                put("app_breakdown", org.json.JSONArray().apply {
+                    statsSnapshot.appBreakdown.take(6).forEach { ap ->
+                        put(JSONObject().apply {
+                            put("app", ap.displayName)
+                            put("plays", ap.playCount)
+                            put("minutes", (ap.listeningMs / 60_000L).toInt())
+                            put("share_percent", (ap.shareFraction * 100f).toInt())
+                        })
+                    }
+                })
+                if (cleanHistory.isNotEmpty()) {
+                    put("recent_play_history", org.json.JSONArray().apply {
+                        cleanHistory.take(10).forEach { ev ->
+                            put(JSONObject().apply {
+                                put("title", ev.title)
+                                put("artist", ev.artist)
+                                put("app", ev.appDisplayName)
+                                put("listened_minutes", (ev.listenedMs / 60_000L).toInt())
+                            })
+                        }
+                    })
+                }
+            })
+        }
+
+        val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
+        put("user_id", identity.userId)
+        put("user_email", identity.email)
+        put("supabase_url", identity.supabaseUrl)
+        put("supabase_anon_key", identity.supabaseAnonKey)
+        put("dialogue_history", getDialogueHistoryJsonArray())
+        put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
+        getAppState?.invoke()?.let { put("app_state", it) }
     }
 
     // Wake Word / Manual Orb tap handler
@@ -913,15 +1162,7 @@ class AgentVoiceManager(
                     put("rolling_history", historyArr)
                     put("recently_played_by_agent", org.json.JSONArray((getRecentlyPlayedByAgent() + listOf(finishedTitle)).distinct()))
 
-                    if (hearing != null) {
-                        put("hearing_telemetry", JSONObject().apply {
-                            put("estimated_db", hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0)
-                            put("safe_headroom_db", hearing.currentHeadroomDb.toDouble().takeIf { !it.isNaN() } ?: 17.0)
-                            put("daily_exposure_minutes", hearing.dailyExposureMinutes)
-                            put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
-                            put("safety_guidance", hearing.safetyGuidance)
-                        })
-                    }
+                    appendHearingTelemetryJson(hearing)
 
                     val vaultArr = org.json.JSONArray()
                     for (vt in vaultList) {
@@ -956,144 +1197,7 @@ class AgentVoiceManager(
                         put("dopamine_capsule", capArr)
                     }
 
-                    val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
-                    val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
-                        context,
-                        registry.getInstalledProviders()
-                    )
-                    val hasExplicitPlayer = registry.hasExplicitDefault()
-                    val preferredId = registry.getPreferredProviderId()
-                    val preferredProvider = registry.getProvider(preferredId)
-                    put("player_preferences", JSONObject().apply {
-                        put("has_explicit_default_player", hasExplicitPlayer)
-                        put("default_player_id", preferredId)
-                        put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
-                        put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
-                        put("available_players", org.json.JSONArray().apply {
-                            installedPlayers.take(8).forEach { p ->
-                                put(JSONObject().apply {
-                                    put("id", p.providerId)
-                                    put("name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p))
-                                    put("package_name", p.packageName.ifBlank { p.providerId })
-                                })
-                            }
-                        })
-                    })
-
-                    val forYouList = getForYouPicks?.invoke()?.filter { !it.isDismissed }.orEmpty()
-                    if (forYouList.isNotEmpty()) {
-                        put("for_you_picks", org.json.JSONArray().apply {
-                            forYouList.take(15).forEach { rec ->
-                                put(JSONObject().apply {
-                                    put("title", rec.title)
-                                    put("artist", rec.artist)
-                                    put("match_percent", rec.matchScorePercent)
-                                    put("category", rec.category)
-                                    put("sub_tier", rec.subTier)
-                                    put("genre_tag", rec.genreTag)
-                                    put("is_wildcard", rec.isWildcard)
-                                    put("is_saved", rec.isSaved)
-                                    put("reason", rec.reason)
-                                    put("spotify_uri", rec.spotifyUri ?: "")
-                                    put("track_id", rec.resolvedCanonicalTrackId())
-                                })
-                            }
-                        })
-                    }
-
-                    val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
-                    if (playlistsList.isNotEmpty()) {
-                        put("spotify_playlists", org.json.JSONArray().apply {
-                            playlistsList.take(15).forEach { pl ->
-                                val decoded = pl.decodeTracks()
-                                put(JSONObject().apply {
-                                    put("playlist_id", pl.playlistId)
-                                    put("name", pl.name)
-                                    put("owner", pl.ownerName)
-                                    put("track_count", maxOf(pl.trackCount, decoded.size))
-                                    put("spotify_uri", "spotify:playlist:${pl.playlistId}")
-                                    put("tracks", org.json.JSONArray().apply {
-                                        decoded.take(8).forEach { tr ->
-                                            put(JSONObject().apply {
-                                                put("title", tr.title)
-                                                put("artist", tr.artist)
-                                                put("spotify_uri", tr.spotifyUri)
-                                                put("track_id", tr.trackId)
-                                            })
-                                        }
-                                    })
-                                })
-                            }
-                        })
-                    }
-
-                    val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
-                    if (likedList.isNotEmpty()) {
-                        put("spotify_liked_tracks", org.json.JSONArray().apply {
-                            likedList.take(15).forEach { lk ->
-                                put(JSONObject().apply {
-                                    put("title", lk.trackTitle)
-                                    put("artist", lk.artistName)
-                                    put("spotify_uri", lk.spotifyUri)
-                                    put("track_id", lk.trackId)
-                                })
-                            }
-                        })
-                    }
-
-                    val statsSnapshot = getListeningStats?.invoke()
-                    if (statsSnapshot != null) {
-                        put("listening_stats", JSONObject().apply {
-                            put("today_minutes", (statsSnapshot.todayListeningMs / 60_000L).toInt())
-                            put("seven_day_minutes", (statsSnapshot.sevenDayListeningMs / 60_000L).toInt())
-                            put("thirty_day_minutes", (statsSnapshot.thirtyDayListeningMs / 60_000L).toInt())
-                            put("all_time_minutes", (statsSnapshot.allTimeListeningMs / 60_000L).toInt())
-                            put("total_verified_plays", statsSnapshot.totalVerifiedPlays)
-                            put("unique_tracks", statsSnapshot.uniqueTrackCount)
-                            put("unique_artists", statsSnapshot.uniqueArtistCount)
-                            put("completion_rate_percent", statsSnapshot.completionRatePercent)
-                            put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
-                            put("peak_window_label", statsSnapshot.peakWindowLabel)
-                            put("top_artists", org.json.JSONArray().apply {
-                                statsSnapshot.topArtists.take(6).forEach { a ->
-                                    put(JSONObject().apply {
-                                        put("artist", a.artistName)
-                                        put("plays", a.playCount)
-                                        put("minutes", (a.listeningMs / 60_000L).toInt())
-                                    })
-                                }
-                            })
-                            put("top_tracks", org.json.JSONArray().apply {
-                                statsSnapshot.topTracks.take(8).forEach { tr ->
-                                    put(JSONObject().apply {
-                                        put("title", tr.title)
-                                        put("artist", tr.artist)
-                                        put("plays", tr.verifiedPlayCount)
-                                        put("freshness_percent", tr.freshnessPercent)
-                                        put("app", tr.primaryAppName)
-                                    })
-                                }
-                            })
-                            put("app_breakdown", org.json.JSONArray().apply {
-                                statsSnapshot.appBreakdown.take(5).forEach { ap ->
-                                    put(JSONObject().apply {
-                                        put("app", ap.displayName)
-                                        put("plays", ap.playCount)
-                                        put("share_percent", (ap.shareFraction * 100f).toInt())
-                                    })
-                                }
-                            })
-                        })
-                    }
-
-                    val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
-                    put("user_id", identity.userId)
-                    put("user_email", identity.email)
-                    put("supabase_url", identity.supabaseUrl)
-                    put("supabase_anon_key", identity.supabaseAnonKey)
-                    put("dialogue_history", getDialogueHistoryJsonArray())
-                    put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
-                    getAppState?.invoke()?.let { put("app_state", it) }
+                    appendStudioContextJson()
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
@@ -1447,15 +1551,7 @@ class AgentVoiceManager(
                         put("recent_tracks", historyArr)
                         put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
 
-                        if (hearing != null) {
-                            put("hearing_telemetry", JSONObject().apply {
-                                put("estimated_db", hearing.estimatedAverageDb.toDouble())
-                                put("safe_headroom_db", hearing.currentHeadroomDb.toDouble())
-                                put("daily_exposure_minutes", hearing.dailyExposureMinutes)
-                                put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
-                                put("safety_guidance", hearing.safetyGuidance)
-                            })
-                        }
+                        appendHearingTelemetryJson(hearing)
 
                         val vaultArr = org.json.JSONArray()
                         for (vt in vaultList) {
@@ -1505,14 +1601,7 @@ class AgentVoiceManager(
                                 put("source", pendingProp.source)
                             })
                         }
-                        val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
-                        put("user_id", identity.userId)
-                        put("user_email", identity.email)
-                        put("supabase_url", identity.supabaseUrl)
-                        put("supabase_anon_key", identity.supabaseAnonKey)
-                        put("dialogue_history", getDialogueHistoryJsonArray())
-                        put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
-                        getAppState?.invoke()?.let { put("app_state", it) }
+                        appendStudioContextJson()
                     }
                     ws.send(metaJson.toString())
                 } catch (e: Exception) {
@@ -1749,12 +1838,17 @@ class AgentVoiceManager(
             rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
         }
 
+        val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
+        val backendHasSpokenAdvice = explicitTtsPayload.isNotBlank() ||
+            !dataObj?.optString("voice_agent_tts", "")?.trim().isNullOrBlank()
+
         // Guard against any conversational non-title phrase leaking into rawTrackTitle when offline/fallback
         val wantsMostPlayed = !isApprovingPending && !isSyntheticPrompt && isMostPlayedSongRequest(userTranscriptLower)
-        val wantsNewOrRecommend = !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && (
-            isNewOrRecommendSongRequest(userTranscriptLower) ||
-            (isExplicitMusicPlayOrRecommendRequest(userTranscriptLower) && !rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
-        )
+        val wantsNewOrRecommend = !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed &&
+            !(rawAction == "ADVISE_ONLY" && backendHasSpokenAdvice) && (
+                isNewOrRecommendSongRequest(userTranscriptLower) ||
+                (isExplicitMusicPlayOrRecommendRequest(userTranscriptLower) && !rawTrackTitle.isNullOrBlank() && isConversationalNonTitlePhrase(rawTrackTitle))
+            )
 
         // When the AI chooses ADVISE_ONLY on a conversational turn, never attach a track or trigger a song proposal
         if (rawAction == "ADVISE_ONLY" && !isApprovingPending && !isSyntheticPrompt && !wantsMostPlayed && !wantsNewOrRecommend) {
@@ -1765,9 +1859,8 @@ class AgentVoiceManager(
             rawSearchQuery = ""
         }
 
-        val backendGaveValidTrack = !rawTrackTitle.isNullOrBlank() && !isConversationalNonTitlePhrase(rawTrackTitle)
         var customProposalSpeechOverride: String? = null
-        if (wantsMostPlayed && !backendGaveValidTrack) {
+        if (wantsMostPlayed && !backendGaveValidTrack && !(rawAction == "ADVISE_ONLY" && backendHasSpokenAdvice)) {
             val recents = getRecentTracks?.invoke() ?: emptyList()
             val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
             if (topTrack != null) {
@@ -2210,15 +2303,7 @@ class AgentVoiceManager(
                     put("rolling_history", historyArr)
                     put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
 
-                    if (hearing != null) {
-                        put("hearing_telemetry", JSONObject().apply {
-                            put("estimated_db", hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0)
-                            put("safe_headroom_db", hearing.currentHeadroomDb.toDouble().takeIf { !it.isNaN() } ?: 17.0)
-                            put("daily_exposure_minutes", hearing.dailyExposureMinutes)
-                            put("output_device", hearing.activeSnapshot?.deviceType ?: "Phone / Wireless Audio")
-                            put("safety_guidance", hearing.safetyGuidance)
-                        })
-                    }
+                    appendHearingTelemetryJson(hearing)
 
                     val vaultArr = org.json.JSONArray()
                     for (vt in vaultList) {
@@ -2268,144 +2353,7 @@ class AgentVoiceManager(
                             put("source", pendingProp.source)
                         })
                     }
-                    val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
-                    val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
-                        context,
-                        registry.getInstalledProviders()
-                    )
-                    val hasExplicitPlayer = registry.hasExplicitDefault()
-                    val preferredId = registry.getPreferredProviderId()
-                    val preferredProvider = registry.getProvider(preferredId)
-                    put("player_preferences", JSONObject().apply {
-                        put("has_explicit_default_player", hasExplicitPlayer)
-                        put("default_player_id", preferredId)
-                        put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
-                        put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
-                        put("available_players", org.json.JSONArray().apply {
-                            installedPlayers.take(8).forEach { p ->
-                                put(JSONObject().apply {
-                                    put("id", p.providerId)
-                                    put("name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p))
-                                    put("package_name", p.packageName.ifBlank { p.providerId })
-                                })
-                            }
-                        })
-                    })
-
-                    val forYouList = getForYouPicks?.invoke()?.filter { !it.isDismissed }.orEmpty()
-                    if (forYouList.isNotEmpty()) {
-                        put("for_you_picks", org.json.JSONArray().apply {
-                            forYouList.take(15).forEach { rec ->
-                                put(JSONObject().apply {
-                                    put("title", rec.title)
-                                    put("artist", rec.artist)
-                                    put("match_percent", rec.matchScorePercent)
-                                    put("category", rec.category)
-                                    put("sub_tier", rec.subTier)
-                                    put("genre_tag", rec.genreTag)
-                                    put("is_wildcard", rec.isWildcard)
-                                    put("is_saved", rec.isSaved)
-                                    put("reason", rec.reason)
-                                    put("spotify_uri", rec.spotifyUri ?: "")
-                                    put("track_id", rec.resolvedCanonicalTrackId())
-                                })
-                            }
-                        })
-                    }
-
-                    val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
-                    if (playlistsList.isNotEmpty()) {
-                        put("spotify_playlists", org.json.JSONArray().apply {
-                            playlistsList.take(15).forEach { pl ->
-                                val decoded = pl.decodeTracks()
-                                put(JSONObject().apply {
-                                    put("playlist_id", pl.playlistId)
-                                    put("name", pl.name)
-                                    put("owner", pl.ownerName)
-                                    put("track_count", maxOf(pl.trackCount, decoded.size))
-                                    put("spotify_uri", "spotify:playlist:${pl.playlistId}")
-                                    put("tracks", org.json.JSONArray().apply {
-                                        decoded.take(8).forEach { tr ->
-                                            put(JSONObject().apply {
-                                                put("title", tr.title)
-                                                put("artist", tr.artist)
-                                                put("spotify_uri", tr.spotifyUri)
-                                                put("track_id", tr.trackId)
-                                            })
-                                        }
-                                    })
-                                })
-                            }
-                        })
-                    }
-
-                    val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
-                    if (likedList.isNotEmpty()) {
-                        put("spotify_liked_tracks", org.json.JSONArray().apply {
-                            likedList.take(15).forEach { lk ->
-                                put(JSONObject().apply {
-                                    put("title", lk.trackTitle)
-                                    put("artist", lk.artistName)
-                                    put("spotify_uri", lk.spotifyUri)
-                                    put("track_id", lk.trackId)
-                                })
-                            }
-                        })
-                    }
-
-                    val statsSnapshot = getListeningStats?.invoke()
-                    if (statsSnapshot != null) {
-                        put("listening_stats", JSONObject().apply {
-                            put("today_minutes", (statsSnapshot.todayListeningMs / 60_000L).toInt())
-                            put("seven_day_minutes", (statsSnapshot.sevenDayListeningMs / 60_000L).toInt())
-                            put("thirty_day_minutes", (statsSnapshot.thirtyDayListeningMs / 60_000L).toInt())
-                            put("all_time_minutes", (statsSnapshot.allTimeListeningMs / 60_000L).toInt())
-                            put("total_verified_plays", statsSnapshot.totalVerifiedPlays)
-                            put("unique_tracks", statsSnapshot.uniqueTrackCount)
-                            put("unique_artists", statsSnapshot.uniqueArtistCount)
-                            put("completion_rate_percent", statsSnapshot.completionRatePercent)
-                            put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
-                            put("peak_window_label", statsSnapshot.peakWindowLabel)
-                            put("top_artists", org.json.JSONArray().apply {
-                                statsSnapshot.topArtists.take(6).forEach { a ->
-                                    put(JSONObject().apply {
-                                        put("artist", a.artistName)
-                                        put("plays", a.playCount)
-                                        put("minutes", (a.listeningMs / 60_000L).toInt())
-                                    })
-                                }
-                            })
-                            put("top_tracks", org.json.JSONArray().apply {
-                                statsSnapshot.topTracks.take(8).forEach { tr ->
-                                    put(JSONObject().apply {
-                                        put("title", tr.title)
-                                        put("artist", tr.artist)
-                                        put("plays", tr.verifiedPlayCount)
-                                        put("freshness_percent", tr.freshnessPercent)
-                                        put("app", tr.primaryAppName)
-                                    })
-                                }
-                            })
-                            put("app_breakdown", org.json.JSONArray().apply {
-                                statsSnapshot.appBreakdown.take(5).forEach { ap ->
-                                    put(JSONObject().apply {
-                                        put("app", ap.displayName)
-                                        put("plays", ap.playCount)
-                                        put("share_percent", (ap.shareFraction * 100f).toInt())
-                                    })
-                                }
-                            })
-                        })
-                    }
-
-                    val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
-                    put("user_id", identity.userId)
-                    put("user_email", identity.email)
-                    put("supabase_url", identity.supabaseUrl)
-                    put("supabase_anon_key", identity.supabaseAnonKey)
-                    put("dialogue_history", getDialogueHistoryJsonArray())
-                    put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
-                    getAppState?.invoke()?.let { put("app_state", it) }
+                    appendStudioContextJson()
                 }
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
