@@ -217,10 +217,16 @@ open class MainActivity : ComponentActivity() {
                     fun executeSingleAppToolAction(tool: com.tunemind.app.domain.execution.AgentToolCallPayload) {
                         when (tool.action) {
                             "PAUSE_PLAYBACK" -> {
-                                vm.setAgentPlaybackPaused()
+                                vm.pausePlayback()
                             }
                             "RESUME_PLAYBACK" -> {
-                                vm.setAgentPlaybackResumed()
+                                vm.resumePlayback()
+                            }
+                            "SKIP_NEXT" -> {
+                                vm.skipNext()
+                            }
+                            "SKIP_PREVIOUS" -> {
+                                vm.skipPrev()
                             }
                             "QUARANTINE_TO_VAULT" -> {
                                 val qTitle = tool.track_title ?: vm.homeState.value.nowPlaying?.title
@@ -448,6 +454,7 @@ open class MainActivity : ComponentActivity() {
                             showAgentGuideSheet = false
                         }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
+                        vm.setUiForegroundActive(isMainAppActive)
                         if (isMainAppActive && spotifyAuthManager.isAuthenticated()) {
                             com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
                                 context = context,
@@ -462,11 +469,13 @@ open class MainActivity : ComponentActivity() {
                                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                                     if (isMainAppActive) {
                                         agentVoiceManager.setForegroundActive(true)
+                                        vm.setUiForegroundActive(true)
                                     }
                                 }
                                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
                                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                                     agentVoiceManager.setForegroundActive(false)
+                                    vm.setUiForegroundActive(false)
                                 }
                                 else -> {}
                             }
@@ -475,6 +484,7 @@ open class MainActivity : ComponentActivity() {
                         onDispose {
                             lifecycleOwner.lifecycle.removeObserver(observer)
                             agentVoiceManager.setForegroundActive(false)
+                            vm.setUiForegroundActive(false)
                         }
                     }
 
@@ -691,6 +701,18 @@ open class MainActivity : ComponentActivity() {
                                             )
                                         }
                                         1 -> {
+                                            val matchedCurrentSpotifyUri = spotifyLiveState?.takeIf { sp ->
+                                                trackTitle != null &&
+                                                    nowPlaying?.sourcePackage?.contains("spotify", ignoreCase = true) == true &&
+                                                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                                                        trackTitle,
+                                                        artistName,
+                                                        null,
+                                                        sp.title,
+                                                        sp.artistOrShow,
+                                                        sp.spotifyUri
+                                                    )
+                                            }?.spotifyUri
                                             PulseAgentScreen(
                                                 agentState = agentState,
                                                 satietyPercentage = agentSatiety,
@@ -742,12 +764,12 @@ open class MainActivity : ComponentActivity() {
                                                     ""
                                                 },
                                                 profileAvatarUrl = authSession.avatarUrl.ifBlank { spotifyUserProfile?.avatarUrl.orEmpty() },
-                                                currentTrackSpotifyUri = spotifyLiveState?.spotifyUri,
+                                                currentTrackSpotifyUri = matchedCurrentSpotifyUri,
                                                 currentTrackPlayCount = if (trackTitle != null) {
                                                     vm.resolvePlayCount(
                                                         trackTitle,
                                                         artistName,
-                                                        spotifyLiveState?.spotifyUri
+                                                        matchedCurrentSpotifyUri
                                                     )
                                                 } else {
                                                     0
@@ -1004,11 +1026,17 @@ open class MainActivity : ComponentActivity() {
                                         onAskAgentAboutCurrent = { title, artist ->
                                             coroutineScope.launch {
                                                 pagerState.animateScrollToPage(1)
+                                                val spUri = spotifyLiveState?.takeIf { sp ->
+                                                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                                                        title, artist, null,
+                                                        sp.title, sp.artistOrShow, sp.spotifyUri
+                                                    )
+                                                }?.spotifyUri
                                                 agentVoiceManager.askAgentAboutTrack(
                                                     title = title,
                                                     artist = artist,
                                                     freshnessPercent = 80,
-                                                    spotifyUri = spotifyLiveState?.spotifyUri,
+                                                    spotifyUri = spUri,
                                                     targetPlayer = selectedTargetPlayer
                                                 )
                                             }

@@ -25,7 +25,10 @@ data class ActivePlaybackSnapshot(
     val isPlaying: Boolean,
     val positionMs: Long,
     val durationMs: Long,
-    val updatedAtElapsedMs: Long
+    val updatedAtElapsedMs: Long,
+    val album: String? = null,
+    val playbackStateCode: Int = if (isPlaying) 3 else 2,
+    val speed: Float = 1.0f
 )
 
 /** Manages active MediaController callbacks while the notification listener is connected. */
@@ -38,10 +41,31 @@ class MediaSessionObserver(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val adapter = GenericMediaAdapter()
     private val controllers = mutableMapOf<MediaSession.Token, Entry>()
+    @Volatile
+    private var orderedTokens: List<MediaSession.Token> = emptyList()
     val observerSessionId: String = java.util.UUID.randomUUID().toString()
     private val deduplicator = CallbackDeduplicator()
     @Volatile
     private var started = false
+
+    private fun orderedEntries(): List<Entry> {
+        val tokenOrder = orderedTokens
+        if (tokenOrder.isEmpty()) return controllers.values.toList()
+        val seen = HashSet<MediaSession.Token>(controllers.size)
+        val ordered = ArrayList<Entry>(controllers.size)
+        for (tok in tokenOrder) {
+            controllers[tok]?.let { entry ->
+                ordered.add(entry)
+                seen.add(tok)
+            }
+        }
+        for ((tok, entry) in controllers) {
+            if (seen.add(tok)) {
+                ordered.add(entry)
+            }
+        }
+        return ordered
+    }
 
     /** True when callbacks are registered and media-session access is active. */
     val isStarted: Boolean get() = started
@@ -103,9 +127,14 @@ class MediaSessionObserver(
     }
 
     fun getActiveTitle(targetPackage: String? = null): String? {
-        val entry = controllers.values.firstOrNull { entry ->
-            targetPackage == null || entry.controller.packageName == targetPackage
-        } ?: controllers.values.firstOrNull() ?: return null
+        val entries = orderedEntries()
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        val entry = entries.firstOrNull { e ->
+            (cleanPkg == null || sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true) &&
+                e.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        } ?: entries.firstOrNull { e ->
+            cleanPkg == null || sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true
+        } ?: entries.firstOrNull() ?: return null
         return entry.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
     }
 
@@ -116,22 +145,50 @@ class MediaSessionObserver(
      */
     fun getActivePlaybackSnapshot(targetPackage: String? = null): ActivePlaybackSnapshot? {
         refreshSessions()
-        val playingEntry = controllers.values.firstOrNull { entry ->
-            (targetPackage == null || entry.controller.packageName == targetPackage) &&
-                entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        val entries = orderedEntries()
+        if (entries.isEmpty()) return null
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        fun pkgMatches(entry: Entry): Boolean {
+            if (cleanPkg == null) return true
+            val pkg = sourcePackage(entry.controller) ?: return false
+            return pkg.equals(cleanPkg, ignoreCase = true) ||
+                pkg.contains(cleanPkg, ignoreCase = true) ||
+                cleanPkg.contains(pkg, ignoreCase = true)
         }
-        val entry = playingEntry ?: controllers.values.firstOrNull { entry ->
-            targetPackage == null || entry.controller.packageName == targetPackage
-        } ?: controllers.values.firstOrNull() ?: return null
+        fun isPlaying(entry: Entry): Boolean =
+            entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        fun isBufferingOrConnecting(entry: Entry): Boolean {
+            val st = entry.controller.playbackState?.state
+            return st == android.media.session.PlaybackState.STATE_BUFFERING ||
+                st == android.media.session.PlaybackState.STATE_CONNECTING
+        }
+        fun hasTitle(entry: Entry): Boolean =
+            !entry.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
 
-        val metadata = entry.controller.metadata
-        val state = entry.controller.playbackState
+        val entry = entries.firstOrNull { pkgMatches(it) && isPlaying(it) && hasTitle(it) }
+            ?: entries.firstOrNull { isPlaying(it) && hasTitle(it) }
+            ?: entries.firstOrNull { pkgMatches(it) && isPlaying(it) }
+            ?: entries.firstOrNull { pkgMatches(it) && isBufferingOrConnecting(it) && hasTitle(it) }
+            ?: entries.firstOrNull { pkgMatches(it) && hasTitle(it) }
+            ?: entries.firstOrNull { hasTitle(it) }
+            ?: entries.firstOrNull { pkgMatches(it) }
+            ?: entries.firstOrNull()
+            ?: return null
+
+        return buildSnapshotFromController(entry.controller)
+    }
+
+    private fun buildSnapshotFromController(controller: MediaController): ActivePlaybackSnapshot {
+        val metadata = controller.metadata
+        val state = controller.playbackState
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
+        val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() }
         val durationMs = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
             ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
 
-        val isPlayingNow = state?.state == android.media.session.PlaybackState.STATE_PLAYING
+        val stateCode = state?.state ?: android.media.session.PlaybackState.STATE_NONE
+        val isPlayingNow = stateCode == android.media.session.PlaybackState.STATE_PLAYING
         val basePos = state?.position ?: 0L
         val lastUpdateElapsed = state?.lastPositionUpdateTime ?: 0L
         val speed = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
@@ -143,19 +200,22 @@ class MediaSessionObserver(
         }
 
         return ActivePlaybackSnapshot(
-            packageName = sourcePackage(entry.controller) ?: "com.spotify.music",
+            packageName = sourcePackage(controller) ?: "",
             title = title,
             artist = artist,
             isPlaying = isPlayingNow,
             positionMs = interpolatedPos.coerceAtLeast(0L),
             durationMs = durationMs.coerceAtLeast(0L),
-            updatedAtElapsedMs = nowElapsed
+            updatedAtElapsedMs = nowElapsed,
+            album = album,
+            playbackStateCode = stateCode,
+            speed = speed
         )
     }
 
     private fun resolveTargetController(targetPackage: String? = null): Entry? {
         refreshSessions()
-        val entries = controllers.values.toList()
+        val entries = orderedEntries()
         if (entries.isEmpty()) return null
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         fun pkgMatches(entry: Entry): Boolean {
@@ -259,6 +319,18 @@ class MediaSessionObserver(
         }
     }
 
+    fun seekTo(targetPackage: String? = null, positionMs: Long): Boolean {
+        val entry = resolveTargetController(targetPackage) ?: return false
+        return try {
+            val tc = entry.controller.transportControls ?: return false
+            tc.seekTo(positionMs.coerceAtLeast(0L))
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "seekTo error: ${e.message}")
+            false
+        }
+    }
+
     /**
      * Attempts to trigger playback in an active background media session via MediaController.
      * Returns true if an active session matching targetPackage was found and playFromSearch dispatched.
@@ -351,8 +423,11 @@ class MediaSessionObserver(
             append("Watching ${eligibleControllers.size} active media session(s)")
             if (excludedCount > 0) append("; non-music sessions excluded")
         }
+        val previousTopToken = orderedTokens.firstOrNull()
+        orderedTokens = eligibleControllers.map { it.sessionToken }
         val activeByToken = eligibleControllers.associateBy { it.sessionToken }
 
+        val removedAny = (controllers.keys - activeByToken.keys).isNotEmpty()
         (controllers.keys - activeByToken.keys).forEach { token ->
             controllers.remove(token)?.let { entry ->
                 runCatching { entry.controller.unregisterCallback(entry.callback) }
@@ -376,6 +451,7 @@ class MediaSessionObserver(
                         controllers.remove(token)?.let { removed ->
                             runCatching { removed.controller.unregisterCallback(this) }
                         }
+                        orderedTokens = orderedTokens.filter { it != token }
                         emit(entry, ObservationEventType.SESSION_DESTROYED)
                     }
                 }
@@ -388,6 +464,32 @@ class MediaSessionObserver(
                 } catch (_: IllegalStateException) {
                     controllers.remove(token)
                 }
+            }
+        }
+
+        val currentTop = orderedEntries().firstOrNull()
+        if (eligibleControllers.isEmpty() && removedAny) {
+            TuneMindListenerService.dispatchPlaybackSnapshot(
+                ActivePlaybackSnapshot(
+                    packageName = "",
+                    title = "",
+                    artist = "",
+                    isPlaying = false,
+                    positionMs = 0L,
+                    durationMs = 0L,
+                    updatedAtElapsedMs = SystemClock.elapsedRealtime(),
+                    album = null,
+                    playbackStateCode = android.media.session.PlaybackState.STATE_STOPPED,
+                    speed = 1.0f
+                )
+            )
+        } else if (currentTop != null && (currentTop.controller.sessionToken != previousTopToken || removedAny)) {
+            val topSrc = sourcePackage(currentTop.controller)
+            val topMeta = currentTop.controller.metadata
+            if (!isExcludedSource(topSrc) && !isWebOrNonMusic(topMeta, topSrc) &&
+                !currentTop.advertisementFilterState.shouldSuppress(topMeta)
+            ) {
+                TuneMindListenerService.dispatchPlaybackSnapshot(buildSnapshotFromController(currentTop.controller))
             }
         }
     }
@@ -417,9 +519,16 @@ class MediaSessionObserver(
         runCatching {
             val snapTitle = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
             val snapArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
+            val snapAlbum = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() }
             val snapDur = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
                 ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-            val isPlayingNow = state?.state == android.media.session.PlaybackState.STATE_PLAYING
+            val stateCode = if (eventType == ObservationEventType.SESSION_DESTROYED) {
+                android.media.session.PlaybackState.STATE_STOPPED
+            } else {
+                state?.state ?: android.media.session.PlaybackState.STATE_NONE
+            }
+            val isPlayingNow = eventType != ObservationEventType.SESSION_DESTROYED &&
+                stateCode == android.media.session.PlaybackState.STATE_PLAYING
             val basePos = state?.position ?: 0L
             val lastUpd = state?.lastPositionUpdateTime ?: 0L
             val spd = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
@@ -431,13 +540,16 @@ class MediaSessionObserver(
             }
             TuneMindListenerService.dispatchPlaybackSnapshot(
                 ActivePlaybackSnapshot(
-                    packageName = source ?: "com.spotify.music",
-                    title = snapTitle,
-                    artist = snapArtist,
+                    packageName = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else (source ?: "com.spotify.music"),
+                    title = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else snapTitle,
+                    artist = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else snapArtist,
                     isPlaying = isPlayingNow,
                     positionMs = interpPos.coerceAtLeast(0L),
                     durationMs = snapDur.coerceAtLeast(0L),
-                    updatedAtElapsedMs = nowElapsed
+                    updatedAtElapsedMs = nowElapsed,
+                    album = if (eventType == ObservationEventType.SESSION_DESTROYED) null else snapAlbum,
+                    playbackStateCode = stateCode,
+                    speed = spd
                 )
             )
         }

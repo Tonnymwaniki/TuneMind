@@ -98,6 +98,15 @@ object TuneMindInAppPlayer {
     private var loopStartMs: Long = 0L
     @Volatile
     private var loopEndMs: Long = 0L
+    @Volatile
+    var lastStateUpdatedMs: Long = 0L
+        private set
+
+    fun clearIfNotPlaying() {
+        if (!isPlaying() && _hasActiveTrackFlow.value) {
+            stopInternal(resetTrackMeta = true)
+        }
+    }
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -677,6 +686,7 @@ object TuneMindInAppPlayer {
     }
 
     private fun publishSnapshot(isPlaying: Boolean, positionMs: Long, durationMs: Long) {
+        lastStateUpdatedMs = System.currentTimeMillis()
         _positionMsFlow.value = positionMs.coerceAtLeast(0L)
         _durationMsFlow.value = durationMs.coerceAtLeast(0L)
         val title = _currentTitleFlow.value?.takeIf { it.isNotBlank() } ?: return
@@ -713,7 +723,10 @@ object TuneMindInAppPlayer {
                     .setWillPauseWhenDucked(pauseOnLoss)
                     .setOnAudioFocusChangeListener { change ->
                         when (change) {
-                            AudioManager.AUDIOFOCUS_LOSS -> pause()
+                            AudioManager.AUDIOFOCUS_LOSS -> {
+                                pause()
+                                stopInternal(resetTrackMeta = true)
+                            }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> pause()
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                                 if (pauseOnLoss) {

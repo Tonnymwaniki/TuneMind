@@ -304,6 +304,13 @@ interface SpotifyWebApiService {
         @Header("Authorization") authHeader: String? = null,
         @Query("device_id") deviceId: String? = null
     ): Response<Unit>
+
+    @PUT("v1/me/player/seek")
+    suspend fun seekToPosition(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("position_ms") positionMs: Long,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
 }
 
 /**

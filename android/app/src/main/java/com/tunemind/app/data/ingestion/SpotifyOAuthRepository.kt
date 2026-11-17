@@ -375,6 +375,55 @@ class SpotifyOAuthRepository(context: Context) {
     }
 
     /**
+     * Fast single-call refresh of `/v1/me/player/currently-playing` for foreground live Now Playing sync.
+     */
+    suspend fun refreshCurrentlyPlayingOnly(): SpotifyLiveTrackState? = withContext(Dispatchers.IO) {
+        if (!tokenManager.isAuthenticated() && !authManager.isAuthenticated()) {
+            return@withContext null
+        }
+        val validToken = authManager.getValidAccessToken() ?: tokenManager.getValidAccessToken(authService)
+            ?: return@withContext null
+        val bearerHeader = "Bearer $validToken"
+        val nowMs = System.currentTimeMillis()
+        try {
+            val currentResp = webApiService.getCurrentlyPlaying(
+                authHeader = bearerHeader,
+                additionalTypes = "track,episode"
+            )
+            when {
+                currentResp.isSuccessful && currentResp.code() == 200 -> {
+                    val liveState = currentResp.body()?.toLiveTrackState(nowMs)
+                    if (liveState != null) {
+                        _currentlyPlayingLiveState.value = liveState
+                    }
+                    liveState
+                }
+                currentResp.code() == 204 -> {
+                    val updated = _currentlyPlayingLiveState.value?.copy(
+                        isPlaying = false,
+                        updatedAtMs = nowMs
+                    )
+                    _currentlyPlayingLiveState.value = updated
+                    updated
+                }
+                else -> _currentlyPlayingLiveState.value
+            }
+        } catch (_: Exception) {
+            _currentlyPlayingLiveState.value
+        }
+    }
+
+    fun markSpotifyLivePausedExternally() {
+        val current = _currentlyPlayingLiveState.value ?: return
+        if (current.isPlaying) {
+            _currentlyPlayingLiveState.value = current.copy(
+                isPlaying = false,
+                updatedAtMs = System.currentTimeMillis()
+            )
+        }
+    }
+
+    /**
      * Fetches Liked Songs (`/v1/me/tracks`), Playlists (`/v1/me/playlists` + tracks),
      * and Podcasts (`/v1/me/shows`, `/v1/me/episodes`) into local Room tables.
      */

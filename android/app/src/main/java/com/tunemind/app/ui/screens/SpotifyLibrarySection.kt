@@ -101,6 +101,7 @@ fun SpotifyLibrarySection(
                     (liveState.progressMs.toFloat() / liveState.durationMs.toFloat()).coerceIn(0f, 1f)
                 } else 0f
                 val livePlayCount = resolvePlayCount(liveState.title, liveState.artistOrShow, liveState.spotifyUri)
+                val liveActuallyPlaying = isTrackCurrentlyPlaying(liveState.title, liveState.artistOrShow, liveState.spotifyUri)
                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
@@ -112,7 +113,7 @@ fun SpotifyLibrarySection(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                if (liveState.isPlaying) {
+                                if (liveActuallyPlaying) {
                                     AnimatedEqualizerBars(
                                         color = spotifyGreen,
                                         modifier = Modifier.size(16.dp, 14.dp)
@@ -127,8 +128,8 @@ fun SpotifyLibrarySection(
                                 }
                                 Text(
                                     text = when {
-                                        liveState.isPlaying && liveState.isPodcast -> "Playing Podcast on Spotify"
-                                        liveState.isPlaying -> "Playing on Spotify"
+                                        liveActuallyPlaying && liveState.isPodcast -> "Playing Podcast on Spotify"
+                                        liveActuallyPlaying -> "Playing on Spotify"
                                         else -> "Paused on Spotify"
                                     },
                                     color = spotifyGreen,

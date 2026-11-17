@@ -81,22 +81,25 @@ fun NowPlayingSheet(
     }
 
     val nowPlaying = homeState.nowPlaying
-    val effectiveTitle = (if (inAppHasTrack) inAppTitle else nowPlaying?.title)
+    val isInAppCurrent = remember(inAppHasTrack, inAppPlaying, nowPlaying?.sourcePackage, context.packageName) {
+        inAppPlaying || (inAppHasTrack && (nowPlaying?.sourcePackage == null || nowPlaying.sourcePackage == context.packageName))
+    }
+    val effectiveTitle = (if (isInAppCurrent) inAppTitle else nowPlaying?.title)
         ?.takeIf { it.isNotBlank() } ?: "Nothing Playing"
-    val effectiveArtist = (if (inAppHasTrack) inAppArtist else nowPlaying?.artist)
+    val effectiveArtist = (if (isInAppCurrent) inAppArtist else nowPlaying?.artist)
         ?.takeIf { it.isNotBlank() } ?: "Start a song or ask TuneMind"
-    val effectivePlaying = if (inAppHasTrack) inAppPlaying else (nowPlaying?.isPlaying == true)
-    val effectiveDurationMs = if (inAppHasTrack && inAppDurMs > 0L) inAppDurMs else (nowPlaying?.durationMs ?: 0L)
+    val effectivePlaying = if (isInAppCurrent) inAppPlaying else (nowPlaying?.isPlaying == true)
+    val effectiveDurationMs = if (isInAppCurrent && inAppDurMs > 0L) inAppDurMs else (nowPlaying?.durationMs ?: 0L)
 
     var externalTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(inAppHasTrack, effectivePlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
+    LaunchedEffect(isInAppCurrent, effectivePlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
         externalTickMs = System.currentTimeMillis()
-        while (!inAppHasTrack && effectivePlaying) {
+        while (!isInAppCurrent && effectivePlaying) {
             kotlinx.coroutines.delay(1000L)
             externalTickMs = System.currentTimeMillis()
         }
     }
-    val effectivePosMs = if (inAppHasTrack) {
+    val effectivePosMs = if (isInAppCurrent) {
         inAppPosMs
     } else {
         val base = nowPlaying?.positionMs ?: 0L
@@ -111,11 +114,12 @@ fun NowPlayingSheet(
     }
 
     val sourceLabel = when {
-        inAppHasTrack -> "TuneMind Built-In Player"
+        isInAppCurrent -> "TuneMind Built-In Player"
         nowPlaying?.sourcePackage?.contains("spotify", ignoreCase = true) == true -> "Spotify"
         nowPlaying?.sourcePackage?.contains("youtube", ignoreCase = true) == true -> "YouTube Music"
         nowPlaying?.sourcePackage?.contains("boomplay", ignoreCase = true) == true -> "Boomplay"
         nowPlaying?.sourcePackage?.contains("apple", ignoreCase = true) == true -> "Apple Music"
+        nowPlaying?.sourcePackage?.contains("audiomack", ignoreCase = true) == true -> "Audiomack"
         nowPlaying?.sourcePackage?.isNotBlank() == true -> nowPlaying.sourcePackage.substringAfterLast(".").replaceFirstChar { it.uppercase() }
         else -> "Playback Queue"
     }
@@ -130,19 +134,28 @@ fun NowPlayingSheet(
     val warnAmber = Color(0xFFFFB000)
 
     val hasTrack = effectiveTitle != "Nothing Playing"
+    val matchedLiveSpotify = remember(liveSpotify, effectiveTitle, effectiveArtist, hasTrack) {
+        if (!hasTrack) null
+        else liveSpotify?.takeIf { sp ->
+            com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                effectiveTitle, effectiveArtist, null,
+                sp.title, sp.artistOrShow, sp.spotifyUri
+            )
+        }
+    }
     val activeMedia = if (hasTrack) {
         rememberResolvedTrackMedia(
             title = effectiveTitle,
             artist = effectiveArtist,
-            spotifyUri = liveSpotify?.spotifyUri,
-            fallbackAlbumArtUrl = liveSpotify?.albumArtUrl
+            spotifyUri = matchedLiveSpotify?.spotifyUri,
+            fallbackAlbumArtUrl = matchedLiveSpotify?.albumArtUrl
         )
     } else null
     val durationSafe = effectiveDurationMs.coerceAtLeast(1L)
     val liveFraction = (effectivePosMs.toFloat() / durationSafe.toFloat()).coerceIn(0f, 1f)
     val displayFraction = sliderOverride ?: liveFraction
 
-    val canSeek = inAppHasTrack || SpotifyAppRemoteManager.isConnected()
+    val canSeek = hasTrack && effectiveDurationMs > 0L
 
     val infiniteTransition = rememberInfiniteTransition(label = "np_pulse")
     val discScale by infiniteTransition.animateFloat(
@@ -324,11 +337,7 @@ fun NowPlayingSheet(
                     onValueChangeFinished = {
                         val targetMs = ((sliderOverride ?: liveFraction) * durationSafe).toLong()
                         sliderOverride = null
-                        if (inAppHasTrack) {
-                            TuneMindInAppPlayer.seekTo(targetMs)
-                        } else if (SpotifyAppRemoteManager.isConnected()) {
-                            SpotifyAppRemoteManager.seekTo(targetMs)
-                        }
+                        vm.seekTo(targetMs)
                     },
                     colors = SliderDefaults.colors(
                         thumbColor = neonCyan,
@@ -451,7 +460,7 @@ fun NowPlayingSheet(
                                 sourcePkg = nowPlaying?.sourcePackage,
                                 startMs = start,
                                 endMs = end,
-                                spotifyUri = liveSpotify?.spotifyUri
+                                spotifyUri = matchedLiveSpotify?.spotifyUri
                             )
                             actionStatus = "Saved moment from \"$effectiveTitle\""
                         }
@@ -488,7 +497,7 @@ fun NowPlayingSheet(
                         accent = Color(0xFF1DB954),
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, liveSpotify?.spotifyUri)
+                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, matchedLiveSpotify?.spotifyUri)
                             actionStatus = "Adding \"$effectiveTitle\" to Spotify queue…"
                         }
                     )
@@ -498,7 +507,7 @@ fun NowPlayingSheet(
                         accent = Color(0xFF1DB954),
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, liveSpotify?.spotifyUri)
+                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, matchedLiveSpotify?.spotifyUri)
                             actionStatus = "Saving \"$effectiveTitle\" to Liked Songs…"
                         }
                     )

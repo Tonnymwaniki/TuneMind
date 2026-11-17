@@ -1159,12 +1159,22 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
             ?: return SpotifyActionResult(false, "Spotify not connected.")
         val authHeader = "Bearer $bearer"
         return try {
-            val resp = when (command.uppercase(Locale.ROOT)) {
-                "PAUSE" -> userApi.pausePlayback(authHeader = authHeader)
-                "PLAY", "RESUME" -> userApi.resumePlayback(authHeader = authHeader)
-                "NEXT" -> userApi.skipToNextTrack(authHeader = authHeader)
-                "PREV", "PREVIOUS" -> userApi.skipToPreviousTrack(authHeader = authHeader)
-                else -> return SpotifyActionResult(false, "Unsupported playback command.")
+            suspend fun executeCmd(deviceId: String? = null) = when (command.uppercase(Locale.ROOT)) {
+                "PAUSE" -> userApi.pausePlayback(authHeader = authHeader, deviceId = deviceId)
+                "PLAY", "RESUME" -> userApi.resumePlayback(authHeader = authHeader, deviceId = deviceId)
+                "NEXT" -> userApi.skipToNextTrack(authHeader = authHeader, deviceId = deviceId)
+                "PREV", "PREVIOUS" -> userApi.skipToPreviousTrack(authHeader = authHeader, deviceId = deviceId)
+                else -> null
+            }
+            var resp = executeCmd(null) ?: return SpotifyActionResult(false, "Unsupported playback command.")
+            if (resp.code() == 404) {
+                val devices = refreshPlaybackDevices()
+                val preferredId = devices.firstOrNull { it.isActive }?.id
+                    ?: devices.firstOrNull { it.type.equals("Smartphone", ignoreCase = true) }?.id
+                    ?: devices.firstOrNull()?.id
+                if (!preferredId.isNullOrBlank()) {
+                    executeCmd(preferredId)?.let { resp = it }
+                }
             }
             when {
                 resp.isSuccessful -> SpotifyActionResult(true, "Spotify $command executed.")
@@ -1174,6 +1184,32 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
             }
         } catch (e: Exception) {
             SpotifyActionResult(false, "Spotify control error: ${e.message}")
+        }
+    }
+
+    suspend fun seekSpotifyWebPlayback(positionMs: Long): SpotifyActionResult {
+        val bearer = getUserBearerToken()
+            ?: return SpotifyActionResult(false, "Spotify not connected.")
+        val authHeader = "Bearer $bearer"
+        val targetMs = positionMs.coerceAtLeast(0L)
+        return try {
+            var resp = userApi.seekToPosition(authHeader = authHeader, positionMs = targetMs)
+            if (resp.code() == 404) {
+                val devices = refreshPlaybackDevices()
+                val preferredId = devices.firstOrNull { it.isActive }?.id
+                    ?: devices.firstOrNull { it.type.equals("Smartphone", ignoreCase = true) }?.id
+                    ?: devices.firstOrNull()?.id
+                if (!preferredId.isNullOrBlank()) {
+                    resp = userApi.seekToPosition(authHeader = authHeader, positionMs = targetMs, deviceId = preferredId)
+                }
+            }
+            when {
+                resp.isSuccessful -> SpotifyActionResult(true, "Seeked Spotify track.")
+                resp.code() == 403 -> SpotifyActionResult(false, "Seek via Web API requires Spotify Premium.")
+                else -> SpotifyActionResult(false, "Seek returned HTTP ${resp.code()}.")
+            }
+        } catch (e: Exception) {
+            SpotifyActionResult(false, "Spotify seek error: ${e.message}")
         }
     }
 

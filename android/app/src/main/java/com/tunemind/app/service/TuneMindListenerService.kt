@@ -180,6 +180,9 @@ class TuneMindListenerService : NotificationListenerService() {
     fun skipPrev(targetPackage: String? = null): Boolean =
         observerOrNull()?.skipPrev(targetPackage) ?: false
 
+    fun seekTo(targetPackage: String? = null, positionMs: Long): Boolean =
+        observerOrNull()?.seekTo(targetPackage, positionMs) ?: false
+
     fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
         return observerOrNull()?.playFromSearch(targetPackage, query, extras) ?: false
     }

@@ -290,6 +290,26 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var queueMonitoredMaxPosMs: Long = 0L
     @Volatile
+    private var expectedHandoverTargetTitle: String = ""
+    @Volatile
+    private var expectedHandoverTargetTrack: DopamineCapsuleTrack? = null
+    @Volatile
+    private var expectedHandoverWindowUntilMs: Long = 0L
+    @Volatile
+    private var expectedHandoverRetryCount: Int = 0
+    @Volatile
+    private var preResolvedQueueKey: String = ""
+    @Volatile
+    private var latestLiveSnapshot: com.tunemind.app.media.ActivePlaybackSnapshot? = null
+    @Volatile
+    private var latestLiveSnapshotWallMs: Long = 0L
+    @Volatile
+    private var manualLaunchPendingTitle: String? = null
+    @Volatile
+    private var manualLaunchPendingUntilMs: Long = 0L
+    @Volatile
+    private var uiForegroundActive: Boolean = false
+    @Volatile
     private var statusClearJob: kotlinx.coroutines.Job? = null
     private var snapshotMonitorListener: ((com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit)? = null
     private var inAppCompletionQueueListener: ((String, String, String) -> Unit)? = null
@@ -305,46 +325,74 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var liveStatsRecomputeJob: kotlinx.coroutines.Job? = null
 
+    fun setUiForegroundActive(active: Boolean) {
+        uiForegroundActive = active
+        if (active) {
+            viewModelScope.launch {
+                runCatching {
+                    com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
+                    publishAuthoritativeNowPlayingNow()
+                    spotifyRepo?.refreshCurrentlyPlayingOnly()
+                    publishAuthoritativeNowPlayingNow()
+                }
+            }
+        }
+    }
+
+    private fun isInAppPlayerCurrent(): Boolean {
+        val ctxPkg = AppHolder.context?.packageName
+        val nowPkg = _homeState.value.nowPlaying?.sourcePackage
+        return com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+            (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack() &&
+                (nowPkg == null || nowPkg == ctxPkg))
+    }
+
     private fun resolveBestNowPlayingForStats(
         rows: List<PlaybackObservation> = cachedRowsForStats,
         liveSpotify: SpotifyLiveTrackState? = _spotifyLiveState.value
     ): NowPlayingObservation? {
         val nowMs = System.currentTimeMillis()
-        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
-            val inAppTitle = com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value
-            if (!inAppTitle.isNullOrBlank()) {
-                return NowPlayingObservation(
-                    title = inAppTitle,
-                    artist = com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value,
-                    album = null,
-                    sourcePackage = AppHolder.context?.packageName ?: "com.tunemind.app",
-                    isPlaying = com.tunemind.app.provider.TuneMindInAppPlayer.isPlayingFlow.value,
-                    playbackStateCode = if (com.tunemind.app.provider.TuneMindInAppPlayer.isPlayingFlow.value) 3 else 2,
-                    positionMs = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value,
-                    durationMs = com.tunemind.app.provider.TuneMindInAppPlayer.durationMsFlow.value,
-                    speed = 1.0f,
-                    updatedAtMs = nowMs
-                )
-            }
-        }
+        val appPkg = AppHolder.context?.packageName ?: "com.tunemind.app"
+
+        val inAppActive = com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()
+        val inAppTitle = com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value?.takeIf { it.isNotBlank() }
+        val inAppObs = if (inAppActive && inAppTitle != null) {
+            val playing = com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
+            NowPlayingObservation(
+                title = inAppTitle,
+                artist = com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value,
+                album = null,
+                sourcePackage = appPkg,
+                isPlaying = playing,
+                playbackStateCode = if (playing) 3 else 2,
+                positionMs = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value,
+                durationMs = com.tunemind.app.provider.TuneMindInAppPlayer.durationMsFlow.value,
+                speed = 1.0f,
+                updatedAtMs = com.tunemind.app.provider.TuneMindInAppPlayer.lastStateUpdatedMs.takeIf { it > 0L } ?: nowMs
+            )
+        } else null
 
         val serviceSnap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
-        if (serviceSnap != null && serviceSnap.title.isNotBlank()) {
-            val ageMs = (android.os.SystemClock.elapsedRealtime() - serviceSnap.updatedAtElapsedMs).coerceAtLeast(0L)
-            if (ageMs < 12 * 60 * 1000L) {
-                return NowPlayingObservation(
-                    title = serviceSnap.title,
-                    artist = serviceSnap.artist,
-                    album = null,
-                    sourcePackage = serviceSnap.packageName,
-                    isPlaying = serviceSnap.isPlaying,
-                    playbackStateCode = if (serviceSnap.isPlaying) 3 else 2,
-                    positionMs = serviceSnap.positionMs,
-                    durationMs = serviceSnap.durationMs,
-                    speed = 1.0f,
-                    updatedAtMs = nowMs - ageMs
-                )
-            }
+        val cachedSnap = latestLiveSnapshot?.takeIf { (nowMs - latestLiveSnapshotWallMs) < 12 * 60 * 1000L }
+        val activeSnap = when {
+            serviceSnap != null && serviceSnap.title.isNotBlank() -> serviceSnap
+            cachedSnap != null && cachedSnap.title.isNotBlank() -> cachedSnap
+            else -> null
+        }
+        val liveSnapObs = activeSnap?.let { snap ->
+            val ageMs = (android.os.SystemClock.elapsedRealtime() - snap.updatedAtElapsedMs).coerceIn(0L, 12 * 60 * 1000L)
+            NowPlayingObservation(
+                title = snap.title,
+                artist = snap.artist,
+                album = snap.album,
+                sourcePackage = snap.packageName,
+                isPlaying = snap.isPlaying,
+                playbackStateCode = snap.playbackStateCode,
+                positionMs = snap.positionMs,
+                durationMs = snap.durationMs,
+                speed = snap.speed,
+                updatedAtMs = nowMs - ageMs
+            )
         }
 
         val deviceObs = rows.filter { it.observerSessionId != "spotify_web_api_ingestion" }
@@ -358,44 +406,181 @@ class TuneMindViewModel : ViewModel() {
         }
         val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
         val isRecentObservation = (nowMs - latestObsTimeMs) < 12 * 60 * 1000L
-        val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
+        val obsIsPlayingNow = (latestStateObs?.playbackStateCode == 3) && (nowMs - latestObsTimeMs) < 90_000L
+        val deviceObsCandidate = if ((latestTrackMeta != null || latestStateObs != null) && isRecentObservation) {
+            val metaTitle = latestTrackMeta?.trackTitle
+            val stateTitle = latestStateObs?.trackTitle
+            val useStateMeta = !stateTitle.isNullOrBlank() && (latestStateObs?.eventTimeMs ?: 0L) >= (latestTrackMeta?.eventTimeMs ?: 0L)
+            NowPlayingObservation(
+                title = if (useStateMeta) stateTitle else (metaTitle ?: stateTitle),
+                artist = if (useStateMeta) (latestStateObs?.trackArtist ?: latestTrackMeta?.trackArtist) else (latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist),
+                album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
+                sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
+                isPlaying = obsIsPlayingNow,
+                playbackStateCode = if (obsIsPlayingNow) 3 else (latestStateObs?.playbackStateCode ?: 2),
+                positionMs = latestStateObs?.positionMs ?: 0L,
+                durationMs = (if (useStateMeta) latestStateObs?.durationMs else latestTrackMeta?.durationMs)
+                    ?: latestTrackMeta?.durationMs
+                    ?: latestStateObs?.durationMs
+                    ?: 0L,
+                speed = latestStateObs?.playbackSpeed ?: 1.0f,
+                updatedAtMs = latestObsTimeMs
+            )
+        } else null
+
+        val freshLiveSpotify = liveSpotify != null && (nowMs - liveSpotify.updatedAtMs) < 12 * 60 * 1000L
+        val spotifyObs = if (freshLiveSpotify && liveSpotify != null && liveSpotify.title.isNotBlank()) {
+            NowPlayingObservation(
+                title = liveSpotify.title,
+                artist = liveSpotify.artistOrShow,
+                album = liveSpotify.albumOrSubtitle.ifBlank { null },
+                sourcePackage = "com.spotify.music",
+                isPlaying = liveSpotify.isPlaying && (nowMs - liveSpotify.updatedAtMs) < 90_000L,
+                playbackStateCode = if (liveSpotify.isPlaying && (nowMs - liveSpotify.updatedAtMs) < 90_000L) 3 else 2,
+                positionMs = liveSpotify.progressMs,
+                durationMs = liveSpotify.durationMs,
+                speed = 1.0f,
+                updatedAtMs = liveSpotify.updatedAtMs
+            )
+        } else null
 
         val overrideObs = manualActiveTrackOverride
-        val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
-        val freshLiveSpotify = liveSpotify != null && (nowMs - liveSpotify.updatedAtMs) < 12 * 60 * 1000L
+        val hasOptimisticPending = overrideObs != null && nowMs < manualLaunchPendingUntilMs
 
-        return when {
-            useAgentOverride -> overrideObs
-            (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
-                NowPlayingObservation(
-                    title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
-                    artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
-                    album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
-                    sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
-                    isPlaying = isPlayingNow,
-                    playbackStateCode = latestStateObs?.playbackStateCode,
-                    positionMs = latestStateObs?.positionMs ?: 0L,
-                    durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
-                    speed = latestStateObs?.playbackSpeed ?: 1.0f,
-                    updatedAtMs = latestObsTimeMs
+        if (hasOptimisticPending && overrideObs != null) {
+            val pendingTitle = manualLaunchPendingTitle
+            val liveAlreadySwitched = !pendingTitle.isNullOrBlank() &&
+                liveSnapObs != null &&
+                liveSnapObs.isPlaying &&
+                ListeningPlayDeduplicator.isSameTrack(
+                    liveSnapObs.title, liveSnapObs.artist, null,
+                    pendingTitle, null, null
+                )
+            val spotifyAlreadySwitched = !pendingTitle.isNullOrBlank() &&
+                spotifyObs != null &&
+                spotifyObs.isPlaying &&
+                ListeningPlayDeduplicator.isSameTrack(
+                    spotifyObs.title, spotifyObs.artist, null,
+                    pendingTitle, null, null
+                )
+            if (!liveAlreadySwitched && !spotifyAlreadySwitched) {
+                return overrideObs
+            }
+        }
+
+        // 1. Any actively playing real source wins immediately
+        if (inAppObs != null && inAppObs.isPlaying) return inAppObs
+        if (liveSnapObs != null && liveSnapObs.isPlaying) return liveSnapObs
+        if (spotifyObs != null && spotifyObs.isPlaying &&
+            (liveSnapObs == null || liveSnapObs.sourcePackage?.contains("spotify", ignoreCase = true) == true)
+        ) {
+            return spotifyObs
+        }
+        if (deviceObsCandidate != null && deviceObsCandidate.isPlaying &&
+            (liveSnapObs == null || liveSnapObs.sourcePackage == deviceObsCandidate.sourcePackage)
+        ) {
+            return deviceObsCandidate
+        }
+
+        // 2. When paused/stopped: pick newest non-playing source
+        val candidates = listOfNotNull(
+            liveSnapObs,
+            inAppObs,
+            deviceObsCandidate,
+            spotifyObs
+        )
+        return candidates.maxByOrNull { it.updatedAtMs }
+            ?: overrideObs
+            ?: _homeState.value.nowPlaying?.copy(isPlaying = false, playbackStateCode = 2)
+    }
+
+    private fun publishAuthoritativeNowPlayingNow(incomingSnap: com.tunemind.app.media.ActivePlaybackSnapshot? = null) {
+        val nowMs = System.currentTimeMillis()
+        val appPkg = AppHolder.context?.packageName
+        if (incomingSnap != null) {
+            latestLiveSnapshot = incomingSnap
+            latestLiveSnapshotWallMs = nowMs
+            if (incomingSnap.title.isNotBlank() && incomingSnap.packageName != appPkg) {
+                if (incomingSnap.isPlaying) {
+                    com.tunemind.app.provider.TuneMindInAppPlayer.clearIfNotPlaying()
+                }
+                if (incomingSnap.isPlaying && !incomingSnap.packageName.contains("spotify", ignoreCase = true)) {
+                    spotifyRepo?.markSpotifyLivePausedExternally()
+                }
+                val pendingTitle = manualLaunchPendingTitle
+                val matchesPending = !pendingTitle.isNullOrBlank() &&
+                    ListeningPlayDeduplicator.isSameTrack(
+                        incomingSnap.title, incomingSnap.artist, null,
+                        pendingTitle, null, null
+                    )
+                if (matchesPending) {
+                    manualLaunchPendingUntilMs = 0L
+                    manualLaunchPendingTitle = null
+                    manualActiveTrackOverride = null
+                } else if (pendingTitle == null && manualActiveTrackOverride?.isPlaying == false && !incomingSnap.isPlaying) {
+                    // External player confirmed pause cleanly
+                    manualLaunchPendingUntilMs = 0L
+                    manualActiveTrackOverride = null
+                } else if (manualActiveTrackOverride != null) {
+                    val matchesOverride = ListeningPlayDeduplicator.isSameTrack(
+                        incomingSnap.title, incomingSnap.artist, null,
+                        manualActiveTrackOverride?.title, manualActiveTrackOverride?.artist, null
+                    )
+                    if (!matchesOverride && (incomingSnap.isPlaying || nowMs >= manualLaunchPendingUntilMs)) {
+                        manualActiveTrackOverride = null
+                    }
+                }
+            } else if (incomingSnap.title.isBlank() && !incomingSnap.isPlaying) {
+                // External MediaSession destroyed or stopped cleanly
+                val cur = _homeState.value.nowPlaying
+                if (cur != null && cur.sourcePackage == incomingSnap.packageName && nowMs >= manualLaunchPendingUntilMs) {
+                    manualActiveTrackOverride = null
+                    _homeState.value = _homeState.value.copy(
+                        nowPlaying = cur.copy(
+                            isPlaying = false,
+                            playbackStateCode = incomingSnap.playbackStateCode,
+                            updatedAtMs = nowMs
+                        )
+                    )
+                    recomputeAdaptiveTheme()
+                    refreshLiveListeningStatsNow()
+                }
+                return
+            }
+        }
+
+        val best = resolveBestNowPlayingForStats(cachedRowsForStats, _spotifyLiveState.value) ?: return
+        val prev = _homeState.value.nowPlaying
+        val trackOrStateChanged = prev == null ||
+            prev.title != best.title ||
+            prev.artist != best.artist ||
+            prev.isPlaying != best.isPlaying ||
+            prev.sourcePackage != best.sourcePackage
+        val positionOrDurationChanged = prev == null ||
+            kotlin.math.abs(prev.positionMs - best.positionMs) >= 1_500L ||
+            prev.durationMs != best.durationMs
+
+        if (trackOrStateChanged || positionOrDurationChanged) {
+            _homeState.value = _homeState.value.copy(nowPlaying = best)
+            if (trackOrStateChanged) {
+                recomputeAdaptiveTheme()
+                syncUpNextQueueWithSources(forceRebuild = false)
+                evaluateActiveForYouSessionTransition(best)
+                refreshLiveListeningStatsNow()
+            }
+            if (!best.title.isNullOrBlank()) {
+                val spMatch = best.sourcePackage?.contains("spotify", ignoreCase = true) == true &&
+                    ListeningPlayDeduplicator.isSameTrack(
+                        best.title, best.artist, null,
+                        _spotifyLiveState.value?.title, _spotifyLiveState.value?.artistOrShow, _spotifyLiveState.value?.spotifyUri
+                    )
+                visualRepo?.requestTrackVisuals(
+                    title = best.title,
+                    artist = best.artist,
+                    spotifyUri = if (spMatch) _spotifyLiveState.value?.spotifyUri else null,
+                    fallbackAlbumArtUrl = if (spMatch) _spotifyLiveState.value?.albumArtUrl else null
                 )
             }
-            freshLiveSpotify && liveSpotify != null -> {
-                NowPlayingObservation(
-                    title = liveSpotify.title,
-                    artist = liveSpotify.artistOrShow,
-                    album = liveSpotify.albumOrSubtitle.ifBlank { null },
-                    sourcePackage = "com.spotify.music",
-                    isPlaying = liveSpotify.isPlaying,
-                    playbackStateCode = if (liveSpotify.isPlaying) 3 else 2,
-                    positionMs = liveSpotify.progressMs,
-                    durationMs = liveSpotify.durationMs,
-                    speed = 1.0f,
-                    updatedAtMs = liveSpotify.updatedAtMs
-                )
-            }
-            overrideObs != null -> overrideObs
-            else -> _homeState.value.nowPlaying
         }
     }
 
@@ -451,35 +636,27 @@ class TuneMindViewModel : ViewModel() {
 
     fun isTrackCurrentlyPlaying(title: String?, artist: String?, spotifyUri: String? = null): Boolean {
         if (title.isNullOrBlank()) return false
-        val nowPlaying = _homeState.value.nowPlaying
-        if (nowPlaying != null && nowPlaying.isPlaying) {
-            if (ListeningPlayDeduplicator.isSameTrack(
+        val nowPlaying = _homeState.value.nowPlaying ?: return false
+        if (!nowPlaying.isPlaying) return false
+        val matchedSpotifyUri = _spotifyLiveState.value?.takeIf { sp ->
+            nowPlaying.sourcePackage?.contains("spotify", ignoreCase = true) == true &&
+                ListeningPlayDeduplicator.isSameTrack(
                     nowPlaying.title,
                     nowPlaying.artist,
                     null,
-                    title,
-                    artist,
-                    spotifyUri
+                    sp.title,
+                    sp.artistOrShow,
+                    sp.spotifyUri
                 )
-            ) {
-                return true
-            }
-        }
-        val liveSpotify = _spotifyLiveState.value
-        val freshSpotify = liveSpotify != null &&
-            liveSpotify.isPlaying &&
-            (System.currentTimeMillis() - liveSpotify.updatedAtMs) < 12 * 60_000L
-        if (freshSpotify && liveSpotify != null) {
-            return ListeningPlayDeduplicator.isSameTrack(
-                liveSpotify.title,
-                liveSpotify.artistOrShow,
-                liveSpotify.spotifyUri,
-                title,
-                artist,
-                spotifyUri
-            )
-        }
-        return false
+        }?.spotifyUri
+        return ListeningPlayDeduplicator.isSameTrack(
+            nowPlaying.title,
+            nowPlaying.artist,
+            matchedSpotifyUri,
+            title,
+            artist,
+            spotifyUri
+        )
     }
 
     private val _loadingPlaylistIds = MutableStateFlow<Set<String>>(emptySet())
@@ -910,6 +1087,7 @@ class TuneMindViewModel : ViewModel() {
     ) {
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim().ifBlank { "Autonomous Studio Flow" }
+        val now = System.currentTimeMillis()
         val nowObs = NowPlayingObservation(
             title = cleanTitle,
             artist = cleanArtist,
@@ -920,22 +1098,32 @@ class TuneMindViewModel : ViewModel() {
             positionMs = 0L,
             durationMs = 210_000L,
             speed = 1.0f,
-            updatedAtMs = System.currentTimeMillis()
+            updatedAtMs = now
         )
+        manualLaunchPendingTitle = cleanTitle
+        manualLaunchPendingUntilMs = now + 7_000L
         manualActiveTrackOverride = nowObs
         _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
         markTrackPlayedFromQueueOrExternal(cleanTitle, cleanArtist, null)
         syncAtmosphereToTrack(cleanTitle, cleanArtist)
         refreshLiveListeningStatsNow()
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1_400L)
+            com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
+            publishAuthoritativeNowPlayingNow()
+        }
     }
 
     fun setAgentPlaybackPaused() {
-        val current = _homeState.value.nowPlaying
-        val pausedObs = (current ?: NowPlayingObservation(title = "Studio Standby", artist = "Paused")).copy(
+        val current = _homeState.value.nowPlaying ?: return
+        val now = System.currentTimeMillis()
+        val pausedObs = current.copy(
             isPlaying = false,
             playbackStateCode = 2,
-            updatedAtMs = System.currentTimeMillis()
+            updatedAtMs = now
         )
+        manualLaunchPendingTitle = null
+        manualLaunchPendingUntilMs = now + 2_000L
         manualActiveTrackOverride = pausedObs
         _homeState.value = _homeState.value.copy(nowPlaying = pausedObs)
         recomputeAdaptiveTheme()
@@ -943,18 +1131,19 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun setAgentPlaybackResumed() {
-        val current = _homeState.value.nowPlaying
-        if (current != null) {
-            val resumedObs = current.copy(
-                isPlaying = true,
-                playbackStateCode = 3,
-                updatedAtMs = System.currentTimeMillis()
-            )
-            manualActiveTrackOverride = resumedObs
-            _homeState.value = _homeState.value.copy(nowPlaying = resumedObs)
-            recomputeAdaptiveTheme()
-            refreshLiveListeningStatsNow()
-        }
+        val current = _homeState.value.nowPlaying ?: return
+        val now = System.currentTimeMillis()
+        val resumedObs = current.copy(
+            isPlaying = true,
+            playbackStateCode = 3,
+            updatedAtMs = now
+        )
+        manualLaunchPendingTitle = current.title
+        manualLaunchPendingUntilMs = now + 2_000L
+        manualActiveTrackOverride = resumedObs
+        _homeState.value = _homeState.value.copy(nowPlaying = resumedObs)
+        recomputeAdaptiveTheme()
+        refreshLiveListeningStatsNow()
     }
 
     fun restoreTrackFromVaultByTitle(titleQuery: String) {
@@ -1022,12 +1211,13 @@ class TuneMindViewModel : ViewModel() {
             .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
             .toSet()
 
-        val activeTitle = if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        val inAppCurrent = isInAppPlayerCurrent()
+        val activeTitle = if (inAppCurrent) {
             com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value
         } else {
             _homeState.value.nowPlaying?.title
         }
-        val activeArtist = if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        val activeArtist = if (inAppCurrent) {
             com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value
         } else {
             _homeState.value.nowPlaying?.artist
@@ -1167,12 +1357,13 @@ class TuneMindViewModel : ViewModel() {
 
     private fun syncUpNextQueueWithSources(forceRebuild: Boolean = false) {
         val slot = currentTimeSlot
-        val activeTitle = if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        val inAppCurrent = isInAppPlayerCurrent()
+        val activeTitle = if (inAppCurrent) {
             com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value
         } else {
             _homeState.value.nowPlaying?.title
         }
-        val activeArtist = if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        val activeArtist = if (inAppCurrent) {
             com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value
         } else {
             _homeState.value.nowPlaying?.artist
@@ -1209,11 +1400,48 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
+        val finalized = combined.take(5)
         _upNextQueueState.value = DopamineCapsuleState(
             slotLabel = slot.label.uppercase(),
             headline = "${slot.label} Dopamine Capsule",
-            tracks = combined.take(5)
+            tracks = finalized
         )
+
+        val head = finalized.firstOrNull()
+        val ctx = AppHolder.context
+        if (ctx != null && head != null && head.spotifyUri.isNullOrBlank()) {
+            val headKey = ListeningPlayDeduplicator.canonicalTrackKey(head.title, head.artist)
+            if (headKey != preResolvedQueueKey) {
+                preResolvedQueueKey = headKey
+                viewModelScope.launch(Dispatchers.IO) {
+                    val uri = runCatching {
+                        com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                            context = ctx,
+                            cleanTitle = head.title,
+                            cleanArtist = head.artist,
+                            fullQuery = "${head.title} ${head.artist}".trim()
+                        )
+                    }.getOrNull()
+                    if (!uri.isNullOrBlank() && uri.startsWith("spotify:track:")) {
+                        val curList = _upNextQueueState.value.tracks
+                        var patchedAny = false
+                        val patched = curList.map { item ->
+                            if (ListeningPlayDeduplicator.canonicalTrackKey(item.title, item.artist) == headKey &&
+                                item.spotifyUri.isNullOrBlank()
+                            ) {
+                                patchedAny = true
+                                item.copy(spotifyUri = uri)
+                            } else {
+                                item
+                            }
+                        }
+                        if (patchedAny) {
+                            _upNextQueueState.value = _upNextQueueState.value.copy(tracks = patched)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun compileDopamineCapsule(): DopamineCapsuleState {
@@ -1346,12 +1574,17 @@ class TuneMindViewModel : ViewModel() {
             ?: "com.spotify.music"
 
         markTrackPlayedFromQueueOrExternal(track.title, track.artist, track.spotifyUri)
+        val now = System.currentTimeMillis()
         queueMonitoredTitle = track.title
         queueMonitoredArtist = track.artist
         queueMonitoredPackage = resolvedPkg
         queueMonitoredDurationMs = 0L
         queueMonitoredMaxPosMs = 0L
-        lastQueueHandoverAtMs = System.currentTimeMillis()
+        lastQueueHandoverAtMs = now
+        expectedHandoverTargetTitle = track.title
+        expectedHandoverTargetTrack = track
+        expectedHandoverWindowUntilMs = now + 15_000L
+        expectedHandoverRetryCount = 0
 
         setAgentActiveTrack(track.title, track.artist, resolvedPkg)
         postNowPlayingStatus("Playing \"${track.title}\" from Up Next…")
@@ -1362,6 +1595,11 @@ class TuneMindViewModel : ViewModel() {
             try {
                 // Ensure current Spotify/external song stops before launching queued track
                 pauseExternalAndLocalMediaQuietly(ctx, resolvedPkg)
+                if (resolvedPkg.contains("spotify", ignoreCase = true) &&
+                    !com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()
+                ) {
+                    runCatching { visualRepo?.controlSpotifyWebPlayback("PAUSE") }
+                }
                 val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(ctx)
                 val matchedProvider = registry.getAllProviders().firstOrNull {
                     it.packageName.equals(resolvedPkg, ignoreCase = true)
@@ -1399,8 +1637,9 @@ class TuneMindViewModel : ViewModel() {
                     else -> "Launched \"${track.title}\""
                 }
                 postNowPlayingStatus(msg)
-                kotlinx.coroutines.delay(500L)
+                kotlinx.coroutines.delay(450L)
                 com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
+                publishAuthoritativeNowPlayingNow()
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 msg = "Could not launch \"${track.title}\": ${e.message}"
@@ -1531,8 +1770,7 @@ class TuneMindViewModel : ViewModel() {
             }
             val ctx = AppHolder.context
             if (ctx != null &&
-                com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx) &&
-                !com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(ctx)
+                com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)
             ) {
                 triggerAutoQueueHandover(
                     finishedTitle = doneTitle,
@@ -1543,23 +1781,48 @@ class TuneMindViewModel : ViewModel() {
         inAppCompletionQueueListener = completionListener
         com.tunemind.app.provider.TuneMindInAppPlayer.addOnTrackCompletedListener(completionListener)
 
-        // Real-time Auto Queue Override listener & 750ms progress guard (blocks Spotify autoplay when Auto mode is active)
+        // Real-time Auto Queue Override + immediate Now Playing sync loop
         val snapListener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit = { snap ->
+            publishAuthoritativeNowPlayingNow(snap)
             handleSnapshotForUpNextAutoOverride(snap)
         }
         snapshotMonitorListener = snapListener
         com.tunemind.app.service.TuneMindListenerService.addPlaybackSnapshotListener(snapListener)
         viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(750L)
-                val ctx = AppHolder.context ?: continue
-                if (com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx) &&
-                    !com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(ctx)
-                ) {
-                    val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
-                    if (snap != null) {
+                val ctx = AppHolder.context
+                val overrideOn = ctx != null && com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)
+                val isPlayingNow = _homeState.value.nowPlaying?.isPlaying == true
+                kotlinx.coroutines.delay(
+                    when {
+                        overrideOn && isPlayingNow -> 400L
+                        uiForegroundActive -> 900L
+                        else -> 1800L
+                    }
+                )
+                if (ctx == null) continue
+                val listener = com.tunemind.app.service.TuneMindListenerService.instance
+                if (uiForegroundActive || overrideOn) {
+                    listener?.observerOrNull()?.refreshSessions()
+                }
+                val snap = listener?.getActivePlaybackSnapshot()
+                if (snap != null) {
+                    publishAuthoritativeNowPlayingNow(snap)
+                    if (overrideOn) {
                         handleSnapshotForUpNextAutoOverride(snap)
                     }
+                } else {
+                    publishAuthoritativeNowPlayingNow()
+                }
+            }
+        }
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(4_500L)
+                if (!uiForegroundActive) continue
+                if (spotifyRepo?.isConnectedFlow?.value == true) {
+                    runCatching { spotifyRepo?.refreshCurrentlyPlayingOnly() }
+                    publishAuthoritativeNowPlayingNow()
                 }
             }
         }
@@ -1822,11 +2085,16 @@ class TuneMindViewModel : ViewModel() {
 
                     // Universal Profile Engine (works for ANY music player — YouTube Music, Boomplay, Apple Music, local MP3, Spotify)
                     nowPlayingObs?.title?.takeIf { it.isNotBlank() }?.let { activeTitle ->
+                        val spMatch = nowPlayingObs.sourcePackage?.contains("spotify", ignoreCase = true) == true &&
+                            ListeningPlayDeduplicator.isSameTrack(
+                                activeTitle, nowPlayingObs.artist, null,
+                                liveSpotify?.title, liveSpotify?.artistOrShow, liveSpotify?.spotifyUri
+                            )
                         visualRepo?.requestTrackVisuals(
                             title = activeTitle,
                             artist = nowPlayingObs.artist,
-                            spotifyUri = if (nowPlayingObs.sourcePackage == "com.spotify.music") liveSpotify?.spotifyUri else null,
-                            fallbackAlbumArtUrl = if (nowPlayingObs.sourcePackage == "com.spotify.music") liveSpotify?.albumArtUrl else null
+                            spotifyUri = if (spMatch) liveSpotify?.spotifyUri else null,
+                            fallbackAlbumArtUrl = if (spMatch) liveSpotify?.albumArtUrl else null
                         )
                     }
                     recent.take(15).forEach { entry ->
@@ -2051,39 +2319,29 @@ class TuneMindViewModel : ViewModel() {
 
     private fun scheduleMediaSessionResync(targetPkg: String?) {
         viewModelScope.launch {
-            kotlinx.coroutines.delay(450L)
+            kotlinx.coroutines.delay(400L)
             com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
-            val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot(targetPkg)
-            if (snap != null) {
-                val cur = _homeState.value.nowPlaying
-                if (cur != null) {
-                    val synced = cur.copy(
-                        title = snap.title.ifBlank { cur.title },
-                        artist = snap.artist.ifBlank { cur.artist },
-                        sourcePackage = snap.packageName.ifBlank { cur.sourcePackage },
-                        isPlaying = snap.isPlaying,
-                        playbackStateCode = if (snap.isPlaying) 3 else 2,
-                        positionMs = snap.positionMs,
-                        durationMs = if (snap.durationMs > 0L) snap.durationMs else cur.durationMs,
-                        updatedAtMs = System.currentTimeMillis()
-                    )
-                    manualActiveTrackOverride = synced
-                    _homeState.value = _homeState.value.copy(nowPlaying = synced)
-                }
+            publishAuthoritativeNowPlayingNow()
+            if (targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) {
+                runCatching { spotifyRepo?.refreshCurrentlyPlayingOnly() }
             }
+            kotlinx.coroutines.delay(950L)
+            com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
+            publishAuthoritativeNowPlayingNow()
         }
     }
 
     fun pausePlayback() {
         val ctx = AppHolder.context
-        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        if (isInAppPlayerCurrent()) {
             com.tunemind.app.provider.TuneMindInAppPlayer.pause()
             setAgentPlaybackPaused()
             postNowPlayingStatus("Paused TuneMind Built-In Player")
             return
         }
         val targetPkg = resolveActiveMediaPackage()
-        val appRemotePaused = if (targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) {
+        val isSpotify = targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)
+        val appRemotePaused = if (isSpotify) {
             runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.pause() }.getOrDefault(false)
         } else {
             false
@@ -2095,7 +2353,7 @@ class TuneMindViewModel : ViewModel() {
             dispatchOsMediaKey(ctx, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
         } else false
 
-        if ((targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) && !appRemotePaused) {
+        if (isSpotify && !appRemotePaused) {
             viewModelScope.launch(Dispatchers.IO) {
                 visualRepo?.controlSpotifyWebPlayback("PAUSE")
             }
@@ -2112,7 +2370,7 @@ class TuneMindViewModel : ViewModel() {
 
     fun resumePlayback() {
         val ctx = AppHolder.context
-        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        if (isInAppPlayerCurrent()) {
             val ok = com.tunemind.app.provider.TuneMindInAppPlayer.resume()
             if (ok) {
                 setAgentPlaybackResumed()
@@ -2121,7 +2379,8 @@ class TuneMindViewModel : ViewModel() {
             }
         }
         val targetPkg = resolveActiveMediaPackage()
-        val appRemoteResumed = if (targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) {
+        val isSpotify = targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)
+        val appRemoteResumed = if (isSpotify) {
             runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.resume() }.getOrDefault(false)
         } else {
             false
@@ -2133,7 +2392,7 @@ class TuneMindViewModel : ViewModel() {
             dispatchOsMediaKey(ctx, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
         } else false
 
-        if ((targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) && !appRemoteResumed && !controllerResumed) {
+        if (isSpotify && !appRemoteResumed) {
             viewModelScope.launch(Dispatchers.IO) {
                 visualRepo?.controlSpotifyWebPlayback("PLAY")
             }
@@ -2149,11 +2408,11 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun togglePlayback() {
-        val currentlyPlaying = if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        val currentlyPlaying = if (isInAppPlayerCurrent()) {
             com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
         } else {
             val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
-            snap?.isPlaying ?: (_homeState.value.nowPlaying?.isPlaying == true)
+            _homeState.value.nowPlaying?.isPlaying ?: snap?.isPlaying ?: false
         }
         if (currentlyPlaying) {
             pausePlayback()
@@ -2167,14 +2426,15 @@ class TuneMindViewModel : ViewModel() {
         val autoQueueActive = ctx != null &&
             com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)
         if (respectAutoQueue &&
-            (autoQueueActive || com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) &&
+            (autoQueueActive || isInAppPlayerCurrent()) &&
             compileDopamineCapsule().tracks.isNotEmpty()
         ) {
             if (playNextFromQueue(resolveActiveMediaPackage())) return
         }
 
         val targetPkg = resolveActiveMediaPackage()
-        val appRemoteSkipped = if (targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) {
+        val isSpotify = targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)
+        val appRemoteSkipped = if (isSpotify) {
             runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.skipNext() }.getOrDefault(false)
         } else {
             false
@@ -2188,7 +2448,7 @@ class TuneMindViewModel : ViewModel() {
             dispatchOsMediaKey(ctx, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
         } else false
 
-        if ((targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) && !appRemoteSkipped && !controllerSkipped) {
+        if (isSpotify && !appRemoteSkipped && !controllerSkipped) {
             viewModelScope.launch(Dispatchers.IO) {
                 visualRepo?.controlSpotifyWebPlayback("NEXT")
             }
@@ -2203,16 +2463,18 @@ class TuneMindViewModel : ViewModel() {
 
     fun skipPrev() {
         val ctx = AppHolder.context
-        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+        if (isInAppPlayerCurrent()) {
             val pos = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value
             if (pos > 3_000L) {
                 com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(0L)
+                publishAuthoritativeNowPlayingNow()
                 postNowPlayingStatus("Restarted track")
                 return
             }
         }
         val targetPkg = resolveActiveMediaPackage()
-        val appRemotePrev = if (targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) {
+        val isSpotify = targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)
+        val appRemotePrev = if (isSpotify) {
             runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.skipPrev() }.getOrDefault(false)
         } else {
             false
@@ -2226,7 +2488,7 @@ class TuneMindViewModel : ViewModel() {
             dispatchOsMediaKey(ctx, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         } else false
 
-        if ((targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)) && !appRemotePrev && !controllerPrev) {
+        if (isSpotify && !appRemotePrev && !controllerPrev) {
             viewModelScope.launch(Dispatchers.IO) {
                 visualRepo?.controlSpotifyWebPlayback("PREV")
             }
@@ -2239,11 +2501,47 @@ class TuneMindViewModel : ViewModel() {
         scheduleMediaSessionResync(targetPkg)
     }
 
+    fun seekTo(positionMs: Long) {
+        val clamped = positionMs.coerceAtLeast(0L)
+        if (isInAppPlayerCurrent()) {
+            com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(clamped)
+            publishAuthoritativeNowPlayingNow()
+            return
+        }
+        val targetPkg = resolveActiveMediaPackage()
+        val isSpotify = targetPkg == null || targetPkg.contains("spotify", ignoreCase = true)
+        val appRemoteSeeked = if (isSpotify && com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()) {
+            runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.seekTo(clamped) }.getOrDefault(false)
+        } else false
+        val controllerSeeked = if (!appRemoteSeeked) {
+            runCatching {
+                com.tunemind.app.service.TuneMindListenerService.instance?.seekTo(targetPkg, clamped) ?: false
+            }.getOrDefault(false)
+        } else false
+
+        if (isSpotify && !appRemoteSeeked && !controllerSeeked) {
+            viewModelScope.launch(Dispatchers.IO) {
+                visualRepo?.seekSpotifyWebPlayback(clamped)
+            }
+        }
+
+        val cur = _homeState.value.nowPlaying
+        if (cur != null) {
+            val now = System.currentTimeMillis()
+            val updated = cur.copy(
+                positionMs = clamped,
+                updatedAtMs = now
+            )
+            manualLaunchPendingUntilMs = now + 1_500L
+            manualActiveTrackOverride = updated
+            _homeState.value = _homeState.value.copy(nowPlaying = updated)
+        }
+        scheduleMediaSessionResync(targetPkg)
+    }
+
     private fun handleSnapshotForUpNextAutoOverride(snap: com.tunemind.app.media.ActivePlaybackSnapshot) {
         val ctx = AppHolder.context ?: return
-        if (!com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx) ||
-            com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(ctx)
-        ) {
+        if (!com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)) {
             queueMonitoredTitle = snap.title.trim()
             queueMonitoredArtist = snap.artist.trim()
             queueMonitoredPackage = snap.packageName
@@ -2256,7 +2554,59 @@ class TuneMindViewModel : ViewModel() {
         if (rawTitle.length < 2 || rawTitle.equals("Advertisement", ignoreCase = true)) return
 
         val now = System.currentTimeMillis()
-        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 9_000L) {
+        val expectedTrack = expectedHandoverTargetTrack
+        val matchesExpected = expectedHandoverTargetTitle.isNotBlank() &&
+            ListeningPlayDeduplicator.isSameTrack(
+                rawTitle, snap.artist, null,
+                expectedHandoverTargetTitle, expectedTrack?.artist, expectedTrack?.spotifyUri
+            )
+        val matchesFinishedSource = lastQueueHandoverSourceTitle.isNotBlank() &&
+            ListeningPlayDeduplicator.isSameTrack(
+                rawTitle, snap.artist, null,
+                lastQueueHandoverSourceTitle, queueMonitoredArtist, null
+            )
+
+        if (matchesExpected) {
+            queueMonitoredTitle = rawTitle
+            queueMonitoredArtist = snap.artist
+            queueMonitoredPackage = snap.packageName
+            if (snap.durationMs > 0L) queueMonitoredDurationMs = snap.durationMs
+            queueMonitoredMaxPosMs = snap.positionMs
+            if (snap.isPlaying) {
+                expectedHandoverTargetTitle = ""
+                expectedHandoverTargetTrack = null
+                expectedHandoverWindowUntilMs = 0L
+                expectedHandoverRetryCount = 0
+            }
+            return
+        }
+
+        // Intercept unapproved third-party autoplay if external player sneaked past Pause during TuneMind handover
+        if (expectedTrack != null &&
+            now < expectedHandoverWindowUntilMs &&
+            !queueHandoverInFlight &&
+            !matchesFinishedSource &&
+            !com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) &&
+            expectedHandoverRetryCount < 2
+        ) {
+            val nextRetryCount = expectedHandoverRetryCount + 1
+            queueHandoverInFlight = true
+            val pkg = snap.packageName.ifBlank { resolveActiveMediaPackage() ?: "com.spotify.music" }
+            pauseExternalAndLocalMediaQuietly(ctx, pkg)
+            if (pkg.contains("spotify", ignoreCase = true)) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching { visualRepo?.controlSpotifyWebPlayback("PAUSE") }
+                }
+            }
+            postNowPlayingStatus("Intercepted player autoplay · Spinning \"${expectedTrack.title}\"")
+            playQueuedTrack(expectedTrack, pkg) { _, _ ->
+                queueHandoverInFlight = false
+            }
+            expectedHandoverRetryCount = nextRetryCount
+            return
+        }
+
+        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 6_500L) {
             if (com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle)) {
                 queueMonitoredTitle = rawTitle
                 queueMonitoredArtist = snap.artist
@@ -2268,9 +2618,7 @@ class TuneMindViewModel : ViewModel() {
         }
 
         val isSameTrack = queueMonitoredTitle.isBlank() ||
-            rawTitle.equals(queueMonitoredTitle, ignoreCase = true) ||
-            rawTitle.contains(queueMonitoredTitle, ignoreCase = true) ||
-            queueMonitoredTitle.contains(rawTitle, ignoreCase = true)
+            ListeningPlayDeduplicator.isSameTrack(rawTitle, snap.artist, null, queueMonitoredTitle, queueMonitoredArtist, null)
 
         if (isSameTrack) {
             queueMonitoredTitle = rawTitle
@@ -2279,10 +2627,11 @@ class TuneMindViewModel : ViewModel() {
             if (snap.durationMs > 0L) queueMonitoredDurationMs = snap.durationMs
             if (snap.positionMs > queueMonitoredMaxPosMs) queueMonitoredMaxPosMs = snap.positionMs
 
-            // Trigger A: Song is within final 2 seconds -> immediately block player autoplay and launch TuneMind Up Next
+            // Trigger A: Song is within final window -> immediately stop player autoplay & spin TuneMind Up Next
+            val leadWindowMs = if (queueMonitoredDurationMs >= 45_000L) 3_200L else 1_800L
             if (snap.isPlaying &&
-                queueMonitoredDurationMs >= 20_000L &&
-                snap.positionMs >= (queueMonitoredDurationMs - 2_000L) &&
+                queueMonitoredDurationMs >= 15_000L &&
+                snap.positionMs >= (queueMonitoredDurationMs - leadWindowMs) &&
                 !lastQueueHandoverSourceTitle.equals(rawTitle, ignoreCase = true)
             ) {
                 triggerAutoQueueHandover(
@@ -2293,14 +2642,14 @@ class TuneMindViewModel : ViewModel() {
             return
         }
 
-        // Trigger B: Track changed without TuneMind initiating it after substantial play -> intercept Spotify/player autoplay
+        // Trigger B: External player auto-advanced to an unrequested song after substantial play -> intercept immediately
         val prevTitle = queueMonitoredTitle
         val prevDur = queueMonitoredDurationMs
         val prevMax = queueMonitoredMaxPosMs
         val wasTuneMindLaunch = com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) ||
             (manualActiveTrackOverride?.title?.equals(rawTitle, ignoreCase = true) == true &&
                 (now - (manualActiveTrackOverride?.updatedAtMs ?: 0L)) < 12_000L)
-        val prevPlayedSubstantially = prevMax >= 25_000L || (prevDur >= 20_000L && prevMax >= (prevDur * 60L) / 100L)
+        val prevPlayedSubstantially = prevMax >= 12_000L || (prevDur >= 15_000L && prevMax >= (prevDur * 45L) / 100L)
 
         if (!wasTuneMindLaunch &&
             prevTitle.isNotBlank() &&
@@ -2325,11 +2674,21 @@ class TuneMindViewModel : ViewModel() {
         val ctx = AppHolder.context ?: return
         if (queueHandoverInFlight) return
         val nextTrack = compileDopamineCapsule().tracks.firstOrNull() ?: return
+        val now = System.currentTimeMillis()
         queueHandoverInFlight = true
-        lastQueueHandoverAtMs = System.currentTimeMillis()
+        lastQueueHandoverAtMs = now
         lastQueueHandoverSourceTitle = finishedTitle
+        expectedHandoverTargetTitle = nextTrack.title
+        expectedHandoverTargetTrack = nextTrack
+        expectedHandoverWindowUntilMs = now + 15_000L
+        expectedHandoverRetryCount = 0
 
         pauseExternalAndLocalMediaQuietly(ctx, targetPkg)
+        if (targetPkg.contains("spotify", ignoreCase = true)) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { visualRepo?.controlSpotifyWebPlayback("PAUSE") }
+            }
+        }
         postNowPlayingStatus("Auto-playing next from TuneMind queue: \"${nextTrack.title}\"")
         playQueuedTrack(nextTrack, targetPkg) { _, _ ->
             queueHandoverInFlight = false

@@ -186,12 +186,18 @@ fun MusicalMomentsScreen(
             }
 
             // Current Track Strip (Open Canvas)
+            val matchedSpotifyArtUrl = liveSpotify?.takeIf { sp ->
+                com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                    currentTrackTitle, currentTrackArtist, activeUri,
+                    sp.title, sp.artistOrShow, sp.spotifyUri
+                )
+            }?.albumArtUrl
             val currentMedia = if (canSaveCurrent) {
                 rememberResolvedTrackMedia(
                     title = currentTrackTitle,
                     artist = currentTrackArtist,
                     spotifyUri = activeUri,
-                    fallbackAlbumArtUrl = liveSpotify?.albumArtUrl
+                    fallbackAlbumArtUrl = matchedSpotifyArtUrl
                 )
             } else null
 

@@ -62,6 +62,7 @@ fun SettingsScreen(
     val isDecibelSafetyEnabled by vm.isDecibelSafetyAlertEnabled.collectAsState()
 
     val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
+    val upNextAutoOverrideEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.upNextAutoOverrideEnabled.collectAsState()
     val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
     val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
     val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
@@ -198,6 +199,20 @@ fun SettingsScreen(
                 checked = autonomousDjEnabled,
                 onCheckedChange = {
                     com.tunemind.app.domain.voice.AgentSettingsStore.setAutonomousDjEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Auto Queue Takeover",
+                description = if (upNextAutoOverrideEnabled) {
+                    "Stops Spotify and external autoplay at song end and spins TuneMind's Up Next track."
+                } else {
+                    "Off: Lets Spotify or your player advance unless you tap Next."
+                },
+                checked = upNextAutoOverrideEnabled,
+                onCheckedChange = {
+                    vm.setUpNextAutoOverrideEnabled(it)
                 }
             )
             StudioHairlineDivider()

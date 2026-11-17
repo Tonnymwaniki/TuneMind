@@ -639,8 +639,11 @@ class AgentVoiceManager(
     }
 
     private fun evaluatePlaybackSnapshotForEndOfSong(snap: com.tunemind.app.media.ActivePlaybackSnapshot) {
-        // Strict consent gate: NEVER talk or queue next songs autonomously unless user enabled Autonomous DJ
-        if (!AgentSettingsStore.isAutonomousDjEnabled(context)) {
+        // Strict consent gate: NEVER talk or queue next songs autonomously unless user enabled Autonomous DJ.
+        // Also yield to TuneMind's Up Next Auto Override whenever the user activated Auto Queue Takeover.
+        if (!AgentSettingsStore.isAutonomousDjEnabled(context) ||
+            AgentSettingsStore.isUpNextAutoOverrideEnabled(context)
+        ) {
             isAwaitingEndOfSongUserChoice = false
             monitoredTrackTitle = ""
             monitoredTrackMaxPosMs = 0L
