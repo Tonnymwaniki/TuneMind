@@ -76,14 +76,14 @@ object RecommendationEngine {
                     category = RecommendationCategory.COOLDOWN_RESTORED,
                     suggestedProviderId = preferredProviderId,
                     observationCountBasis = 0,
-                    trackId = track.trackId.ifBlank {
+                    trackId = vault.trackId.ifBlank {
                         com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                            spotifyUri = track.spotifyUri,
-                            title = track.title,
-                            artist = track.artist
+                            spotifyUri = vault.spotifyUri,
+                            title = vault.title,
+                            artist = vault.artist
                         )
                     },
-                    spotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.spotifyUri)
+                    spotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(vault.spotifyUri)
                 )
             )
         }

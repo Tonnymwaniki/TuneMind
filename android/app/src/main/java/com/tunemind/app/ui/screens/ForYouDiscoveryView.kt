@@ -504,7 +504,6 @@ fun LazyListScope.forYouDiscoveryItems(
 
                 newReleases.take(10).forEach { rel ->
                     val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                        trackId = rel.id,
                         spotifyUri = rel.spotifyUri,
                         title = rel.title,
                         artist = rel.artistName

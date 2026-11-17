@@ -426,9 +426,8 @@ class TuneMindViewModel : ViewModel() {
             val useStateMeta = !stateTitle.isNullOrBlank() && (latestStateObs?.eventTimeMs ?: 0L) >= (latestTrackMeta?.eventTimeMs ?: 0L)
             val resolvedDeviceTitle = if (useStateMeta) stateTitle else (metaTitle ?: stateTitle)
             val resolvedDeviceArtist = if (useStateMeta) (latestStateObs?.trackArtist ?: latestTrackMeta?.trackArtist) else (latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist)
-            val resolvedDeviceUri = TrackIdentityResolver.normalizeSpotifyUri(
-                latestTrackMeta?.providerTrackId ?: latestStateObs?.providerTrackId
-            )
+            val rawDeviceTrackId = latestTrackMeta?.trackId ?: latestStateObs?.trackId
+            val resolvedDeviceUri = TrackIdentityResolver.normalizeSpotifyUri(rawDeviceTrackId)
             NowPlayingObservation(
                 title = resolvedDeviceTitle,
                 artist = resolvedDeviceArtist,
@@ -444,6 +443,7 @@ class TuneMindViewModel : ViewModel() {
                 speed = latestStateObs?.playbackSpeed ?: 1.0f,
                 updatedAtMs = latestObsTimeMs,
                 trackId = TrackIdentityResolver.resolveCanonicalTrackId(
+                    trackId = rawDeviceTrackId,
                     spotifyUri = resolvedDeviceUri,
                     title = resolvedDeviceTitle,
                     artist = resolvedDeviceArtist
@@ -467,7 +467,7 @@ class TuneMindViewModel : ViewModel() {
                 speed = 1.0f,
                 updatedAtMs = liveSpotify.updatedAtMs,
                 trackId = TrackIdentityResolver.resolveCanonicalTrackId(
-                    trackId = liveSpotify.trackId,
+                    trackId = liveSpotify.id,
                     spotifyUri = spUri,
                     title = liveSpotify.title,
                     artist = liveSpotify.artistOrShow
