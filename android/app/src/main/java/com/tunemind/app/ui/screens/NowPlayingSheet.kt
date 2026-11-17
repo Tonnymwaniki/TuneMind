@@ -452,16 +452,6 @@ fun NowPlayingSheet(
                 }
             }
 
-            if (autoOverrideEnabled) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "Auto Queue Takeover ON · Next spins TuneMind queue & stops Spotify autoplay",
-                    color = safeGreen.copy(alpha = 0.9f),
-                    fontSize = 11.5.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
-
             if (!displayActionStatus.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
@@ -552,18 +542,30 @@ fun NowPlayingSheet(
                 Spacer(modifier = Modifier.height(18.dp))
             }
 
-            // Up Next Queue (Cross-App Autoplay Override + Recommended Fresh Additions)
-            val recommendedForQueue = remember(effectiveUpNext, vaultState, manualFreshTracks, freshExcludedKeys, effectiveTitle) {
-                vm.getRecommendedFreshPoolForQueue(limit = 4)
-            }
+            // Up Next Queue (Fixed 5-track sliding Fresh window: 1 playing + 5 queued)
+            val queueTracks = effectiveUpNext.tracks.take(5)
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        StudioSectionHeader(title = "Up Next Queue")
+                        Column(modifier = Modifier.weight(1f)) {
+                            StudioSectionHeader(title = "Up Next · ${queueTracks.size}/5")
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (autoOverrideEnabled) {
+                                    "Queue locked · Shifts up & auto-refills from Fresh"
+                                } else {
+                                    "Queue unlocked · Tap Lock to block player autoplay"
+                                },
+                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.56f),
+                                fontSize = 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -580,7 +582,7 @@ fun NowPlayingSheet(
                                     .clickable { vm.setUpNextAutoOverrideEnabled(!autoOverrideEnabled) }
                             ) {
                                 Text(
-                                    text = if (autoOverrideEnabled) "Auto · Lock Queue" else "Manual",
+                                    text = if (autoOverrideEnabled) "Locked" else "Lock",
                                     color = if (autoOverrideEnabled) safeGreen else Color.White.copy(alpha = 0.72f),
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -601,20 +603,9 @@ fun NowPlayingSheet(
                         }
                     }
 
-                    Text(
-                        text = if (autoOverrideEnabled) {
-                            "Blocking Spotify & player autoplay — next song strictly plays from this queue."
-                        } else {
-                            "Manual queue — toggle Auto to block playlist autoplay across music apps."
-                        },
-                        color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.56f),
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp
-                    )
-
                     if (pendingProposedTrack != null) {
                         Surface(
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(14.dp),
                             color = safeGreen.copy(alpha = 0.12f),
                             border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.45f)),
                             modifier = Modifier.fillMaxWidth()
@@ -622,7 +613,7 @@ fun NowPlayingSheet(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -631,15 +622,15 @@ fun NowPlayingSheet(
                                     Text(
                                         text = pendingProposedTrack.title,
                                         color = Color(0xFFF8FAFC),
-                                        fontSize = 14.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "Suggested · ${pendingProposedTrack.artist}",
+                                        text = "Voice Queue · ${pendingProposedTrack.artist}",
                                         color = safeGreen,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -649,9 +640,9 @@ fun NowPlayingSheet(
                                 }
                                 Button(
                                     onClick = onApproveProposedTrack,
-                                    shape = RoundedCornerShape(28.dp),
+                                    shape = RoundedCornerShape(24.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = safeGreen, contentColor = Color(0xFF0D0D0D)),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                                 ) {
                                     Text("Play", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
@@ -659,66 +650,77 @@ fun NowPlayingSheet(
                         }
                     }
 
-                    if (effectiveUpNext.tracks.isEmpty()) {
+                    StudioHairlineDivider()
+
+                    if (queueTracks.isEmpty()) {
                         Text(
-                            text = "Play a few tracks or tap Refresh above to populate your non-repeating Up Next queue.",
+                            text = "Play songs in TuneMind or sync a Spotify playlist to populate your 5-song Fresh queue.",
                             color = Color.White.copy(alpha = 0.56f),
                             fontSize = 13.sp,
-                            lineHeight = 18.sp
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
                     } else {
-                        effectiveUpNext.tracks.forEachIndexed { idx, capTrack ->
+                        queueTracks.forEachIndexed { idx, capTrack ->
                             val capMedia = rememberResolvedTrackMedia(
                                 title = capTrack.title,
                                 artist = capTrack.artist,
                                 spotifyUri = capTrack.spotifyUri
                             )
+                            val isNext = idx == 0
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (isNext) neonCyan.copy(alpha = 0.08f) else Color.Transparent
+                                    )
                                     .clickable {
                                         vm.playQueuedTrack(capTrack, selectedTargetPlayer)
                                         actionStatus = null
                                     }
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    .padding(vertical = 7.dp, horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
+                                        .size(22.dp)
                                         .clip(CircleShape)
-                                        .background(neonCyan.copy(alpha = 0.14f)),
+                                        .background(
+                                            if (isNext) neonCyan.copy(alpha = 0.22f)
+                                            else Color.White.copy(alpha = 0.07f)
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.PlayArrow,
-                                        contentDescription = "Play",
-                                        tint = neonCyan,
-                                        modifier = Modifier.size(18.dp)
+                                    Text(
+                                        text = "${idx + 1}",
+                                        color = if (isNext) neonCyan else Color.White.copy(alpha = 0.65f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
+                                LayeredSongArtistBadge(
+                                    albumArtUrl = capMedia.albumArtUrl,
+                                    artistImageUrl = capMedia.artistImageUrl,
+                                    title = capTrack.title,
+                                    artist = capTrack.artist,
+                                    accentColor = if (isNext) neonCyan else theme.primaryAccent,
+                                    size = 42.dp
+                                )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "${idx + 1}. ${capTrack.title}",
+                                        text = capTrack.title,
                                         color = Color(0xFFF8FAFC),
                                         fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
+                                        fontWeight = if (isNext) FontWeight.Bold else FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "${capTrack.artist} · ${capTrack.freshnessPercent}% fresh",
-                                        color = Color.White.copy(alpha = 0.62f),
+                                        color = if (isNext) neonCyan.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.58f),
                                         fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = capTrack.reason,
-                                        color = Color.White.copy(alpha = 0.44f),
-                                        fontSize = 11.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -730,8 +732,8 @@ fun NowPlayingSheet(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.VerticalAlignTop,
-                                            contentDescription = "Play Next",
-                                            tint = neonCyan.copy(alpha = 0.8f),
+                                            contentDescription = "Move to #1",
+                                            tint = Color.White.copy(alpha = 0.65f),
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -742,133 +744,14 @@ fun NowPlayingSheet(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Skip from queue",
-                                        tint = Color.White.copy(alpha = 0.52f),
+                                        contentDescription = "Swap track",
+                                        tint = Color.White.copy(alpha = 0.48f),
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
-                                LayeredSongArtistBadge(
-                                    albumArtUrl = capMedia.albumArtUrl,
-                                    artistImageUrl = capMedia.artistImageUrl,
-                                    title = capTrack.title,
-                                    artist = capTrack.artist,
-                                    accentColor = neonCyan,
-                                    size = 44.dp
-                                )
                             }
-                            if (idx < effectiveUpNext.tracks.lastIndex) {
+                            if (idx < queueTracks.lastIndex) {
                                 StudioHairlineDivider()
-                            }
-                        }
-
-                        val headTrack = effectiveUpNext.tracks.first()
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Button(
-                            onClick = { vm.playNextFromQueue(selectedTargetPlayer) },
-                            shape = RoundedCornerShape(28.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = neonCyan.copy(alpha = 0.16f),
-                                contentColor = Color(0xFFF8FAFC)
-                            ),
-                            border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.52f)),
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = null,
-                                tint = neonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Play Next: ${headTrack.title}",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    if (recommendedForQueue.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        StudioHairlineDivider()
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Add Recommended Songs",
-                                color = Color.White.copy(alpha = 0.78f),
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Auto Add 2",
-                                color = neonCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(neonCyan.copy(alpha = 0.14f))
-                                    .clickable {
-                                        vm.autoAddRecommendedFreshToQueue(2)
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                        recommendedForQueue.forEach { recTrack ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        vm.enqueueUpNextTrack(
-                                            title = recTrack.title,
-                                            artist = recTrack.artist,
-                                            spotifyUri = recTrack.spotifyUri,
-                                            reason = recTrack.reason,
-                                            freshnessPercent = recTrack.freshnessPercent,
-                                            playNext = false
-                                        )
-                                    }
-                                    .padding(vertical = 6.dp, horizontal = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = recTrack.title,
-                                        color = Color(0xFFF8FAFC),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${recTrack.artist} · ${recTrack.freshnessPercent}% fresh · ${recTrack.reason}",
-                                        color = Color.White.copy(alpha = 0.54f),
-                                        fontSize = 11.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(100.dp))
-                                        .background(neonCyan.copy(alpha = 0.16f))
-                                        .border(1.dp, neonCyan.copy(alpha = 0.45f), RoundedCornerShape(100.dp))
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "+ Queue",
-                                        color = neonCyan,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
                             }
                         }
                     }
