@@ -16,7 +16,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +36,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +48,7 @@ import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.domain.vault.RestingVaultEngine
 import com.tunemind.app.ui.GraduatedVaultSummary
+import com.tunemind.app.ui.ManualFreshTrack
 import com.tunemind.app.ui.TrackVaultUiStatus
 import com.tunemind.app.ui.VaultTrack
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
@@ -107,13 +119,18 @@ fun DopamineVaultScreen(
     likedTracks: List<SpotifyLikedTrackEntity> = emptyList(),
     playlists: List<SpotifyPlaylistEntity> = emptyList(),
     savedRecommendations: List<AiRecommendationEntity> = emptyList(),
-    restoredAtMap: Map<String, Long> = emptyMap()
+    restoredAtMap: Map<String, Long> = emptyMap(),
+    manualFreshTracks: List<ManualFreshTrack> = emptyList(),
+    freshExcludedKeys: Set<String> = emptySet(),
+    onAddToFresh: (title: String, artist: String, sourcePackage: String?, spotifyUri: String?, trackId: String?, albumArtUrl: String?) -> Unit = { _, _, _, _, _, _ -> },
+    onRemoveFromFresh: (title: String, artist: String, spotifyUri: String?, trackId: String?) -> Unit = { _, _, _, _ -> }
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Resting, 2 = For You
     var freshFilter by remember { mutableStateOf(0) } // 0 = All, 1 = Comebacks, 2 = Library Gems, 3 = Played
     var activeSyncSong by remember { mutableStateOf<DopamineSongItem?>(null) }
+    var showManualPickerSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedTab) {
         onTickVaultLifecycle()
@@ -134,6 +151,8 @@ fun DopamineVaultScreen(
         playlists,
         savedRecommendations,
         restoredAtMap,
+        manualFreshTracks,
+        freshExcludedKeys,
         resolvePlayCount,
         repetitionSensitivity,
         resolveTrackVaultStatus
@@ -143,6 +162,50 @@ fun DopamineVaultScreen(
         val seenIds = mutableSetOf<String>()
         val nowMs = System.currentTimeMillis()
         val sevenDaysMs = 7L * RestingVaultEngine.DAY_MS
+
+        fun isFreshExcluded(title: String, artist: String, canonicalId: String?): Boolean {
+            if (freshExcludedKeys.isEmpty()) return false
+            val nKey = RestingVaultEngine.normalizeTrackKey(title, artist)
+            return freshExcludedKeys.contains(nKey) ||
+                (!canonicalId.isNullOrBlank() && freshExcludedKeys.contains(canonicalId))
+        }
+
+        // 0. User Manual Fresh Additions (pinned at peak freshness by user)
+        for (mf in manualFreshTracks) {
+            val title = mf.title.trim().takeIf { it.isNotEmpty() } ?: continue
+            val artist = mf.artist.trim().ifBlank { "Music" }
+            val key = "${title.lowercase()}|${artist.lowercase()}"
+            if (!seenKeys.add(key)) continue
+            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(mf.spotifyUri)
+            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                trackId = mf.trackId,
+                spotifyUri = cleanUri,
+                title = title,
+                artist = artist
+            )
+            val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
+            if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
+            val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
+            val safeId = "mf_${canonicalId}".let { if (seenIds.add(it)) it else "mf_${list.size}" }
+            list.add(
+                DopamineSongItem(
+                    id = safeId,
+                    title = title,
+                    artist = artist,
+                    freshnessPercent = 99,
+                    playCount = plays,
+                    spotifyUri = cleanUri,
+                    sourcePackage = mf.sourcePackage ?: "com.spotify.music",
+                    isCoolingDown = false,
+                    isFromVault = false,
+                    trackId = canonicalId,
+                    albumArtUrl = mf.albumArtUrl,
+                    freshCategory = RestingVaultEngine.FreshCategory.UNPLAYED_GEM,
+                    freshReason = "Pinned to Fresh · Ready now",
+                    readinessScore = 99
+                )
+            )
+        }
 
         // 1. Active Resting Vault entries (live ease-out recovery curve & remaining cooldown)
         for (v in vaultTracks) {
@@ -184,6 +247,7 @@ fun DopamineVaultScreen(
         // 2. Graduated Vault Comebacks (completed full rest cleanly & ready to replay)
         for (grad in graduatedTracks) {
             val key = "${grad.title.trim().lowercase()}|${grad.artist.trim().lowercase()}"
+            if (isFreshExcluded(grad.title, grad.artist, grad.trackId)) continue
             if (!seenKeys.add(key)) continue
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(grad.spotifyUri)
             val resolvedPlays = resolvePlayCount(grad.title, grad.artist, cleanUri).coerceAtLeast(0)
@@ -228,6 +292,8 @@ fun DopamineVaultScreen(
             val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
                 ?: t.distinctAppearanceCount.coerceAtLeast(0)
             val vaultStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
+            val cooling = vaultStatus.isInVault || vaultStatus.isCoolingDown
+            if (!cooling && isFreshExcluded(title, artist, canonicalId)) continue
             val lastPlayedMs = t.lastObservedAppearanceAtMs ?: 0L
             val restoredAt = maxOf(
                 restoredAtMap[canonicalId] ?: 0L,
@@ -245,7 +311,6 @@ fun DopamineVaultScreen(
             } else {
                 fallbackFresh
             }
-            val cooling = vaultStatus.isInVault || vaultStatus.isCoolingDown
             val readiness = RestingVaultEngine.computeFreshReadiness(
                 baseFreshnessPercent = baseFresh,
                 playCount = plays,
@@ -286,7 +351,7 @@ fun DopamineVaultScreen(
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
             val canonicalId = rec.resolvedCanonicalTrackId()
             val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
-            if (vaultStatus.isInVault || vaultStatus.isCoolingDown) continue
+            if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
             val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
             val readiness = RestingVaultEngine.computeFreshReadiness(
                 baseFreshnessPercent = if (plays == 0) 99 else vaultStatus.freshnessPercent,
@@ -328,7 +393,7 @@ fun DopamineVaultScreen(
                 artist = artist
             )
             val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
-            if (vaultStatus.isInVault || vaultStatus.isCoolingDown) continue
+            if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
             val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
             val readiness = RestingVaultEngine.computeFreshReadiness(
                 baseFreshnessPercent = if (plays == 0) 99 else vaultStatus.freshnessPercent,
@@ -618,6 +683,38 @@ fun DopamineVaultScreen(
                                             )
                                         }
                                     }
+
+                                    // Manual Add pill for Fresh (0) & Resting Vault (1)
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(100.dp))
+                                            .background(activeTabAccent.copy(alpha = 0.16f))
+                                            .border(
+                                                width = 1.dp,
+                                                color = activeTabAccent.copy(alpha = 0.48f),
+                                                shape = RoundedCornerShape(100.dp)
+                                            )
+                                            .clickable { showManualPickerSheet = true }
+                                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Add,
+                                                contentDescription = if (currentTab == 1) "Add to Resting" else "Add to Fresh",
+                                                tint = activeTabAccent,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text(
+                                                text = if (currentTab == 1) "Rest" else "Fresh",
+                                                color = Color(0xFFFAFAFA),
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
                                 }
                                 com.tunemind.app.ui.components.StudioHairlineDivider()
                                 if (currentTab == 0 && peakFreshSongs.isNotEmpty()) {
@@ -773,12 +870,19 @@ fun DopamineVaultScreen(
     }
 
     activeSyncSong?.let { selectedSong ->
+        val selVaultStatus = resolveTrackVaultStatus(
+            selectedSong.title,
+            selectedSong.artist,
+            selectedSong.spotifyUri,
+            selectedSong.trackId
+        )
         NeuralTrackActionDialog(
             title = selectedSong.title,
             artist = selectedSong.artist,
             freshnessPercent = selectedSong.freshnessPercent,
             playCount = selectedSong.playCount,
             isCoolingDown = selectedSong.isCoolingDown,
+            isInFresh = selVaultStatus.isInFresh && !selectedSong.isCoolingDown,
             spotifyUri = selectedSong.spotifyUri,
             trackId = selectedSong.trackId,
             cooldownRemainingLabel = selectedSong.cooldownRemainingLabel,
@@ -807,6 +911,25 @@ fun DopamineVaultScreen(
                     selectedTab = 1
                 }
             },
+            onToggleFreshList = {
+                if (selVaultStatus.isInFresh && !selectedSong.isCoolingDown) {
+                    onRemoveFromFresh(
+                        selectedSong.title,
+                        selectedSong.artist,
+                        selectedSong.spotifyUri,
+                        selectedSong.trackId
+                    )
+                } else {
+                    onAddToFresh(
+                        selectedSong.title,
+                        selectedSong.artist,
+                        selectedSong.sourcePackage,
+                        selectedSong.spotifyUri,
+                        selectedSong.trackId,
+                        selectedSong.albumArtUrl
+                    )
+                }
+            },
             onAddToSpotifyQueue = {
                 onAddToQueue(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
             },
@@ -814,5 +937,294 @@ fun DopamineVaultScreen(
                 onSaveToSpotifyLiked(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
             }
         )
+    }
+
+    if (showManualPickerSheet) {
+        ManualVaultFreshPickerSheet(
+            isRestingMode = selectedTab == 1,
+            recentTracks = recentTracks,
+            likedTracks = likedTracks,
+            playlists = playlists,
+            resolveTrackVaultStatus = resolveTrackVaultStatus,
+            onAddToFresh = { title, artist, pkg, uri, tid, art ->
+                onAddToFresh(title, artist, pkg, uri, tid, art)
+            },
+            onRemoveFromFresh = { title, artist, uri, tid ->
+                onRemoveFromFresh(title, artist, uri, tid)
+            },
+            onQuarantineTrack = { title, artist ->
+                onQuarantineTrack(title, artist)
+            },
+            onRestoreVaultTrack = { vaultId ->
+                onRestoreVaultTrack(vaultId)
+            },
+            onDismiss = { showManualPickerSheet = false }
+        )
+    }
+}
+
+private data class ManualPickerCandidate(
+    val title: String,
+    val artist: String,
+    val sourcePackage: String,
+    val spotifyUri: String?,
+    val trackId: String,
+    val albumArtUrl: String?
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ManualVaultFreshPickerSheet(
+    isRestingMode: Boolean,
+    recentTracks: List<TrackMemoryEntry>,
+    likedTracks: List<SpotifyLikedTrackEntity>,
+    playlists: List<SpotifyPlaylistEntity>,
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus,
+    onAddToFresh: (String, String, String?, String?, String?, String?) -> Unit,
+    onRemoveFromFresh: (String, String, String?, String?) -> Unit,
+    onQuarantineTrack: (String, String) -> Unit,
+    onRestoreVaultTrack: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val theme = LocalAdaptiveTheme.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf("") }
+    val accent = if (isRestingMode) Color(0xFFFFB000) else theme.primaryAccent
+
+    val candidates = remember(recentTracks, likedTracks, playlists) {
+        val seen = mutableSetOf<String>()
+        val items = mutableListOf<ManualPickerCandidate>()
+        for (t in recentTracks) {
+            val title = t.title?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            val artist = t.artist?.trim()?.ifBlank { "Music" } ?: "Music"
+            val key = RestingVaultEngine.normalizeTrackKey(title, artist)
+            if (seen.add(key)) {
+                val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t.providerTrackId)
+                items.add(
+                    ManualPickerCandidate(
+                        title = title,
+                        artist = artist,
+                        sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
+                        spotifyUri = uri,
+                        trackId = t.canonicalTrackId(),
+                        albumArtUrl = null
+                    )
+                )
+            }
+        }
+        for (l in likedTracks.take(100)) {
+            val title = l.trackTitle.trim().takeIf { it.isNotEmpty() } ?: continue
+            val artist = l.artistName.trim().ifBlank { "Spotify Library" }
+            val key = RestingVaultEngine.normalizeTrackKey(title, artist)
+            if (seen.add(key)) {
+                val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(l.spotifyUri)
+                val tid = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                    trackId = l.trackId, spotifyUri = uri, title = title, artist = artist
+                )
+                items.add(
+                    ManualPickerCandidate(
+                        title = title,
+                        artist = artist,
+                        sourcePackage = "com.spotify.music",
+                        spotifyUri = uri,
+                        trackId = tid,
+                        albumArtUrl = l.albumArtUrl
+                    )
+                )
+            }
+        }
+        for (pl in playlists.take(8)) {
+            for (tr in pl.decodeTracks().take(30)) {
+                val title = tr.title.trim().takeIf { it.isNotEmpty() } ?: continue
+                val artist = tr.artist.trim().ifBlank { "Spotify Playlist" }
+                val key = RestingVaultEngine.normalizeTrackKey(title, artist)
+                if (seen.add(key)) {
+                    val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(tr.spotifyUri)
+                    val tid = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                        trackId = tr.trackId, spotifyUri = uri, title = title, artist = artist
+                    )
+                    items.add(
+                        ManualPickerCandidate(
+                            title = title,
+                            artist = artist,
+                            sourcePackage = "com.spotify.music",
+                            spotifyUri = uri,
+                            trackId = tid,
+                            albumArtUrl = tr.albumArtUrl
+                        )
+                    )
+                }
+            }
+        }
+        items
+    }
+
+    val filtered = remember(candidates, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) candidates.take(60)
+        else candidates.filter {
+            it.title.lowercase().contains(q) || it.artist.lowercase().contains(q)
+        }.take(60)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF0E1420),
+        contentColor = Color(0xFFFAFAFA)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.76f)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isRestingMode) "Add Songs to Resting Vault" else "Add Songs to Fresh",
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isRestingMode) "Rest overplayed tracks to restore their spark" else "Pin songs from your library or recent plays into Fresh",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search recent plays or Spotify library...", color = Color.White.copy(alpha = 0.42f), fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                    unfocusedContainerColor = Color.White.copy(alpha = 0.04f),
+                    focusedBorderColor = accent.copy(alpha = 0.65f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filtered, key = { "${it.title}|${it.artist}|${it.trackId}" }) { item ->
+                    val status = resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
+                    val activeInTarget = if (isRestingMode) status.isInVault || status.isCoolingDown else status.isInFresh && !status.isCoolingDown
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .border(
+                                width = 1.dp,
+                                color = if (activeInTarget) accent.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.07f),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.title,
+                                color = Color(0xFFFAFAFA),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = item.artist,
+                                color = Color.White.copy(alpha = 0.58f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(100.dp))
+                                .background(
+                                    if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.16f)
+                                    else accent.copy(alpha = 0.18f)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.55f) else accent.copy(alpha = 0.55f),
+                                    shape = RoundedCornerShape(100.dp)
+                                )
+                                .clickable {
+                                    if (isRestingMode) {
+                                        if (status.isInVault && status.vaultId != null) {
+                                            onRestoreVaultTrack(status.vaultId)
+                                        } else {
+                                            onQuarantineTrack(item.title, item.artist)
+                                        }
+                                    } else {
+                                        if (activeInTarget) {
+                                            onRemoveFromFresh(item.title, item.artist, item.spotifyUri, item.trackId)
+                                        } else {
+                                            onAddToFresh(item.title, item.artist, item.sourcePackage, item.spotifyUri, item.trackId, item.albumArtUrl)
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = if (isRestingMode) {
+                                    if (activeInTarget) "In Vault · Remove" else "+ Rest"
+                                } else {
+                                    if (activeInTarget) "In Fresh · Remove" else "+ Fresh"
+                                },
+                                color = if (activeInTarget) Color(0xFF34D399) else accent,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }

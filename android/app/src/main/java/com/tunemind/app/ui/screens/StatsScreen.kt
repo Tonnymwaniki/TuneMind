@@ -175,6 +175,7 @@ fun StatsScreen(
                 freshnessPercent = vStatus.freshnessPercent,
                 playCount = tr.verifiedPlayCount,
                 isCoolingDown = vStatus.isCoolingDown,
+                isInFresh = vStatus.isInFresh && !vStatus.isCoolingDown,
                 spotifyUri = tr.spotifyUri,
                 trackId = tr.trackId,
                 cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -186,6 +187,9 @@ fun StatsScreen(
                 onSyncAtmosphereToTrack = { vm.syncAtmosphereToTrack(tr.title, tr.artist) },
                 onToggleCooldownVault = {
                     vm.toggleTrackVaultStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
+                },
+                onToggleFreshList = {
+                    vm.toggleTrackFreshStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
                 }
             )
         }
@@ -211,6 +215,7 @@ fun StatsDashboardContent(
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
+    onToggleTrackFresh: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
     onAskAgentAboutTrack: ((title: String, artist: String, freshness: Int, uri: String?) -> Unit)? = null,
     onSyncAtmosphereToTrack: ((title: String, artist: String) -> Unit)? = null
 ) {
@@ -259,6 +264,7 @@ fun StatsDashboardContent(
             freshnessPercent = vStatus.freshnessPercent,
             playCount = tr.verifiedPlayCount,
             isCoolingDown = vStatus.isCoolingDown,
+            isInFresh = vStatus.isInFresh && !vStatus.isCoolingDown,
             spotifyUri = tr.spotifyUri,
             trackId = tr.trackId,
             cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -274,7 +280,10 @@ fun StatsDashboardContent(
             },
             onToggleCooldownVault = {
                 onToggleTrackVault?.invoke(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
-            }
+            },
+            onToggleFreshList = if (onToggleTrackFresh != null) {
+                { onToggleTrackFresh(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId) }
+            } else null
         )
     }
 }

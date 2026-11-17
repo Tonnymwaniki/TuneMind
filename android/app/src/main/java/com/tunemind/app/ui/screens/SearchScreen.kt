@@ -636,6 +636,7 @@ fun SearchScreen(
                 freshnessPercent = vStatus.freshnessPercent,
                 playCount = sel.playCount,
                 isCoolingDown = vStatus.isCoolingDown,
+                isInFresh = vStatus.isInFresh && !vStatus.isCoolingDown,
                 spotifyUri = sel.spotifyUri,
                 trackId = sel.trackId,
                 cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -654,6 +655,14 @@ fun SearchScreen(
                         "Restored \"${sel.title}\" back to Fresh"
                     } else {
                         "Moved \"${sel.title}\" to Resting Vault"
+                    }
+                },
+                onToggleFreshList = {
+                    vm.toggleTrackFreshStatus(sel.title, sel.artist, sel.sourcePkg, sel.spotifyUri, sel.trackId)
+                    feedbackBanner = if (vStatus.isInFresh && !vStatus.isCoolingDown) {
+                        "Removed \"${sel.title}\" from Fresh"
+                    } else {
+                        "Added \"${sel.title}\" to Fresh"
                     }
                 }
             )

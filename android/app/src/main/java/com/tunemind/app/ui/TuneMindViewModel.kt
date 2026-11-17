@@ -291,6 +291,8 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var expectedHandoverRetryCount: Int = 0
     @Volatile
+    private var lastHandoverRetryAtMs: Long = 0L
+    @Volatile
     private var preResolvedQueueKey: String = ""
     @Volatile
     private var latestLiveSnapshot: com.tunemind.app.media.ActivePlaybackSnapshot? = null
@@ -948,6 +950,12 @@ class TuneMindViewModel : ViewModel() {
     private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
     val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
 
+    private val _manualFreshTracks = MutableStateFlow<List<ManualFreshTrack>>(loadManualFreshFromPrefs())
+    val manualFreshTracks: StateFlow<List<ManualFreshTrack>> = _manualFreshTracks.asStateFlow()
+
+    private val _freshExcludedKeys = MutableStateFlow<Set<String>>(loadFreshExcludedKeysFromPrefs())
+    val freshExcludedKeys: StateFlow<Set<String>> = _freshExcludedKeys.asStateFlow()
+
     @Volatile
     private var lastBackendVaultSyncMs: Long = 0L
 
@@ -1166,6 +1174,12 @@ class TuneMindViewModel : ViewModel() {
         manualLaunchPendingTitle = cleanTitle
         manualLaunchPendingUntilMs = now + 7_000L
         manualActiveTrackOverride = nowObs
+        queueMonitoredTitle = cleanTitle
+        queueMonitoredArtist = cleanArtist
+        queueMonitoredPackage = sourcePackage
+        queueMonitoredDurationMs = 0L
+        queueMonitoredMaxPosMs = 0L
+        lastQueueHandoverSourceTitle = ""
         _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
         markTrackPlayedFromQueueOrExternal(cleanTitle, cleanArtist, null)
         syncAtmosphereToTrack(cleanTitle, cleanArtist)
@@ -1298,6 +1312,7 @@ class TuneMindViewModel : ViewModel() {
         val activeKey = ListeningPlayDeduplicator.canonicalTrackKey(activeTitle, activeArtist)
         val activeCleanTitle = ListeningPlayDeduplicator.normalizeText(activeTitle)
 
+        val excludedFresh = runCatching { _freshExcludedKeys.value }.getOrDefault(emptySet())
         val rawCandidates = mutableListOf<DopamineCapsuleTrack>()
         val seenKeys = mutableSetOf<String>()
 
@@ -1305,11 +1320,28 @@ class TuneMindViewModel : ViewModel() {
             val cleanTitle = track.title.trim()
             if (cleanTitle.length < 2) return
             val key = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, track.artist)
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, track.artist)
             val normTitle = ListeningPlayDeduplicator.normalizeText(cleanTitle)
             if (key == activeKey || (activeCleanTitle.isNotBlank() && normTitle == activeCleanTitle)) return
             if (key in coolingKeys) return
+            if (normKey in excludedFresh || track.resolvedCanonicalTrackId() in excludedFresh) return
             if (!seenKeys.add(key)) return
             rawCandidates.add(track)
+        }
+
+        // 0. Manually added Fresh tracks (user-curated Peak Fresh)
+        runCatching { _manualFreshTracks.value }.getOrDefault(emptyList()).forEach { mf ->
+            val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(mf.spotifyUri)
+            addCandidateIfEligible(
+                DopamineCapsuleTrack(
+                    title = mf.title,
+                    artist = mf.artist,
+                    spotifyUri = cleanUri,
+                    freshnessPercent = 99,
+                    reason = "Added to Fresh · Ready now",
+                    trackId = mf.resolvedCanonicalTrackId()
+                )
+            )
         }
 
         // 1. Graduated Vault comebacks (completed full cooldown & ready for peak return)
@@ -1678,6 +1710,111 @@ class TuneMindViewModel : ViewModel() {
         postNowPlayingStatus("Up Next refreshed with fresh tracks")
     }
 
+    fun getRecommendedFreshPoolForQueue(limit: Int = 6): List<DopamineCapsuleTrack> {
+        val queuedKeys = _upNextQueueState.value.tracks
+            .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
+            .toSet()
+        val nowMs = System.currentTimeMillis()
+        val coolingKeys = _vaultState.value
+            .filter {
+                !com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                    quarantinedAtMs = it.quarantinedAtMs,
+                    totalDays = it.totalDays,
+                    baseSatietyScore = it.satietyScore,
+                    nowMs = nowMs
+                ).isGraduated
+            }
+            .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
+            .toSet()
+        val activeTitle = _homeState.value.nowPlaying?.title
+        val activeArtist = _homeState.value.nowPlaying?.artist
+        val activeKey = ListeningPlayDeduplicator.canonicalTrackKey(activeTitle, activeArtist)
+        val excluded = _freshExcludedKeys.value
+
+        val recs = mutableListOf<DopamineCapsuleTrack>()
+        val seen = mutableSetOf<String>()
+        fun tryAdd(item: DopamineCapsuleTrack) {
+            if (recs.size >= limit) return
+            val key = ListeningPlayDeduplicator.canonicalTrackKey(item.title, item.artist)
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(item.title, item.artist)
+            if (key in queuedKeys || key in coolingKeys || key == activeKey) return
+            if (normKey in excluded || item.resolvedCanonicalTrackId() in excluded) return
+            if (!seen.add(key)) return
+            recs.add(item)
+        }
+
+        _manualFreshTracks.value.forEach { mf ->
+            tryAdd(
+                DopamineCapsuleTrack(
+                    title = mf.title,
+                    artist = mf.artist,
+                    spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(mf.spotifyUri),
+                    freshnessPercent = 99,
+                    reason = "Fresh Pick · Ready now",
+                    trackId = mf.resolvedCanonicalTrackId()
+                )
+            )
+        }
+        _aiDiscoveryCrate.value.filter { !it.isDismissed && !it.wasPlayed }.forEach { ai ->
+            tryAdd(
+                DopamineCapsuleTrack(
+                    title = ai.title,
+                    artist = ai.artist,
+                    spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(ai.spotifyUri),
+                    freshnessPercent = ai.matchScorePercent.coerceIn(82, 99),
+                    reason = "For You · ${ai.genreTag.ifBlank { "Discovery" }}",
+                    trackId = ai.resolvedCanonicalTrackId()
+                )
+            )
+        }
+        _unifiedTracks.value.filter { !it.isCoolingDown }.sortedByDescending { it.freshnessPercent }.forEach { ut ->
+            tryAdd(
+                DopamineCapsuleTrack(
+                    title = ut.title,
+                    artist = ut.artist,
+                    spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(ut.spotifyUri),
+                    freshnessPercent = ut.freshnessPercent,
+                    reason = "${ut.freshnessPercent}% fresh rotation",
+                    trackId = ut.trackId
+                )
+            )
+        }
+        _spotifyLikedTracks.value.take(40).forEach { liked ->
+            val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(liked.spotifyUri)
+            val plays = resolvePlayCount(liked.trackTitle, liked.artistName, cleanUri, liked.trackId)
+            tryAdd(
+                DopamineCapsuleTrack(
+                    title = liked.trackTitle,
+                    artist = liked.artistName.ifBlank { "Spotify Library" },
+                    spotifyUri = cleanUri,
+                    freshnessPercent = if (plays == 0) 99 else (100 - minOf(80, plays * 18)),
+                    reason = if (plays == 0) "Liked Song · Untouched" else "Liked Song · $plays plays",
+                    trackId = TrackIdentityResolver.resolveCanonicalTrackId(liked.trackId, cleanUri, liked.trackTitle, liked.artistName)
+                )
+            )
+        }
+        return recs
+    }
+
+    fun autoAddRecommendedFreshToQueue(count: Int = 2) {
+        val candidates = getRecommendedFreshPoolForQueue(limit = count.coerceIn(1, 5))
+        if (candidates.isEmpty()) {
+            postNowPlayingStatus("No additional Fresh tracks available to add")
+            return
+        }
+        candidates.forEach { item ->
+            enqueueUpNextTrack(
+                title = item.title,
+                artist = item.artist,
+                spotifyUri = item.spotifyUri,
+                reason = item.reason,
+                freshnessPercent = item.freshnessPercent,
+                playNext = false
+            )
+        }
+        postNowPlayingStatus("Added ${candidates.size} recommended Fresh tracks to Up Next")
+    }
+
     fun playQueuedTrack(
         track: DopamineCapsuleTrack,
         targetPlayer: String? = null,
@@ -1908,9 +2045,9 @@ class TuneMindViewModel : ViewModel() {
                 val isPlayingNow = _homeState.value.nowPlaying?.isPlaying == true
                 kotlinx.coroutines.delay(
                     when {
-                        overrideOn && isPlayingNow -> 400L
+                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 350L
                         uiForegroundActive -> 900L
-                        else -> 1800L
+                        else -> 1600L
                     }
                 )
                 if (ctx == null) continue
@@ -2722,24 +2859,26 @@ class TuneMindViewModel : ViewModel() {
             return
         }
 
-        // Intercept unapproved third-party autoplay if external player sneaked past Pause during TuneMind handover
+        // Intercept unapproved third-party autoplay if external player (e.g. Spotify playlist or YouTube Music) sneaks a different track
         if (expectedTrack != null &&
             now < expectedHandoverWindowUntilMs &&
-            !queueHandoverInFlight &&
             !matchesFinishedSource &&
             !com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) &&
-            expectedHandoverRetryCount < 2
+            (now - lastHandoverRetryAtMs) >= 1_400L &&
+            expectedHandoverRetryCount < 3
         ) {
             val nextRetryCount = expectedHandoverRetryCount + 1
+            lastHandoverRetryAtMs = now
             queueHandoverInFlight = true
             val pkg = snap.packageName.ifBlank { resolveActiveMediaPackage() ?: "com.spotify.music" }
             pauseExternalAndLocalMediaQuietly(ctx, pkg)
             if (pkg.contains("spotify", ignoreCase = true)) {
+                runCatching { com.tunemind.app.provider.SpotifyAppRemoteManager.pause() }
                 viewModelScope.launch(Dispatchers.IO) {
                     runCatching { visualRepo?.controlSpotifyWebPlayback("PAUSE") }
                 }
             }
-            postNowPlayingStatus("Intercepted player autoplay · Spinning \"${expectedTrack.title}\"")
+            postNowPlayingStatus("Blocked player autoplay · Playing \"${expectedTrack.title}\"")
             playQueuedTrack(expectedTrack, pkg) { _, _ ->
                 queueHandoverInFlight = false
             }
@@ -2747,7 +2886,7 @@ class TuneMindViewModel : ViewModel() {
             return
         }
 
-        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 6_500L) {
+        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 3_000L) {
             if (com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle)) {
                 queueMonitoredTitle = rawTitle
                 queueMonitoredArtist = snap.artist
@@ -2769,7 +2908,7 @@ class TuneMindViewModel : ViewModel() {
             if (snap.positionMs > queueMonitoredMaxPosMs) queueMonitoredMaxPosMs = snap.positionMs
 
             // Trigger A: Song is within final window -> immediately stop player autoplay & spin TuneMind Up Next
-            val leadWindowMs = if (queueMonitoredDurationMs >= 45_000L) 3_200L else 1_800L
+            val leadWindowMs = if (queueMonitoredDurationMs >= 35_000L) 3_200L else 1_600L
             if (snap.isPlaying &&
                 queueMonitoredDurationMs >= 15_000L &&
                 snap.positionMs >= (queueMonitoredDurationMs - leadWindowMs) &&
@@ -2783,14 +2922,15 @@ class TuneMindViewModel : ViewModel() {
             return
         }
 
-        // Trigger B: External player auto-advanced to an unrequested song after substantial play -> intercept immediately
+        // Trigger B: External player auto-advanced to an unrequested playlist/radio song -> intercept immediately
         val prevTitle = queueMonitoredTitle
         val prevDur = queueMonitoredDurationMs
         val prevMax = queueMonitoredMaxPosMs
         val wasTuneMindLaunch = com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) ||
             (manualActiveTrackOverride?.title?.equals(rawTitle, ignoreCase = true) == true &&
                 (now - (manualActiveTrackOverride?.updatedAtMs ?: 0L)) < 12_000L)
-        val prevPlayedSubstantially = prevMax >= 12_000L || (prevDur >= 15_000L && prevMax >= (prevDur * 45L) / 100L)
+        val prevPlayedSubstantially = prevMax >= 10_000L ||
+            (prevDur >= 15_000L && (prevMax >= (prevDur * 40L) / 100L || prevMax >= (prevDur - 15_000L)))
 
         if (!wasTuneMindLaunch &&
             prevTitle.isNotBlank() &&
@@ -3024,6 +3164,208 @@ class TuneMindViewModel : ViewModel() {
         prefs.edit().putString("vault_items", array.toString()).apply()
     }
 
+    private fun loadManualFreshFromPrefs(): List<ManualFreshTrack> {
+        val ctx = AppHolder.context ?: return emptyList()
+        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("manual_fresh_items", null) ?: return emptyList()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val list = mutableListOf<ManualFreshTrack>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val t = obj.optString("title", "").trim()
+                if (t.isBlank()) continue
+                val a = obj.optString("artist", "Unknown Artist").trim()
+                val rawUri = obj.optString("spotifyUri", "").takeIf { it.isNotBlank() }
+                val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                    trackId = obj.optString("trackId", "").takeIf { it.isNotBlank() },
+                    spotifyUri = rawUri,
+                    title = t,
+                    artist = a
+                )
+                list.add(
+                    ManualFreshTrack(
+                        id = obj.optString("id", "fresh-${identity.trackId}"),
+                        title = t,
+                        artist = a,
+                        spotifyUri = identity.spotifyUri,
+                        sourcePackage = obj.optString("sourcePackage", "com.spotify.music"),
+                        trackId = identity.trackId,
+                        addedAtMs = obj.optLong("addedAtMs", System.currentTimeMillis()),
+                        albumArtUrl = obj.optString("albumArtUrl", "").takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveManualFreshToPrefs(items: List<ManualFreshTrack>) {
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val array = org.json.JSONArray()
+        for (item in items) {
+            array.put(org.json.JSONObject().apply {
+                put("id", item.id)
+                put("title", item.title)
+                put("artist", item.artist)
+                item.spotifyUri?.let { put("spotifyUri", it) }
+                put("sourcePackage", item.sourcePackage)
+                put("trackId", item.resolvedCanonicalTrackId())
+                put("addedAtMs", item.addedAtMs)
+                item.albumArtUrl?.let { put("albumArtUrl", it) }
+            })
+        }
+        prefs.edit().putString("manual_fresh_items", array.toString()).apply()
+    }
+
+    private fun loadFreshExcludedKeysFromPrefs(): Set<String> {
+        val ctx = AppHolder.context ?: return emptySet()
+        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("fresh_excluded_keys", null) ?: return emptySet()
+        return try {
+            val array = org.json.JSONArray(raw)
+            val set = mutableSetOf<String>()
+            for (i in 0 until array.length()) {
+                val s = array.optString(i, "").trim()
+                if (s.isNotBlank()) set.add(s)
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    private fun saveFreshExcludedKeysToPrefs(keys: Set<String>) {
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val array = org.json.JSONArray()
+        keys.take(250).forEach { array.put(it) }
+        prefs.edit().putString("fresh_excluded_keys", array.toString()).apply()
+    }
+
+    fun addToFresh(
+        title: String,
+        artist: String,
+        sourcePackage: String? = null,
+        spotifyUri: String? = null,
+        trackId: String? = null,
+        albumArtUrl: String? = null
+    ) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return
+        val cleanArtist = artist.trim().ifBlank { "Your Library" }
+        val nowMs = System.currentTimeMillis()
+        val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = trackId,
+            spotifyUri = spotifyUri,
+            title = cleanTitle,
+            artist = cleanArtist
+        )
+        val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, cleanArtist)
+
+        // If the song is currently in Resting Vault, restore it back cleanly first
+        val vaultMatch = _vaultState.value.firstOrNull { vt ->
+            ListeningPlayDeduplicator.isSameTrack(vt.title, vt.artist, vt.spotifyUri, cleanTitle, cleanArtist, spotifyUri) ||
+                vt.resolvedCanonicalTrackId() == identity.trackId
+        }
+        if (vaultMatch != null) {
+            val restoredMap = loadRestoredVaultMapFromPrefs()
+            restoredMap[vaultMatch.resolvedCanonicalTrackId()] = nowMs
+            restoredMap[normKey] = nowMs
+            saveRestoredVaultMapToPrefs(restoredMap)
+            val remainingVault = _vaultState.value.filter { it.id != vaultMatch.id }
+            _vaultState.value = remainingVault
+            saveVaultToPrefs(remainingVault)
+        } else {
+            val restoredMap = loadRestoredVaultMapFromPrefs()
+            restoredMap[identity.trackId] = nowMs
+            restoredMap[normKey] = nowMs
+            saveRestoredVaultMapToPrefs(restoredMap)
+        }
+
+        // Remove any previous Fresh exclusion
+        val cleanedExcluded = _freshExcludedKeys.value
+            .filterNot { it == normKey || it == identity.trackId }
+            .toSet()
+        _freshExcludedKeys.value = cleanedExcluded
+        saveFreshExcludedKeysToPrefs(cleanedExcluded)
+
+        val resolvedPkg = sourcePackage?.takeIf { it.isNotBlank() }
+            ?: _homeState.value.nowPlaying?.sourcePackage?.takeIf { it.isNotBlank() }
+            ?: "com.spotify.music"
+        val newPin = ManualFreshTrack(
+            id = "fresh-${identity.trackId}-$nowMs",
+            title = cleanTitle,
+            artist = cleanArtist,
+            spotifyUri = identity.spotifyUri,
+            sourcePackage = resolvedPkg,
+            trackId = identity.trackId,
+            addedAtMs = nowMs,
+            albumArtUrl = albumArtUrl
+        )
+        val updatedPins = listOf(newPin) + _manualFreshTracks.value.filterNot {
+            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, cleanTitle, cleanArtist, spotifyUri) ||
+                it.resolvedCanonicalTrackId() == identity.trackId
+        }
+        _manualFreshTracks.value = updatedPins
+        saveManualFreshToPrefs(updatedPins)
+        refreshLiveListeningStatsNow()
+        syncUpNextQueueWithSources(forceRebuild = false)
+        postNowPlayingStatus("Added \"$cleanTitle\" to Fresh")
+        syncVaultToBackendAsync(force = true)
+    }
+
+    fun removeFromFresh(
+        title: String,
+        artist: String,
+        spotifyUri: String? = null,
+        trackId: String? = null
+    ) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return
+        val cleanArtist = artist.trim().ifBlank { "Your Library" }
+        val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+            trackId = trackId,
+            spotifyUri = spotifyUri,
+            title = cleanTitle,
+            artist = cleanArtist
+        )
+        val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, cleanArtist)
+
+        val updatedPins = _manualFreshTracks.value.filterNot {
+            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, cleanTitle, cleanArtist, spotifyUri) ||
+                it.resolvedCanonicalTrackId() == identity.trackId
+        }
+        _manualFreshTracks.value = updatedPins
+        saveManualFreshToPrefs(updatedPins)
+
+        val updatedExcluded = (_freshExcludedKeys.value + normKey + identity.trackId).toSet()
+        _freshExcludedKeys.value = updatedExcluded
+        saveFreshExcludedKeysToPrefs(updatedExcluded)
+
+        syncUpNextQueueWithSources(forceRebuild = false)
+        postNowPlayingStatus("Removed \"$cleanTitle\" from Fresh")
+    }
+
+    fun toggleTrackFreshStatus(
+        title: String,
+        artist: String,
+        sourcePackage: String? = null,
+        spotifyUri: String? = null,
+        trackId: String? = null,
+        albumArtUrl: String? = null
+    ) {
+        val status = resolveTrackVaultStatus(title, artist, spotifyUri, trackId)
+        if (status.isInFresh) {
+            removeFromFresh(title, artist, spotifyUri, trackId)
+        } else {
+            addToFresh(title, artist, sourcePackage, spotifyUri, trackId, albumArtUrl)
+        }
+    }
+
     fun resolveTrackVaultStatus(
         title: String?,
         artist: String?,
@@ -3033,9 +3375,23 @@ class TuneMindViewModel : ViewModel() {
         val cleanTitle = title?.trim().orEmpty()
         if (cleanTitle.isBlank()) return TrackVaultUiStatus()
         val nowMs = System.currentTimeMillis()
+        val canonicalId = TrackIdentityResolver.resolveCanonicalTrackId(
+            trackId = trackId?.takeIf { it.isNotBlank() },
+            spotifyUri = spotifyUri,
+            title = cleanTitle,
+            artist = artist
+        )
+        val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, artist)
+        val isManualFresh = _manualFreshTracks.value.any { mf ->
+            ListeningPlayDeduplicator.isSameTrack(mf.title, mf.artist, mf.spotifyUri, cleanTitle, artist, spotifyUri) ||
+                mf.resolvedCanonicalTrackId() == canonicalId
+        }
+        val excludedSet = _freshExcludedKeys.value
+        val isExcludedFresh = normKey in excludedSet || canonicalId in excludedSet
+
         val vaultMatch = _vaultState.value.firstOrNull { vt ->
             ListeningPlayDeduplicator.isSameTrack(vt.title, vt.artist, vt.spotifyUri, cleanTitle, artist, spotifyUri) ||
-                (!trackId.isNullOrBlank() && vt.resolvedCanonicalTrackId() == trackId)
+                vt.resolvedCanonicalTrackId() == canonicalId
         }
         if (vaultMatch != null) {
             val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
@@ -3044,36 +3400,59 @@ class TuneMindViewModel : ViewModel() {
                 baseSatietyScore = vaultMatch.satietyScore,
                 nowMs = nowMs
             )
+            val inVaultActive = !rec.isGraduated
             return TrackVaultUiStatus(
-                isInVault = true,
+                isInVault = inVaultActive,
                 vaultId = vaultMatch.id,
-                isCoolingDown = !rec.isGraduated,
+                isCoolingDown = inVaultActive,
                 freshnessPercent = rec.freshnessPercent,
                 recoveryPercent = (rec.recoveryProgress * 100f).toInt().coerceIn(0, 100),
                 cooldownRemainingLabel = rec.remainingLabel,
                 satietyScore = vaultMatch.satietyScore,
-                entryReason = vaultMatch.entryReason
+                entryReason = vaultMatch.entryReason,
+                isManualFresh = isManualFresh,
+                isExcludedFromFresh = isExcludedFresh,
+                isInFresh = !inVaultActive && !isExcludedFresh && (isManualFresh || true)
             )
         }
 
         val statsMatch = _unifiedTracks.value.firstOrNull { ut ->
             ListeningPlayDeduplicator.isSameTrack(ut.title, ut.artist, ut.spotifyUri, cleanTitle, artist, spotifyUri) ||
-                (!trackId.isNullOrBlank() && ut.trackId == trackId)
+                ut.trackId == canonicalId
         }
         if (statsMatch != null) {
+            val inFresh = isManualFresh || (!statsMatch.isCoolingDown && !isExcludedFresh)
             return TrackVaultUiStatus(
                 isInVault = false,
                 vaultId = null,
                 isCoolingDown = statsMatch.isCoolingDown,
-                freshnessPercent = statsMatch.freshnessPercent,
+                freshnessPercent = if (isManualFresh) maxOf(statsMatch.freshnessPercent, 96) else statsMatch.freshnessPercent,
                 recoveryPercent = 0,
                 cooldownRemainingLabel = null,
                 satietyScore = (100 - statsMatch.freshnessPercent).coerceIn(0, 99),
-                entryReason = null
+                entryReason = null,
+                isManualFresh = isManualFresh,
+                isExcludedFromFresh = isExcludedFresh,
+                isInFresh = inFresh
             )
         }
 
-        return TrackVaultUiStatus()
+        val inLibraryOrRecentlyKnown = isManualFresh ||
+            _spotifyLikedTracks.value.any {
+                ListeningPlayDeduplicator.isSameTrack(it.trackTitle, it.artistName, it.spotifyUri, cleanTitle, artist, spotifyUri)
+            } ||
+            _recentlyGraduatedVaultTracks.value.any {
+                ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, cleanTitle, artist, spotifyUri)
+            }
+
+        return TrackVaultUiStatus(
+            isInVault = false,
+            isCoolingDown = false,
+            freshnessPercent = if (isManualFresh) 99 else 96,
+            isManualFresh = isManualFresh,
+            isExcludedFromFresh = isExcludedFresh,
+            isInFresh = !isExcludedFresh && inLibraryOrRecentlyKnown
+        )
     }
 
     fun toggleTrackVaultStatus(
@@ -3326,6 +3705,15 @@ class TuneMindViewModel : ViewModel() {
         }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
+        // Remove from Manual Fresh pins if moved into Resting Vault
+        val remainingPins = _manualFreshTracks.value.filterNot {
+            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, spotifyUri) ||
+                it.resolvedCanonicalTrackId() == resolvedIdentity.trackId
+        }
+        if (remainingPins.size != _manualFreshTracks.value.size) {
+            _manualFreshTracks.value = remainingPins
+            saveManualFreshToPrefs(remainingPins)
+        }
         refreshLiveListeningStatsNow()
         syncUpNextQueueWithSources(forceRebuild = false)
         refreshRecommendations()
@@ -3343,9 +3731,16 @@ class TuneMindViewModel : ViewModel() {
         }
         val restoredMap = loadRestoredVaultMapFromPrefs()
         if (target != null) {
-            restoredMap[target.resolvedCanonicalTrackId()] = nowMs
-            restoredMap[com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(target.title, target.artist)] = nowMs
+            val cid = target.resolvedCanonicalTrackId()
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(target.title, target.artist)
+            restoredMap[cid] = nowMs
+            restoredMap[normKey] = nowMs
             saveRestoredVaultMapToPrefs(restoredMap)
+            val cleanedExcluded = _freshExcludedKeys.value.filterNot { it == normKey || it == cid }.toSet()
+            if (cleanedExcluded.size != _freshExcludedKeys.value.size) {
+                _freshExcludedKeys.value = cleanedExcluded
+                saveFreshExcludedKeysToPrefs(cleanedExcluded)
+            }
         }
         val updated = _vaultState.value.filter {
             it.id != id && it.trackId != id && it.resolvedCanonicalTrackId() != id
@@ -4455,8 +4850,29 @@ data class TrackVaultUiStatus(
     val recoveryPercent: Int = 0,
     val cooldownRemainingLabel: String? = null,
     val satietyScore: Int = 0,
-    val entryReason: String? = null
+    val entryReason: String? = null,
+    val isManualFresh: Boolean = false,
+    val isExcludedFromFresh: Boolean = false,
+    val isInFresh: Boolean = false
 )
+
+data class ManualFreshTrack(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val spotifyUri: String? = null,
+    val sourcePackage: String = "com.spotify.music",
+    val trackId: String = "",
+    val addedAtMs: Long = System.currentTimeMillis(),
+    val albumArtUrl: String? = null
+) {
+    fun resolvedCanonicalTrackId(): String = TrackIdentityResolver.resolveCanonicalTrackId(
+        trackId = trackId.ifBlank { null },
+        spotifyUri = spotifyUri,
+        title = title,
+        artist = artist
+    )
+}
 
 data class DopamineCapsuleTrack(
     val title: String,

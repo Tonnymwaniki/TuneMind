@@ -107,7 +107,8 @@ fun RhythmDnaScreen(
     requestedSubDeck: Int? = null,
     onConsumeRequestedSubDeck: () -> Unit = {},
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
-    onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null
+    onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
+    onToggleTrackFresh: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -315,6 +316,7 @@ fun RhythmDnaScreen(
                             onOpenMusicProfile = onOpenMusicProfile,
                             resolveTrackVaultStatus = resolveTrackVaultStatus,
                             onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
+                            onToggleTrackFresh = onToggleTrackFresh,
                             onAskAgentAboutTrack = onAskAgentAboutTrack,
                             onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
                         )
@@ -340,6 +342,7 @@ fun RhythmDnaScreen(
                             onPlayTrack = onPlayTrack,
                             resolveTrackVaultStatus = resolveTrackVaultStatus,
                             onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
+                            onToggleTrackFresh = onToggleTrackFresh,
                             onAskAgentAboutTrack = onAskAgentAboutTrack,
                             onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
                         )
@@ -831,6 +834,7 @@ fun RhythmDnaScreen(
             freshnessPercent = freshness,
             playCount = plays,
             isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
+            isInFresh = vStatus.isInFresh && !(vStatus.isInVault || vStatus.isCoolingDown),
             spotifyUri = uri,
             trackId = canonicalId,
             cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -846,7 +850,10 @@ fun RhythmDnaScreen(
                 } else {
                     onQuarantineTrack(title, artist)
                 }
-            }
+            },
+            onToggleFreshList = if (onToggleTrackFresh != null) {
+                { onToggleTrackFresh(title, artist, pkg, uri, canonicalId) }
+            } else null
         )
     }
 }

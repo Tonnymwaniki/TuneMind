@@ -40,7 +40,7 @@ object AgentSettingsStore {
     private val _autonomousDjEnabled = MutableStateFlow(false)
     val autonomousDjEnabled: StateFlow<Boolean> = _autonomousDjEnabled.asStateFlow()
 
-    private val _upNextAutoOverrideEnabled = MutableStateFlow(false)
+    private val _upNextAutoOverrideEnabled = MutableStateFlow(true)
     val upNextAutoOverrideEnabled: StateFlow<Boolean> = _upNextAutoOverrideEnabled.asStateFlow()
 
     private val _stayInTuneMindEnabled = MutableStateFlow(true)
@@ -92,7 +92,7 @@ object AgentSettingsStore {
             if (initialized) return
             val p = prefs(context)
             _autonomousDjEnabled.value = p.getBoolean(KEY_AUTONOMOUS_DJ, false)
-            _upNextAutoOverrideEnabled.value = p.getBoolean(KEY_UP_NEXT_AUTO_OVERRIDE, false)
+            _upNextAutoOverrideEnabled.value = p.getBoolean(KEY_UP_NEXT_AUTO_OVERRIDE, true)
             _stayInTuneMindEnabled.value = p.getBoolean(KEY_STAY_IN_TUNEMIND, true)
             _strictNoAppSwitchEnabled.value = p.getBoolean(KEY_STRICT_NO_APP_SWITCH, false)
             _preferInAppPlayerEnabled.value = p.getBoolean(KEY_PREFER_IN_APP_PLAYER, true)

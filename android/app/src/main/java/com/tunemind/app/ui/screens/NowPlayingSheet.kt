@@ -60,7 +60,9 @@ fun NowPlayingSheet(
     val context = LocalContext.current
     val homeState by vm.homeState.collectAsState()
     val liveSpotify by vm.spotifyLiveState.collectAsState()
-    val spotifyDevices by vm.spotifyDevices.collectAsState()
+    val vaultState by vm.vaultState.collectAsState()
+    val manualFreshTracks by vm.manualFreshTracks.collectAsState()
+    val freshExcludedKeys by vm.freshExcludedKeys.collectAsState()
     val upNextQueueState by vm.upNextQueueState.collectAsState()
     val autoOverrideEnabled by vm.upNextAutoOverrideEnabled.collectAsState()
     val vmActionStatus by vm.nowPlayingActionStatus.collectAsState()
@@ -76,7 +78,6 @@ fun NowPlayingSheet(
     }
 
     LaunchedEffect(Unit) {
-        vm.refreshSpotifyDevices()
         vm.compileDopamineCapsule()
     }
 
@@ -213,15 +214,15 @@ fun NowPlayingSheet(
                 IconButton(
                     onClick = {
                         if (hasTrack) {
-                            vm.syncAtmosphereToTrack(effectiveTitle, effectiveArtist, activeMedia?.albumArtUrl)
-                            actionStatus = "Chromatic sync applied to \"$effectiveTitle\""
+                            onAskAgentAboutCurrent(effectiveTitle, effectiveArtist)
+                            onBack()
                         }
                     }
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Palette,
-                        contentDescription = "Sync Theme",
-                        tint = theme.primaryAccent
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = "Ask TuneMind",
+                        tint = neonCyan
                     )
                 }
             }
@@ -326,7 +327,47 @@ fun NowPlayingSheet(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            val currentVaultStatus = remember(
+                effectiveTitle,
+                effectiveArtist,
+                activeSpotifyUri,
+                vaultState,
+                manualFreshTracks,
+                freshExcludedKeys,
+                hasTrack
+            ) {
+                if (hasTrack) {
+                    vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
+                } else {
+                    com.tunemind.app.ui.TrackVaultUiStatus()
+                }
+            }
+
+            if (hasTrack) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val statusLabel = when {
+                    currentVaultStatus.isInVault -> "Resting · ${currentVaultStatus.cooldownRemainingLabel ?: "Locked"}"
+                    currentVaultStatus.isManualFresh -> "In Fresh · ${currentVaultStatus.freshnessPercent}% ready"
+                    else -> "${currentVaultStatus.freshnessPercent}% fresh"
+                }
+                val statusColor = if (currentVaultStatus.isInVault) warnAmber else safeGreen
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(statusColor.copy(alpha = 0.14f))
+                        .border(1.dp, statusColor.copy(alpha = 0.35f), RoundedCornerShape(100.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = statusLabel,
+                        color = statusColor,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Progress Slider
             if (hasTrack && effectiveDurationMs > 0L) {
@@ -439,26 +480,27 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Quick Actions for Current Track
+            // Clean 2-Pill Collection Controls: Resting Vault & Fresh (Add / Remove cleanly)
             if (hasTrack) {
+                val trackVaultStatus = vm.resolveTrackVaultStatus(
+                    effectiveTitle,
+                    effectiveArtist,
+                    activeSpotifyUri,
+                    nowPlaying?.trackId
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val currentVaultStatus = vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
                     NowPlayingQuickAction(
-                        icon = Icons.Rounded.Shield,
-                        label = if (currentVaultStatus.isInVault) {
-                            currentVaultStatus.cooldownRemainingLabel ?: "In Vault"
-                        } else {
-                            "Vault"
-                        },
-                        accent = if (currentVaultStatus.isInVault) Color(0xFF10B981) else warnAmber,
+                        icon = if (trackVaultStatus.isInVault) Icons.Rounded.LockOpen else Icons.Rounded.Schedule,
+                        label = if (trackVaultStatus.isInVault) "Remove Resting" else "Add to Resting",
+                        accent = if (trackVaultStatus.isInVault) safeGreen else warnAmber,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            if (currentVaultStatus.isInVault && !currentVaultStatus.vaultId.isNullOrBlank()) {
-                                vm.restoreFromVault(currentVaultStatus.vaultId)
-                                actionStatus = "Restored \"$effectiveTitle\" back to Fresh"
+                            if (trackVaultStatus.isInVault && !trackVaultStatus.vaultId.isNullOrBlank()) {
+                                vm.restoreFromVault(trackVaultStatus.vaultId)
+                                actionStatus = "Removed \"$effectiveTitle\" from Resting Vault"
                             } else {
                                 vm.quarantineTrack(
                                     title = effectiveTitle,
@@ -467,135 +509,53 @@ fun NowPlayingSheet(
                                     spotifyUri = activeSpotifyUri,
                                     trackId = nowPlaying?.trackId
                                 )
-                                val afterStatus = vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
+                                val afterStatus = vm.resolveTrackVaultStatus(
+                                    effectiveTitle,
+                                    effectiveArtist,
+                                    activeSpotifyUri,
+                                    nowPlaying?.trackId
+                                )
                                 val durHint = afterStatus.cooldownRemainingLabel?.let { " ($it)" }.orEmpty()
-                                actionStatus = "Moved \"$effectiveTitle\" to Cooldown Vault$durHint"
+                                actionStatus = "Added \"$effectiveTitle\" to Resting Vault$durHint"
                             }
                         }
                     )
+
                     NowPlayingQuickAction(
-                        icon = Icons.Rounded.AutoAwesome,
-                        label = "Ask Agent",
-                        accent = electricPurple,
+                        icon = if (trackVaultStatus.isInFresh) Icons.Rounded.RemoveCircleOutline else Icons.Rounded.Bolt,
+                        label = if (trackVaultStatus.isInFresh) "Remove Fresh" else "Add to Fresh",
+                        accent = if (trackVaultStatus.isInFresh) Color.White.copy(alpha = 0.78f) else neonCyan,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            onAskAgentAboutCurrent(effectiveTitle, effectiveArtist)
-                            onBack()
+                            if (trackVaultStatus.isInFresh) {
+                                vm.removeFromFresh(
+                                    title = effectiveTitle,
+                                    artist = effectiveArtist,
+                                    spotifyUri = activeSpotifyUri,
+                                    trackId = nowPlaying?.trackId
+                                )
+                                actionStatus = "Removed \"$effectiveTitle\" from Fresh"
+                            } else {
+                                vm.addToFresh(
+                                    title = effectiveTitle,
+                                    artist = effectiveArtist,
+                                    sourcePackage = nowPlaying?.sourcePackage,
+                                    spotifyUri = activeSpotifyUri,
+                                    trackId = nowPlaying?.trackId,
+                                    albumArtUrl = activeMedia?.albumArtUrl
+                                )
+                                actionStatus = "Added \"$effectiveTitle\" to Fresh"
+                            }
                         }
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    NowPlayingQuickAction(
-                        icon = Icons.Rounded.PlaylistAdd,
-                        label = "Spotify Queue",
-                        accent = Color(0xFF1DB954),
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            vm.addTrackToSpotifyQueue(effectiveTitle, effectiveArtist, activeSpotifyUri)
-                            actionStatus = "Adding \"$effectiveTitle\" to Spotify queue…"
-                        }
-                    )
-                    NowPlayingQuickAction(
-                        icon = Icons.Rounded.FavoriteBorder,
-                        label = "Save Liked",
-                        accent = Color(0xFF1DB954),
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            vm.saveTrackToSpotifyLiked(effectiveTitle, effectiveArtist, activeSpotifyUri)
-                            actionStatus = "Saving \"$effectiveTitle\" to Liked Songs…"
-                        }
-                    )
-                }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
             }
 
-            if (spotifyDevices.isNotEmpty()) {
-                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            StudioSectionHeader(title = "Spotify Devices")
-                            IconButton(
-                                onClick = { vm.refreshSpotifyDevices() },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Refresh,
-                                    contentDescription = "Refresh devices",
-                                    tint = neonCyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        spotifyDevices.forEach { dev ->
-                            val isActive = dev.isActive
-                            val devAccent = if (isActive) Color(0xFF1DB954) else Color.White.copy(alpha = 0.6f)
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActive) Color(0xFF1DB954).copy(alpha = 0.12f) else Color.White.copy(alpha = 0.04f))
-                                    .border(
-                                        1.dp,
-                                        if (isActive) Color(0xFF1DB954).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable {
-                                        vm.transferPlaybackToDevice(dev.id)
-                                        actionStatus = "Switching playback to ${dev.name}…"
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = when {
-                                        dev.type.contains("Speaker", true) -> Icons.Rounded.Speaker
-                                        dev.type.contains("Computer", true) -> Icons.Rounded.Computer
-                                        else -> Icons.Rounded.Headphones
-                                    },
-                                    contentDescription = null,
-                                    tint = devAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = dev.name,
-                                        color = Color(0xFFF8FAFC),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = if (isActive) "Active · ${dev.type}" else dev.type,
-                                        color = devAccent,
-                                        fontSize = 11.5.sp
-                                    )
-                                }
-                                if (isActive) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Check,
-                                        contentDescription = "Active",
-                                        tint = Color(0xFF1DB954),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
+            // Up Next Queue (Cross-App Autoplay Override + Recommended Fresh Additions)
+            val recommendedForQueue = remember(effectiveUpNext, vaultState, manualFreshTracks, freshExcludedKeys, effectiveTitle) {
+                vm.getRecommendedFreshPoolForQueue(limit = 4)
             }
-
-            // Up Next Queue (Manual / Auto Spotify-Override + Pending AI Proposal + Non-Repeating Queue)
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -604,94 +564,53 @@ fun NowPlayingSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StudioSectionHeader(title = "Up Next Queue")
-                        IconButton(
-                            onClick = { vm.refreshUpNextQueue() },
-                            modifier = Modifier.size(30.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Shuffle,
-                                contentDescription = "Refresh Up Next Queue",
-                                tint = neonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (autoOverrideEnabled) safeGreen.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.14f)
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .clickable { vm.setUpNextAutoOverrideEnabled(!autoOverrideEnabled) }
+                            ) {
+                                Text(
+                                    text = if (autoOverrideEnabled) "Auto · Lock Queue" else "Manual",
+                                    color = if (autoOverrideEnabled) safeGreen else Color.White.copy(alpha = 0.72f),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { vm.refreshUpNextQueue() },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Shuffle,
+                                    contentDescription = "Refresh Up Next Queue",
+                                    tint = neonCyan,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Manual vs Auto Queue Takeover Switch
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White.copy(alpha = 0.04f),
-                        border = BorderStroke(
-                            1.dp,
-                            if (autoOverrideEnabled) safeGreen.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.10f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(22.dp),
-                                    color = if (!autoOverrideEnabled) neonCyan.copy(alpha = 0.18f) else Color.Transparent,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (!autoOverrideEnabled) neonCyan else Color.White.copy(alpha = 0.14f)
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .clickable { vm.setUpNextAutoOverrideEnabled(false) }
-                                ) {
-                                    Text(
-                                        text = "Manual",
-                                        color = if (!autoOverrideEnabled) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(vertical = 8.dp)
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(22.dp),
-                                    color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.22f) else Color.Transparent,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (autoOverrideEnabled) safeGreen else Color.White.copy(alpha = 0.14f)
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .clickable { vm.setUpNextAutoOverrideEnabled(true) }
-                                ) {
-                                    Text(
-                                        text = "Auto · Override Spotify",
-                                        color = if (autoOverrideEnabled) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = if (autoOverrideEnabled) {
-                                    "Auto: stops Spotify from playing random next songs and auto-spins TuneMind's Up Next track."
-                                } else {
-                                    "Manual: tap any queued track or Play Next below when you want TuneMind to play next."
-                                },
-                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.58f),
-                                fontSize = 11.5.sp,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
+                    Text(
+                        text = if (autoOverrideEnabled) {
+                            "Blocking Spotify & player autoplay — next song strictly plays from this queue."
+                        } else {
+                            "Manual queue — toggle Auto to block playlist autoplay across music apps."
+                        },
+                        color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.56f),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp
+                    )
 
                     if (pendingProposedTrack != null) {
                         Surface(
@@ -869,6 +788,88 @@ fun NowPlayingSheet(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
+                    }
+
+                    if (recommendedForQueue.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        StudioHairlineDivider()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Add Recommended Songs",
+                                color = Color.White.copy(alpha = 0.78f),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Auto Add 2",
+                                color = neonCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(neonCyan.copy(alpha = 0.14f))
+                                    .clickable {
+                                        vm.autoAddRecommendedFreshToQueue(2)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                        recommendedForQueue.forEach { recTrack ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        vm.enqueueUpNextTrack(
+                                            title = recTrack.title,
+                                            artist = recTrack.artist,
+                                            spotifyUri = recTrack.spotifyUri,
+                                            reason = recTrack.reason,
+                                            freshnessPercent = recTrack.freshnessPercent,
+                                            playNext = false
+                                        )
+                                    }
+                                    .padding(vertical = 6.dp, horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = recTrack.title,
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${recTrack.artist} · ${recTrack.freshnessPercent}% fresh · ${recTrack.reason}",
+                                        color = Color.White.copy(alpha = 0.54f),
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .background(neonCyan.copy(alpha = 0.16f))
+                                        .border(1.dp, neonCyan.copy(alpha = 0.45f), RoundedCornerShape(100.dp))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "+ Queue",
+                                        color = neonCyan,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -145,6 +145,8 @@ open class MainActivity : ComponentActivity() {
                     val tasteShiftSummary by vm.tasteShiftSummary.collectAsState()
                     val spotifyNewReleases by vm.spotifyNewReleases.collectAsState()
                     val spotifyActionFeedback by vm.spotifyActionFeedback.collectAsState()
+                    val manualFreshTracks by vm.manualFreshTracks.collectAsState()
+                    val freshExcludedKeys by vm.freshExcludedKeys.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -791,7 +793,15 @@ open class MainActivity : ComponentActivity() {
                                                 likedTracks = spotifyLikedTracks,
                                                 playlists = spotifyPlaylists,
                                                 savedRecommendations = savedAiRecommendations,
-                                                restoredAtMap = vm.getRestoredVaultTimestampsSnapshot()
+                                                restoredAtMap = vm.getRestoredVaultTimestampsSnapshot(),
+                                                manualFreshTracks = manualFreshTracks,
+                                                freshExcludedKeys = freshExcludedKeys,
+                                                onAddToFresh = { title, artist, pkg, uri, tid, art ->
+                                                    vm.addToFresh(title, artist, pkg, uri, tid, art)
+                                                },
+                                                onRemoveFromFresh = { title, artist, uri, tid ->
+                                                    vm.removeFromFresh(title, artist, uri, tid)
+                                                }
                                             )
                                         }
                                         1 -> {
@@ -942,6 +952,9 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onToggleTrackVault = { t, a, pkg, uri, id ->
                                                     vm.toggleTrackVaultStatus(t, a, pkg, uri, id)
+                                                },
+                                                onToggleTrackFresh = { t, a, pkg, uri, id ->
+                                                    vm.toggleTrackFreshStatus(t, a, pkg, uri, id)
                                                 }
                                             )
                                         }

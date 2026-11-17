@@ -340,6 +340,7 @@ fun WeeklyReportScreen(
                 freshnessPercent = vStatus.freshnessPercent,
                 playCount = tr.verifiedPlayCount,
                 isCoolingDown = vStatus.isCoolingDown,
+                isInFresh = vStatus.isInFresh && !vStatus.isCoolingDown,
                 spotifyUri = tr.spotifyUri,
                 trackId = tr.trackId,
                 cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -351,6 +352,9 @@ fun WeeklyReportScreen(
                 onSyncAtmosphereToTrack = { vm.syncAtmosphereToTrack(tr.title, tr.artist) },
                 onToggleCooldownVault = {
                     vm.toggleTrackVaultStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
+                },
+                onToggleFreshList = {
+                    vm.toggleTrackFreshStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
                 }
             )
         }

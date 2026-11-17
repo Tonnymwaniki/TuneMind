@@ -95,6 +95,8 @@ fun NeuralTrackActionDialog(
     cooldownRemainingLabel: String? = null,
     recoveryPercent: Int? = null,
     vaultReason: String? = null,
+    isInFresh: Boolean = !isCoolingDown,
+    onToggleFreshList: (() -> Unit)? = null,
     onAddToSpotifyQueue: (() -> Unit)? = null,
     onSaveToSpotifyLiked: (() -> Unit)? = null
 ) {
@@ -267,7 +269,7 @@ fun NeuralTrackActionDialog(
 
             TrackActionRow(
                 icon = if (isCoolingDown) Icons.Rounded.Bolt else Icons.Rounded.Schedule,
-                title = if (isCoolingDown) "Restore back to Fresh" else "Rest this song in Vault",
+                title = if (isCoolingDown) "Restore from Resting Vault" else "Add to Resting Vault",
                 subtitle = if (isCoolingDown) {
                     listOfNotNull(
                         cooldownRemainingLabel?.takeIf { it.isNotBlank() },
@@ -283,6 +285,23 @@ fun NeuralTrackActionDialog(
                     onDismiss()
                 }
             )
+            if (onToggleFreshList != null) {
+                HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+                TrackActionRow(
+                    icon = Icons.Rounded.AutoAwesome,
+                    title = if (isInFresh) "Remove from Fresh" else "Add to Fresh",
+                    subtitle = if (isInFresh) {
+                        "Hide this song from your Fresh list & queue pool"
+                    } else {
+                        "Move to Fresh right away for clean rotation"
+                    },
+                    accent = if (isInFresh) Color.White.copy(alpha = 0.72f) else theme.primaryAccent,
+                    onClick = {
+                        onToggleFreshList()
+                        onDismiss()
+                    }
+                )
+            }
         }
     }
 }

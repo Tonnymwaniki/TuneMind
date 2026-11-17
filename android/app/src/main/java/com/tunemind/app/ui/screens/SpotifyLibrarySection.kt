@@ -76,6 +76,7 @@ fun SpotifyLibrarySection(
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
+    onToggleTrackFresh: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
     onAskAgentAboutTrack: ((title: String, artist: String, freshness: Int, uri: String?) -> Unit)? = null,
     onSyncAtmosphereToTrack: ((title: String, artist: String) -> Unit)? = null
 ) {
@@ -896,6 +897,7 @@ fun SpotifyLibrarySection(
             freshnessPercent = vStatus.freshnessPercent,
             playCount = libPlays,
             isCoolingDown = vStatus.isCoolingDown,
+            isInFresh = vStatus.isInFresh && !vStatus.isCoolingDown,
             spotifyUri = libUri,
             trackId = libCanonicalId,
             cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
@@ -911,7 +913,10 @@ fun SpotifyLibrarySection(
             },
             onToggleCooldownVault = {
                 onToggleTrackVault?.invoke(libTitle, libArtist, "com.spotify.music", libUri, libCanonicalId)
-            }
+            },
+            onToggleFreshList = if (onToggleTrackFresh != null) {
+                { onToggleTrackFresh(libTitle, libArtist, "com.spotify.music", libUri, libCanonicalId) }
+            } else null
         )
     }
 }
