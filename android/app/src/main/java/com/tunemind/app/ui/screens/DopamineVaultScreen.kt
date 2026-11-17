@@ -29,6 +29,9 @@ import com.tunemind.app.data.ingestion.SpotifyNewReleaseItem
 import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
+import com.tunemind.app.domain.vault.RestingVaultEngine
+import com.tunemind.app.ui.GraduatedVaultSummary
+import com.tunemind.app.ui.TrackVaultUiStatus
 import com.tunemind.app.ui.VaultTrack
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
@@ -48,7 +51,11 @@ data class DopamineSongItem(
     val sourcePackage: String,
     val isCoolingDown: Boolean,
     val isFromVault: Boolean = false,
-    val trackId: String = ""
+    val trackId: String = "",
+    val vaultId: String? = null,
+    val cooldownRemainingLabel: String? = null,
+    val recoveryPercent: Int? = null,
+    val entryReason: String? = null
 )
 
 @Composable
@@ -83,12 +90,19 @@ fun DopamineVaultScreen(
     onSaveToSpotifyLiked: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
     onExportForYouPlaylist: (List<AiRecommendationEntity>) -> Unit = {},
     requestedSubTab: Int? = null,
-    onConsumeRequestedSubTab: () -> Unit = {}
+    onConsumeRequestedSubTab: () -> Unit = {},
+    graduatedTracks: List<GraduatedVaultSummary> = emptyList(),
+    onTickVaultLifecycle: () -> Unit = {},
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() }
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
     var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Resting, 2 = For You
     var activeSyncSong by remember { mutableStateOf<DopamineSongItem?>(null) }
+
+    LaunchedEffect(selectedTab) {
+        onTickVaultLifecycle()
+    }
 
     LaunchedEffect(requestedSubTab) {
         if (requestedSubTab != null && requestedSubTab in 0..2) {
@@ -97,23 +111,24 @@ fun DopamineVaultScreen(
         }
     }
 
-    val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount, repetitionSensitivity) {
+    val allSongs = remember(recentTracks, vaultTracks, resolvePlayCount, repetitionSensitivity, resolveTrackVaultStatus) {
         val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
         val seenIds = mutableSetOf<String>()
-        val satietyPerPlay = (12f + repetitionSensitivity.coerceIn(0.2f, 1.0f) * 12f).toInt().coerceIn(13, 25)
-        val coolingPlayThreshold = when {
-            repetitionSensitivity >= 0.85f -> 3
-            repetitionSensitivity >= 0.50f -> 4
-            else -> 6
-        }
+        val nowMs = System.currentTimeMillis()
 
         for (v in vaultTracks) {
             val key = "${v.title.trim().lowercase()}|${v.artist.trim().lowercase()}"
             if (!seenKeys.add(key)) continue
             val safeId = v.id.takeIf { it.isNotBlank() && seenIds.add(it) } ?: "vault_${list.size}"
             seenIds.add(safeId)
-            val freshness = (v.recoveryProgress * 100f).toInt().coerceIn(15, 75)
+            val rec = RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = v.quarantinedAtMs,
+                totalDays = v.totalDays,
+                baseSatietyScore = v.satietyScore,
+                nowMs = nowMs
+            )
+            if (rec.isGraduated) continue
             val canonicalId = v.resolvedCanonicalTrackId()
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(v.spotifyUri)
             val resolvedPlays = resolvePlayCount(v.title, v.artist, cleanUri).coerceAtLeast(0)
@@ -122,13 +137,17 @@ fun DopamineVaultScreen(
                     id = safeId,
                     title = v.title,
                     artist = v.artist,
-                    freshnessPercent = freshness,
+                    freshnessPercent = rec.freshnessPercent,
                     playCount = resolvedPlays,
                     spotifyUri = cleanUri,
                     sourcePackage = v.sourcePackage.ifBlank { "com.spotify.music" },
                     isCoolingDown = true,
                     isFromVault = true,
-                    trackId = canonicalId
+                    trackId = canonicalId,
+                    vaultId = v.id,
+                    cooldownRemainingLabel = rec.remainingLabel,
+                    recoveryPercent = (rec.recoveryProgress * 100f).toInt().coerceIn(0, 100),
+                    entryReason = v.entryReason
                 )
             )
         }
@@ -145,9 +164,18 @@ fun DopamineVaultScreen(
             val canonicalId = t.canonicalTrackId()
             val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
                 ?: t.distinctAppearanceCount.coerceAtLeast(0)
-            val satiety = if (plays <= 0) 0 else minOf(94, plays * satietyPerPlay)
-            val freshness = (100 - satiety).coerceIn(12, 98)
-            val cooling = plays >= coolingPlayThreshold || freshness < 45
+            val vaultStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
+            val fallbackFresh = if (plays <= 0) 98 else RestingVaultEngine.evaluateTrackFatigue(
+                playTimestampsMs = listOfNotNull((t.lastObservedAppearanceAtMs ?: 0L).takeIf { it > 0L }),
+                sensitivity = repetitionSensitivity,
+                nowMs = nowMs
+            ).freshnessPercent
+            val freshness = if (vaultStatus.satietyScore > 0 || vaultStatus.isInVault) {
+                vaultStatus.freshnessPercent
+            } else {
+                fallbackFresh
+            }
+            val cooling = vaultStatus.isInVault || vaultStatus.isCoolingDown
 
             list.add(
                 DopamineSongItem(
@@ -159,8 +187,12 @@ fun DopamineVaultScreen(
                     spotifyUri = uri,
                     sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
                     isCoolingDown = cooling,
-                    isFromVault = false,
-                    trackId = canonicalId
+                    isFromVault = vaultStatus.isInVault,
+                    trackId = canonicalId,
+                    vaultId = vaultStatus.vaultId,
+                    cooldownRemainingLabel = vaultStatus.cooldownRemainingLabel,
+                    recoveryPercent = vaultStatus.recoveryPercent.takeIf { vaultStatus.isInVault },
+                    entryReason = vaultStatus.entryReason
                 )
             )
         }
@@ -170,16 +202,20 @@ fun DopamineVaultScreen(
 
     val peakFreshSongs = remember(allSongs) {
         allSongs.filter { !it.isCoolingDown }.sortedByDescending { it.freshnessPercent }
-            .ifEmpty { allSongs.sortedByDescending { it.freshnessPercent }.take(5) }
     }
 
     val coolingDownSongs = remember(allSongs) {
-        allSongs.filter { it.isCoolingDown }.sortedBy { it.freshnessPercent }
+        allSongs.filter { it.isCoolingDown }.sortedBy { it.recoveryPercent ?: (100 - it.freshnessPercent) }
     }
 
-    val averageFreshness = remember(allSongs) {
-        if (allSongs.isEmpty()) 0
-        else allSongs.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
+    val averageFreshness = remember(allSongs, coolingDownSongs, selectedTab) {
+        if (selectedTab == 1) {
+            if (coolingDownSongs.isEmpty()) 100
+            else coolingDownSongs.map { it.recoveryPercent ?: it.freshnessPercent }.average().toInt().coerceIn(0, 100)
+        } else {
+            if (allSongs.isEmpty()) 0
+            else allSongs.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
+        }
     }
 
     val displayedSongs = if (selectedTab == 0) peakFreshSongs else coolingDownSongs
@@ -311,9 +347,10 @@ fun DopamineVaultScreen(
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
+                                        val entryGate = RestingVaultEngine.computeEntryThreshold(repetitionSensitivity)
                                         Text(
                                             text = when {
-                                                currentTab == 1 -> "${coolingDownSongs.size} resting tracks"
+                                                currentTab == 1 -> "${coolingDownSongs.size} resting · $averageFreshness% avg recovery"
                                                 allSongs.isEmpty() -> "No tracks tracked yet"
                                                 else -> "${peakFreshSongs.size} fresh tracks"
                                             },
@@ -324,7 +361,7 @@ fun DopamineVaultScreen(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = when {
-                                                currentTab == 1 -> "Resting in your vault to keep them feeling fresh."
+                                                currentTab == 1 -> "Auto-rests above $entryGate% satiety (2–7d) · Graduates cleanly at 100%"
                                                 allSongs.isEmpty() -> "Play music in Spotify or any player to build your Fresh mix."
                                                 else -> "Ready to play without feeling repetitive."
                                             },
@@ -332,6 +369,16 @@ fun DopamineVaultScreen(
                                             fontSize = 12.5.sp,
                                             lineHeight = 17.sp
                                         )
+                                        if (currentTab == 1 && graduatedTracks.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            val latestGrad = graduatedTracks.first()
+                                            Text(
+                                                text = "Graduated to Fresh: \"${latestGrad.title}\" (${latestGrad.totalRestedDays}d rest complete)",
+                                                color = Color(0xFF10B981),
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 }
                                 com.tunemind.app.ui.components.StudioHairlineDivider()
@@ -420,11 +467,14 @@ fun DopamineVaultScreen(
                             TuneMindTrackCard(
                                 title = song.title,
                                 artist = song.artist,
+                                subtitle = if (currentTab == 1) song.entryReason else null,
                                 playCount = accurateCount,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = isCurrentlyPlaying,
                                 freshnessPercent = song.freshnessPercent,
                                 isCoolingDown = song.isCoolingDown,
+                                cooldownRemainingLabel = song.cooldownRemainingLabel,
+                                recoveryPercent = song.recoveryPercent,
                                 accentColor = theme.primaryAccent,
                                 secondaryAccent = theme.secondaryAccent,
                                 spotifyUri = song.spotifyUri,
@@ -452,6 +502,9 @@ fun DopamineVaultScreen(
             isCoolingDown = selectedSong.isCoolingDown,
             spotifyUri = selectedSong.spotifyUri,
             trackId = selectedSong.trackId,
+            cooldownRemainingLabel = selectedSong.cooldownRemainingLabel,
+            recoveryPercent = selectedSong.recoveryPercent,
+            vaultReason = selectedSong.entryReason,
             onDismiss = { activeSyncSong = null },
             onPlayNow = {
                 onPlayTrack(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri, selectedSong.sourcePackage)
@@ -468,8 +521,8 @@ fun DopamineVaultScreen(
                 onSyncAtmosphereToTrack(selectedSong.title, selectedSong.artist)
             },
             onToggleCooldownVault = {
-                if (selectedSong.isFromVault) {
-                    onRestoreVaultTrack(selectedSong.id)
+                if (selectedSong.isFromVault || selectedSong.vaultId != null) {
+                    onRestoreVaultTrack(selectedSong.vaultId ?: selectedSong.id)
                 } else {
                     onQuarantineTrack(selectedSong.title, selectedSong.artist)
                     selectedTab = 1

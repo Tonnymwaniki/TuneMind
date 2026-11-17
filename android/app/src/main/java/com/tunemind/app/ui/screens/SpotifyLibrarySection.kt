@@ -39,9 +39,11 @@ import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import com.tunemind.app.ui.components.AnimatedEqualizerBars
+import com.tunemind.app.ui.TrackVaultUiStatus
 import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
+import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
@@ -71,12 +73,17 @@ fun SpotifyLibrarySection(
     onRefreshLibrary: () -> Unit,
     onRequestSpotifyAuth: () -> Unit,
     onLoadPlaylistTracks: (playlistId: String) -> Unit,
-    onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit
+    onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
+    onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
+    onAskAgentAboutTrack: ((title: String, artist: String, freshness: Int, uri: String?) -> Unit)? = null,
+    onSyncAtmosphereToTrack: ((title: String, artist: String) -> Unit)? = null
 ) {
     val spotifyGreen = Color(0xFF1DB954)
     val theme = LocalAdaptiveTheme.current
     var subTab by remember { mutableStateOf(0) } // 0 = Liked Songs, 1 = Playlists, 2 = Podcasts
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    var inspectedLibTrack by remember { mutableStateOf<Triple<String, String, Triple<String?, String, Int>>?>(null) }
 
     val selectedPlaylist = remember(playlists, selectedPlaylistId) {
         selectedPlaylistId?.let { id -> playlists.firstOrNull { it.playlistId == id } }
@@ -342,6 +349,7 @@ fun SpotifyLibrarySection(
                         val plays = resolvePlayCount(item.trackTitle, item.artistName, item.spotifyUri)
                         val isPlaying = isTrackCurrentlyPlaying(item.trackTitle, item.artistName, item.spotifyUri)
                         val durLabel = formatTrackMinutesSeconds(item.durationMs)
+                        val vStatus = resolveTrackVaultStatus(item.trackTitle, item.artistName, item.spotifyUri, canonicalId)
                         TuneMindTrackCard(
                             title = item.trackTitle,
                             artist = item.artistName,
@@ -352,6 +360,10 @@ fun SpotifyLibrarySection(
                             playCount = plays,
                             showUnplayedLabel = true,
                             isCurrentlyPlaying = isPlaying,
+                            freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else null,
+                            isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
+                            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                             accentColor = spotifyGreen,
                             leadingIndex = idx + 1,
                             spotifyUri = item.spotifyUri,
@@ -359,6 +371,17 @@ fun SpotifyLibrarySection(
                             trackId = canonicalId,
                             onPlayClick = {
                                 onPlayTrack(item.trackTitle, item.artistName, item.spotifyUri, "com.spotify.music")
+                            },
+                            onSyncClick = if (onToggleTrackVault != null) {
+                                {
+                                    inspectedLibTrack = Triple(
+                                        item.trackTitle,
+                                        item.artistName,
+                                        Triple(item.spotifyUri, canonicalId, plays)
+                                    )
+                                }
+                            } else {
+                                null
                             }
                         )
                     }
@@ -447,6 +470,7 @@ fun SpotifyLibrarySection(
                             val plays = resolvePlayCount(tr.title, tr.artist, tr.spotifyUri)
                             val isPlaying = isTrackCurrentlyPlaying(tr.title, tr.artist, tr.spotifyUri)
                             val durLabel = formatTrackMinutesSeconds(tr.durationMs)
+                            val vStatus = resolveTrackVaultStatus(tr.title, tr.artist, tr.spotifyUri, canonicalId)
                             TuneMindTrackCard(
                                 title = tr.title,
                                 artist = tr.artist,
@@ -457,6 +481,10 @@ fun SpotifyLibrarySection(
                                 playCount = plays,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = isPlaying,
+                                freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else null,
+                                isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
+                                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                                 accentColor = spotifyGreen,
                                 leadingIndex = idx + 1,
                                 spotifyUri = tr.spotifyUri.ifBlank { null },
@@ -464,6 +492,17 @@ fun SpotifyLibrarySection(
                                 trackId = canonicalId,
                                 onPlayClick = {
                                     onPlayTrack(tr.title, tr.artist, tr.spotifyUri.ifBlank { null }, "com.spotify.music")
+                                },
+                                onSyncClick = if (onToggleTrackVault != null) {
+                                    {
+                                        inspectedLibTrack = Triple(
+                                            tr.title,
+                                            tr.artist,
+                                            Triple(tr.spotifyUri.ifBlank { null }, canonicalId, plays)
+                                        )
+                                    }
+                                } else {
+                                    null
                                 }
                             )
                         }
@@ -846,6 +885,34 @@ fun SpotifyLibrarySection(
                 }
             }
         }
+    }
+
+    inspectedLibTrack?.let { (libTitle, libArtist, meta) ->
+        val (libUri, libCanonicalId, libPlays) = meta
+        val vStatus = resolveTrackVaultStatus(libTitle, libArtist, libUri, libCanonicalId)
+        NeuralTrackActionDialog(
+            title = libTitle,
+            artist = libArtist,
+            freshnessPercent = vStatus.freshnessPercent,
+            playCount = libPlays,
+            isCoolingDown = vStatus.isCoolingDown,
+            spotifyUri = libUri,
+            trackId = libCanonicalId,
+            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+            vaultReason = vStatus.entryReason,
+            onDismiss = { inspectedLibTrack = null },
+            onPlayNow = { onPlayTrack(libTitle, libArtist, libUri, "com.spotify.music") },
+            onAgentNeuralBreakdown = {
+                onAskAgentAboutTrack?.invoke(libTitle, libArtist, vStatus.freshnessPercent, libUri)
+            },
+            onSyncAtmosphereToTrack = {
+                onSyncAtmosphereToTrack?.invoke(libTitle, libArtist)
+            },
+            onToggleCooldownVault = {
+                onToggleTrackVault?.invoke(libTitle, libArtist, "com.spotify.music", libUri, libCanonicalId)
+            }
+        )
     }
 }
 

@@ -44,6 +44,7 @@ import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.ui.HearingInsightsState
+import com.tunemind.app.ui.TrackVaultUiStatus
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.NeuralTrackActionDialog
@@ -106,7 +107,9 @@ fun RhythmDnaScreen(
     momentsCount: Int = 0,
     onRefreshStats: () -> Unit = {},
     requestedSubDeck: Int? = null,
-    onConsumeRequestedSubDeck: () -> Unit = {}
+    onConsumeRequestedSubDeck: () -> Unit = {},
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
+    onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -312,7 +315,11 @@ fun RhythmDnaScreen(
                             onOpenWeeklyReport = onOpenWeeklyReport,
                             onOpenHearingHealth = onOpenHearingHealth,
                             onOpenMusicProfile = onOpenMusicProfile,
-                            onOpenMoments = onOpenMoments
+                            onOpenMoments = onOpenMoments,
+                            resolveTrackVaultStatus = resolveTrackVaultStatus,
+                            onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
+                            onAskAgentAboutTrack = onAskAgentAboutTrack,
+                            onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
                         )
                     }
 
@@ -333,7 +340,11 @@ fun RhythmDnaScreen(
                             onRefreshLibrary = onRefreshSpotifyLibrary,
                             onRequestSpotifyAuth = { spotifyAuthManager.launchSpotifyAuth(context) },
                             onLoadPlaylistTracks = onLoadPlaylistTracks,
-                            onPlayTrack = onPlayTrack
+                            onPlayTrack = onPlayTrack,
+                            resolveTrackVaultStatus = resolveTrackVaultStatus,
+                            onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
+                            onAskAgentAboutTrack = onAskAgentAboutTrack,
+                            onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
                         )
                     }
 
@@ -415,6 +426,7 @@ fun RhythmDnaScreen(
                                             )
                                         }
                                         val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.spotifyUri)
+                                        val vStatus = resolveTrackVaultStatus(track.title, track.artist, cleanUri, canonicalId)
                                         TuneMindTrackCard(
                                             title = track.title,
                                             artist = track.artist,
@@ -423,8 +435,10 @@ fun RhythmDnaScreen(
                                             showUnplayedLabel = true,
                                             isCurrentlyPlaying = isPlaying,
                                             appLabel = track.primaryAppName,
-                                            freshnessPercent = track.freshnessPercent,
-                                            isCoolingDown = track.isCoolingDown,
+                                            freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else track.freshnessPercent,
+                                            isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown || track.isCoolingDown,
+                                            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                                            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                                             leadingIndex = idx + 1,
                                             spotifyUri = cleanUri,
                                             trackId = canonicalId,
@@ -497,6 +511,7 @@ fun RhythmDnaScreen(
                                             )
                                         }
 
+                                        val vStatus = resolveTrackVaultStatus(ev.title, ev.artist, cleanUri, canonicalId)
                                         TuneMindTrackCard(
                                             title = ev.title,
                                             artist = ev.artist,
@@ -505,6 +520,10 @@ fun RhythmDnaScreen(
                                             showUnplayedLabel = true,
                                             isCurrentlyPlaying = isPlaying,
                                             appLabel = ev.appDisplayName,
+                                            freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else null,
+                                            isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
+                                            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                                            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                                             spotifyUri = cleanUri,
                                             trackId = canonicalId,
                                             onPlayClick = {
@@ -877,6 +896,7 @@ fun RhythmDnaScreen(
                                     val strictPlays = resolvePlayCount(title, artist, uri)
                                         .takeIf { it > 0 } ?: track.distinctAppearanceCount.coerceAtLeast(0)
                                     val isPlaying = isTrackCurrentlyPlaying(title, artist, uri)
+                                    val vStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
 
                                     TuneMindTrackCard(
                                         title = title,
@@ -886,6 +906,10 @@ fun RhythmDnaScreen(
                                         showUnplayedLabel = true,
                                         isCurrentlyPlaying = isPlaying,
                                         appLabel = ListeningPlayDeduplicator.resolveAppDisplayName(track.sourcePackage),
+                                        freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else null,
+                                        isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
+                                        cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                                        recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                                         accentColor = activePhase.color,
                                         secondaryAccent = theme.secondaryAccent,
                                         spotifyUri = uri,
@@ -953,7 +977,8 @@ fun RhythmDnaScreen(
         val canonicalId = selected.canonicalTrackId()
         val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
             ?: selected.distinctAppearanceCount.coerceAtLeast(0)
-        val freshness = (100 - minOf(94, plays * 19)).coerceIn(15, 98)
+        val vStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
+        val freshness = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else (100 - minOf(94, plays * 19)).coerceIn(15, 98)
         val pkg = selectedTargetPlayer.ifBlank {
             selected.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
         }
@@ -963,14 +988,23 @@ fun RhythmDnaScreen(
             artist = artist,
             freshnessPercent = freshness,
             playCount = plays,
-            isCoolingDown = plays >= 4,
+            isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown,
             spotifyUri = uri,
             trackId = canonicalId,
+            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+            vaultReason = vStatus.entryReason,
             onDismiss = { activeSyncTrack = null },
             onPlayNow = { onPlayTrack(title, artist, uri, pkg) },
             onAgentNeuralBreakdown = { onAskAgentAboutTrack(title, artist, freshness, uri) },
             onSyncAtmosphereToTrack = { onSyncAtmosphereToTrack(title, artist) },
-            onToggleCooldownVault = { onQuarantineTrack(title, artist) }
+            onToggleCooldownVault = {
+                if (onToggleTrackVault != null) {
+                    onToggleTrackVault(title, artist, pkg, uri, canonicalId)
+                } else {
+                    onQuarantineTrack(title, artist)
+                }
+            }
         )
     }
 }

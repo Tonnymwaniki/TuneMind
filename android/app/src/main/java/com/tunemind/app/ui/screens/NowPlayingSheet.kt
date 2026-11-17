@@ -465,20 +465,32 @@ fun NowPlayingSheet(
                             actionStatus = "Saved moment from \"$effectiveTitle\""
                         }
                     )
+                    val currentVaultStatus = vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
                     NowPlayingQuickAction(
                         icon = Icons.Rounded.Shield,
-                        label = "Vault",
-                        accent = warnAmber,
+                        label = if (currentVaultStatus.isInVault) {
+                            currentVaultStatus.cooldownRemainingLabel ?: "In Vault"
+                        } else {
+                            "Vault"
+                        },
+                        accent = if (currentVaultStatus.isInVault) Color(0xFF10B981) else warnAmber,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            vm.quarantineTrack(
-                                title = effectiveTitle,
-                                artist = effectiveArtist,
-                                sourcePackage = nowPlaying?.sourcePackage,
-                                spotifyUri = activeSpotifyUri,
-                                trackId = nowPlaying?.trackId
-                            )
-                            actionStatus = "Moved \"$effectiveTitle\" to Cooldown Vault"
+                            if (currentVaultStatus.isInVault && !currentVaultStatus.vaultId.isNullOrBlank()) {
+                                vm.restoreFromVault(currentVaultStatus.vaultId)
+                                actionStatus = "Restored \"$effectiveTitle\" back to Fresh"
+                            } else {
+                                vm.quarantineTrack(
+                                    title = effectiveTitle,
+                                    artist = effectiveArtist,
+                                    sourcePackage = nowPlaying?.sourcePackage,
+                                    spotifyUri = activeSpotifyUri,
+                                    trackId = nowPlaying?.trackId
+                                )
+                                val afterStatus = vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
+                                val durHint = afterStatus.cooldownRemainingLabel?.let { " ($it)" }.orEmpty()
+                                actionStatus = "Moved \"$effectiveTitle\" to Cooldown Vault$durHint"
+                            }
                         }
                     )
                     NowPlayingQuickAction(

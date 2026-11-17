@@ -92,6 +92,9 @@ fun NeuralTrackActionDialog(
     spotifyUri: String? = null,
     albumArtUrl: String? = null,
     trackId: String = "",
+    cooldownRemainingLabel: String? = null,
+    recoveryPercent: Int? = null,
+    vaultReason: String? = null,
     onAddToSpotifyQueue: (() -> Unit)? = null,
     onSaveToSpotifyLiked: (() -> Unit)? = null
 ) {
@@ -264,11 +267,15 @@ fun NeuralTrackActionDialog(
 
             TrackActionRow(
                 icon = if (isCoolingDown) Icons.Rounded.Bolt else Icons.Rounded.Schedule,
-                title = if (isCoolingDown) "Move back to Fresh" else "Rest this song for a few days",
+                title = if (isCoolingDown) "Restore back to Fresh" else "Rest this song in Vault",
                 subtitle = if (isCoolingDown) {
-                    "Bring back into regular rotation"
+                    listOfNotNull(
+                        cooldownRemainingLabel?.takeIf { it.isNotBlank() },
+                        recoveryPercent?.takeIf { it > 0 }?.let { "$it% recovered" },
+                        vaultReason?.takeIf { it.isNotBlank() && !it.equals("Manual Vault Lock", ignoreCase = true) }
+                    ).joinToString(" · ").ifBlank { "Graduate back to active rotation" }
                 } else {
-                    "Keep it from getting overplayed"
+                    "Adaptive 2–7d cooldown protects its freshness"
                 },
                 accent = if (isCoolingDown) Color(0xFF10B981) else Color(0xFFFFB000),
                 onClick = {

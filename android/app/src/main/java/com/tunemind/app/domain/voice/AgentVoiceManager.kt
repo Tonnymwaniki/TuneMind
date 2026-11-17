@@ -1164,18 +1164,7 @@ class AgentVoiceManager(
 
                     appendHearingTelemetryJson(hearing)
 
-                    val vaultArr = org.json.JSONArray()
-                    for (vt in vaultList) {
-                        vaultArr.put(JSONObject().apply {
-                            put("id", vt.id)
-                            put("title", vt.title)
-                            put("artist", vt.artist)
-                            put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble().takeIf { !it.isNaN() } ?: 3.0)
-                            put("recovery_percent", (vt.recoveryProgress * 100).toInt())
-                            put("satiety_score", vt.satietyScore)
-                        })
-                    }
-                    put("vault_tracks", vaultArr)
+                    put("vault_tracks", buildVaultJsonArray(vaultList))
 
                     if (capsule != null && capsule.tracks.isNotEmpty()) {
                         val capArr = org.json.JSONArray()
@@ -1553,18 +1542,7 @@ class AgentVoiceManager(
 
                         appendHearingTelemetryJson(hearing)
 
-                        val vaultArr = org.json.JSONArray()
-                        for (vt in vaultList) {
-                            vaultArr.put(JSONObject().apply {
-                                put("id", vt.id)
-                                put("title", vt.title)
-                                put("artist", vt.artist)
-                                put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble())
-                                put("recovery_percent", (vt.recoveryProgress * 100).toInt())
-                                put("satiety_score", vt.satietyScore)
-                            })
-                        }
-                        put("vault_tracks", vaultArr)
+                        put("vault_tracks", buildVaultJsonArray(vaultList))
 
                         if (capsule != null && capsule.tracks.isNotEmpty()) {
                             val capArr = org.json.JSONArray()
@@ -2305,18 +2283,7 @@ class AgentVoiceManager(
 
                     appendHearingTelemetryJson(hearing)
 
-                    val vaultArr = org.json.JSONArray()
-                    for (vt in vaultList) {
-                        vaultArr.put(JSONObject().apply {
-                            put("id", vt.id)
-                            put("title", vt.title)
-                            put("artist", vt.artist)
-                            put("cooldown_days_remaining", vt.cooldownDaysRemaining.toDouble().takeIf { !it.isNaN() } ?: 3.0)
-                            put("recovery_percent", (vt.recoveryProgress * 100).toInt())
-                            put("satiety_score", vt.satietyScore)
-                        })
-                    }
-                    put("vault_tracks", vaultArr)
+                    put("vault_tracks", buildVaultJsonArray(vaultList))
 
                     if (capsule != null && capsule.tracks.isNotEmpty()) {
                         val capArr = org.json.JSONArray()
@@ -3295,5 +3262,36 @@ class AgentVoiceManager(
             Log.w(TAG, "Error shutting down executionEngine", e)
         }
         scope.cancel()
+    }
+
+    private fun buildVaultJsonArray(vaultList: List<com.tunemind.app.ui.VaultTrack>): org.json.JSONArray {
+        val vaultArr = org.json.JSONArray()
+        val nowMs = System.currentTimeMillis()
+        for (vt in vaultList) {
+            val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = vt.quarantinedAtMs,
+                totalDays = vt.totalDays,
+                baseSatietyScore = vt.satietyScore,
+                nowMs = nowMs
+            )
+            vaultArr.put(JSONObject().apply {
+                put("id", vt.id)
+                put("title", vt.title)
+                put("artist", vt.artist)
+                put("trackId", vt.resolvedCanonicalTrackId())
+                vt.spotifyUri?.let { put("spotifyUri", it) }
+                put("sourcePackage", vt.sourcePackage)
+                put("quarantinedAtMs", vt.quarantinedAtMs)
+                put("totalDays", vt.totalDays.toDouble())
+                put("cooldown_days_remaining", rec.cooldownDaysRemaining.toDouble())
+                put("remaining_label", rec.remainingLabel)
+                put("recovery_percent", (rec.recoveryProgress * 100f).toInt())
+                put("freshness_percent", rec.freshnessPercent)
+                put("satiety_score", vt.satietyScore)
+                put("entry_reason", vt.entryReason)
+                put("is_auto_quarantined", vt.isAutoQuarantined)
+            })
+        }
+        return vaultArr
     }
 }

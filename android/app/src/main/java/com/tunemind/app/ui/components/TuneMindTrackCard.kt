@@ -100,6 +100,8 @@ fun TuneMindTrackCard(
     appLabel: String? = null,
     freshnessPercent: Int? = null,
     isCoolingDown: Boolean = false,
+    cooldownRemainingLabel: String? = null,
+    recoveryPercent: Int? = null,
     accentColor: Color = LocalAdaptiveTheme.current.primaryAccent,
     secondaryAccent: Color = LocalAdaptiveTheme.current.secondaryAccent,
     leadingIndex: Int? = null,
@@ -143,8 +145,17 @@ fun TuneMindTrackCard(
         showUnplayedLabel -> zeroPlayLabel.ifBlank { "0 plays" }
         else -> null
     }
-    val freshnessSummary = freshnessPercent?.let {
-        if (isCoolingDown) "Resting" else "${it}% fresh"
+    val freshnessSummary = when {
+        isCoolingDown -> buildString {
+            append("Resting")
+            if (!cooldownRemainingLabel.isNullOrBlank()) {
+                append(" · $cooldownRemainingLabel")
+            } else if (recoveryPercent != null && recoveryPercent > 0) {
+                append(" · $recoveryPercent% recovered")
+            }
+        }
+        freshnessPercent != null -> "${freshnessPercent}% fresh"
+        else -> null
     }
 
     val metadataLine = listOfNotNull(

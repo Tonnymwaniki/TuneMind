@@ -34,10 +34,13 @@ import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
+import com.tunemind.app.domain.memory.UnifiedTrackStats
 import com.tunemind.app.domain.memory.WindowedListeningStats
+import com.tunemind.app.ui.TrackVaultUiStatus
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
+import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
@@ -65,11 +68,13 @@ fun StatsScreen(
     val stats by vm.listeningStats.collectAsState()
     val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
     val tasteShifts by vm.tasteShiftSummary.collectAsState()
+    val vaultTracks by vm.vaultState.collectAsState()
     val nowPlaying = vm.homeState.collectAsState().value.nowPlaying
     val liveSpotify by vm.spotifyLiveState.collectAsState()
 
     var selectedWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
     var liveTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    var inspectedTrack by remember { mutableStateOf<UnifiedTrackStats?>(null) }
 
     LaunchedEffect(Unit) {
         vm.refreshLiveListeningStatsNow()
@@ -142,6 +147,7 @@ fun StatsScreen(
                 }
             }
 
+            val _vt = vaultTracks
             statsDashboardItems(
                 windowStats = windowStats,
                 selectedWindow = selectedWindow,
@@ -157,7 +163,32 @@ fun StatsScreen(
                 onOpenWeeklyReport = onOpenWeeklyReport,
                 onOpenHearingHealth = onOpenHearingHealth,
                 onOpenMusicProfile = onOpenMusicProfile,
-                onOpenMoments = onOpenMoments
+                onOpenMoments = onOpenMoments,
+                resolveTrackVaultStatus = { t, a, uri, id -> vm.resolveTrackVaultStatus(t, a, uri, id) },
+                onInspectTrack = { inspectedTrack = it }
+            )
+        }
+
+        inspectedTrack?.let { tr ->
+            val vStatus = vm.resolveTrackVaultStatus(tr.title, tr.artist, tr.spotifyUri, tr.trackId)
+            NeuralTrackActionDialog(
+                title = tr.title,
+                artist = tr.artist,
+                freshnessPercent = vStatus.freshnessPercent,
+                playCount = tr.verifiedPlayCount,
+                isCoolingDown = vStatus.isCoolingDown,
+                spotifyUri = tr.spotifyUri,
+                trackId = tr.trackId,
+                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+                vaultReason = vStatus.entryReason,
+                onDismiss = { inspectedTrack = null },
+                onPlayNow = { onPlayTrack(tr.title, tr.artist, tr.spotifyUri, tr.primarySourcePackage) },
+                onAgentNeuralBreakdown = { onBack() },
+                onSyncAtmosphereToTrack = { vm.syncAtmosphereToTrack(tr.title, tr.artist) },
+                onToggleCooldownVault = {
+                    vm.toggleTrackVaultStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
+                }
             )
         }
     }
@@ -180,11 +211,16 @@ fun StatsDashboardContent(
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
     onOpenMoments: () -> Unit,
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
+    onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
+    onAskAgentAboutTrack: ((title: String, artist: String, freshness: Int, uri: String?) -> Unit)? = null,
+    onSyncAtmosphereToTrack: ((title: String, artist: String) -> Unit)? = null
 ) {
     var internalWindow by rememberSaveable { mutableStateOf(selectedWindow) }
     val activeWindow = if (onSelectWindow != null) selectedWindow else internalWindow
     val handleWindowSelect: (StatsTimeWindow) -> Unit = onSelectWindow ?: { internalWindow = it }
+    var inspectedTrack by remember { mutableStateOf<UnifiedTrackStats?>(null) }
 
     LaunchedEffect(Unit) {
         onRefreshStats()
@@ -213,7 +249,36 @@ fun StatsDashboardContent(
             onOpenWeeklyReport = onOpenWeeklyReport,
             onOpenHearingHealth = onOpenHearingHealth,
             onOpenMusicProfile = onOpenMusicProfile,
-            onOpenMoments = onOpenMoments
+            onOpenMoments = onOpenMoments,
+            resolveTrackVaultStatus = resolveTrackVaultStatus,
+            onInspectTrack = if (onToggleTrackVault != null) { { inspectedTrack = it } } else null
+        )
+    }
+
+    inspectedTrack?.let { tr ->
+        val vStatus = resolveTrackVaultStatus(tr.title, tr.artist, tr.spotifyUri, tr.trackId)
+        NeuralTrackActionDialog(
+            title = tr.title,
+            artist = tr.artist,
+            freshnessPercent = vStatus.freshnessPercent,
+            playCount = tr.verifiedPlayCount,
+            isCoolingDown = vStatus.isCoolingDown,
+            spotifyUri = tr.spotifyUri,
+            trackId = tr.trackId,
+            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+            vaultReason = vStatus.entryReason,
+            onDismiss = { inspectedTrack = null },
+            onPlayNow = { onPlayTrack(tr.title, tr.artist, tr.spotifyUri, tr.primarySourcePackage) },
+            onAgentNeuralBreakdown = {
+                onAskAgentAboutTrack?.invoke(tr.title, tr.artist, vStatus.freshnessPercent, tr.spotifyUri)
+            },
+            onSyncAtmosphereToTrack = {
+                onSyncAtmosphereToTrack?.invoke(tr.title, tr.artist)
+            },
+            onToggleCooldownVault = {
+                onToggleTrackVault?.invoke(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
+            }
         )
     }
 }
@@ -228,7 +293,9 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
     onOpenMoments: () -> Unit,
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
+    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
+    onInspectTrack: ((UnifiedTrackStats) -> Unit)? = null
 ) {
     // 1. Open-Canvas Hero Listening Summary (No outer card box)
     item(key = "stats_hero_card") {
@@ -752,6 +819,9 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                     artist = track.artist
                 )
             }
+            val vStatus = resolveTrackVaultStatus(track.title, track.artist, track.spotifyUri, canonicalId)
+            val effectiveFreshness = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else track.freshnessPercent
+            val effectiveCooling = vStatus.isInVault || vStatus.isCoolingDown || track.isCoolingDown
             TuneMindTrackCard(
                 title = track.title,
                 artist = track.artist,
@@ -760,11 +830,20 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 showUnplayedLabel = true,
                 isCurrentlyPlaying = playingNow,
                 appLabel = track.primaryAppName,
+                freshnessPercent = effectiveFreshness,
+                isCoolingDown = effectiveCooling,
+                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                 leadingIndex = index + 1,
                 spotifyUri = track.spotifyUri,
                 trackId = canonicalId,
                 onPlayClick = {
                     onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
+                },
+                onSyncClick = if (onInspectTrack != null) {
+                    { onInspectTrack(track) }
+                } else {
+                    null
                 }
             )
         }

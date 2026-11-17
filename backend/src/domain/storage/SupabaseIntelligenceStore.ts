@@ -5,6 +5,11 @@ import {
   normalizeSpotifyUri,
   resolveCanonicalTrackIdentity
 } from '../identity/trackIdentity';
+import {
+  GraduatedVaultTrack,
+  RestingVaultEngine,
+  VaultTrackPayload
+} from '../vault/RestingVaultEngine';
 
 export interface SupabaseConnectionOverride {
   supabaseUrl?: string;
@@ -58,6 +63,8 @@ export interface LongTermIntelligenceSummary {
   circadianPatternNotes: string[];
   allListenedTitles: string[];
   allListenedUris: string[];
+  vaultTracks?: VaultTrackPayload[];
+  graduatedVaultTracks?: GraduatedVaultTrack[];
 }
 
 export class SupabaseIntelligenceStore {
@@ -65,6 +72,9 @@ export class SupabaseIntelligenceStore {
   private static inMemoryApprovedTracks = new Map<string, { trackId?: string; title: string; artist: string; spotifyUri?: string; approvedAt: string }>();
   private static inMemoryRejectedTracks = new Map<string, { trackId?: string; title: string; artist: string; rejectedAt: string }>();
   private static inMemoryLearnedTracks = new Map<string, LearnedTrackEntry>();
+  private static inMemoryVaultTracks = new Map<string, VaultTrackPayload[]>();
+  private static inMemoryGraduatedVaultTracks = new Map<string, GraduatedVaultTrack[]>();
+  private static inMemoryRestoredTrackTimestamps = new Map<string, Record<string, number>>();
   private static lastSupabaseHydrationMs = 0;
 
   public static clearInMemoryStateForTests(): void {
@@ -72,6 +82,9 @@ export class SupabaseIntelligenceStore {
     this.inMemoryApprovedTracks.clear();
     this.inMemoryRejectedTracks.clear();
     this.inMemoryLearnedTracks.clear();
+    this.inMemoryVaultTracks.clear();
+    this.inMemoryGraduatedVaultTracks.clear();
+    this.inMemoryRestoredTrackTimestamps.clear();
     this.lastSupabaseHydrationMs = 0;
   }
 
@@ -98,10 +111,11 @@ export class SupabaseIntelligenceStore {
         daily_exposure_minutes?: number;
         output_device?: string;
       };
-      vaultTracks?: Array<{ title: string; artist: string; cooldown_days_remaining?: number; recovery_percent?: number }>;
+      vaultTracks?: Array<Record<string, any>>;
+      restoredTrackTimestamps?: Record<string, number>;
       override?: SupabaseConnectionOverride;
     }
-  ): Promise<{ syncedTracksCount: number; liveSupabaseStored: boolean }> {
+  ): Promise<{ syncedTracksCount: number; liveSupabaseStored: boolean; reconciledVaultCount: number; graduatedCount: number }> {
     const cleanUserId = this.normalizeUserId(userId);
     const validTracks = (tracks || []).filter(
       t =>
@@ -175,9 +189,50 @@ export class SupabaseIntelligenceStore {
       console.warn('[SupabaseIntelligenceStore] Local EventStore mirror notice:', e);
     }
 
+    // Reconcile Vault mathematically on server using live recovery curve & graduation rules
+    let reconciledVault: VaultTrackPayload[] = this.inMemoryVaultTracks.get(cleanUserId) || [];
+    let graduatedVault: GraduatedVaultTrack[] = this.inMemoryGraduatedVaultTracks.get(cleanUserId) || [];
+    if (options?.restoredTrackTimestamps && typeof options.restoredTrackTimestamps === 'object') {
+      const mergedRestored = {
+        ...(this.inMemoryRestoredTrackTimestamps.get(cleanUserId) || {}),
+        ...options.restoredTrackTimestamps
+      };
+      this.inMemoryRestoredTrackTimestamps.set(cleanUserId, mergedRestored);
+    }
+    if (Array.isArray(options?.vaultTracks)) {
+      const res = RestingVaultEngine.reconcileVaultTracks(
+        options.vaultTracks,
+        Date.now(),
+        this.inMemoryRestoredTrackTimestamps.get(cleanUserId)
+      );
+      reconciledVault = res.activeVault;
+      this.inMemoryVaultTracks.set(cleanUserId, reconciledVault);
+      if (res.graduatedTracks.length > 0) {
+        graduatedVault = [...res.graduatedTracks, ...graduatedVault].slice(0, 30);
+        this.inMemoryGraduatedVaultTracks.set(cleanUserId, graduatedVault);
+      }
+    } else if (reconciledVault.length > 0) {
+      const res = RestingVaultEngine.reconcileVaultTracks(
+        reconciledVault,
+        Date.now(),
+        this.inMemoryRestoredTrackTimestamps.get(cleanUserId)
+      );
+      reconciledVault = res.activeVault;
+      this.inMemoryVaultTracks.set(cleanUserId, reconciledVault);
+      if (res.graduatedTracks.length > 0) {
+        graduatedVault = [...res.graduatedTracks, ...graduatedVault].slice(0, 30);
+        this.inMemoryGraduatedVaultTracks.set(cleanUserId, graduatedVault);
+      }
+    }
+
     const client = getLiveSupabaseClient(options?.override?.supabaseUrl, options?.override?.supabaseKey);
     if (!client) {
-      return { syncedTracksCount: validTracks.length, liveSupabaseStored: false };
+      return {
+        syncedTracksCount: validTracks.length,
+        liveSupabaseStored: false,
+        reconciledVaultCount: reconciledVault.length,
+        graduatedCount: graduatedVault.length
+      };
     }
 
     let storedToSupabase = false;
@@ -248,7 +303,7 @@ export class SupabaseIntelligenceStore {
           approved_tracks_json: JSON.stringify(approvedForUser),
           rejected_tracks_json: JSON.stringify(rejectedForUser),
           hearing_telemetry_json: options?.hearingTelemetry ? JSON.stringify(options.hearingTelemetry) : null,
-          vault_tracks_json: options?.vaultTracks ? JSON.stringify(options.vaultTracks) : null,
+          vault_tracks_json: JSON.stringify(reconciledVault),
           updated_at: nowIso
         },
         { onConflict: 'user_id' }
@@ -299,7 +354,12 @@ export class SupabaseIntelligenceStore {
       }
     }
 
-    return { syncedTracksCount: validTracks.length, liveSupabaseStored: storedToSupabase };
+    return {
+      syncedTracksCount: validTracks.length,
+      liveSupabaseStored: storedToSupabase,
+      reconciledVaultCount: reconciledVault.length,
+      graduatedCount: graduatedVault.length
+    };
   }
 
   /**
@@ -484,16 +544,38 @@ export class SupabaseIntelligenceStore {
         // Optional table
       }
 
-      // Also hydrate `user_taste_genome` if present (top_tracks_json, approved_tracks_json, rejected_tracks_json)
+      // Also hydrate `user_taste_genome` if present (top_tracks_json, approved_tracks_json, rejected_tracks_json, vault_tracks_json)
       try {
         const { data: genomeRows, error: genomeErr } = await client
           .from('user_taste_genome')
-          .select('top_tracks_json, approved_tracks_json, rejected_tracks_json')
+          .select('top_tracks_json, approved_tracks_json, rejected_tracks_json, vault_tracks_json')
           .eq('user_id', cleanUserId)
           .limit(1);
 
         if (!genomeErr && Array.isArray(genomeRows) && genomeRows[0]) {
           const row = genomeRows[0] as any;
+          if (row.vault_tracks_json && !(this.inMemoryVaultTracks.get(cleanUserId)?.length)) {
+            try {
+              const parsedVault = JSON.parse(String(row.vault_tracks_json));
+              if (Array.isArray(parsedVault)) {
+                const reconciled = RestingVaultEngine.reconcileVaultTracks(
+                  parsedVault,
+                  Date.now(),
+                  this.inMemoryRestoredTrackTimestamps.get(cleanUserId)
+                );
+                this.inMemoryVaultTracks.set(cleanUserId, reconciled.activeVault);
+                if (reconciled.graduatedTracks.length > 0) {
+                  const prevGrad = this.inMemoryGraduatedVaultTracks.get(cleanUserId) || [];
+                  this.inMemoryGraduatedVaultTracks.set(
+                    cleanUserId,
+                    [...reconciled.graduatedTracks, ...prevGrad].slice(0, 30)
+                  );
+                }
+              }
+            } catch {
+              // Ignore malformed JSON
+            }
+          }
           if (row.top_tracks_json) {
             const topTracks = JSON.parse(String(row.top_tracks_json));
             if (Array.isArray(topTracks)) {
@@ -722,6 +804,21 @@ export class SupabaseIntelligenceStore {
       }
     }
 
+    const currentVaultRaw = this.inMemoryVaultTracks.get(cleanUserId) || [];
+    const currentVaultReconciled = RestingVaultEngine.reconcileVaultTracks(
+      currentVaultRaw,
+      Date.now(),
+      this.inMemoryRestoredTrackTimestamps.get(cleanUserId)
+    );
+    this.inMemoryVaultTracks.set(cleanUserId, currentVaultReconciled.activeVault);
+    if (currentVaultReconciled.graduatedTracks.length > 0) {
+      const prevGrad = this.inMemoryGraduatedVaultTracks.get(cleanUserId) || [];
+      this.inMemoryGraduatedVaultTracks.set(
+        cleanUserId,
+        [...currentVaultReconciled.graduatedTracks, ...prevGrad].slice(0, 30)
+      );
+    }
+
     return {
       userId: cleanUserId,
       isLiveSupabaseConnected: liveConnected,
@@ -735,7 +832,9 @@ export class SupabaseIntelligenceStore {
       recentInterventions: recentInterventionsFormatted,
       circadianPatternNotes,
       allListenedTitles: Array.from(allListenedTitlesSet),
-      allListenedUris: Array.from(allListenedUrisSet)
+      allListenedUris: Array.from(allListenedUrisSet),
+      vaultTracks: currentVaultReconciled.activeVault,
+      graduatedVaultTracks: this.inMemoryGraduatedVaultTracks.get(cleanUserId) || []
     };
   }
 }

@@ -590,6 +590,14 @@ open class MainActivity : ComponentActivity() {
                     val combinedRecentTracks = remember(historyState.tracks, homeState.recentTracks) {
                         historyState.tracks.ifEmpty { homeState.recentTracks }
                     }
+                    val recentlyGraduatedVault by vm.recentlyGraduatedVaultTracks.collectAsState()
+
+                    LaunchedEffect(isMainAppActive) {
+                        while (isMainAppActive) {
+                            kotlinx.coroutines.delay(60_000L)
+                            vm.refreshVaultLifecycleNow(syncWithBackend = false)
+                        }
+                    }
 
                     val dopamineCapsule by vm.upNextQueueState.collectAsState()
                     LaunchedEffect(combinedRecentTracks, vaultState, nowPlaying?.title) {
@@ -786,7 +794,12 @@ open class MainActivity : ComponentActivity() {
                                                     vm.exportForYouDropAsPlaylist("TuneMind Daily Drop", triples)
                                                 },
                                                 requestedSubTab = requestedDopamineSubTab,
-                                                onConsumeRequestedSubTab = { requestedDopamineSubTab = null }
+                                                onConsumeRequestedSubTab = { requestedDopamineSubTab = null },
+                                                graduatedTracks = recentlyGraduatedVault,
+                                                onTickVaultLifecycle = { vm.refreshVaultLifecycleNow(syncWithBackend = false) },
+                                                resolveTrackVaultStatus = { t, a, uri, id ->
+                                                    vm.resolveTrackVaultStatus(t, a, uri, id)
+                                                }
                                             )
                                         }
                                         1 -> {
@@ -933,7 +946,13 @@ open class MainActivity : ComponentActivity() {
                                                 momentsCount = musicalMomentsState.confirmedMoments.size,
                                                 onRefreshStats = { vm.refreshLiveListeningStatsNow() },
                                                 requestedSubDeck = requestedRhythmSubDeck,
-                                                onConsumeRequestedSubDeck = { requestedRhythmSubDeck = null }
+                                                onConsumeRequestedSubDeck = { requestedRhythmSubDeck = null },
+                                                resolveTrackVaultStatus = { t, a, uri, id ->
+                                                    vm.resolveTrackVaultStatus(t, a, uri, id)
+                                                },
+                                                onToggleTrackVault = { t, a, pkg, uri, id ->
+                                                    vm.toggleTrackVaultStatus(t, a, pkg, uri, id)
+                                                }
                                             )
                                         }
                                     }

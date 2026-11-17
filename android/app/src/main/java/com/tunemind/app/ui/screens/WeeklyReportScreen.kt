@@ -20,7 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.StatsTimeWindow
+import com.tunemind.app.domain.memory.UnifiedTrackStats
 import com.tunemind.app.ui.TuneMindViewModel
+import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
@@ -42,6 +44,7 @@ fun WeeklyReportScreen(
     val homeState by vm.homeState.collectAsState()
     val liveSpotify by vm.spotifyLiveState.collectAsState()
     val theme = LocalAdaptiveTheme.current
+    var inspectedWeeklyTrack by remember { mutableStateOf<UnifiedTrackStats?>(null) }
 
     LaunchedEffect(Unit) {
         vm.refreshLiveListeningStatsNow()
@@ -202,6 +205,7 @@ fun WeeklyReportScreen(
                                 artist = track.artist
                             )
                         }
+                        val vStatus = vm.resolveTrackVaultStatus(track.title, track.artist, track.spotifyUri, canonicalId)
                         TuneMindTrackCard(
                             title = track.title,
                             artist = track.artist,
@@ -210,13 +214,18 @@ fun WeeklyReportScreen(
                             showUnplayedLabel = true,
                             isCurrentlyPlaying = isPlaying,
                             appLabel = track.primaryAppName,
-                            freshnessPercent = track.freshnessPercent,
-                            isCoolingDown = track.isCoolingDown,
+                            freshnessPercent = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else track.freshnessPercent,
+                            isCoolingDown = vStatus.isInVault || vStatus.isCoolingDown || track.isCoolingDown,
+                            cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                            recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                             leadingIndex = index + 1,
                             spotifyUri = track.spotifyUri,
                             trackId = canonicalId,
                             onPlayClick = {
                                 onPlayTrack(track.title, track.artist, track.spotifyUri, track.primarySourcePackage)
+                            },
+                            onSyncClick = {
+                                inspectedWeeklyTrack = track
                             }
                         )
                     }
@@ -321,6 +330,29 @@ fun WeeklyReportScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+
+        inspectedWeeklyTrack?.let { tr ->
+            val vStatus = vm.resolveTrackVaultStatus(tr.title, tr.artist, tr.spotifyUri, tr.trackId)
+            NeuralTrackActionDialog(
+                title = tr.title,
+                artist = tr.artist,
+                freshnessPercent = vStatus.freshnessPercent,
+                playCount = tr.verifiedPlayCount,
+                isCoolingDown = vStatus.isCoolingDown,
+                spotifyUri = tr.spotifyUri,
+                trackId = tr.trackId,
+                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+                vaultReason = vStatus.entryReason,
+                onDismiss = { inspectedWeeklyTrack = null },
+                onPlayNow = { onPlayTrack(tr.title, tr.artist, tr.spotifyUri, tr.primarySourcePackage) },
+                onAgentNeuralBreakdown = { onBack() },
+                onSyncAtmosphereToTrack = { vm.syncAtmosphereToTrack(tr.title, tr.artist) },
+                onToggleCooldownVault = {
+                    vm.toggleTrackVaultStatus(tr.title, tr.artist, tr.primarySourcePackage, tr.spotifyUri, tr.trackId)
+                }
+            )
         }
     }
 }

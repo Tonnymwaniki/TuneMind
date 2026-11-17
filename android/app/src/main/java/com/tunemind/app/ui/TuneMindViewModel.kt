@@ -624,6 +624,8 @@ class TuneMindViewModel : ViewModel() {
         liveStatsRecomputeJob = viewModelScope.launch {
             val nowMs = System.currentTimeMillis()
             val np = resolveBestNowPlayingForStats(rows, _spotifyLiveState.value)
+            val restoredMap = loadRestoredVaultMapFromPrefs()
+            val activeVaultFreshness = buildActiveVaultFreshnessMap(nowMs)
             val snapshot = withContext(Dispatchers.Default) {
                 ListeningPlayDeduplicator.buildSnapshot(
                     rawObservations = rows,
@@ -637,7 +639,9 @@ class TuneMindViewModel : ViewModel() {
                     repetitionSensitivity = cachedRepetitionSensitivityForStats,
                     nowPlayingPositionMs = np?.positionMs ?: 0L,
                     nowPlayingDurationMs = np?.durationMs ?: 0L,
-                    nowPlayingUpdatedAtMs = np?.updatedAtMs ?: 0L
+                    nowPlayingUpdatedAtMs = np?.updatedAtMs ?: 0L,
+                    restoredAtByKey = restoredMap,
+                    activeVaultFreshnessByKey = activeVaultFreshness
                 )
             }
             _unifiedTracks.value = snapshot.unifiedTracks
@@ -646,6 +650,11 @@ class TuneMindViewModel : ViewModel() {
             _playCountByKey.value = snapshot.playCountByTrackKey
             _playCountByUri.value = snapshot.playCountByUri
             _playCountByTrackId.value = snapshot.playCountByTrackId
+            reconcileVaultLifecycle(
+                unifiedList = snapshot.unifiedTracks,
+                cleanEvents = snapshot.cleanPlayHistory,
+                syncBackend = false
+            )
             refreshHearingInsights()
         }
     }
@@ -943,9 +952,18 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    // Cooldown Vault Persistence
+    // Cooldown Vault Persistence & Mathematical Lifecycle
+    private val _recentlyGraduatedVaultTracks = MutableStateFlow<List<GraduatedVaultSummary>>(emptyList())
+    val recentlyGraduatedVaultTracks: StateFlow<List<GraduatedVaultSummary>> = _recentlyGraduatedVaultTracks.asStateFlow()
+
     private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
     val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
+
+    @Volatile
+    private var lastBackendVaultSyncMs: Long = 0L
+
+    @Volatile
+    private var hasHydratedRemoteVault: Boolean = false
 
     // Claude Cognitive AI Reasoning State
     private val _claudeSessionInsight = MutableStateFlow<String?>(null)
@@ -2132,6 +2150,8 @@ class TuneMindViewModel : ViewModel() {
                     val coverage: CoverageAssessment
                     val nowPlayingObs = resolveBestNowPlayingForStats(rows, liveSpotify)
 
+                    val restoredMap = loadRestoredVaultMapFromPrefs()
+                    val activeVaultFreshness = buildActiveVaultFreshnessMap(System.currentTimeMillis())
                     val snapshot: com.tunemind.app.domain.memory.DeduplicatedListeningSnapshot
                     withContext(Dispatchers.Default) {
                         val truncated = rows.size >= EventBufferRepository.MAX_OBSERVATIONS
@@ -2150,7 +2170,9 @@ class TuneMindViewModel : ViewModel() {
                             repetitionSensitivity = repetitionSensitivity,
                             nowPlayingPositionMs = nowPlayingObs?.positionMs ?: 0L,
                             nowPlayingDurationMs = nowPlayingObs?.durationMs ?: 0L,
-                            nowPlayingUpdatedAtMs = nowPlayingObs?.updatedAtMs ?: 0L
+                            nowPlayingUpdatedAtMs = nowPlayingObs?.updatedAtMs ?: 0L,
+                            restoredAtByKey = restoredMap,
+                            activeVaultFreshnessByKey = activeVaultFreshness
                         )
                     }
 
@@ -2160,6 +2182,15 @@ class TuneMindViewModel : ViewModel() {
                     _playCountByKey.value = snapshot.playCountByTrackKey
                     _playCountByUri.value = snapshot.playCountByUri
                     _playCountByTrackId.value = snapshot.playCountByTrackId
+                    reconcileVaultLifecycle(
+                        unifiedList = snapshot.unifiedTracks,
+                        cleanEvents = snapshot.cleanPlayHistory,
+                        syncBackend = true
+                    )
+                    if (!hasHydratedRemoteVault) {
+                        hasHydratedRemoteVault = true
+                        hydrateVaultFromBackendIfNeeded()
+                    }
                     refreshHearingInsights()
 
                     // Build authoritative deduplicated TrackMemoryEntry list (accurate play counts everywhere)
@@ -2815,21 +2846,73 @@ class TuneMindViewModel : ViewModel() {
         com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
     }
 
+    private fun loadRestoredVaultMapFromPrefs(): MutableMap<String, Long> {
+        val ctx = AppHolder.context ?: return mutableMapOf()
+        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val raw = prefs.getString("vault_restored_map", null) ?: return mutableMapOf()
+        return try {
+            val obj = org.json.JSONObject(raw)
+            val result = mutableMapOf<String, Long>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val v = obj.optLong(k, 0L)
+                if (v > 0L) result[k] = v
+            }
+            result
+        } catch (_: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveRestoredVaultMapToPrefs(map: Map<String, Long>) {
+        val ctx = AppHolder.context ?: return
+        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val obj = org.json.JSONObject()
+        // Keep most recent 120 restored entries
+        map.entries
+            .sortedByDescending { it.value }
+            .take(120)
+            .forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("vault_restored_map", obj.toString()).apply()
+    }
+
+    private fun buildActiveVaultFreshnessMap(nowMs: Long = System.currentTimeMillis()): Map<String, Int> {
+        val items = runCatching { _vaultState.value }.getOrNull() ?: return emptyMap()
+        if (items.isEmpty()) return emptyMap()
+        val map = mutableMapOf<String, Int>()
+        for (v in items) {
+            val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = v.quarantinedAtMs,
+                totalDays = v.totalDays,
+                baseSatietyScore = v.satietyScore,
+                nowMs = nowMs
+            )
+            if (!rec.isGraduated) {
+                val canonicalId = v.resolvedCanonicalTrackId()
+                val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(v.title, v.artist)
+                map[canonicalId] = rec.freshnessPercent
+                map[normKey] = rec.freshnessPercent
+            }
+        }
+        return map
+    }
+
     private fun loadVaultFromPrefs(): List<VaultTrack> {
         val ctx = AppHolder.context ?: return defaultSeedVault()
         val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
         val raw = prefs.getString("vault_items", null) ?: return defaultSeedVault()
+        val restoredMap = loadRestoredVaultMapFromPrefs()
         return try {
             val array = org.json.JSONArray(raw)
             val now = System.currentTimeMillis()
             val list = mutableListOf<VaultTrack>()
+            val graduatedNew = mutableListOf<GraduatedVaultSummary>()
+            var changed = false
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
                 val qTime = obj.getLong("quarantinedAtMs")
-                val totalDays = obj.getDouble("totalDays").toFloat()
-                val elapsedDays = maxOf(0f, (now - qTime) / 86_400_000f)
-                val remaining = maxOf(0f, totalDays - elapsedDays)
-                val progress = (1f - (remaining / totalDays)).coerceIn(0f, 1f)
+                val totalDays = obj.getDouble("totalDays").toFloat().coerceIn(0.5f, 14.0f)
                 val pkg = obj.optString("sourcePackage", "").ifBlank { "com.spotify.music" }
                 val rawUri = obj.optString("spotifyUri", "").takeIf { it.isNotBlank() }
                 val titleStr = obj.getString("title")
@@ -2840,6 +2923,43 @@ class TuneMindViewModel : ViewModel() {
                     title = titleStr,
                     artist = artistStr
                 )
+                val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(titleStr, artistStr)
+                val restoredAt = maxOf(restoredMap[resolvedIdentity.trackId] ?: 0L, restoredMap[normKey] ?: 0L)
+                if (restoredAt > qTime) {
+                    changed = true
+                    continue
+                }
+                val satiety = obj.optInt("satietyScore", 82).coerceIn(40, 99)
+                val entryReason = obj.optString("entryReason", "").ifBlank { "Manual Vault Lock" }
+                val isAuto = obj.optBoolean("isAutoQuarantined", false)
+                val lastPenalty = obj.optLong("lastPenaltyPlayAtMs", 0L)
+
+                val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                    quarantinedAtMs = qTime,
+                    totalDays = totalDays,
+                    baseSatietyScore = satiety,
+                    nowMs = now
+                )
+                if (rec.isGraduated) {
+                    changed = true
+                    restoredMap[resolvedIdentity.trackId] = now
+                    restoredMap[normKey] = now
+                    graduatedNew.add(
+                        GraduatedVaultSummary(
+                            id = obj.getString("id"),
+                            trackId = resolvedIdentity.trackId,
+                            title = titleStr,
+                            artist = artistStr,
+                            spotifyUri = resolvedIdentity.spotifyUri,
+                            graduatedAtMs = now,
+                            totalRestedDays = totalDays,
+                            previousSatietyScore = satiety,
+                            entryReason = entryReason
+                        )
+                    )
+                    continue
+                }
+
                 list.add(
                     VaultTrack(
                         id = obj.getString("id"),
@@ -2847,14 +2967,24 @@ class TuneMindViewModel : ViewModel() {
                         artist = artistStr,
                         quarantinedAtMs = qTime,
                         totalDays = totalDays,
-                        cooldownDaysRemaining = (remaining * 10).toInt() / 10f,
-                        recoveryProgress = progress,
-                        satietyScore = obj.optInt("satietyScore", 85),
+                        cooldownDaysRemaining = rec.cooldownDaysRemaining,
+                        recoveryProgress = rec.recoveryProgress,
+                        satietyScore = satiety,
                         sourcePackage = pkg,
                         spotifyUri = resolvedIdentity.spotifyUri,
-                        trackId = resolvedIdentity.trackId
+                        trackId = resolvedIdentity.trackId,
+                        entryReason = entryReason,
+                        isAutoQuarantined = isAuto,
+                        lastPenaltyPlayAtMs = lastPenalty,
+                        updatedAtMs = now
                     )
                 )
+            }
+            if (changed) {
+                saveRestoredVaultMapToPrefs(restoredMap)
+            }
+            if (graduatedNew.isNotEmpty()) {
+                _recentlyGraduatedVaultTracks.value = (graduatedNew + _recentlyGraduatedVaultTracks.value).take(10)
             }
             if (list.isEmpty()) defaultSeedVault() else list
         } catch (_: Exception) {
@@ -2877,6 +3007,10 @@ class TuneMindViewModel : ViewModel() {
                 put("totalDays", item.totalDays.toDouble())
                 put("satietyScore", item.satietyScore)
                 put("sourcePackage", item.sourcePackage)
+                put("entryReason", item.entryReason)
+                put("isAutoQuarantined", item.isAutoQuarantined)
+                put("lastPenaltyPlayAtMs", item.lastPenaltyPlayAtMs)
+                put("updatedAtMs", item.updatedAtMs)
                 put(
                     "trackId",
                     item.trackId.ifBlank {
@@ -2894,14 +3028,248 @@ class TuneMindViewModel : ViewModel() {
         prefs.edit().putString("vault_items", array.toString()).apply()
     }
 
-    fun quarantineTrack(
+    fun resolveTrackVaultStatus(
+        title: String?,
+        artist: String?,
+        spotifyUri: String? = null,
+        trackId: String? = null
+    ): TrackVaultUiStatus {
+        val cleanTitle = title?.trim().orEmpty()
+        if (cleanTitle.isBlank()) return TrackVaultUiStatus()
+        val nowMs = System.currentTimeMillis()
+        val vaultMatch = _vaultState.value.firstOrNull { vt ->
+            ListeningPlayDeduplicator.isSameTrack(vt.title, vt.artist, vt.spotifyUri, cleanTitle, artist, spotifyUri) ||
+                (!trackId.isNullOrBlank() && vt.resolvedCanonicalTrackId() == trackId)
+        }
+        if (vaultMatch != null) {
+            val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = vaultMatch.quarantinedAtMs,
+                totalDays = vaultMatch.totalDays,
+                baseSatietyScore = vaultMatch.satietyScore,
+                nowMs = nowMs
+            )
+            return TrackVaultUiStatus(
+                isInVault = true,
+                vaultId = vaultMatch.id,
+                isCoolingDown = !rec.isGraduated,
+                freshnessPercent = rec.freshnessPercent,
+                recoveryPercent = (rec.recoveryProgress * 100f).toInt().coerceIn(0, 100),
+                cooldownRemainingLabel = rec.remainingLabel,
+                satietyScore = vaultMatch.satietyScore,
+                entryReason = vaultMatch.entryReason
+            )
+        }
+
+        val statsMatch = _unifiedTracks.value.firstOrNull { ut ->
+            ListeningPlayDeduplicator.isSameTrack(ut.title, ut.artist, ut.spotifyUri, cleanTitle, artist, spotifyUri) ||
+                (!trackId.isNullOrBlank() && ut.trackId == trackId)
+        }
+        if (statsMatch != null) {
+            return TrackVaultUiStatus(
+                isInVault = false,
+                vaultId = null,
+                isCoolingDown = statsMatch.isCoolingDown,
+                freshnessPercent = statsMatch.freshnessPercent,
+                recoveryPercent = 0,
+                cooldownRemainingLabel = null,
+                satietyScore = (100 - statsMatch.freshnessPercent).coerceIn(0, 99),
+                entryReason = null
+            )
+        }
+
+        return TrackVaultUiStatus()
+    }
+
+    fun toggleTrackVaultStatus(
         title: String,
         artist: String,
-        durationDays: Float = 5f,
         sourcePackage: String? = null,
         spotifyUri: String? = null,
         trackId: String? = null
     ) {
+        val status = resolveTrackVaultStatus(title, artist, spotifyUri, trackId)
+        if (status.isInVault && !status.vaultId.isNullOrBlank()) {
+            restoreFromVault(status.vaultId)
+        } else {
+            quarantineTrack(
+                title = title,
+                artist = artist,
+                durationDays = null,
+                sourcePackage = sourcePackage,
+                spotifyUri = spotifyUri,
+                trackId = trackId
+            )
+        }
+    }
+
+    fun refreshVaultLifecycleNow(syncWithBackend: Boolean = false) {
+        reconcileVaultLifecycle(
+            unifiedList = _unifiedTracks.value,
+            cleanEvents = _cleanPlayHistory.value,
+            syncBackend = syncWithBackend
+        )
+    }
+
+    private fun reconcileVaultLifecycle(
+        unifiedList: List<UnifiedTrackStats>,
+        cleanEvents: List<UnifiedPlayEvent>,
+        syncBackend: Boolean
+    ) {
+        val nowMs = System.currentTimeMillis()
+        val sensitivity = cachedRepetitionSensitivityForStats.coerceIn(0.2f, 1.0f)
+        val restoredMap = loadRestoredVaultMapFromPrefs()
+        val eventsByTrackKey = cleanEvents.groupBy { it.trackKey }
+
+        val updatedActive = mutableListOf<VaultTrack>()
+        val graduatedNow = mutableListOf<GraduatedVaultSummary>()
+        var mutated = false
+
+        val existing = _vaultState.value
+        val existingKeys = mutableSetOf<String>()
+
+        for (v in existing) {
+            val canonicalId = v.resolvedCanonicalTrackId()
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(v.title, v.artist)
+            existingKeys.add(normKey)
+            existingKeys.add(canonicalId)
+
+            val restoredAt = maxOf(restoredMap[canonicalId] ?: 0L, restoredMap[normKey] ?: 0L)
+            if (restoredAt > v.quarantinedAtMs) {
+                mutated = true
+                continue
+            }
+
+            // Premature Replay Penalty: if played again >15m after entering Vault, extend rest by +0.75d once per new play
+            var effectiveTotalDays = v.totalDays
+            var effectivePenaltyPlayMs = v.lastPenaltyPlayAtMs
+            var effectiveReason = v.entryReason
+            val matchedStats = unifiedList.firstOrNull { ut ->
+                ListeningPlayDeduplicator.isSameTrack(ut.title, ut.artist, ut.spotifyUri, v.title, v.artist, v.spotifyUri) ||
+                    ut.trackId == canonicalId
+            }
+            if (matchedStats != null &&
+                matchedStats.lastPlayedAtMs > v.quarantinedAtMs + 15L * 60_000L &&
+                matchedStats.lastPlayedAtMs > effectivePenaltyPlayMs
+            ) {
+                effectiveTotalDays = (v.totalDays + 0.75f).coerceIn(2.0f, 7.0f)
+                effectivePenaltyPlayMs = matchedStats.lastPlayedAtMs
+                effectiveReason = "Replay during rest (+18h added)"
+                mutated = true
+            }
+
+            val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = v.quarantinedAtMs,
+                totalDays = effectiveTotalDays,
+                baseSatietyScore = v.satietyScore,
+                nowMs = nowMs
+            )
+            if (rec.isGraduated) {
+                mutated = true
+                restoredMap[canonicalId] = nowMs
+                restoredMap[normKey] = nowMs
+                graduatedNow.add(
+                    GraduatedVaultSummary(
+                        id = v.id,
+                        trackId = canonicalId,
+                        title = v.title,
+                        artist = v.artist,
+                        spotifyUri = v.spotifyUri,
+                        graduatedAtMs = nowMs,
+                        totalRestedDays = effectiveTotalDays,
+                        previousSatietyScore = v.satietyScore,
+                        entryReason = effectiveReason
+                    )
+                )
+            } else {
+                if (kotlin.math.abs(rec.recoveryProgress - v.recoveryProgress) >= 0.01f ||
+                    rec.cooldownDaysRemaining != v.cooldownDaysRemaining
+                ) {
+                    mutated = true
+                }
+                updatedActive.add(
+                    v.copy(
+                        totalDays = effectiveTotalDays,
+                        cooldownDaysRemaining = rec.cooldownDaysRemaining,
+                        recoveryProgress = rec.recoveryProgress,
+                        lastPenaltyPlayAtMs = effectivePenaltyPlayMs,
+                        entryReason = effectiveReason,
+                        updatedAtMs = nowMs
+                    )
+                )
+            }
+        }
+
+        // Auto-Entry check for tracks exceeding temporal satiety or 24h binge thresholds
+        for (ut in unifiedList) {
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(ut.title, ut.artist)
+            if (normKey in existingKeys || ut.trackId in existingKeys) continue
+
+            val restoredAt = maxOf(restoredMap[ut.trackId] ?: 0L, restoredMap[normKey] ?: 0L)
+            val evs = eventsByTrackKey[ut.trackKey].orEmpty()
+            val timestamps = if (evs.isNotEmpty()) evs.map { it.playedAtMs } else listOf(ut.lastPlayedAtMs)
+            val ratios = evs.map { ev ->
+                if (ev.durationMs > 30_000L && ev.listenedMs > 0L) {
+                    (ev.listenedMs.toFloat() / ev.durationMs.toFloat()).coerceIn(0.01f, 1.0f)
+                } else {
+                    1.0f
+                }
+            }
+            val fatigue = com.tunemind.app.domain.vault.RestingVaultEngine.evaluateTrackFatigue(
+                playTimestampsMs = timestamps,
+                listenedRatios = ratios,
+                sensitivity = sensitivity,
+                lastRestoredAtMs = restoredAt,
+                nowMs = nowMs
+            )
+
+            if (fatigue.shouldAutoQuarantine) {
+                mutated = true
+                existingKeys.add(normKey)
+                existingKeys.add(ut.trackId)
+                val newItem = VaultTrack(
+                    id = "vault-${ut.trackId}-$nowMs",
+                    title = ut.title,
+                    artist = ut.artist,
+                    quarantinedAtMs = nowMs,
+                    totalDays = fatigue.recommendedCooldownDays,
+                    cooldownDaysRemaining = fatigue.recommendedCooldownDays,
+                    recoveryProgress = 0.0f,
+                    satietyScore = fatigue.effectiveSatiety.coerceIn(55, 99),
+                    sourcePackage = ut.primarySourcePackage.ifBlank { "com.spotify.music" },
+                    spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(ut.spotifyUri),
+                    trackId = ut.trackId,
+                    entryReason = fatigue.entryReason,
+                    isAutoQuarantined = true,
+                    updatedAtMs = nowMs
+                )
+                updatedActive.add(0, newItem)
+            }
+        }
+
+        if (graduatedNow.isNotEmpty()) {
+            _recentlyGraduatedVaultTracks.value = (graduatedNow + _recentlyGraduatedVaultTracks.value).take(10)
+            saveRestoredVaultMapToPrefs(restoredMap)
+        }
+
+        if (mutated) {
+            _vaultState.value = updatedActive
+            saveVaultToPrefs(updatedActive)
+            syncUpNextQueueWithSources(forceRebuild = false)
+            if (syncBackend) {
+                syncVaultToBackendAsync(force = graduatedNow.isNotEmpty())
+            }
+        }
+    }
+
+    fun quarantineTrack(
+        title: String,
+        artist: String,
+        durationDays: Float? = null,
+        sourcePackage: String? = null,
+        spotifyUri: String? = null,
+        trackId: String? = null
+    ) {
+        val nowMs = System.currentTimeMillis()
         val matched = _unifiedTracks.value.firstOrNull {
             ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, spotifyUri)
         }
@@ -2916,25 +3284,56 @@ class TuneMindViewModel : ViewModel() {
             artist = artist
         )
 
-        val id = "vault-${System.currentTimeMillis()}"
+        val evs = if (matched != null) {
+            _cleanPlayHistory.value.filter { it.trackKey == matched.trackKey }
+        } else {
+            emptyList()
+        }
+        val fatigue = com.tunemind.app.domain.vault.RestingVaultEngine.evaluateTrackFatigue(
+            playTimestampsMs = evs.map { it.playedAtMs },
+            sensitivity = cachedRepetitionSensitivityForStats,
+            nowMs = nowMs
+        )
+        val satietyScore = maxOf(fatigue.effectiveSatiety, if (matched != null) 70 else 78).coerceIn(50, 99)
+        val computedDays = durationDays?.coerceIn(0.5f, 14.0f)
+            ?: com.tunemind.app.domain.vault.RestingVaultEngine.computeCooldownDurationDays(
+                satietyScore = satietyScore,
+                recentPlays7d = maxOf(fatigue.recentPlays7d, 2),
+                recentPlays24h = fatigue.recentPlays24h,
+                sensitivity = cachedRepetitionSensitivityForStats
+            )
+
+        val id = "vault-${resolvedIdentity.trackId}-$nowMs"
         val newTrack = VaultTrack(
             id = id,
-            title = title,
-            artist = artist,
-            quarantinedAtMs = System.currentTimeMillis(),
-            totalDays = durationDays,
-            cooldownDaysRemaining = durationDays,
-            recoveryProgress = 0.05f,
-            satietyScore = 85,
+            title = title.trim(),
+            artist = artist.trim(),
+            quarantinedAtMs = nowMs,
+            totalDays = computedDays,
+            cooldownDaysRemaining = computedDays,
+            recoveryProgress = 0.0f,
+            satietyScore = satietyScore,
             sourcePackage = resolvedPkg,
             spotifyUri = resolvedIdentity.spotifyUri,
-            trackId = resolvedIdentity.trackId
+            trackId = resolvedIdentity.trackId,
+            entryReason = if (fatigue.recentPlays7d >= 2) {
+                "Manual Lock · ${fatigue.recentPlays7d} recent plays"
+            } else {
+                "Manual Vault Lock"
+            },
+            isAutoQuarantined = false,
+            updatedAtMs = nowMs
         )
-        val updated = listOf(newTrack) + _vaultState.value.filter { !it.title.equals(title, ignoreCase = true) }
+        val updated = listOf(newTrack) + _vaultState.value.filter {
+            !ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, spotifyUri) &&
+                it.resolvedCanonicalTrackId() != resolvedIdentity.trackId
+        }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
+        refreshLiveListeningStatsNow()
         syncUpNextQueueWithSources(forceRebuild = false)
         refreshRecommendations()
+        syncVaultToBackendAsync(force = true)
     }
 
     fun addToVault(title: String, artist: String, durationDays: Float = 5f) {
@@ -2942,11 +3341,189 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun restoreFromVault(id: String) {
-        val updated = _vaultState.value.filter { it.id != id && it.trackId != id }
+        val nowMs = System.currentTimeMillis()
+        val target = _vaultState.value.firstOrNull {
+            it.id == id || it.trackId == id || it.resolvedCanonicalTrackId() == id
+        }
+        val restoredMap = loadRestoredVaultMapFromPrefs()
+        if (target != null) {
+            restoredMap[target.resolvedCanonicalTrackId()] = nowMs
+            restoredMap[com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(target.title, target.artist)] = nowMs
+            saveRestoredVaultMapToPrefs(restoredMap)
+        }
+        val updated = _vaultState.value.filter {
+            it.id != id && it.trackId != id && it.resolvedCanonicalTrackId() != id
+        }
         _vaultState.value = updated
         saveVaultToPrefs(updated)
+        refreshLiveListeningStatsNow()
         syncUpNextQueueWithSources(forceRebuild = false)
         refreshRecommendations()
+        syncVaultToBackendAsync(force = true)
+    }
+
+    private fun syncVaultToBackendAsync(force: Boolean = false) {
+        val ctx = AppHolder.context ?: return
+        val nowMs = System.currentTimeMillis()
+        if (!force && nowMs - lastBackendVaultSyncMs < 45_000L) return
+        lastBackendVaultSyncMs = nowMs
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(ctx).trim().trimEnd('/')
+                if (baseUrl.isBlank()) return@launch
+                val authSession = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value
+                val restoredMap = loadRestoredVaultMapFromPrefs()
+                val currentVault = _vaultState.value
+
+                val body = org.json.JSONObject().apply {
+                    put("user_id", authSession.userId)
+                    put("user_email", authSession.email)
+                    put("repetition_sensitivity", cachedRepetitionSensitivityForStats.toDouble())
+                    put("tracks", org.json.JSONArray())
+                    val restoredObj = org.json.JSONObject()
+                    restoredMap.forEach { (k, v) -> restoredObj.put(k, v) }
+                    put("restored_track_timestamps", restoredObj)
+
+                    val vaultArr = org.json.JSONArray()
+                    for (vt in currentVault) {
+                        val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                            quarantinedAtMs = vt.quarantinedAtMs,
+                            totalDays = vt.totalDays,
+                            baseSatietyScore = vt.satietyScore,
+                            nowMs = nowMs
+                        )
+                        vaultArr.put(org.json.JSONObject().apply {
+                            put("id", vt.id)
+                            put("title", vt.title)
+                            put("artist", vt.artist)
+                            put("trackId", vt.resolvedCanonicalTrackId())
+                            vt.spotifyUri?.let { put("spotifyUri", it) }
+                            put("sourcePackage", vt.sourcePackage)
+                            put("quarantinedAtMs", vt.quarantinedAtMs)
+                            put("totalDays", vt.totalDays.toDouble())
+                            put("cooldownDaysRemaining", rec.cooldownDaysRemaining.toDouble())
+                            put("recoveryProgress", rec.recoveryProgress.toDouble())
+                            put("satietyScore", vt.satietyScore)
+                            put("freshnessPercent", rec.freshnessPercent)
+                            put("entryReason", vt.entryReason)
+                            put("isAutoQuarantined", vt.isAutoQuarantined)
+                            put("lastPenaltyPlayAtMs", vt.lastPenaltyPlayAtMs)
+                        })
+                    }
+                    put("vault_tracks", vaultArr)
+                }
+
+                val conn = (java.net.URL("$baseUrl/api/v1/intelligence/sync").openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8_000
+                    readTimeout = 10_000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                conn.disconnect()
+                android.util.Log.d("TuneMindVM", "Synced Vault state to backend: HTTP $code (${currentVault.size} resting)")
+            } catch (e: Exception) {
+                android.util.Log.w("TuneMindVM", "Vault backend sync skipped: ${e.message}")
+            }
+        }
+    }
+
+    private fun hydrateVaultFromBackendIfNeeded() {
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(ctx).trim().trimEnd('/')
+                if (baseUrl.isBlank()) return@launch
+                val authSession = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value
+                val uid = java.net.URLEncoder.encode(authSession.userId, "UTF-8")
+                val email = java.net.URLEncoder.encode(authSession.email, "UTF-8")
+                val url = java.net.URL("$baseUrl/api/v1/intelligence/growth?user_id=$uid&user_email=$email")
+                val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 8_000
+                    readTimeout = 10_000
+                }
+                if (conn.responseCode !in 200..299) {
+                    conn.disconnect()
+                    return@launch
+                }
+                val raw = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+
+                val json = org.json.JSONObject(raw)
+                val remoteArr = json.optJSONArray("vaultTracks") ?: return@launch
+                if (remoteArr.length() == 0) return@launch
+
+                val restoredMap = loadRestoredVaultMapFromPrefs()
+                val currentLocal = _vaultState.value.toMutableList()
+                val localKeys = currentLocal.flatMap {
+                    listOf(
+                        it.resolvedCanonicalTrackId(),
+                        com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(it.title, it.artist)
+                    )
+                }.toMutableSet()
+
+                var addedAny = false
+                val nowMs = System.currentTimeMillis()
+                for (i in 0 until remoteArr.length()) {
+                    val obj = remoteArr.optJSONObject(i) ?: continue
+                    val title = obj.optString("title", "").trim()
+                    val artist = obj.optString("artist", "Unknown Artist").trim()
+                    if (title.isBlank()) continue
+                    val identity = TrackIdentityResolver.resolveCanonicalIdentity(
+                        trackId = obj.optString("trackId", "").takeIf { it.isNotBlank() },
+                        spotifyUri = obj.optString("spotifyUri", "").takeIf { it.isNotBlank() },
+                        title = title,
+                        artist = artist
+                    )
+                    val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(title, artist)
+                    if (normKey in localKeys || identity.trackId in localKeys) continue
+
+                    val qAt = obj.optLong("quarantinedAtMs", nowMs)
+                    val restoredAt = maxOf(restoredMap[identity.trackId] ?: 0L, restoredMap[normKey] ?: 0L)
+                    if (restoredAt > qAt) continue
+
+                    val totalDays = obj.optDouble("totalDays", 3.5).toFloat().coerceIn(0.5f, 14.0f)
+                    val satiety = obj.optInt("satietyScore", 82).coerceIn(40, 99)
+                    val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(qAt, totalDays, satiety, nowMs)
+                    if (rec.isGraduated) continue
+
+                    currentLocal.add(
+                        VaultTrack(
+                            id = obj.optString("id", "vault-${identity.trackId}-$qAt"),
+                            title = title,
+                            artist = artist,
+                            quarantinedAtMs = qAt,
+                            totalDays = totalDays,
+                            cooldownDaysRemaining = rec.cooldownDaysRemaining,
+                            recoveryProgress = rec.recoveryProgress,
+                            satietyScore = satiety,
+                            sourcePackage = obj.optString("sourcePackage", "com.spotify.music"),
+                            spotifyUri = identity.spotifyUri,
+                            trackId = identity.trackId,
+                            entryReason = obj.optString("entryReason", "Synced from Cloud Vault"),
+                            isAutoQuarantined = obj.optBoolean("isAutoQuarantined", false),
+                            lastPenaltyPlayAtMs = obj.optLong("lastPenaltyPlayAtMs", 0L),
+                            updatedAtMs = nowMs
+                        )
+                    )
+                    localKeys.add(normKey)
+                    localKeys.add(identity.trackId)
+                    addedAny = true
+                }
+
+                if (addedAny) {
+                    _vaultState.value = currentLocal
+                    saveVaultToPrefs(currentLocal)
+                    refreshLiveListeningStatsNow()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("TuneMindVM", "Cloud Vault hydration skipped: ${e.message}")
+            }
+        }
     }
 
 
@@ -3913,7 +4490,11 @@ data class VaultTrack(
     val satietyScore: Int = 85,
     val sourcePackage: String = "com.spotify.music",
     val spotifyUri: String? = null,
-    val trackId: String = ""
+    val trackId: String = "",
+    val entryReason: String = "Manual Vault Lock",
+    val isAutoQuarantined: Boolean = false,
+    val lastPenaltyPlayAtMs: Long = 0L,
+    val updatedAtMs: Long = quarantinedAtMs
 ) {
     fun resolvedCanonicalTrackId(): String = TrackIdentityResolver.resolveCanonicalTrackId(
         trackId = trackId.ifBlank { null },
@@ -3922,6 +4503,29 @@ data class VaultTrack(
         artist = artist
     )
 }
+
+data class GraduatedVaultSummary(
+    val id: String,
+    val trackId: String,
+    val title: String,
+    val artist: String,
+    val spotifyUri: String? = null,
+    val graduatedAtMs: Long,
+    val totalRestedDays: Float,
+    val previousSatietyScore: Int,
+    val entryReason: String
+)
+
+data class TrackVaultUiStatus(
+    val isInVault: Boolean = false,
+    val vaultId: String? = null,
+    val isCoolingDown: Boolean = false,
+    val freshnessPercent: Int = 96,
+    val recoveryPercent: Int = 0,
+    val cooldownRemainingLabel: String? = null,
+    val satietyScore: Int = 0,
+    val entryReason: String? = null
+)
 
 data class DopamineCapsuleTrack(
     val title: String,

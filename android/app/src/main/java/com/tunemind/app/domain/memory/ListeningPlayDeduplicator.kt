@@ -3,6 +3,7 @@ package com.tunemind.app.domain.memory
 import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
 import com.tunemind.app.domain.model.PlaybackObservation
 import com.tunemind.app.domain.model.TrackIdentityResolver
+import com.tunemind.app.domain.vault.RestingVaultEngine
 import java.util.Calendar
 import java.util.Locale
 
@@ -237,7 +238,9 @@ object ListeningPlayDeduplicator {
         repetitionSensitivity: Float = 0.75f,
         nowPlayingPositionMs: Long = 0L,
         nowPlayingDurationMs: Long = 0L,
-        nowPlayingUpdatedAtMs: Long = 0L
+        nowPlayingUpdatedAtMs: Long = 0L,
+        restoredAtByKey: Map<String, Long> = emptyMap(),
+        activeVaultFreshnessByKey: Map<String, Int> = emptyMap()
     ): DeduplicatedListeningSnapshot {
         // 1. Reconstruct genuine plays from raw MediaSession observations (ignoring mirrored spotify_web_api_ingestion rows & browser clutter)
         val filteredObs = rawObservations
@@ -553,19 +556,11 @@ object ListeningPlayDeduplicator {
             .associate { canonicalTrackKey(it.trackTitle, it.artistName) to it.albumArtUrl }
 
         val sensitivity = repetitionSensitivity.coerceIn(0.2f, 1.0f)
-        val satietyPerPlay = (12f + sensitivity * 12f).toInt().coerceIn(13, 25)
-        val coolingPlayThreshold = when {
-            sensitivity >= 0.85f -> 3
-            sensitivity >= 0.50f -> 4
-            else -> 6
-        }
 
         val groupedByTrack = finalTimeline.groupBy { it.trackKey }
         val unifiedTracks = groupedByTrack.map { (key, events) ->
             val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
             val plays = events.size
-            val satiety = minOf(94, plays * satietyPerPlay)
-            val freshness = (100 - satiety).coerceIn(12, 98)
             val bestUri = events.firstNotNullOfOrNull { it.spotifyUri?.let { uri -> TrackIdentityResolver.normalizeSpotifyUri(uri) } }
             val bestTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = events.firstOrNull { it.trackId.isNotBlank() }?.trackId,
@@ -573,6 +568,30 @@ object ListeningPlayDeduplicator {
                 title = latest.title,
                 artist = latest.artist
             )
+            val normKey = RestingVaultEngine.normalizeTrackKey(latest.title, latest.artist)
+            val restoredAtMs = maxOf(
+                restoredAtByKey[bestTrackId] ?: 0L,
+                restoredAtByKey[normKey] ?: 0L
+            )
+            val vaultFreshness = activeVaultFreshnessByKey[bestTrackId]
+                ?: activeVaultFreshnessByKey[normKey]
+            val ratios = events.map { ev ->
+                if (ev.durationMs > 30_000L && ev.listenedMs > 0L) {
+                    (ev.listenedMs.toFloat() / ev.durationMs.toFloat()).coerceIn(0.01f, 1.0f)
+                } else {
+                    1.0f
+                }
+            }
+            val fatigue = RestingVaultEngine.evaluateTrackFatigue(
+                playTimestampsMs = events.map { it.playedAtMs },
+                listenedRatios = ratios,
+                sensitivity = sensitivity,
+                lastRestoredAtMs = restoredAtMs,
+                nowMs = nowMs
+            )
+            val isRestingInVault = vaultFreshness != null
+            val freshness = vaultFreshness ?: fatigue.freshnessPercent
+            val cooling = isRestingInVault || fatigue.shouldAutoQuarantine
             val bestAlbum = events.firstNotNullOfOrNull { it.album }
             val bestArt = events.firstNotNullOfOrNull { it.albumArtUrl } ?: artMap[key]
             val bestDur = events.maxOfOrNull { it.durationMs } ?: 195_000L
@@ -594,7 +613,7 @@ object ListeningPlayDeduplicator {
                 firstPlayedAtMs = events.minOf { it.playedAtMs },
                 lastPlayedAtMs = latest.playedAtMs,
                 freshnessPercent = freshness,
-                isCoolingDown = plays >= coolingPlayThreshold || freshness < 45,
+                isCoolingDown = cooling,
                 sourcesUsed = events.map { it.sourcePackage }.toSet(),
                 trackId = bestTrackId
             )
@@ -734,7 +753,10 @@ object ListeningPlayDeduplicator {
         cleanPlayHistory: List<UnifiedPlayEvent>,
         overallStats: OverallListeningStats,
         window: StatsTimeWindow,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        repetitionSensitivity: Float = 0.75f,
+        restoredAtByKey: Map<String, Long> = emptyMap(),
+        activeVaultFreshnessByKey: Map<String, Int> = emptyMap()
     ): WindowedListeningStats {
         val calStartOfToday = Calendar.getInstance().apply {
             timeInMillis = nowMs
@@ -824,8 +846,6 @@ object ListeningPlayDeduplicator {
                 val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
                 val plays = events.size
                 val baseTrack = baseTrackByKey[key]
-                val satiety = minOf(94, plays * 18)
-                val freshness = (100 - satiety).coerceIn(12, 98)
                 val bestUri = events.firstNotNullOfOrNull { it.spotifyUri?.let { uri -> TrackIdentityResolver.normalizeSpotifyUri(uri) } } ?: baseTrack?.spotifyUri
                 val bestTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
                     trackId = events.firstOrNull { it.trackId.isNotBlank() }?.trackId ?: baseTrack?.trackId,
@@ -833,6 +853,29 @@ object ListeningPlayDeduplicator {
                     title = latest.title,
                     artist = latest.artist
                 )
+                val normKey = RestingVaultEngine.normalizeTrackKey(latest.title, latest.artist)
+                val restoredAtMs = maxOf(
+                    restoredAtByKey[bestTrackId] ?: 0L,
+                    restoredAtByKey[normKey] ?: 0L
+                )
+                val vaultFreshness = activeVaultFreshnessByKey[bestTrackId]
+                    ?: activeVaultFreshnessByKey[normKey]
+                val ratios = events.map { ev ->
+                    if (ev.durationMs > 30_000L && ev.listenedMs > 0L) {
+                        (ev.listenedMs.toFloat() / ev.durationMs.toFloat()).coerceIn(0.01f, 1.0f)
+                    } else {
+                        1.0f
+                    }
+                }
+                val fatigue = RestingVaultEngine.evaluateTrackFatigue(
+                    playTimestampsMs = events.map { it.playedAtMs },
+                    listenedRatios = ratios,
+                    sensitivity = repetitionSensitivity,
+                    lastRestoredAtMs = restoredAtMs,
+                    nowMs = nowMs
+                )
+                val freshness = vaultFreshness ?: fatigue.freshnessPercent
+                val cooling = vaultFreshness != null || fatigue.shouldAutoQuarantine
                 val bestAlbum = events.firstNotNullOfOrNull { it.album } ?: baseTrack?.album
                 val bestArt = events.firstNotNullOfOrNull { it.albumArtUrl } ?: baseTrack?.albumArtUrl
                 UnifiedTrackStats(
@@ -851,7 +894,7 @@ object ListeningPlayDeduplicator {
                     firstPlayedAtMs = events.minOf { it.playedAtMs },
                     lastPlayedAtMs = latest.playedAtMs,
                     freshnessPercent = freshness,
-                    isCoolingDown = plays >= 4 || freshness < 45,
+                    isCoolingDown = cooling,
                     sourcesUsed = events.map { it.sourcePackage }.toSet(),
                     trackId = bestTrackId
                 )

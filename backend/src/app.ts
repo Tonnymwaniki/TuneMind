@@ -13,6 +13,7 @@ import supportRouter from './api/v1/support';
 import accountRouter from './api/v1/account';
 import legalRouter from './api/v1/legalRoutes';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
+import { RestingVaultEngine } from './domain/vault/RestingVaultEngine';
 
 export function createApp(): express.Express {
   const app = express();
@@ -77,6 +78,7 @@ export function createApp(): express.Express {
       const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(userId, tracks, {
         hearingTelemetry: body.hearing_telemetry,
         vaultTracks: body.vault_tracks,
+        restoredTrackTimestamps: body.restored_track_timestamps,
         override
       });
 
@@ -106,11 +108,55 @@ export function createApp(): express.Express {
         user_id: userId,
         synced_tracks_count: syncRes.syncedTracksCount,
         live_supabase_stored: syncRes.liveSupabaseStored,
+        reconciled_vault_count: syncRes.reconciledVaultCount,
+        graduated_count: syncRes.graduatedCount,
+        vault_tracks: summary.vaultTracks || [],
+        graduated_vault_tracks: summary.graduatedVaultTracks || [],
         intelligence_summary: summary
       });
     } catch (err: any) {
       console.error('[IntelligenceSync] Error:', err);
       res.status(500).json({ error: err?.message || 'Intelligence sync failed' });
+    }
+  });
+
+  app.post('/api/v1/intelligence/vault/reconcile', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
+      const userId = identity.userId;
+      const sensitivity = Number(body.repetition_sensitivity ?? 0.75);
+      const rawVault = Array.isArray(body.vault_tracks) ? body.vault_tracks : [];
+      const restoredTimestamps =
+        body.restored_track_timestamps && typeof body.restored_track_timestamps === 'object'
+          ? body.restored_track_timestamps
+          : undefined;
+
+      const reconciled = RestingVaultEngine.reconcileVaultTracks(rawVault, Date.now(), restoredTimestamps);
+      const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(
+        userId,
+        Array.isArray(body.tracks) ? body.tracks : [],
+        {
+          vaultTracks: reconciled.activeVault,
+          restoredTrackTimestamps: restoredTimestamps,
+          override: {
+            supabaseUrl: body.supabase_url,
+            supabaseKey: body.supabase_anon_key
+          }
+        }
+      );
+
+      res.json({
+        status: 'reconciled',
+        user_id: userId,
+        entry_threshold_satiety: RestingVaultEngine.computeEntryThreshold(sensitivity),
+        active_vault: reconciled.activeVault,
+        graduated_tracks: reconciled.graduatedTracks,
+        live_supabase_stored: syncRes.liveSupabaseStored
+      });
+    } catch (err: any) {
+      console.error('[VaultReconcile] Error:', err);
+      res.status(500).json({ error: err?.message || 'Vault reconcile failed' });
     }
   });
 

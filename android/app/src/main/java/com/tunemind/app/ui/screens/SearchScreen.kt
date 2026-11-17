@@ -32,9 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.provider.LocalAudioMatch
 import com.tunemind.app.provider.TuneMindInAppPlayer
+import com.tunemind.app.domain.vault.RestingVaultEngine
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.MagicalSegmentedTabs
 import com.tunemind.app.ui.components.MagicalTabItem
+import com.tunemind.app.ui.components.NeuralTrackActionDialog
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.LayeredSongArtistBadge
@@ -88,6 +90,7 @@ fun SearchScreen(
     var hasAudioPerm by remember { mutableStateOf(PermissionUtils.hasAudioStoragePermission(context)) }
     var localAudioTracks by remember { mutableStateOf<List<LocalAudioMatch>>(emptyList()) }
     var feedbackBanner by remember { mutableStateOf<String?>(null) }
+    var inspectedSearchItem by remember { mutableStateOf<UniversalSearchItem?>(null) }
 
     val neonCyan = theme.primaryAccent
     val spotifyGreen = Color(0xFF1DB954)
@@ -217,8 +220,10 @@ fun SearchScreen(
             )
         }
 
+        val nowMs = System.currentTimeMillis()
         vaultTracks.forEach { vt ->
-            val pct = (vt.recoveryProgress * 100).toInt().coerceIn(0, 100)
+            val rec = RestingVaultEngine.computeRecoveryState(vt.quarantinedAtMs, vt.totalDays, vt.satietyScore, nowMs)
+            val pct = (rec.recoveryProgress * 100).toInt().coerceIn(0, 100)
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(vt.spotifyUri)
             val canonicalId = vt.resolvedCanonicalTrackId()
             list.add(
@@ -226,7 +231,7 @@ fun SearchScreen(
                     id = "vault_${vt.id}",
                     title = vt.title,
                     artist = vt.artist,
-                    subtitle = "Vault · $pct% recovered",
+                    subtitle = "Resting · ${rec.remainingLabel} · $pct% recovered",
                     spotifyUri = cleanUri,
                     sourcePkg = vt.sourcePackage.ifBlank { selectedTargetPlayer },
                     origin = SearchOrigin.VAULT,
@@ -599,6 +604,7 @@ fun SearchScreen(
                                 )
                             }
                         } else {
+                            val vStatus = vm.resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
                             TuneMindTrackCard(
                                 title = item.title,
                                 artist = item.artist,
@@ -606,19 +612,51 @@ fun SearchScreen(
                                 playCount = item.playCount,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
+                                freshnessPercent = vStatus.freshnessPercent,
+                                isCoolingDown = vStatus.isCoolingDown,
+                                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
                                 accentColor = accent,
                                 spotifyUri = item.spotifyUri,
                                 trackId = item.trackId,
                                 onPlayClick = { playUniversalItem(item) },
-                                onSyncClick = {
-                                    onAskAgentAboutTrack(item.title, item.artist, 85, item.spotifyUri)
-                                    onBack()
-                                }
+                                onSyncClick = { inspectedSearchItem = item }
                             )
                         }
                     }
                 }
             }
+        }
+
+        inspectedSearchItem?.let { sel ->
+            val vStatus = vm.resolveTrackVaultStatus(sel.title, sel.artist, sel.spotifyUri, sel.trackId)
+            NeuralTrackActionDialog(
+                title = sel.title,
+                artist = sel.artist,
+                freshnessPercent = vStatus.freshnessPercent,
+                playCount = sel.playCount,
+                isCoolingDown = vStatus.isCoolingDown,
+                spotifyUri = sel.spotifyUri,
+                trackId = sel.trackId,
+                cooldownRemainingLabel = vStatus.cooldownRemainingLabel,
+                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+                vaultReason = vStatus.entryReason,
+                onDismiss = { inspectedSearchItem = null },
+                onPlayNow = { playUniversalItem(sel) },
+                onAgentNeuralBreakdown = {
+                    onAskAgentAboutTrack(sel.title, sel.artist, vStatus.freshnessPercent, sel.spotifyUri)
+                    onBack()
+                },
+                onSyncAtmosphereToTrack = { vm.syncAtmosphereToTrack(sel.title, sel.artist) },
+                onToggleCooldownVault = {
+                    vm.toggleTrackVaultStatus(sel.title, sel.artist, sel.sourcePkg, sel.spotifyUri, sel.trackId)
+                    feedbackBanner = if (vStatus.isInVault) {
+                        "Restored \"${sel.title}\" back to Fresh"
+                    } else {
+                        "Moved \"${sel.title}\" to Resting Vault"
+                    }
+                }
+            )
         }
     }
 }
