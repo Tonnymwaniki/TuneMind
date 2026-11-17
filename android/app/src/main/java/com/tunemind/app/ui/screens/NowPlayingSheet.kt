@@ -61,6 +61,9 @@ fun NowPlayingSheet(
     val homeState by vm.homeState.collectAsState()
     val liveSpotify by vm.spotifyLiveState.collectAsState()
     val spotifyDevices by vm.spotifyDevices.collectAsState()
+    val upNextQueueState by vm.upNextQueueState.collectAsState()
+    val autoOverrideEnabled by vm.upNextAutoOverrideEnabled.collectAsState()
+    val vmActionStatus by vm.nowPlayingActionStatus.collectAsState()
     val inAppHasTrack by TuneMindInAppPlayer.hasActiveTrackFlow.collectAsState()
     val inAppPlaying by TuneMindInAppPlayer.isPlayingFlow.collectAsState()
     val inAppTitle by TuneMindInAppPlayer.currentTitleFlow.collectAsState()
@@ -68,8 +71,13 @@ fun NowPlayingSheet(
     val inAppPosMs by TuneMindInAppPlayer.positionMsFlow.collectAsState()
     val inAppDurMs by TuneMindInAppPlayer.durationMsFlow.collectAsState()
 
+    val effectiveUpNext = remember(upNextQueueState, dopamineCapsule) {
+        if (upNextQueueState.tracks.isNotEmpty()) upNextQueueState else dopamineCapsule
+    }
+
     LaunchedEffect(Unit) {
         vm.refreshSpotifyDevices()
+        vm.compileDopamineCapsule()
     }
 
     val nowPlaying = homeState.nowPlaying
@@ -104,14 +112,17 @@ fun NowPlayingSheet(
 
     val sourceLabel = when {
         inAppHasTrack -> "TuneMind Built-In Player"
-        nowPlaying?.sourcePackage?.contains("spotify") == true -> "Spotify"
-        nowPlaying?.sourcePackage?.contains("youtube") == true -> "YouTube Music"
+        nowPlaying?.sourcePackage?.contains("spotify", ignoreCase = true) == true -> "Spotify"
+        nowPlaying?.sourcePackage?.contains("youtube", ignoreCase = true) == true -> "YouTube Music"
+        nowPlaying?.sourcePackage?.contains("boomplay", ignoreCase = true) == true -> "Boomplay"
+        nowPlaying?.sourcePackage?.contains("apple", ignoreCase = true) == true -> "Apple Music"
         nowPlaying?.sourcePackage?.isNotBlank() == true -> nowPlaying.sourcePackage.substringAfterLast(".").replaceFirstChar { it.uppercase() }
         else -> "Playback Queue"
     }
 
     var sliderOverride by remember { mutableStateOf<Float?>(null) }
     var actionStatus by remember { mutableStateOf<String?>(null) }
+    val displayActionStatus = vmActionStatus ?: actionStatus
 
     val neonCyan = Color(0xFF00F0FF)
     val electricPurple = Color(0xFF8A2BE2)
@@ -180,9 +191,9 @@ fun NowPlayingSheet(
                         letterSpacing = 1.6.sp
                     )
                     Text(
-                        text = sourceLabel,
+                        text = "$sourceLabel · ${if (effectivePlaying) "Playing" else if (hasTrack) "Paused" else "Standby"}",
                         fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.62f)
+                        color = if (effectivePlaying) safeGreen else Color.White.copy(alpha = 0.62f)
                     )
                 }
                 IconButton(
@@ -391,7 +402,17 @@ fun NowPlayingSheet(
                 }
             }
 
-            if (!actionStatus.isNullOrBlank()) {
+            if (autoOverrideEnabled) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Auto Queue Takeover ON · Next spins TuneMind queue & stops Spotify autoplay",
+                    color = safeGreen.copy(alpha = 0.9f),
+                    fontSize = 11.5.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            if (!displayActionStatus.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -399,7 +420,7 @@ fun NowPlayingSheet(
                     border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.45f))
                 ) {
                     Text(
-                        text = actionStatus!!,
+                        text = displayActionStatus,
                         color = Color(0xFFF8FAFC),
                         fontSize = 12.5.sp,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
@@ -567,10 +588,103 @@ fun NowPlayingSheet(
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            // Up Next Queue (Pending AI Proposal + Dopamine Capsule)
+            // Up Next Queue (Manual / Auto Spotify-Override + Pending AI Proposal + Non-Repeating Queue)
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StudioSectionHeader(title = "Up Next Queue")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StudioSectionHeader(title = "Up Next Queue")
+                        IconButton(
+                            onClick = { vm.refreshUpNextQueue() },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shuffle,
+                                contentDescription = "Refresh Up Next Queue",
+                                tint = neonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Manual vs Auto Queue Takeover Switch
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.04f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (autoOverrideEnabled) safeGreen.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.10f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(22.dp),
+                                    color = if (!autoOverrideEnabled) neonCyan.copy(alpha = 0.18f) else Color.Transparent,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (!autoOverrideEnabled) neonCyan else Color.White.copy(alpha = 0.14f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .clickable { vm.setUpNextAutoOverrideEnabled(false) }
+                                ) {
+                                    Text(
+                                        text = "Manual",
+                                        color = if (!autoOverrideEnabled) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(22.dp),
+                                    color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.22f) else Color.Transparent,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (autoOverrideEnabled) safeGreen else Color.White.copy(alpha = 0.14f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .clickable { vm.setUpNextAutoOverrideEnabled(true) }
+                                ) {
+                                    Text(
+                                        text = "Auto · Override Spotify",
+                                        color = if (autoOverrideEnabled) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = if (autoOverrideEnabled) {
+                                    "Auto: stops Spotify from playing random next songs and auto-spins TuneMind's Up Next track."
+                                } else {
+                                    "Manual: tap any queued track or Play Next below when you want TuneMind to play next."
+                                },
+                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.58f),
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
 
                     if (pendingProposedTrack != null) {
                         Surface(
@@ -619,15 +733,15 @@ fun NowPlayingSheet(
                         }
                     }
 
-                    if (dopamineCapsule.tracks.isEmpty()) {
+                    if (effectiveUpNext.tracks.isEmpty()) {
                         Text(
-                            text = "Play a few tracks or tap your morning mix to populate your upcoming fresh queue.",
+                            text = "Play a few tracks or tap Refresh above to populate your non-repeating Up Next queue.",
                             color = Color.White.copy(alpha = 0.56f),
                             fontSize = 13.sp,
                             lineHeight = 18.sp
                         )
                     } else {
-                        dopamineCapsule.tracks.forEachIndexed { idx, capTrack ->
+                        effectiveUpNext.tracks.forEachIndexed { idx, capTrack ->
                             val capMedia = rememberResolvedTrackMedia(
                                 title = capTrack.title,
                                 artist = capTrack.artist,
@@ -638,13 +752,8 @@ fun NowPlayingSheet(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .clickable {
-                                        onPlayTrack(
-                                            capTrack.title,
-                                            capTrack.artist,
-                                            capTrack.spotifyUri,
-                                            selectedTargetPlayer
-                                        )
-                                        actionStatus = "Playing \"${capTrack.title}\"…"
+                                        vm.playQueuedTrack(capTrack, selectedTargetPlayer)
+                                        actionStatus = null
                                     }
                                     .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -675,10 +784,41 @@ fun NowPlayingSheet(
                                     )
                                     Text(
                                         text = "${capTrack.artist} · ${capTrack.freshnessPercent}% fresh",
-                                        color = Color.White.copy(alpha = 0.58f),
+                                        color = Color.White.copy(alpha = 0.62f),
                                         fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = capTrack.reason,
+                                        color = Color.White.copy(alpha = 0.44f),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (idx > 0) {
+                                    IconButton(
+                                        onClick = { vm.moveUpNextTrackToTop(capTrack) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.VerticalAlignTop,
+                                            contentDescription = "Play Next",
+                                            tint = neonCyan.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { vm.removeFromUpNextQueue(capTrack) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Skip from queue",
+                                        tint = Color.White.copy(alpha = 0.52f),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                                 LayeredSongArtistBadge(
@@ -690,9 +830,38 @@ fun NowPlayingSheet(
                                     size = 44.dp
                                 )
                             }
-                            if (idx < dopamineCapsule.tracks.lastIndex) {
+                            if (idx < effectiveUpNext.tracks.lastIndex) {
                                 StudioHairlineDivider()
                             }
+                        }
+
+                        val headTrack = effectiveUpNext.tracks.first()
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Button(
+                            onClick = { vm.playNextFromQueue(selectedTargetPlayer) },
+                            shape = RoundedCornerShape(28.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = neonCyan.copy(alpha = 0.16f),
+                                contentColor = Color(0xFFF8FAFC)
+                            ),
+                            border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.52f)),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SkipNext,
+                                contentDescription = null,
+                                tint = neonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Play Next: ${headTrack.title}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }

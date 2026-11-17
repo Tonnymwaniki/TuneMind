@@ -1154,6 +1154,29 @@ class SpotifyVisualArtworkRepository private constructor(context: Context) {
         }
     }
 
+    suspend fun controlSpotifyWebPlayback(command: String): SpotifyActionResult {
+        val bearer = getUserBearerToken()
+            ?: return SpotifyActionResult(false, "Spotify not connected.")
+        val authHeader = "Bearer $bearer"
+        return try {
+            val resp = when (command.uppercase(Locale.ROOT)) {
+                "PAUSE" -> userApi.pausePlayback(authHeader = authHeader)
+                "PLAY", "RESUME" -> userApi.resumePlayback(authHeader = authHeader)
+                "NEXT" -> userApi.skipToNextTrack(authHeader = authHeader)
+                "PREV", "PREVIOUS" -> userApi.skipToPreviousTrack(authHeader = authHeader)
+                else -> return SpotifyActionResult(false, "Unsupported playback command.")
+            }
+            when {
+                resp.isSuccessful -> SpotifyActionResult(true, "Spotify $command executed.")
+                resp.code() == 403 -> SpotifyActionResult(false, "Spotify Premium required for Web API control.")
+                resp.code() == 404 -> SpotifyActionResult(false, "No active Spotify playback device.")
+                else -> SpotifyActionResult(false, "Spotify returned HTTP ${resp.code()}.")
+            }
+        } catch (e: Exception) {
+            SpotifyActionResult(false, "Spotify control error: ${e.message}")
+        }
+    }
+
     private suspend fun resolvePlayableTrackUri(title: String, artist: String, explicitUri: String?): String? {
         val cleanExplicit = explicitUri?.trim()
         if (!cleanExplicit.isNullOrBlank() && cleanExplicit.startsWith("spotify:track:")) {

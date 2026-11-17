@@ -33,6 +33,24 @@ object MusicPlayerAutoLauncher {
         "android-app://com.google.android.googlequicksearchbox/https/www.google.com"
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    @Volatile
+    var lastDispatchedTrackTitle: String = ""
+        private set
+
+    @Volatile
+    var lastDispatchedAtMs: Long = 0L
+        private set
+
+    fun wasRecentlyDispatched(title: String?, windowMs: Long = 12_000L): Boolean {
+        val clean = title?.trim().orEmpty()
+        val last = lastDispatchedTrackTitle.trim()
+        if (clean.isBlank() || last.isBlank()) return false
+        if ((System.currentTimeMillis() - lastDispatchedAtMs) > windowMs) return false
+        return clean.equals(last, ignoreCase = true) ||
+            clean.contains(last, ignoreCase = true) ||
+            last.contains(clean, ignoreCase = true)
+    }
+
     /**
      * Strips noisy suffixes like ", Tenzi No 22.", "(Official Video)", "[Lyrics]", etc.
      */
@@ -113,6 +131,8 @@ object MusicPlayerAutoLauncher {
 
         val cleanTitle = sanitizeTrackTitleForPlay(track.title.ifBlank { query })
         val cleanArtist = sanitizeArtistForPlay(track.artist)
+        lastDispatchedTrackTitle = cleanTitle.ifBlank { track.title.trim() }
+        lastDispatchedAtMs = System.currentTimeMillis()
         val fullSearchQuery = if (cleanArtist.isNotBlank() && !cleanTitle.contains(cleanArtist, ignoreCase = true)) {
             "$cleanTitle $cleanArtist".trim()
         } else {

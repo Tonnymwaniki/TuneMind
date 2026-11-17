@@ -358,6 +358,17 @@ object SpotifyAppRemoteManager {
                     val posMs = state.playbackPosition.coerceAtLeast(0L)
                     val durMs = track.duration.coerceAtLeast(0L)
                     playerStateListener?.invoke(title, artist, album, uri, isPlaying, posMs, durMs)
+                    com.tunemind.app.service.TuneMindListenerService.dispatchPlaybackSnapshot(
+                        com.tunemind.app.media.ActivePlaybackSnapshot(
+                            packageName = "com.spotify.music",
+                            title = title,
+                            artist = artist,
+                            isPlaying = isPlaying,
+                            positionMs = posMs,
+                            durationMs = durMs,
+                            updatedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
+                        )
+                    )
                 }
         } catch (t: Throwable) {
             Log.d(TAG, "subscribeToPlayerState notice: ${t.message}")

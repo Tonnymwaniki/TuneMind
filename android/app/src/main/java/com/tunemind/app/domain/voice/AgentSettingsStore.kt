@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object AgentSettingsStore {
     private const val PREFS_NAME = "tunemind_agent_settings"
     private const val KEY_AUTONOMOUS_DJ = "autonomous_dj_enabled"
+    private const val KEY_UP_NEXT_AUTO_OVERRIDE = "up_next_auto_override_enabled"
     private const val KEY_STAY_IN_TUNEMIND = "stay_in_tunemind_enabled"
     private const val KEY_STRICT_NO_APP_SWITCH = "strict_no_app_switch_enabled"
     private const val KEY_PREFER_IN_APP_PLAYER = "prefer_in_app_player_enabled"
@@ -39,6 +40,9 @@ object AgentSettingsStore {
 
     private val _autonomousDjEnabled = MutableStateFlow(false)
     val autonomousDjEnabled: StateFlow<Boolean> = _autonomousDjEnabled.asStateFlow()
+
+    private val _upNextAutoOverrideEnabled = MutableStateFlow(false)
+    val upNextAutoOverrideEnabled: StateFlow<Boolean> = _upNextAutoOverrideEnabled.asStateFlow()
 
     private val _stayInTuneMindEnabled = MutableStateFlow(true)
     val stayInTuneMindEnabled: StateFlow<Boolean> = _stayInTuneMindEnabled.asStateFlow()
@@ -92,6 +96,7 @@ object AgentSettingsStore {
             if (initialized) return
             val p = prefs(context)
             _autonomousDjEnabled.value = p.getBoolean(KEY_AUTONOMOUS_DJ, false)
+            _upNextAutoOverrideEnabled.value = p.getBoolean(KEY_UP_NEXT_AUTO_OVERRIDE, false)
             _stayInTuneMindEnabled.value = p.getBoolean(KEY_STAY_IN_TUNEMIND, true)
             _strictNoAppSwitchEnabled.value = p.getBoolean(KEY_STRICT_NO_APP_SWITCH, false)
             _preferInAppPlayerEnabled.value = p.getBoolean(KEY_PREFER_IN_APP_PLAYER, true)
@@ -119,6 +124,17 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_AUTONOMOUS_DJ, enabled).apply()
         _autonomousDjEnabled.value = enabled
+    }
+
+    fun isUpNextAutoOverrideEnabled(context: Context): Boolean {
+        ensureLoaded(context)
+        return _upNextAutoOverrideEnabled.value
+    }
+
+    fun setUpNextAutoOverrideEnabled(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        prefs(context).edit().putBoolean(KEY_UP_NEXT_AUTO_OVERRIDE, enabled).apply()
+        _upNextAutoOverrideEnabled.value = enabled
     }
 
     fun isStayInTuneMindEnabled(context: Context): Boolean {

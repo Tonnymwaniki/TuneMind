@@ -49,6 +49,9 @@ object TuneMindInAppPlayer {
     @Volatile
     private var onTrackCompletedListener: ((title: String, artist: String, packageName: String) -> Unit)? = null
 
+    private val trackCompletedListeners =
+        java.util.concurrent.CopyOnWriteArraySet<(title: String, artist: String, packageName: String) -> Unit>()
+
     private val _isPlayingFlow = MutableStateFlow(false)
     val isPlayingFlow: StateFlow<Boolean> = _isPlayingFlow.asStateFlow()
 
@@ -108,6 +111,18 @@ object TuneMindInAppPlayer {
         listener: ((title: String, artist: String, packageName: String) -> Unit)?
     ) {
         onTrackCompletedListener = listener
+    }
+
+    fun addOnTrackCompletedListener(
+        listener: (title: String, artist: String, packageName: String) -> Unit
+    ) {
+        trackCompletedListeners.add(listener)
+    }
+
+    fun removeOnTrackCompletedListener(
+        listener: (title: String, artist: String, packageName: String) -> Unit
+    ) {
+        trackCompletedListeners.remove(listener)
     }
 
     /**
@@ -367,6 +382,9 @@ object TuneMindInAppPlayer {
                 )
                 Log.i(TAG, "In-App playback completed: $doneTitle")
                 onTrackCompletedListener?.invoke(doneTitle, doneArtist, appPackageName)
+                trackCompletedListeners.forEach { listener ->
+                    runCatching { listener.invoke(doneTitle, doneArtist, appPackageName) }
+                }
             }
 
             setOnErrorListener { failedMp, what, extra ->
@@ -521,7 +539,7 @@ object TuneMindInAppPlayer {
             updatedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
         )
         mainHandler.post {
-            TuneMindListenerService.onPlaybackSnapshotUpdated?.invoke(snap)
+            TuneMindListenerService.dispatchPlaybackSnapshot(snap)
         }
     }
 

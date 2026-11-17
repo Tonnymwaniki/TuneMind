@@ -710,10 +710,12 @@ class AgentVoiceManager(
         val prevDur = monitoredTrackDurationMs
         val prevMaxPos = monitoredTrackMaxPosMs
 
-        val wasDispatchedByTuneMind = lastDispatchedByTuneMindTitle.isNotBlank() && (
-            rawTitle.equals(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
-                rawTitle.contains(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
-                lastDispatchedByTuneMindTitle.contains(rawTitle, ignoreCase = true)
+        val wasDispatchedByTuneMind = com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) || (
+            lastDispatchedByTuneMindTitle.isNotBlank() && (
+                rawTitle.equals(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
+                    rawTitle.contains(lastDispatchedByTuneMindTitle, ignoreCase = true) ||
+                    lastDispatchedByTuneMindTitle.contains(rawTitle, ignoreCase = true)
+                )
             )
         val previousPlayedSubstantially = prevMaxPos >= 25_000L || (prevDur >= 25_000L && prevMaxPos >= (prevDur * 65L) / 100L)
 

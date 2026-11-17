@@ -165,25 +165,20 @@ class TuneMindListenerService : NotificationListenerService() {
     fun getActivePlaybackSnapshot(targetPackage: String? = null): com.tunemind.app.media.ActivePlaybackSnapshot? =
         observerOrNull()?.getActivePlaybackSnapshot(targetPackage)
 
-    fun togglePlayback() {
-        observerOrNull()?.togglePlayback()
-    }
+    fun togglePlayback(targetPackage: String? = null): Boolean =
+        observerOrNull()?.togglePlayback(targetPackage) ?: false
 
-    fun play(targetPackage: String? = null) {
-        observerOrNull()?.play(targetPackage)
-    }
+    fun play(targetPackage: String? = null): Boolean =
+        observerOrNull()?.play(targetPackage) ?: false
 
-    fun pause() {
-        observerOrNull()?.pause()
-    }
+    fun pause(targetPackage: String? = null): Boolean =
+        observerOrNull()?.pause(targetPackage) ?: false
 
-    fun skipNext(targetPackage: String? = null) {
-        observerOrNull()?.skipNext(targetPackage)
-    }
+    fun skipNext(targetPackage: String? = null): Boolean =
+        observerOrNull()?.skipNext(targetPackage) ?: false
 
-    fun skipPrev() {
-        observerOrNull()?.skipPrev()
-    }
+    fun skipPrev(targetPackage: String? = null): Boolean =
+        observerOrNull()?.skipPrev(targetPackage) ?: false
 
     fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
         return observerOrNull()?.playFromSearch(targetPackage, query, extras) ?: false
@@ -210,5 +205,22 @@ class TuneMindListenerService : NotificationListenerService() {
 
         @Volatile
         var onPlaybackSnapshotUpdated: ((com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit)? = null
+
+        private val snapshotListeners = java.util.concurrent.CopyOnWriteArraySet<(com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit>()
+
+        fun addPlaybackSnapshotListener(listener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit) {
+            snapshotListeners.add(listener)
+        }
+
+        fun removePlaybackSnapshotListener(listener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit) {
+            snapshotListeners.remove(listener)
+        }
+
+        fun dispatchPlaybackSnapshot(snap: com.tunemind.app.media.ActivePlaybackSnapshot) {
+            onPlaybackSnapshotUpdated?.invoke(snap)
+            snapshotListeners.forEach { listener ->
+                runCatching { listener.invoke(snap) }
+            }
+        }
     }
 }

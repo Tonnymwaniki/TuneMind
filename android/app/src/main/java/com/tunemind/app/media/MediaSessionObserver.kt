@@ -153,51 +153,110 @@ class MediaSessionObserver(
         )
     }
 
-    fun togglePlayback() {
-        val entry = controllers.values.firstOrNull() ?: return
+    private fun resolveTargetController(targetPackage: String? = null): Entry? {
+        refreshSessions()
+        val entries = controllers.values.toList()
+        if (entries.isEmpty()) return null
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        fun pkgMatches(entry: Entry): Boolean {
+            if (cleanPkg == null) return true
+            val pkg = sourcePackage(entry.controller) ?: return false
+            return pkg.equals(cleanPkg, ignoreCase = true) ||
+                pkg.contains(cleanPkg, ignoreCase = true) ||
+                cleanPkg.contains(pkg, ignoreCase = true)
+        }
+        fun isPlayingState(stateCode: Int?): Boolean =
+            stateCode == android.media.session.PlaybackState.STATE_PLAYING
+        fun isActiveState(stateCode: Int?): Boolean =
+            stateCode == android.media.session.PlaybackState.STATE_PLAYING ||
+                stateCode == android.media.session.PlaybackState.STATE_BUFFERING ||
+                stateCode == android.media.session.PlaybackState.STATE_CONNECTING
+
+        return entries.firstOrNull { pkgMatches(it) && isPlayingState(it.controller.playbackState?.state) }
+            ?: entries.firstOrNull { isPlayingState(it.controller.playbackState?.state) }
+            ?: entries.firstOrNull { pkgMatches(it) && isActiveState(it.controller.playbackState?.state) }
+            ?: entries.firstOrNull { pkgMatches(it) && !it.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() }
+            ?: entries.firstOrNull { pkgMatches(it) }
+            ?: entries.firstOrNull { isActiveState(it.controller.playbackState?.state) }
+            ?: entries.firstOrNull { !it.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() }
+            ?: entries.firstOrNull()
+    }
+
+    fun togglePlayback(targetPackage: String? = null): Boolean {
+        val entry = resolveTargetController(targetPackage) ?: return false
         val state = entry.controller.playbackState?.state
-        val tc = entry.controller.transportControls ?: return
-        if (state == android.media.session.PlaybackState.STATE_PLAYING) {
-            tc.pause()
-        } else {
-            tc.play()
+        val tc = entry.controller.transportControls ?: return false
+        return try {
+            if (state == android.media.session.PlaybackState.STATE_PLAYING ||
+                state == android.media.session.PlaybackState.STATE_BUFFERING
+            ) {
+                tc.pause()
+            } else {
+                tc.play()
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "togglePlayback error: ${e.message}")
+            false
         }
     }
 
-    fun play(targetPackage: String? = null) {
-        refreshSessions()
-        val entry = controllers.values.firstOrNull { entry ->
-            targetPackage == null || entry.controller.packageName == targetPackage
-        } ?: controllers.values.firstOrNull() ?: return
-        try {
-            entry.controller.transportControls?.play()
+    fun play(targetPackage: String? = null): Boolean {
+        val entry = resolveTargetController(targetPackage) ?: return false
+        return try {
+            val tc = entry.controller.transportControls ?: return false
+            tc.play()
+            true
         } catch (e: Exception) {
             Log.w(TAG, "play error: ${e.message}")
+            false
         }
     }
 
-    fun pause() {
-        controllers.values.forEach { entry ->
-            try {
-                entry.controller.transportControls?.pause()
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun skipNext(targetPackage: String? = null) {
+    fun pause(targetPackage: String? = null): Boolean {
         refreshSessions()
-        val entry = controllers.values.firstOrNull { entry ->
-            targetPackage == null || entry.controller.packageName == targetPackage
-        } ?: controllers.values.firstOrNull() ?: return
-        try {
-            entry.controller.transportControls?.skipToNext()
+        var dispatched = false
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        controllers.values.forEach { entry ->
+            val pkg = sourcePackage(entry.controller)
+            val isTarget = cleanPkg == null ||
+                (pkg != null && (pkg.equals(cleanPkg, ignoreCase = true) || pkg.contains(cleanPkg, ignoreCase = true)))
+            val isActivelyPlaying = entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING ||
+                entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_BUFFERING
+            if (isTarget || isActivelyPlaying) {
+                try {
+                    entry.controller.transportControls?.let { tc ->
+                        tc.pause()
+                        dispatched = true
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        return dispatched
+    }
+
+    fun skipNext(targetPackage: String? = null): Boolean {
+        val entry = resolveTargetController(targetPackage) ?: return false
+        return try {
+            val tc = entry.controller.transportControls ?: return false
+            tc.skipToNext()
+            true
         } catch (e: Exception) {
             Log.w(TAG, "skipNext error: ${e.message}")
+            false
         }
     }
 
-    fun skipPrev() {
-        controllers.values.firstOrNull()?.controller?.transportControls?.skipToPrevious()
+    fun skipPrev(targetPackage: String? = null): Boolean {
+        val entry = resolveTargetController(targetPackage) ?: return false
+        return try {
+            val tc = entry.controller.transportControls ?: return false
+            tc.skipToPrevious()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "skipPrev error: ${e.message}")
+            false
+        }
     }
 
     /**
@@ -370,7 +429,7 @@ class MediaSessionObserver(
             } else {
                 basePos
             }
-            TuneMindListenerService.onPlaybackSnapshotUpdated?.invoke(
+            TuneMindListenerService.dispatchPlaybackSnapshot(
                 ActivePlaybackSnapshot(
                     packageName = source ?: "com.spotify.music",
                     title = snapTitle,

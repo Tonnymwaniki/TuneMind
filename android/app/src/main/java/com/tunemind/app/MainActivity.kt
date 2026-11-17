@@ -505,7 +505,8 @@ open class MainActivity : ComponentActivity() {
                         historyState.tracks.ifEmpty { homeState.recentTracks }
                     }
 
-                    val dopamineCapsule = remember(combinedRecentTracks, vaultState, nowPlaying?.title) {
+                    val dopamineCapsule by vm.upNextQueueState.collectAsState()
+                    LaunchedEffect(combinedRecentTracks, vaultState, nowPlaying?.title) {
                         vm.compileDopamineCapsule()
                     }
 
@@ -565,6 +566,7 @@ open class MainActivity : ComponentActivity() {
                                     sourcePkg: String
                                 ) {
                                     val targetPkg = selectedTargetPlayer.ifBlank { sourcePkg }
+                                    vm.markTrackPlayedFromQueueOrExternal(title, artist, spotifyUri)
                                     vm.setAgentActiveTrack(title, artist, targetPkg)
                                     agentVoiceManager.playTrackImmediatelyWithVoice(
                                         title = title,

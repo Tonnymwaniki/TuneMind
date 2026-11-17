@@ -280,6 +280,30 @@ interface SpotifyWebApiService {
         @Header("Authorization") authHeader: String? = null,
         @Body body: TransferPlaybackRequestDto
     ): Response<Unit>
+
+    @PUT("v1/me/player/pause")
+    suspend fun pausePlayback(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
+
+    @PUT("v1/me/player/play")
+    suspend fun resumePlayback(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
+
+    @POST("v1/me/player/next")
+    suspend fun skipToNextTrack(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
+
+    @POST("v1/me/player/previous")
+    suspend fun skipToPreviousTrack(
+        @Header("Authorization") authHeader: String? = null,
+        @Query("device_id") deviceId: String? = null
+    ): Response<Unit>
 }
 
 /**
