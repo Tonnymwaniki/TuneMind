@@ -58,6 +58,8 @@ import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class DopamineSongItem(
     val id: String,
@@ -143,7 +145,8 @@ fun DopamineVaultScreen(
         }
     }
 
-    val allSongs = remember(
+    val allSongs by produceState<List<DopamineSongItem>>(
+        initialValue = emptyList(),
         recentTracks,
         vaultTracks,
         graduatedTracks,
@@ -157,7 +160,8 @@ fun DopamineVaultScreen(
         repetitionSensitivity,
         resolveTrackVaultStatus
     ) {
-        val list = mutableListOf<DopamineSongItem>()
+        value = withContext(Dispatchers.Default) {
+            val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
         val seenIds = mutableSetOf<String>()
         val nowMs = System.currentTimeMillis()
@@ -472,7 +476,8 @@ fun DopamineVaultScreen(
             }
         }
 
-        list
+            list
+        }
     }
 
     val peakFreshSongs = remember(allSongs) {
@@ -994,9 +999,15 @@ private fun ManualVaultFreshPickerSheet(
     var query by remember { mutableStateOf("") }
     val accent = if (isRestingMode) Color(0xFFFFB000) else theme.primaryAccent
 
-    val candidates = remember(recentTracks, likedTracks, playlists) {
-        val seen = mutableSetOf<String>()
-        val items = mutableListOf<ManualPickerCandidate>()
+    val candidates by produceState<List<ManualPickerCandidate>>(
+        initialValue = emptyList(),
+        recentTracks,
+        likedTracks,
+        playlists
+    ) {
+        value = withContext(Dispatchers.Default) {
+            val seen = mutableSetOf<String>()
+            val items = mutableListOf<ManualPickerCandidate>()
         for (t in recentTracks) {
             val title = t.title?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             val artist = t.artist?.trim()?.ifBlank { "Music" } ?: "Music"
@@ -1059,7 +1070,8 @@ private fun ManualVaultFreshPickerSheet(
                 }
             }
         }
-        items
+            items
+        }
     }
 
     val filtered = remember(candidates, query) {

@@ -35,10 +35,12 @@ import com.tunemind.app.data.ingestion.SpotifyOAuthRepository
 import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
 import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -319,11 +321,17 @@ class TuneMindViewModel : ViewModel() {
     private var cachedRepetitionSensitivityForStats: Float = 0.75f
     @Volatile
     private var liveStatsRecomputeJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var queueSyncJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var lastVisualTasteSize: Int = -1
+    @Volatile
+    private var cachedRestoredVaultMap: Map<String, Long>? = null
 
     fun setUiForegroundActive(active: Boolean) {
         uiForegroundActive = active
         if (active) {
-            viewModelScope.launch {
+            viewModelScope.launch(Dispatchers.IO) {
                 runCatching {
                     com.tunemind.app.service.TuneMindListenerService.instance?.observerOrNull()?.refreshSessions()
                     publishAuthoritativeNowPlayingNow()
@@ -612,29 +620,27 @@ class TuneMindViewModel : ViewModel() {
         val spHistory = cachedSpotifyHistoryForStats
         if (rows.isEmpty() && spHistory.isEmpty() && _homeState.value.nowPlaying == null) return
         if (liveStatsRecomputeJob?.isActive == true) return
-        liveStatsRecomputeJob = viewModelScope.launch {
+        liveStatsRecomputeJob = viewModelScope.launch(Dispatchers.Default) {
             val nowMs = System.currentTimeMillis()
             val np = resolveBestNowPlayingForStats(rows, _spotifyLiveState.value)
             val restoredMap = loadRestoredVaultMapFromPrefs()
             val activeVaultFreshness = buildActiveVaultFreshnessMap(nowMs)
-            val snapshot = withContext(Dispatchers.Default) {
-                ListeningPlayDeduplicator.buildSnapshot(
-                    rawObservations = rows,
-                    spotifyHistory = spHistory,
-                    nowPlayingTitle = np?.title,
-                    nowPlayingArtist = np?.artist,
-                    nowPlayingSourcePkg = np?.sourcePackage,
-                    isMusicPlayingNow = np?.isPlaying == true,
-                    nowMs = nowMs,
-                    mergeDuplicatePlays = cachedMergeDuplicatesForStats,
-                    repetitionSensitivity = cachedRepetitionSensitivityForStats,
-                    nowPlayingPositionMs = np?.positionMs ?: 0L,
-                    nowPlayingDurationMs = np?.durationMs ?: 0L,
-                    nowPlayingUpdatedAtMs = np?.updatedAtMs ?: 0L,
-                    restoredAtByKey = restoredMap,
-                    activeVaultFreshnessByKey = activeVaultFreshness
-                )
-            }
+            val snapshot = ListeningPlayDeduplicator.buildSnapshot(
+                rawObservations = rows,
+                spotifyHistory = spHistory,
+                nowPlayingTitle = np?.title,
+                nowPlayingArtist = np?.artist,
+                nowPlayingSourcePkg = np?.sourcePackage,
+                isMusicPlayingNow = np?.isPlaying == true,
+                nowMs = nowMs,
+                mergeDuplicatePlays = cachedMergeDuplicatesForStats,
+                repetitionSensitivity = cachedRepetitionSensitivityForStats,
+                nowPlayingPositionMs = np?.positionMs ?: 0L,
+                nowPlayingDurationMs = np?.durationMs ?: 0L,
+                nowPlayingUpdatedAtMs = np?.updatedAtMs ?: 0L,
+                restoredAtByKey = restoredMap,
+                activeVaultFreshnessByKey = activeVaultFreshness
+            )
             _unifiedTracks.value = snapshot.unifiedTracks
             _cleanPlayHistory.value = snapshot.cleanPlayHistory
             _listeningStats.value = snapshot.stats
@@ -1507,6 +1513,17 @@ class TuneMindViewModel : ViewModel() {
     }
 
     private fun syncUpNextQueueWithSources(forceRebuild: Boolean = false) {
+        if (forceRebuild) {
+            queueSyncJob?.cancel()
+        } else if (queueSyncJob?.isActive == true) {
+            return
+        }
+        queueSyncJob = viewModelScope.launch(Dispatchers.Default) {
+            computeUpNextQueueSync(forceRebuild)
+        }
+    }
+
+    private fun computeUpNextQueueSync(forceRebuild: Boolean = false) {
         val slot = currentTimeSlot
         val inAppCurrent = isInAppPlayerCurrent()
         val activeTitle = if (inAppCurrent) {
@@ -1609,7 +1626,7 @@ class TuneMindViewModel : ViewModel() {
     fun compileDopamineCapsule(): DopamineCapsuleState {
         val current = _upNextQueueState.value
         if (current.tracks.isEmpty()) {
-            syncUpNextQueueWithSources(forceRebuild = true)
+            computeUpNextQueueSync(forceRebuild = true)
         }
         return _upNextQueueState.value
     }
@@ -2063,21 +2080,21 @@ class TuneMindViewModel : ViewModel() {
         }
         snapshotMonitorListener = snapListener
         com.tunemind.app.service.TuneMindListenerService.addPlaybackSnapshotListener(snapListener)
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             while (true) {
                 val ctx = AppHolder.context
                 val overrideOn = ctx != null && com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)
                 val isPlayingNow = _homeState.value.nowPlaying?.isPlaying == true
                 kotlinx.coroutines.delay(
                     when {
-                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 350L
-                        uiForegroundActive -> 900L
-                        else -> 1600L
+                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 550L
+                        uiForegroundActive -> 1200L
+                        else -> 3500L
                     }
                 )
                 if (ctx == null) continue
                 val listener = com.tunemind.app.service.TuneMindListenerService.instance
-                if (uiForegroundActive || overrideOn) {
+                if (uiForegroundActive || (overrideOn && isPlayingNow)) {
                     listener?.observerOrNull()?.refreshSessions()
                 }
                 val snap = listener?.getActivePlaybackSnapshot()
@@ -2091,9 +2108,9 @@ class TuneMindViewModel : ViewModel() {
                 }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             while (true) {
-                kotlinx.coroutines.delay(4_500L)
+                kotlinx.coroutines.delay(5_500L)
                 if (!uiForegroundActive) continue
                 if (spotifyRepo?.isConnectedFlow?.value == true) {
                     runCatching { spotifyRepo?.refreshCurrentlyPlayingOnly() }
@@ -2103,11 +2120,10 @@ class TuneMindViewModel : ViewModel() {
         }
 
         // Observe AI Recommendation Crate from Room DB
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 aiRecDao?.observeAll()?.collect { crate ->
                     _aiDiscoveryCrate.value = crate
-                    syncUpNextQueueWithSources(forceRebuild = false)
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("TuneMindVM", "observeCrate notice: ${t.message}")
@@ -2181,7 +2197,7 @@ class TuneMindViewModel : ViewModel() {
         }
 
         // Observe Spotify Library (Liked Songs, Playlists, Podcasts, Live Playback State)
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
                 spotifyRepo?.observeLikedTracks(150)?.collect {
                     _spotifyLikedTracks.value = it
@@ -2189,55 +2205,64 @@ class TuneMindViewModel : ViewModel() {
                 }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
-                spotifyRepo?.observePlaylists(60)?.collect { _spotifyPlaylists.value = it }
+                spotifyRepo?.observePlaylists(60)?.collect {
+                    _spotifyPlaylists.value = it
+                    syncUpNextQueueWithSources(forceRebuild = false)
+                }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
                 spotifyRepo?.observePodcasts(100)?.collect { _spotifyPodcasts.value = it }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
                 spotifyRepo?.currentlyPlayingLiveState?.collect { _spotifyLiveState.value = it }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
                 spotifyRepo?.needsLibraryScopeUpgrade?.collect { _needsLibraryScopeUpgrade.value = it }
             }
         }
 
         // Observe Spotify Visuals, Profile, Taste Shifts, New Releases & Playback Devices
-        viewModelScope.launch {
+        @OptIn(FlowPreview::class)
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching {
-                visualRepo?.trackVisualsFlow?.collect { visualsMap ->
+                visualRepo?.trackVisualsFlow?.debounce(900L)?.collect { visualsMap ->
                     _spotifyTrackVisuals.value = visualsMap
-                    val recentPairs = _unifiedTracks.value.take(30).map { it.title to it.artist }
-                    if (recentPairs.isNotEmpty()) {
-                        visualRepo?.refreshUniversalTasteIntelligenceFromResolvedTracks(recentPairs)
+                    if (visualsMap.size != lastVisualTasteSize) {
+                        lastVisualTasteSize = visualsMap.size
+                        val recentPairs = _unifiedTracks.value.take(30).map { it.title to it.artist }
+                        if (recentPairs.isNotEmpty()) {
+                            visualRepo?.refreshUniversalTasteIntelligenceFromResolvedTracks(recentPairs)
+                        }
                     }
                 }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching { visualRepo?.artistProfilesFlow?.collect { _spotifyArtistProfiles.value = it } }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching { visualRepo?.userProfileFlow?.collect { _spotifyUserProfile.value = it } }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching { visualRepo?.tasteShiftSummaryFlow?.collect { _tasteShiftSummary.value = it } }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching { visualRepo?.newReleasesFlow?.collect { _spotifyNewReleases.value = it } }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             runCatching { visualRepo?.playbackDevicesFlow?.collect { _spotifyDevices.value = it } }
         }
         viewModelScope.launch(Dispatchers.IO) {
+            // Stagger heavy network & playlist hydration slightly so first frame + taps stay 100% responsive
+            kotlinx.coroutines.delay(1_200L)
             runCatching {
                 refreshLiveListeningStatsNow()
                 if (spotifyRepo?.isConnectedFlow?.value == true) {
@@ -2263,24 +2288,25 @@ class TuneMindViewModel : ViewModel() {
             runCatching { db?.spotifyListeningHistoryDao()?.deletePollingDuplicates() }
         }
 
-        // Live listening clock: updates active Today/7d/30d/All-Time durations every 5s while playback is running
-        viewModelScope.launch {
+        // Live listening clock: updates active Today/7d/30d/All-Time durations smoothly while UI is visible
+        viewModelScope.launch(Dispatchers.Default) {
             while (true) {
-                kotlinx.coroutines.delay(5_000L)
+                kotlinx.coroutines.delay(12_000L)
                 val playingAny = _homeState.value.nowPlaying?.isPlaying == true ||
                     com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
                     _spotifyLiveState.value?.isPlaying == true
-                if (playingAny) {
+                if (playingAny && uiForegroundActive) {
                     refreshLiveListeningStatsNow()
                 }
             }
         }
 
         // Unified Authoritative Pipeline: Combine Device MediaSessions + Verified Spotify History + Live State
-        viewModelScope.launch {
+        @OptIn(FlowPreview::class)
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 val obsFlow = repo?.observeRecent() ?: flowOf(emptyList())
-                val spotifyHistoryFlow = db?.spotifyListeningHistoryDao()?.observeRecentHistory(10_000) ?: flowOf(emptyList())
+                val spotifyHistoryFlow = db?.spotifyListeningHistoryDao()?.observeRecentHistory(2_500) ?: flowOf(emptyList())
 
                 combine(
                     obsFlow,
@@ -2290,7 +2316,7 @@ class TuneMindViewModel : ViewModel() {
                     com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity
                 ) { rows, spotifyHistory, liveSpotify, mergeDuplicates, repetitionSensitivity ->
                     listOf(rows, spotifyHistory, liveSpotify, mergeDuplicates, repetitionSensitivity)
-                }.collect { values ->
+                }.debounce(250L).collect { values ->
                     @Suppress("UNCHECKED_CAST")
                     val rows = values[0] as List<PlaybackObservation>
                     @Suppress("UNCHECKED_CAST")
@@ -3008,9 +3034,13 @@ class TuneMindViewModel : ViewModel() {
     }
 
     private fun loadRestoredVaultMapFromPrefs(): MutableMap<String, Long> {
+        cachedRestoredVaultMap?.let { return HashMap(it) }
         val ctx = AppHolder.context ?: return mutableMapOf()
         val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
-        val raw = prefs.getString("vault_restored_map", null) ?: return mutableMapOf()
+        val raw = prefs.getString("vault_restored_map", null) ?: run {
+            cachedRestoredVaultMap = emptyMap()
+            return mutableMapOf()
+        }
         return try {
             val obj = org.json.JSONObject(raw)
             val result = mutableMapOf<String, Long>()
@@ -3020,21 +3050,24 @@ class TuneMindViewModel : ViewModel() {
                 val v = obj.optLong(k, 0L)
                 if (v > 0L) result[k] = v
             }
+            cachedRestoredVaultMap = HashMap(result)
             result
         } catch (_: Exception) {
+            cachedRestoredVaultMap = emptyMap()
             mutableMapOf()
         }
     }
 
     private fun saveRestoredVaultMapToPrefs(map: Map<String, Long>) {
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
-        val obj = org.json.JSONObject()
-        // Keep most recent 120 restored entries
-        map.entries
+        val trimmed = map.entries
             .sortedByDescending { it.value }
             .take(120)
-            .forEach { (k, v) -> obj.put(k, v) }
+            .associate { it.key to it.value }
+        cachedRestoredVaultMap = trimmed
+        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val obj = org.json.JSONObject()
+        trimmed.forEach { (k, v) -> obj.put(k, v) }
         prefs.edit().putString("vault_restored_map", obj.toString()).apply()
     }
 

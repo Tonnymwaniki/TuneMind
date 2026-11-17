@@ -32,8 +32,40 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.tunemind.app.data.ingestion.ArtistProfileCacheEntity
 import com.tunemind.app.data.ingestion.ResolvedTrackVisuals
 import com.tunemind.app.data.ingestion.SpotifyVisualArtworkRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+
+private fun resolveTrackVisualSlice(
+    visualsMap: Map<String, ResolvedTrackVisuals>,
+    artistsMap: Map<String, ArtistProfileCacheEntity>,
+    tKey: String,
+    uKey: String?,
+    aKey: String,
+    cleanUri: String?,
+    fallbackAlbumArtUrl: String?
+): ResolvedTrackVisuals {
+    val byUri = uKey?.let { visualsMap[it] }
+    val byTrack = if (tKey.isNotBlank()) visualsMap[tKey] else null
+    val matched = byUri ?: byTrack
+    val cachedArtistUrl = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
+
+    val effectiveAlbum = matched?.albumArtUrl?.takeIf { it.isNotBlank() }
+        ?: fallbackAlbumArtUrl?.takeIf { it.isNotBlank() }
+    val effectiveArtist = matched?.artistImageUrl?.takeIf { it.isNotBlank() }
+        ?: cachedArtistUrl?.takeIf { it.isNotBlank() }
+
+    return (matched ?: ResolvedTrackVisuals(trackKey = tKey, spotifyUri = cleanUri)).copy(
+        albumArtUrl = effectiveAlbum,
+        artistImageUrl = effectiveArtist
+    )
+}
 
 @Composable
 fun rememberResolvedTrackMedia(
@@ -44,39 +76,46 @@ fun rememberResolvedTrackMedia(
 ): ResolvedTrackVisuals {
     val context = LocalContext.current
     val repo = remember(context) { SpotifyVisualArtworkRepository.getInstance(context) }
-    val visualsMap by repo.trackVisualsFlow.collectAsState()
-    val artistsMap by repo.artistProfilesFlow.collectAsState()
+
+    val cleanUri = remember(spotifyUri) { spotifyUri?.trim()?.takeIf { it.isNotBlank() } }
+    val tKey = remember(title, artist) { SpotifyVisualArtworkRepository.canonicalTrackKey(title, artist) }
+    val uKey = remember(cleanUri) { cleanUri?.let { SpotifyVisualArtworkRepository.uriKey(it) } }
+    val aKey = remember(artist) {
+        SpotifyVisualArtworkRepository.canonicalArtistKey(
+            SpotifyVisualArtworkRepository.extractPrimaryArtistName(artist)
+        )
+    }
 
     LaunchedEffect(title, artist, spotifyUri, fallbackAlbumArtUrl) {
-        repo.requestTrackVisuals(
-            title = title,
-            artist = artist,
-            spotifyUri = spotifyUri,
+        withContext(Dispatchers.IO) {
+            repo.requestTrackVisuals(
+                title = title,
+                artist = artist,
+                spotifyUri = spotifyUri,
+                fallbackAlbumArtUrl = fallbackAlbumArtUrl
+            )
+        }
+    }
+
+    val initialValue = remember(tKey, uKey, aKey, fallbackAlbumArtUrl) {
+        resolveTrackVisualSlice(
+            visualsMap = repo.trackVisualsFlow.value,
+            artistsMap = repo.artistProfilesFlow.value,
+            tKey = tKey,
+            uKey = uKey,
+            aKey = aKey,
+            cleanUri = cleanUri,
             fallbackAlbumArtUrl = fallbackAlbumArtUrl
         )
     }
 
-    return remember(visualsMap, artistsMap, title, artist, spotifyUri, fallbackAlbumArtUrl) {
-        val cleanUri = spotifyUri?.trim()?.takeIf { it.isNotBlank() }
-        val tKey = SpotifyVisualArtworkRepository.canonicalTrackKey(title, artist)
-        val primaryArtist = SpotifyVisualArtworkRepository.extractPrimaryArtistName(artist)
-        val aKey = SpotifyVisualArtworkRepository.canonicalArtistKey(primaryArtist)
+    val resolved by remember(tKey, uKey, aKey, fallbackAlbumArtUrl) {
+        combine(repo.trackVisualsFlow, repo.artistProfilesFlow) { visualsMap, artistsMap ->
+            resolveTrackVisualSlice(visualsMap, artistsMap, tKey, uKey, aKey, cleanUri, fallbackAlbumArtUrl)
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
+    }.collectAsState(initial = initialValue)
 
-        val byUri = cleanUri?.let { visualsMap[SpotifyVisualArtworkRepository.uriKey(it)] }
-        val byTrack = if (tKey.isNotBlank()) visualsMap[tKey] else null
-        val matched = byUri ?: byTrack
-        val cachedArtistUrl = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
-
-        val effectiveAlbum = matched?.albumArtUrl?.takeIf { it.isNotBlank() }
-            ?: fallbackAlbumArtUrl?.takeIf { it.isNotBlank() }
-        val effectiveArtist = matched?.artistImageUrl?.takeIf { it.isNotBlank() }
-            ?: cachedArtistUrl?.takeIf { it.isNotBlank() }
-
-        (matched ?: ResolvedTrackVisuals(trackKey = tKey, spotifyUri = cleanUri)).copy(
-            albumArtUrl = effectiveAlbum,
-            artistImageUrl = effectiveArtist
-        )
-    }
+    return resolved
 }
 
 @Composable
@@ -86,19 +125,33 @@ fun rememberResolvedArtistPhoto(
 ): String? {
     val context = LocalContext.current
     val repo = remember(context) { SpotifyVisualArtworkRepository.getInstance(context) }
-    val artistsMap by repo.artistProfilesFlow.collectAsState()
+    val aKey = remember(artistName) {
+        SpotifyVisualArtworkRepository.canonicalArtistKey(
+            SpotifyVisualArtworkRepository.extractPrimaryArtistName(artistName)
+        )
+    }
 
     LaunchedEffect(artistName, artistId) {
-        repo.requestArtistProfile(artistName = artistName, artistId = artistId)
+        withContext(Dispatchers.IO) {
+            repo.requestArtistProfile(artistName = artistName, artistId = artistId)
+        }
     }
 
-    return remember(artistsMap, artistName, artistId) {
-        val primary = SpotifyVisualArtworkRepository.extractPrimaryArtistName(artistName)
-        val aKey = SpotifyVisualArtworkRepository.canonicalArtistKey(primary)
-        val byName = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
-        val byId = artistId?.takeIf { it.isNotBlank() }?.let { artistsMap["id:$it"]?.imageUrl }
-        byName ?: byId
+    val initialValue = remember(aKey, artistId) {
+        val snap = repo.artistProfilesFlow.value
+        (if (aKey.isNotBlank()) snap[aKey]?.imageUrl else null)
+            ?: artistId?.takeIf { it.isNotBlank() }?.let { snap["id:$it"]?.imageUrl }
     }
+
+    val photo by remember(aKey, artistId) {
+        repo.artistProfilesFlow.map { artistsMap ->
+            val byName = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
+            val byId = artistId?.takeIf { it.isNotBlank() }?.let { artistsMap["id:$it"]?.imageUrl }
+            byName ?: byId
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
+    }.collectAsState(initial = initialValue)
+
+    return photo
 }
 
 @Composable
