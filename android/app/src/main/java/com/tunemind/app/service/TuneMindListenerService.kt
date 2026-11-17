@@ -25,9 +25,6 @@ class TuneMindListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var observer: MediaSessionObserver
     private var audioDeviceObserver: com.tunemind.app.domain.audio.AudioDeviceObserver? = null
-    private val momentDiscoveryEngine: com.tunemind.app.domain.moment.MomentDiscoveryEngine by lazy {
-        com.tunemind.app.domain.moment.MomentDiscoveryEngine(db.musicalMomentDao())
-    }
     private val stopEmitted = AtomicBoolean(false)
 
     override fun onListenerConnected() {
@@ -42,13 +39,6 @@ class TuneMindListenerService : NotificationListenerService() {
                     return@MediaSessionObserver
                 }
                 repository.record(observation)
-                serviceScope.launch {
-                    try {
-                        momentDiscoveryEngine.processObservation(observation)
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Moment discovery error: ${t.message}")
-                    }
-                }
                 serviceScope.launch {
                     SyncScheduler.schedule(this@TuneMindListenerService)
                 }

@@ -61,7 +61,6 @@ class AgentVoiceManager(
     private val getSpotifyLikedTracks: (() -> List<com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity>)? = null,
     private val getListeningStats: (() -> com.tunemind.app.domain.memory.OverallListeningStats)? = null,
     private val getCleanPlayHistory: (() -> List<com.tunemind.app.domain.memory.UnifiedPlayEvent>)? = null,
-    private val getMomentsCount: (() -> Int)? = null,
     private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
@@ -591,7 +590,6 @@ class AgentVoiceManager(
                 put("completion_rate_percent", statsSnapshot.completionRatePercent)
                 put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
                 put("peak_window_label", statsSnapshot.peakWindowLabel)
-                put("moments_count", getMomentsCount?.invoke() ?: 0)
                 put("windows", JSONObject().apply {
                     put("today", JSONObject().apply {
                         put("minutes", (todayWin.totalListeningMs / 60_000L).toInt())

@@ -101,10 +101,8 @@ fun RhythmDnaScreen(
     onOpenWeeklyReport: () -> Unit = {},
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
-    onOpenMoments: () -> Unit = {},
     onOpenAccountAuth: () -> Unit = {},
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
-    momentsCount: Int = 0,
     onRefreshStats: () -> Unit = {},
     requestedSubDeck: Int? = null,
     onConsumeRequestedSubDeck: () -> Unit = {},
@@ -315,7 +313,6 @@ fun RhythmDnaScreen(
                             onOpenWeeklyReport = onOpenWeeklyReport,
                             onOpenHearingHealth = onOpenHearingHealth,
                             onOpenMusicProfile = onOpenMusicProfile,
-                            onOpenMoments = onOpenMoments,
                             resolveTrackVaultStatus = resolveTrackVaultStatus,
                             onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
                             onAskAgentAboutTrack = onAskAgentAboutTrack,
@@ -621,12 +618,6 @@ fun RhythmDnaScreen(
                                             selectedIndex = selectedPhaseIndex,
                                             onSelectTab = { index ->
                                                 selectedPhaseIndex = index
-                                                onUpdateThemePreferences(
-                                                    themePreferences.copy(
-                                                        behavior = ThemeBehavior.FIXED,
-                                                        fixedPaletteId = phases[index].paletteId
-                                                    )
-                                                )
                                             },
                                             height = 40.dp
                                         )
@@ -716,167 +707,18 @@ fun RhythmDnaScreen(
                                             modifier = Modifier.weight(1f)
                                         )
                                         FlowInsightCard(
-                                            title = "Saved Moments",
-                                            value = if (momentsCount > 0) "$momentsCount saved" else "Save clip hooks",
-                                            icon = Icons.Rounded.BookmarkBorder,
-                                            accent = Color(0xFFF59E0B),
-                                            onClick = onOpenMoments,
+                                            title = "Listening Stats",
+                                            value = "${listeningStats.totalVerifiedPlays} plays",
+                                            icon = Icons.Rounded.BarChart,
+                                            accent = Color(0xFF38BDF8),
+                                            onClick = { activeRhythmSubDeck = 1 },
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
                                 }
                             }
 
-                            // 3. Account & Spotify Card
-                            item(key = "overview_spotify_account") {
-                                val hasExplicitAccount = authSession.isGoogleConnected || authSession.email.isNotBlank()
-                                SoftGlassCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    accentTint = if (effectiveSpotifyConnected) Color(0xFF1DB954) else theme.primaryAccent
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        StudioSectionHeader(
-                                            title = "Account & Spotify",
-                                            actionLabel = if (effectiveSpotifyConnected) "Library" else "Connect Spotify",
-                                            onActionClick = {
-                                                if (effectiveSpotifyConnected) {
-                                                    onRefreshSpotifyLibrary()
-                                                    activeRhythmSubDeck = 2
-                                                } else {
-                                                    spotifyAuthManager.launchSpotifyAuth(context)
-                                                }
-                                            }
-                                        )
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = if (effectiveSpotifyConnected) {
-                                                        "${likedTracks.size} liked songs · ${playlists.size} playlists"
-                                                    } else {
-                                                        "Connect Spotify for full library & history sync"
-                                                    },
-                                                    color = Color(0xFFF8FAFC),
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                                Spacer(modifier = Modifier.height(3.dp))
-                                                Text(
-                                                    text = if (hasExplicitAccount) {
-                                                        listOfNotNull(
-                                                            authSession.displayName.takeIf { it.isNotBlank() },
-                                                            authSession.email.takeIf { it.isNotBlank() }
-                                                        ).joinToString(" · ")
-                                                    } else {
-                                                        "Using guest session — open Profile to sign in or switch"
-                                                    },
-                                                    color = Color.White.copy(alpha = 0.58f),
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = if (hasExplicitAccount) "Profile" else "Sign In",
-                                                color = Color(0xFFFAFAFA),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(Color.White.copy(alpha = 0.06f))
-                                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-                                                    .clickable { onOpenAccountAuth() }
-                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 4. Adaptive Appearance Preset Card
-                            item(key = "overview_adaptive_theme") {
-                                val isAuto = themePreferences.behavior == ThemeBehavior.ADAPTIVE
-                                SoftGlassCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    accentTint = theme.primaryAccent
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        StudioSectionHeader(
-                                            title = "Appearance",
-                                            actionLabel = if (isAuto) "Auto · ${theme.activePalette.name}" else "Enable Auto",
-                                            onActionClick = {
-                                                onUpdateThemePreferences(
-                                                    themePreferences.copy(
-                                                        behavior = ThemeBehavior.ADAPTIVE,
-                                                        enableMoodAdaptation = true,
-                                                        enableEnergyAdaptation = true
-                                                    )
-                                                )
-                                            }
-                                        )
-
-                                        val atmospherePresets = listOf(
-                                            Triple("morning", "Glacier", Color(0xFF38BDF8)),
-                                            Triple("afternoon", "Emerald", Color(0xFF10B981)),
-                                            Triple("evening", "Ember", Color(0xFFF59E0B)),
-                                            Triple("night", "Violet", Color(0xFFA78BFA))
-                                        )
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            atmospherePresets.forEach { (id, label, color) ->
-                                                val isSelected = theme.activePalette.id == id && themePreferences.behavior == ThemeBehavior.FIXED
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.Center,
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .background(
-                                                            if (isSelected) color.copy(alpha = 0.16f) else Color(0xFF18181D)
-                                                        )
-                                                        .border(
-                                                            1.dp,
-                                                            if (isSelected) color.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.08f),
-                                                            RoundedCornerShape(10.dp)
-                                                        )
-                                                        .clickable {
-                                                            onUpdateThemePreferences(
-                                                                themePreferences.copy(
-                                                                    behavior = ThemeBehavior.FIXED,
-                                                                    fixedPaletteId = id
-                                                                )
-                                                            )
-                                                        }
-                                                        .padding(vertical = 10.dp, horizontal = 6.dp)
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(7.dp)
-                                                            .clip(CircleShape)
-                                                            .background(color)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(5.dp))
-                                                    Text(
-                                                        text = label,
-                                                        color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.74f),
-                                                        fontSize = 12.sp,
-                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                                        maxLines = 1
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 5. Top Rotation Track Rows
+                            // 3. Top Rotation Track Rows
                             if (powerTracks.isNotEmpty()) {
                                 item(key = "overview_top_rotation_header") {
                                     StudioSectionHeader(title = "Top Rotation · ${activePhase.label}")

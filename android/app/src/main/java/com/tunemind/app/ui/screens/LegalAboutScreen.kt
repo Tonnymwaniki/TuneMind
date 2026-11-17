@@ -111,7 +111,7 @@ fun LegalAboutScreen(
                             )
                             LegalParagraph(
                                 title = "2. Listening Telemetry & Local Storage",
-                                body = "Playback events, freshness scores, Cooldown Vault items, and Musical Moments are processed and stored locally on your device inside an encrypted SQLite (Room) database. You can pause all tracking anytime using Private Session in Profile or Settings."
+                                body = "Playback events, freshness scores, and Resting Vault tracks are processed and stored locally on your device inside an encrypted SQLite (Room) database. You can pause all tracking anytime using Private Session in Profile or Settings."
                             )
                             LegalParagraph(
                                 title = "3. Spotify & Device Permissions",
@@ -149,7 +149,7 @@ fun LegalAboutScreen(
                             StudioHairlineDivider()
                             LegalParagraph(
                                 title = "1. Personal Listening Companion",
-                                body = "TuneMind helps you track repetition fatigue, organize listening moments, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use."
+                                body = "TuneMind helps you track repetition fatigue, protect song freshness, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use."
                             )
                             LegalParagraph(
                                 title = "2. Third-Party Services",

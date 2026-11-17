@@ -23,7 +23,6 @@ import com.tunemind.app.domain.experiment.PlaybackIntervalEstimator
 import com.tunemind.app.domain.model.PlaybackObservation
 import com.tunemind.app.domain.audio.AudioDeviceSessionEntity
 import com.tunemind.app.domain.audio.VolumeObservationEntity
-import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.temporal.TimeSlot
 import com.tunemind.app.domain.temporal.TimePatternEngine
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
@@ -43,12 +42,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-data class MusicalMomentsState(
-    val confirmedMoments: List<MusicalMomentEntity> = emptyList(),
-    val candidateMoments: List<MusicalMomentEntity> = emptyList(),
-    val isLoading: Boolean = false
-)
 
 data class HearingInsightsState(
     val recentAudioDevices: List<AudioDeviceSessionEntity> = emptyList(),
@@ -195,12 +188,8 @@ class TuneMindViewModel : ViewModel() {
     private val db: TuneMindDatabase? by lazy {
         AppHolder.context?.let { TuneMindDatabase.getInstance(it) }
     }
-    private val momentDao by lazy { db?.musicalMomentDao() }
     private val audioDao by lazy { db?.audioDeviceDao() }
     private val aiRecDao by lazy { db?.aiRecommendationDao() }
-
-    private val _musicalMomentsState = MutableStateFlow(MusicalMomentsState())
-    val musicalMomentsState: StateFlow<MusicalMomentsState> = _musicalMomentsState.asStateFlow()
 
     private val _hearingInsightsState = MutableStateFlow(HearingInsightsState())
     val hearingInsightsState: StateFlow<HearingInsightsState> = _hearingInsightsState.asStateFlow()
@@ -1844,23 +1833,6 @@ class TuneMindViewModel : ViewModel() {
                 }
             } catch (t: Throwable) {
                 android.util.Log.w("TuneMindVM", "observeExperiment notice: ${t.message}")
-            }
-        }
-
-        // Observe musical moments
-        viewModelScope.launch {
-            try {
-                momentDao?.observeAll()?.collect { all ->
-                    val confirmed = all.filter { it.userConfirmed }
-                    val candidates = all.filter { !it.userConfirmed }
-                    _musicalMomentsState.value = MusicalMomentsState(
-                        confirmedMoments = confirmed,
-                        candidateMoments = candidates,
-                        isLoading = false
-                    )
-                }
-            } catch (t: Throwable) {
-                android.util.Log.w("TuneMindVM", "observeMoments notice: ${t.message}")
             }
         }
 
@@ -3865,71 +3837,6 @@ class TuneMindViewModel : ViewModel() {
                     _recommendations.value = aiRecs
                 }
             }
-        }
-    }
-
-    fun configureAndSeekMomentPlayback(startMs: Long, endMs: Long, loopEnabled: Boolean) {
-        com.tunemind.app.provider.TuneMindInAppPlayer.setClipLoop(startMs, endMs, loopEnabled)
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(900L)
-            if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
-                com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(startMs)
-            } else if (com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()) {
-                com.tunemind.app.provider.SpotifyAppRemoteManager.seekTo(startMs)
-            }
-        }
-    }
-
-    fun saveMusicalMoment(
-        title: String,
-        artist: String,
-        album: String? = null,
-        sourcePkg: String? = null,
-        startMs: Long,
-        endMs: Long,
-        customName: String? = null,
-        spotifyUri: String? = null
-    ) {
-        val duration = maxOf(5_000L, endMs - startMs)
-        val resolvedUri = spotifyUri?.takeIf { it.isNotBlank() } ?: _unifiedTracks.value.firstOrNull {
-            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, null)
-        }?.spotifyUri
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                momentDao?.insertOrUpdate(
-                    MusicalMomentEntity(
-                        momentId = java.util.UUID.randomUUID().toString(),
-                        trackTitle = title,
-                        trackArtist = artist,
-                        trackAlbum = album,
-                        sourcePackage = sourcePkg,
-                        providerTrackId = resolvedUri,
-                        startPositionMs = startMs,
-                        endPositionMs = endMs,
-                        preferredPlaybackDurationMs = duration,
-                        discoveryMethod = "USER_MARKED",
-                        confidence = 1.0f,
-                        userConfirmed = true,
-                        customName = customName ?: "Moment (${startMs / 1000}s - ${endMs / 1000}s)"
-                    )
-                )
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun confirmCandidateMoment(momentId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                momentDao?.confirmMoment(momentId)
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun deleteMusicalMoment(momentId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                momentDao?.deleteById(momentId)
-            } catch (_: Exception) {}
         }
     }
 

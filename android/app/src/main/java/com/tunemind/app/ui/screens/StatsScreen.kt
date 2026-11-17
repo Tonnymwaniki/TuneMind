@@ -62,8 +62,7 @@ fun StatsScreen(
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
-    onOpenMusicProfile: () -> Unit,
-    onOpenMoments: () -> Unit
+    onOpenMusicProfile: () -> Unit
 ) {
     val stats by vm.listeningStats.collectAsState()
     val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
@@ -163,7 +162,6 @@ fun StatsScreen(
                 onOpenWeeklyReport = onOpenWeeklyReport,
                 onOpenHearingHealth = onOpenHearingHealth,
                 onOpenMusicProfile = onOpenMusicProfile,
-                onOpenMoments = onOpenMoments,
                 resolveTrackVaultStatus = { t, a, uri, id -> vm.resolveTrackVaultStatus(t, a, uri, id) },
                 onInspectTrack = { inspectedTrack = it }
             )
@@ -210,7 +208,6 @@ fun StatsDashboardContent(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    onOpenMoments: () -> Unit,
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
@@ -249,7 +246,6 @@ fun StatsDashboardContent(
             onOpenWeeklyReport = onOpenWeeklyReport,
             onOpenHearingHealth = onOpenHearingHealth,
             onOpenMusicProfile = onOpenMusicProfile,
-            onOpenMoments = onOpenMoments,
             resolveTrackVaultStatus = resolveTrackVaultStatus,
             onInspectTrack = if (onToggleTrackVault != null) { { inspectedTrack = it } } else null
         )
@@ -292,7 +288,6 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    onOpenMoments: () -> Unit,
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onInspectTrack: ((UnifiedTrackStats) -> Unit)? = null
@@ -880,15 +875,6 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 icon = Icons.Rounded.PersonOutline,
                 accent = theme.secondaryAccent,
                 onClick = onOpenMusicProfile
-            )
-            StudioHairlineDivider()
-
-            InsightHubTile(
-                title = "Saved Moments",
-                subtitle = "Saved song highlights",
-                icon = Icons.Rounded.BookmarkBorder,
-                accent = Color(0xFFF59E0B),
-                onClick = onOpenMoments
             )
             StudioHairlineDivider()
         }

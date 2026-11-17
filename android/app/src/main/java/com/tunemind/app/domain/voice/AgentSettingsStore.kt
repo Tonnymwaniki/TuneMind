@@ -29,7 +29,6 @@ object AgentSettingsStore {
     private const val KEY_LATE_NIGHT_COMFORT = "late_night_comfort_enabled"
     private const val KEY_PRIVATE_SESSION = "private_session_enabled"
     private const val KEY_MERGE_DUPLICATE_PLAYS = "merge_duplicate_plays_enabled"
-    private const val KEY_LOOP_MOMENTS = "loop_moments_enabled"
     private const val KEY_ALERTS_VAULT_RECOVERY = "alerts_vault_recovery_enabled"
     private const val KEY_ALERTS_WEEKLY_RECAP = "alerts_weekly_recap_enabled"
     private const val KEY_ALERTS_HEARING = "alerts_hearing_enabled"
@@ -71,9 +70,6 @@ object AgentSettingsStore {
     private val _mergeDuplicatePlaysEnabled = MutableStateFlow(true)
     val mergeDuplicatePlaysEnabled: StateFlow<Boolean> = _mergeDuplicatePlaysEnabled.asStateFlow()
 
-    private val _loopMomentsEnabled = MutableStateFlow(false)
-    val loopMomentsEnabled: StateFlow<Boolean> = _loopMomentsEnabled.asStateFlow()
-
     private val _vaultRecoveryAlertsEnabled = MutableStateFlow(true)
     val vaultRecoveryAlertsEnabled: StateFlow<Boolean> = _vaultRecoveryAlertsEnabled.asStateFlow()
 
@@ -106,7 +102,6 @@ object AgentSettingsStore {
             _lateNightComfortEnabled.value = p.getBoolean(KEY_LATE_NIGHT_COMFORT, true)
             _privateSessionEnabled.value = p.getBoolean(KEY_PRIVATE_SESSION, false)
             _mergeDuplicatePlaysEnabled.value = p.getBoolean(KEY_MERGE_DUPLICATE_PLAYS, true)
-            _loopMomentsEnabled.value = p.getBoolean(KEY_LOOP_MOMENTS, false)
             _vaultRecoveryAlertsEnabled.value = p.getBoolean(KEY_ALERTS_VAULT_RECOVERY, true)
             _weeklyRecapAlertsEnabled.value = p.getBoolean(KEY_ALERTS_WEEKLY_RECAP, true)
             _hearingAlertsEnabled.value = p.getBoolean(KEY_ALERTS_HEARING, true)
@@ -235,17 +230,6 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_MERGE_DUPLICATE_PLAYS, enabled).apply()
         _mergeDuplicatePlaysEnabled.value = enabled
-    }
-
-    fun isLoopMomentsEnabled(context: Context): Boolean {
-        ensureLoaded(context)
-        return _loopMomentsEnabled.value
-    }
-
-    fun setLoopMomentsEnabled(context: Context, enabled: Boolean) {
-        ensureLoaded(context)
-        prefs(context).edit().putBoolean(KEY_LOOP_MOMENTS, enabled).apply()
-        _loopMomentsEnabled.value = enabled
     }
 
     fun isVaultRecoveryAlertsEnabled(context: Context): Boolean {

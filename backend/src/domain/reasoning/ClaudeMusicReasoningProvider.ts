@@ -167,7 +167,6 @@ export interface TuneMindTelemetryContext {
     completion_rate_percent?: number;
     discovery_rate_percent?: number;
     peak_window_label?: string;
-    moments_count?: number;
     windows?: {
       today?: { minutes: number; plays: number; unique_tracks: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number; peak_window?: string };
       seven_days?: { minutes: number; plays: number; unique_tracks: number; unique_artists: number; skipped: number; completion_rate_percent: number; discovery_rate_percent: number; peak_window?: string; range_label?: string };
@@ -842,7 +841,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             target_screen: {
               type: 'string',
-              description: 'Target screen or sub-tab when action is NAVIGATE_SCREEN: "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SAVED_MOMENTS" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".'
+              description: 'Target screen or sub-tab when action is NAVIGATE_SCREEN: "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".'
             },
             extra_actions: {
               type: 'array',
@@ -922,7 +921,7 @@ FULL APP-WIDE CONTROL ACTIONS:
 - Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH".
 - Volume: action="SET_VOLUME_PERCENT" (volume_percent: 10-100).
 - Navigation: action="NAVIGATE_SCREEN" with target_screen in:
-  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SAVED_MOMENTS" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
+  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
 - Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 

@@ -145,7 +145,6 @@ open class MainActivity : ComponentActivity() {
                     val tasteShiftSummary by vm.tasteShiftSummary.collectAsState()
                     val spotifyNewReleases by vm.spotifyNewReleases.collectAsState()
                     val spotifyActionFeedback by vm.spotifyActionFeedback.collectAsState()
-                    val musicalMomentsState by vm.musicalMomentsState.collectAsState()
 
                     val playerPrefs = remember {
                         context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
@@ -196,7 +195,6 @@ open class MainActivity : ComponentActivity() {
                     var showWeeklyReportScreen by remember { mutableStateOf(false) }
                     var showHearingScreen by remember { mutableStateOf(false) }
                     var showMusicProfileScreen by remember { mutableStateOf(false) }
-                    var showMomentsScreen by remember { mutableStateOf(false) }
                     var showSearchScreen by remember { mutableStateOf(false) }
                     var showNowPlayingScreen by remember { mutableStateOf(false) }
                     var showLegalScreen by remember { mutableStateOf(false) }
@@ -354,7 +352,6 @@ open class MainActivity : ComponentActivity() {
                                         showWeeklyReportScreen = false
                                         showHearingScreen = false
                                         showMusicProfileScreen = false
-                                        showMomentsScreen = false
                                         showStatsScreen = true
                                     }
                                     screen.contains("WEEKLY") || screen.contains("RECAP") -> {
@@ -373,10 +370,6 @@ open class MainActivity : ComponentActivity() {
                                         showSettingsScreen = false
                                         showProfileScreen = true
                                     }
-                                    screen.contains("MOMENT") -> {
-                                        showSettingsScreen = false
-                                        showMomentsScreen = true
-                                    }
                                     else -> {
                                         showSettingsScreen = false
                                         showProfileScreen = false
@@ -384,7 +377,6 @@ open class MainActivity : ComponentActivity() {
                                         showWeeklyReportScreen = false
                                         showHearingScreen = false
                                         showMusicProfileScreen = false
-                                        showMomentsScreen = false
                                         showSearchScreen = false
                                         showNowPlayingScreen = false
                                         showNotificationsScreen = false
@@ -444,7 +436,6 @@ open class MainActivity : ComponentActivity() {
                                 vm.listeningStats.value
                             },
                             getCleanPlayHistory = { vm.cleanPlayHistory.value },
-                            getMomentsCount = { vm.musicalMomentsState.value.confirmedMoments.size },
                             getAppState = {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
@@ -458,7 +449,6 @@ open class MainActivity : ComponentActivity() {
                                     showWeeklyReportScreen -> "WEEKLY_REPORT"
                                     showHearingScreen -> "HEARING_HEALTH"
                                     showMusicProfileScreen -> "MUSIC_PROFILE"
-                                    showMomentsScreen -> "SOUND_MOMENTS"
                                     showStatsScreen -> "STATS"
                                     currentPagerPage == 0 -> "DOPAMINE_VAULT"
                                     currentPagerPage == 2 -> "RHYTHM_DNA"
@@ -522,7 +512,6 @@ open class MainActivity : ComponentActivity() {
                             showMusicProfileScreen = false
                             showWeeklyReportScreen = false
                             showHearingScreen = false
-                            showMomentsScreen = false
                             showStatsScreen = false
                             showSearchScreen = false
                             showNowPlayingScreen = false
@@ -690,7 +679,6 @@ open class MainActivity : ComponentActivity() {
                                     showWeeklyReportScreen ||
                                     showHearingScreen ||
                                     showMusicProfileScreen ||
-                                    showMomentsScreen ||
                                     showStatsScreen ||
                                     showSearchScreen ||
                                     showNowPlayingScreen ||
@@ -706,7 +694,6 @@ open class MainActivity : ComponentActivity() {
                                         showMusicProfileScreen -> showMusicProfileScreen = false
                                         showWeeklyReportScreen -> showWeeklyReportScreen = false
                                         showHearingScreen -> showHearingScreen = false
-                                        showMomentsScreen -> showMomentsScreen = false
                                         showStatsScreen -> showStatsScreen = false
                                         showNowPlayingScreen -> showNowPlayingScreen = false
                                         showSearchScreen -> showSearchScreen = false
@@ -943,12 +930,10 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },
-                                                onOpenMoments = { showMomentsScreen = true },
                                                 onOpenAccountAuth = {
                                                     showProfileScreen = true
                                                 },
                                                 tasteShiftSummary = tasteShiftSummary,
-                                                momentsCount = musicalMomentsState.confirmedMoments.size,
                                                 onRefreshStats = { vm.refreshLiveListeningStatsNow() },
                                                 requestedSubDeck = requestedRhythmSubDeck,
                                                 onConsumeRequestedSubDeck = { requestedRhythmSubDeck = null },
@@ -1169,8 +1154,7 @@ open class MainActivity : ComponentActivity() {
                                         onPlayTrack = ::playAnyTrack,
                                         onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                         onOpenHearingHealth = { showHearingScreen = true },
-                                        onOpenMusicProfile = { showMusicProfileScreen = true },
-                                        onOpenMoments = { showMomentsScreen = true }
+                                        onOpenMusicProfile = { showMusicProfileScreen = true }
                                     )
                                 }
 
@@ -1217,14 +1201,6 @@ open class MainActivity : ComponentActivity() {
                                         vm = vm,
                                         onBack = { showMusicProfileScreen = false },
                                         onOpenSettings = { showSettingsScreen = true }
-                                    )
-                                }
-
-                                if (showMomentsScreen) {
-                                    com.tunemind.app.ui.screens.MusicalMomentsScreen(
-                                        vm = vm,
-                                        onBack = { showMomentsScreen = false },
-                                        onPlayTrack = ::playAnyTrack
                                     )
                                 }
 

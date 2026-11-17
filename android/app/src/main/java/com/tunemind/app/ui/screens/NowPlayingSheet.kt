@@ -445,26 +445,6 @@ fun NowPlayingSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    NowPlayingQuickAction(
-                        icon = Icons.Rounded.BookmarkAdd,
-                        label = "Moment",
-                        accent = neonCyan,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            val start = maxOf(0L, effectivePosMs - 15_000L)
-                            val end = minOf(maxOf(start + 15_000L, effectivePosMs + 15_000L), maxOf(30_000L, effectiveDurationMs))
-                            vm.saveMusicalMoment(
-                                title = effectiveTitle,
-                                artist = effectiveArtist,
-                                album = nowPlaying?.album,
-                                sourcePkg = nowPlaying?.sourcePackage,
-                                startMs = start,
-                                endMs = end,
-                                spotifyUri = activeSpotifyUri
-                            )
-                            actionStatus = "Saved moment from \"$effectiveTitle\""
-                        }
-                    )
                     val currentVaultStatus = vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
                     NowPlayingQuickAction(
                         icon = Icons.Rounded.Shield,

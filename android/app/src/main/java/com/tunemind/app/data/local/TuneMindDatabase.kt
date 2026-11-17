@@ -12,8 +12,6 @@ import com.tunemind.app.domain.audio.VolumeObservationEntity
 import com.tunemind.app.domain.experiment.ExperimentDao
 import com.tunemind.app.domain.experiment.ExperimentEntity
 import com.tunemind.app.domain.experiment.ExperimentEventEntity
-import com.tunemind.app.domain.moment.MusicalMomentDao
-import com.tunemind.app.domain.moment.MusicalMomentEntity
 import com.tunemind.app.domain.provider.MusicProviderDao
 import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
@@ -53,7 +51,6 @@ import com.tunemind.app.domain.study.StudyEntity
         StudyEntity::class,
         ExperimentEntity::class,
         ExperimentEventEntity::class,
-        MusicalMomentEntity::class,
         AudioDeviceSessionEntity::class,
         VolumeObservationEntity::class,
         MusicProviderEntity::class,
@@ -66,7 +63,7 @@ import com.tunemind.app.domain.study.StudyEntity
         TrackVisualCacheEntity::class,
         ArtistProfileCacheEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -74,7 +71,6 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun eventQueueDao(): EventQueueDao
     abstract fun studyDao(): StudyDao
     abstract fun experimentDao(): ExperimentDao
-    abstract fun musicalMomentDao(): MusicalMomentDao
     abstract fun audioDeviceDao(): AudioDeviceDao
     abstract fun musicProviderDao(): MusicProviderDao
     abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
@@ -109,7 +105,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_10_11,
                         MIGRATION_11_12,
                         MIGRATION_12_13,
-                        MIGRATION_13_14
+                        MIGRATION_13_14,
+                        MIGRATION_14_15
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -493,6 +490,12 @@ abstract class TuneMindDatabase : RoomDatabase() {
         val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE ai_recommendation_crate ADD COLUMN trackId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS musical_moments")
             }
         }
     }

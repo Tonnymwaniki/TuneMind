@@ -132,7 +132,7 @@ router.get('/privacy', (_req: Request, res: Response) => {
         },
         {
           heading: '2. Listening Telemetry & On-Device Storage',
-          body: 'Playback history, repetition fatigue (satiety) calculations, Cooldown Vault tracks, and Musical Moments are primarily processed and stored locally on your device inside an encrypted Room SQLite database. You can pause all tracking immediately using Private Session in Profile or Settings.'
+          body: 'Playback history, repetition fatigue (satiety) calculations, and Resting Vault tracks are primarily processed and stored locally on your device inside an encrypted Room SQLite database. You can pause all tracking immediately using Private Session in Profile or Settings.'
         },
         {
           heading: '3. Device & Music Permissions',
@@ -160,7 +160,7 @@ router.get('/terms', (_req: Request, res: Response) => {
       [
         {
           heading: '1. Personal Listening Companion',
-          body: 'TuneMind helps you track repetition fatigue, organize musical moments, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use.'
+          body: 'TuneMind helps you track repetition fatigue, protect song freshness, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use.'
         },
         {
           heading: '2. Third-Party Services & Content Rights',
