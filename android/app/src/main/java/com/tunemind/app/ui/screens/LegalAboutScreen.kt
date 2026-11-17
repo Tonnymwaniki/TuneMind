@@ -34,8 +34,8 @@ fun LegalAboutScreen(
 ) {
     val theme = LocalAdaptiveTheme.current
     var selectedTab by remember(initialTab) { mutableStateOf(initialTab.coerceIn(0, 2)) }
-    val neonCyan = Color(0xFF00F0FF)
-    val electricPurple = Color(0xFF8A2BE2)
+    val neonCyan = theme.primaryAccent
+    val electricPurple = theme.secondaryAccent
     val safeGreen = Color(0xFF10B981)
 
     StudioAmbientBackground {

@@ -16,13 +16,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -121,10 +122,9 @@ fun PulseAgentScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(top = 10.dp, bottom = 112.dp),
+                .padding(top = 12.dp, bottom = 118.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 1. Clean Top Header with Interactive Theme Cycle + Stats & Profile
@@ -133,20 +133,31 @@ fun PulseAgentScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         text = "TuneMind",
-                        color = Color(0xFFF8FAFC),
-                        fontSize = 21.sp,
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp
+                        letterSpacing = (-0.4).sp
                     )
-                    Text(
-                        text = colors.activePalette.name,
-                        color = activeAccent.copy(alpha = 0.85f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(activeAccent)
+                        )
+                        Text(
+                            text = colors.activePalette.name,
+                            color = Color.White.copy(alpha = 0.68f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
                 Row(
@@ -184,9 +195,9 @@ fun PulseAgentScreen(
                                 imageUrl = profileAvatarUrl,
                                 fallbackInitial = cleanInitial.ifBlank { "T" },
                                 size = 32.dp,
-                                accentColor = Color(0xFF00F0FF),
+                                accentColor = activeAccent,
                                 borderWidth = 1.2.dp,
-                                borderColor = Color(0xFF00F0FF).copy(alpha = 0.72f)
+                                borderColor = activeAccent.copy(alpha = 0.65f)
                             )
                         } else {
                             Box(
@@ -211,7 +222,7 @@ fun PulseAgentScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 2. Suggested Mix Dimensional Card
+            // 2. Unboxed Suggested Mix Strip
             if (dopamineCapsule != null && dopamineCapsule.tracks.isNotEmpty()) {
                 SuggestedMixCard(
                     capsule = dopamineCapsule,
@@ -220,142 +231,151 @@ fun PulseAgentScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 3. Living Fluid Sphere + Lottie Neural Intelligence Loop Centerpiece
-            val lottieSpeed = when {
-                agentState == AgentState.SPEAKING -> 1.85f
-                agentState == AgentState.THINKING -> 1.65f
-                agentState == AgentState.LISTENING -> 1.45f
-                isMusicPlaying -> 1.25f
-                else -> 0.90f
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(276.dp)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onOrbTapped
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                TuneMindAiIntelligenceLoop(
-                    modifier = Modifier.size(276.dp),
-                    speed = lottieSpeed,
-                    alpha = when {
-                        agentState != AgentState.IDLE -> 0.92f
-                        isMusicPlaying -> 0.78f
-                        else -> 0.58f
-                    }
-                )
-                TuneMindLivingOrb(
-                    agentState = agentState,
-                    isMusicPlaying = isMusicPlaying,
-                    hasPendingApproval = hasPendingApproval,
-                    energy = energy,
-                    primaryAccent = activeAccent,
-                    secondaryAccent = colors.secondaryAccent,
-                    modifier = Modifier.size(252.dp)
-                )
-            }
-
-            // 4. Up Next Approval Card
-            AnimatedVisibility(
-                visible = pendingProposedTrack != null,
-                enter = fadeIn(tween(240)),
-                exit = fadeOut(tween(180))
-            ) {
-                pendingProposedTrack?.let { proposed ->
-                    Column {
-                        ProposedTrackApprovalCard(
-                            proposedTrack = proposed,
-                            isListeningForVoiceApproval = agentState == AgentState.LISTENING,
-                            onApprove = onApproveProposedTrack,
-                            onReject = onRejectProposedTrack
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                    }
-                }
-            }
-
-            // 5. Voice Prompt & Live Response
-            val stateHint = when {
-                hasPendingApproval && agentState == AgentState.LISTENING -> "Say \"Yes\" to play or \"Skip\""
-                hasPendingApproval -> "Waiting for your go-ahead"
-                agentState == AgentState.IDLE -> "Tap orb or say \"Hey TuneMind\""
-                agentState == AgentState.LISTENING -> "Listening…"
-                agentState == AgentState.THINKING -> "Thinking…"
-                agentState == AgentState.SPEAKING -> "Speaking"
-                agentState == AgentState.ERROR -> "Tap to try again"
-                else -> "Ready"
-            }
-
+            // 3. Hero Center Stage: Living Orb + Voice Prompt
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable { onOrbTapped() }
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                    .weight(1f)
+                    .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = stateHint,
-                    color = activeAccent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = liveTranscript.ifBlank { "Ask for a song, switch the mood, or start your daily mix." },
-                    style = TuneMindTypography.bodyMedium,
-                    fontSize = 15.sp,
-                    color = if (liveTranscript.isNotBlank()) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.68f),
-                    textAlign = TextAlign.Center,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 21.sp
-                )
-                if (flowAnalysis.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(268.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onOrbTapped
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    TuneMindLivingOrb(
+                        agentState = agentState,
+                        isMusicPlaying = isMusicPlaying,
+                        hasPendingApproval = hasPendingApproval,
+                        energy = energy,
+                        primaryAccent = activeAccent,
+                        secondaryAccent = colors.secondaryAccent,
+                        modifier = Modifier.size(258.dp)
+                    )
+                }
+
+                // 4. Up Next Approval Card
+                AnimatedVisibility(
+                    visible = pendingProposedTrack != null,
+                    enter = fadeIn(tween(240)),
+                    exit = fadeOut(tween(180))
+                ) {
+                    pendingProposedTrack?.let { proposed ->
+                        Column {
+                            ProposedTrackApprovalCard(
+                                proposedTrack = proposed,
+                                isListeningForVoiceApproval = agentState == AgentState.LISTENING,
+                                onApprove = onApproveProposedTrack,
+                                onReject = onRejectProposedTrack
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    }
+                }
+
+                // 5. Voice Prompt & Live Response
+                val stateLabel = when {
+                    hasPendingApproval && agentState == AgentState.LISTENING -> "Say \"Yes\" or \"Skip\""
+                    hasPendingApproval -> "Waiting for approval"
+                    agentState == AgentState.IDLE -> "Ready"
+                    agentState == AgentState.LISTENING -> "Listening…"
+                    agentState == AgentState.THINKING -> "Thinking…"
+                    agentState == AgentState.SPEAKING -> "Speaking"
+                    agentState == AgentState.ERROR -> "Tap to retry"
+                    else -> "Ready"
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onOrbTapped() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(activeAccent.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(activeAccent)
+                        )
+                        Text(
+                            text = stateLabel,
+                            color = activeAccent,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
                     Text(
-                        text = flowAnalysis,
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.52f),
+                        text = if (liveTranscript.isNotBlank()) {
+                            liveTranscript
+                        } else {
+                            "Tap orb or say \"Hey TuneMind\""
+                        },
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFFAFAFA),
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 23.sp
+                    )
+
+                    Text(
+                        text = if (flowAnalysis.isNotBlank() && !flowAnalysis.contains("Studio Neural Engine", ignoreCase = true)) {
+                            flowAnalysis
+                        } else {
+                            "Ask for a song, shift the mood, or start your mix"
+                        },
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.58f),
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, activeAccent.copy(alpha = 0.28f), RoundedCornerShape(28.dp))
-                        .clickable { onOpenAgentGuide() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.HelpOutline,
-                        contentDescription = null,
-                        tint = activeAccent,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "What can I say?",
-                        color = Color.White.copy(alpha = 0.84f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { onOpenAgentGuide() }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
+                            contentDescription = null,
+                            tint = activeAccent.copy(alpha = 0.85f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Voice commands",
+                            color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 6. Tactile Now-Playing Card (Tap to expand Now Playing & Up Next Queue)
+            // 6. Anchored Now-Playing Strip (Open-Canvas Hairline Bar)
             NowPlayingCard(
                 trackTitle = currentTrackName,
                 artistName = artistName,
@@ -375,31 +395,36 @@ private fun SuggestedMixCard(
     accentColor: Color,
     onClick: () -> Unit
 ) {
-    SoftGlassCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
-        accentTint = accentColor,
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable { onClick() }
+                .padding(vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                val formattedSlot = capsule.slotLabel
+                    .trim()
+                    .lowercase()
+                    .split(Regex("\\s+"))
+                    .joinToString(" ") { word ->
+                        word.replaceFirstChar { it.uppercase() }
+                    }
+                    .replace("Receptivity", "Mix", ignoreCase = true)
+                    .let { if (it.endsWith("Mix", ignoreCase = true)) it else "$it Mix" }
                 Text(
-                    text = "${capsule.slotLabel} mix",
+                    text = "$formattedSlot · ${capsule.tracks.size} tracks",
                     color = accentColor,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = capsule.tracks.take(3).joinToString(" · ") { it.title },
-                    color = Color(0xFFF8FAFC).copy(alpha = 0.88f),
+                    color = Color(0xFFFAFAFA).copy(alpha = 0.84f),
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -409,26 +434,32 @@ private fun SuggestedMixCard(
             Spacer(modifier = Modifier.width(12.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(accentColor.copy(alpha = 0.14f))
-                    .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(accentColor.copy(alpha = 0.16f))
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
             ) {
-                Text(
-                    text = "Play",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
                 Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
+                    imageVector = Icons.Rounded.PlayArrow,
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(16.dp)
                 )
+                Text(
+                    text = "Play",
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(Color.White.copy(alpha = 0.08f))
+        )
     }
 }
 
@@ -517,11 +548,11 @@ private fun TuneMindLivingOrb(
         val luminousWhite = Color.White
 
         val haloAlpha = when {
-            agentState == AgentState.SPEAKING -> 0.34f
-            agentState == AgentState.LISTENING -> 0.30f
-            agentState == AgentState.THINKING -> 0.26f
-            isMusicPlaying -> 0.24f
-            else -> 0.16f
+            agentState == AgentState.SPEAKING -> 0.28f
+            agentState == AgentState.LISTENING -> 0.24f
+            agentState == AgentState.THINKING -> 0.22f
+            isMusicPlaying -> 0.20f
+            else -> 0.12f
         }
         drawCircle(
             brush = Brush.radialGradient(
@@ -536,6 +567,37 @@ private fun TuneMindLivingOrb(
             radius = baseRadius * 2.15f,
             center = center
         )
+
+        // Subtle 48-tick acoustic studio dial around the orb
+        val dialRadiusInner = size.minDimension * 0.39f
+        val tickCount = 48
+        for (t in 0 until tickCount) {
+            val angle = (t.toFloat() / tickCount) * (2f * PI).toFloat()
+            val isMajor = t % 4 == 0
+            val pulseWave = 0.5f + 0.5f * sin(angle * 2f - wavePhase)
+            val tickLen = if (isMajor) 7.dp.toPx() else 3.5.dp.toPx()
+            val tickAlpha = when {
+                agentState != AgentState.IDLE -> 0.18f + 0.32f * pulseWave
+                isMusicPlaying -> 0.14f + 0.22f * pulseWave
+                isMajor -> 0.22f
+                else -> 0.10f
+            }
+            val start = Offset(
+                center.x + dialRadiusInner * cos(angle),
+                center.y + dialRadiusInner * sin(angle)
+            )
+            val end = Offset(
+                center.x + (dialRadiusInner + tickLen) * cos(angle),
+                center.y + (dialRadiusInner + tickLen) * sin(angle)
+            )
+            drawLine(
+                color = (if (isMajor) primaryAccent else Color.White).copy(alpha = tickAlpha),
+                start = start,
+                end = end,
+                strokeWidth = if (isMajor) 1.4.dp.toPx() else 1.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
 
         if (agentState == AgentState.LISTENING || isMusicPlaying || hasPendingApproval) {
             for (ringIdx in 0..1) {
@@ -681,26 +743,24 @@ private fun TuneMindLivingOrb(
                 )
             }
             else -> {
-                if (isMusicPlaying) {
-                    rotate(degrees = swirlAngle * 0.6f, pivot = center) {
-                        drawArc(
-                            brush = Brush.sweepGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    luminousWhite.copy(alpha = 0.72f),
-                                    primaryAccent.copy(alpha = 0.65f),
-                                    Color.Transparent
-                                ),
-                                center = center
+                rotate(degrees = swirlAngle * if (isMusicPlaying) 0.6f else 0.25f, pivot = center) {
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                primaryAccent.copy(alpha = if (isMusicPlaying) 0.65f else 0.35f),
+                                secondaryAccent.copy(alpha = if (isMusicPlaying) 0.45f else 0.22f),
+                                Color.Transparent
                             ),
-                            startAngle = 0f,
-                            sweepAngle = 220f,
-                            useCenter = false,
-                            topLeft = Offset(center.x - baseRadius * 1.18f, center.y - baseRadius * 1.18f),
-                            size = Size(baseRadius * 2.36f, baseRadius * 2.36f),
-                            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
-                        )
-                    }
+                            center = center
+                        ),
+                        startAngle = 0f,
+                        sweepAngle = if (isMusicPlaying) 220f else 170f,
+                        useCenter = false,
+                        topLeft = Offset(center.x - baseRadius * 1.18f, center.y - baseRadius * 1.18f),
+                        size = Size(baseRadius * 2.36f, baseRadius * 2.36f),
+                        style = Stroke(width = if (isMusicPlaying) 2.dp.toPx() else 1.4.dp.toPx(), cap = StrokeCap.Round)
+                    )
                 }
             }
         }
@@ -824,19 +884,21 @@ private fun NowPlayingCard(
         )
     } else null
 
-    SoftGlassCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
-        accentTint = activeAccent,
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(Color.White.copy(alpha = 0.08f))
+        )
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable { onClick() }
+                .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Box(
                 modifier = Modifier

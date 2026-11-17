@@ -35,6 +35,7 @@ export interface AgentToolCall {
     | 'TOGGLE_AUTONOMOUS_DJ'
     | 'TOGGLE_STAY_IN_TUNEMIND'
     | 'TOGGLE_STRICT_NO_APP_SWITCH'
+    | 'SELECT_MUSIC_PLAYER'
     | 'OPEN_SETTINGS'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
@@ -44,6 +45,7 @@ export interface AgentToolCall {
   track_artist?: string;
   spotify_uri?: string;
   target_player?: string;
+  remember_default_player?: boolean;
   volume_percent?: number;
   palette_id?: string; // 'morning' | 'afternoon' | 'evening' | 'night' | 'auto'
   custom_accent_hex?: string; // e.g. '#00FFA3', '#FF2A85', or 'AUTO' to reset adaptive
@@ -52,7 +54,7 @@ export interface AgentToolCall {
   stay_in_tunemind_enabled?: boolean;
   strict_no_app_switch_enabled?: boolean;
   never_open_external_app?: boolean;
-  target_screen?: string; // 'DOPAMINE' | 'AGENT' | 'RHYTHM'
+  target_screen?: string;
   expect_follow_up?: boolean;
   extra_actions?: AgentToolCall[];
 }
@@ -114,8 +116,68 @@ export interface TuneMindTelemetryContext {
   user_email?: string;
   supabase_url?: string;
   supabase_anon_key?: string;
+  for_you_picks?: Array<{
+    title: string;
+    artist: string;
+    match_percent: number;
+    category?: string;
+    sub_tier?: string;
+    genre_tag?: string;
+    is_wildcard?: boolean;
+    is_saved?: boolean;
+    reason: string;
+    spotify_uri?: string;
+    track_id?: string;
+  }>;
+  spotify_playlists?: Array<{
+    playlist_id: string;
+    name: string;
+    owner?: string;
+    track_count: number;
+    spotify_uri?: string;
+    tracks?: Array<{
+      title: string;
+      artist: string;
+      spotify_uri?: string;
+      track_id?: string;
+    }>;
+  }>;
+  spotify_liked_tracks?: Array<{
+    title: string;
+    artist: string;
+    spotify_uri?: string;
+    track_id?: string;
+  }>;
+  listening_stats?: {
+    today_minutes?: number;
+    seven_day_minutes?: number;
+    thirty_day_minutes?: number;
+    all_time_minutes?: number;
+    total_verified_plays?: number;
+    unique_tracks?: number;
+    unique_artists?: number;
+    completion_rate_percent?: number;
+    discovery_rate_percent?: number;
+    peak_window_label?: string;
+    top_artists?: Array<{ artist: string; plays: number; minutes: number }>;
+    top_tracks?: Array<{ title: string; artist: string; plays: number; freshness_percent?: number; app?: string }>;
+    app_breakdown?: Array<{ app: string; plays: number; share_percent: number }>;
+  };
+  player_preferences?: {
+    has_explicit_default_player: boolean;
+    default_player_id?: string;
+    default_player_package?: string;
+    default_player_name?: string;
+    available_players: Array<{
+      id: string;
+      name: string;
+      package_name: string;
+    }>;
+  };
   app_state?: {
     current_screen?: string;
+    current_dopamine_tab?: string;
+    current_rhythm_tab?: string;
     theme_behavior?: string;
     palette_id?: string;
     custom_accent_hex?: string;
@@ -595,15 +657,81 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         }
       },
       {
+        name: 'inspect_for_you_suggestions',
+        description:
+          'Inspects today\'s personalized "For You" AI discovery suggestions screen inside TuneMind (daily curated picks, match percentages, categories, wildcard picks, saved status, and telemetry reasons). Call whenever the user asks "what do you have for me today", asks about the suggestion / For You screen, or wants to hear or play from today\'s suggestions.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            category_filter: {
+              type: 'string',
+              description: 'Optional filter by category/tier or keyword (e.g. "wildcard", "dopamine", "saved", artist, or leave empty for all active picks).'
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum suggestions to return (default 10).'
+            }
+          }
+        }
+      },
+      {
+        name: 'query_spotify_library',
+        description:
+          'Inspects the user\'s synced Spotify Library (personal playlists, tracks inside playlists, and liked songs). Call whenever the user asks about their Spotify playlists, wants to play a playlist from their Spotify library, asks how many playlists or liked songs they have, or picks a song from their saved library.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['playlists', 'liked_tracks', 'all'],
+              description: 'Whether to inspect playlists, liked tracks, or both.'
+            },
+            query: {
+              type: 'string',
+              description: 'Optional playlist name, song title, or artist filter.'
+            }
+          }
+        }
+      },
+      {
+        name: 'query_listening_stats',
+        description:
+          'Queries the user\'s cross-app listening analytics from the Stats and Hearing Health screens (minutes today / 7 days / 30 days / all time, total verified plays, unique tracks & artists, completion rate, discovery freshness rate, peak window, top artists, top tracks, app share breakdown, and acoustic hearing headroom).',
+        input_schema: {
+          type: 'object',
+          properties: {
+            window: {
+              type: 'string',
+              enum: ['today', '7_days', '30_days', 'all_time', 'all'],
+              description: 'Time window to inspect.'
+            }
+          }
+        }
+      },
+      {
+        name: 'inspect_vault_tracks',
+        description:
+          'Inspects the user\'s Cooldown Resting Vault tracks (tracks quarantined for dopamine recovery with remaining cooldown days, recovery %, and satiety score) plus their Fresh low-satiety rotation. Call whenever the user asks to play a song in the vault, check what is in the vault, restore a song, or check fresh songs.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            include_fresh_pool: {
+              type: 'boolean',
+              description: 'Also include the freshest ready-to-play songs from their rotation.'
+            }
+          }
+        }
+      },
+      {
         name: 'submit_agent_turn',
         description:
-          'Submits your final spoken response and app/playback action to the user after you have finished reasoning and calling any necessary Spotify/history tools.',
+          'Submits your final spoken response and app/playback action to the user after you have finished reasoning and calling any necessary tools.',
         input_schema: {
           type: 'object',
           properties: {
             voice_agent_tts: {
               type: 'string',
-              description: 'Your natural, warm, unscripted spoken response to the user (1-3 sentences, conversational like ChatGPT Voice). If proposing a track, ask if they want you to play it.'
+              description: 'Your natural, warm, unscripted spoken response to the user (1-3 sentences, conversational like ChatGPT Voice). If proposing a track or asking which music player to use, ask clearly.'
             },
             flow_state_analysis: {
               type: 'string',
@@ -631,24 +759,37 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'TOGGLE_AUTONOMOUS_DJ',
                 'TOGGLE_STAY_IN_TUNEMIND',
                 'TOGGLE_STRICT_NO_APP_SWITCH',
+                'SELECT_MUSIC_PLAYER',
                 'OPEN_SETTINGS',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE'
               ],
               description:
-                'Use ADVISE_ONLY for greetings ("hi tunemind", "how are you"), identity questions, music insights, or open dialogue. Use PROPOSE_TRACK when recommending or finding a song for user approval. Use PLAY_TRACK_NOW ONLY when approving pending_proposed_track or during AUTO_CURATE_NEXT_TRACK. Use SET_THEME_COLOR / SHIFT_ATMOSPHERE / TOGGLE_AUTONOMOUS_DJ / TOGGLE_STAY_IN_TUNEMIND / TOGGLE_STRICT_NO_APP_SWITCH / OPEN_SETTINGS / NAVIGATE_SCREEN / SET_VOLUME_PERCENT to control TuneMind.'
+                'Use ADVISE_ONLY for greetings, stats/insights answers, asking which player to use, or open dialogue. Use PROPOSE_TRACK when recommending or finding a song/playlist for user approval. Use PLAY_TRACK_NOW when approving pending_proposed_track, during AUTO_CURATE_NEXT_TRACK, or right after the user answers which music player to play a proposed track on. Use SELECT_MUSIC_PLAYER to switch/save the user\'s chosen player, RESTORE_FROM_VAULT to un-vault a track, or NAVIGATE_SCREEN / SET_VOLUME_PERCENT / SET_THEME_COLOR to control TuneMind.'
             },
             track_title: {
               type: 'string',
-              description: 'Exact song title (ONLY when action is PROPOSE_TRACK, PLAY_TRACK_NOW, LAUNCH_DOPAMINE_CAPSULE, or QUARANTINE_TO_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
+              description: 'Exact song or playlist title (ONLY when action is PROPOSE_TRACK, PLAY_TRACK_NOW, LAUNCH_DOPAMINE_CAPSULE, QUARANTINE_TO_VAULT, or RESTORE_FROM_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
             },
             track_artist: {
               type: 'string',
-              description: 'Exact artist name.'
+              description: 'Exact artist name (or playlist owner / "Spotify Playlist" when launching a playlist).'
+            },
+            track_id: {
+              type: 'string',
+              description: 'Optional canonical trackId or Vault track ID.'
             },
             spotify_uri: {
               type: 'string',
-              description: 'Exact canonical spotify:track:<22-char-id> URI returned by tools.'
+              description: 'Exact canonical Spotify URI (spotify:track:... or spotify:playlist:...) returned by tools.'
+            },
+            target_player: {
+              type: 'string',
+              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.spotify.music", "com.afmobi.boomplayer", "com.google.android.apps.youtube.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
+            },
+            remember_default_player: {
+              type: 'boolean',
+              description: 'Set to true when the user chooses a default player or wants to remember that player going forward.'
             },
             volume_percent: {
               type: 'number',
@@ -685,11 +826,11 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             target_screen: {
               type: 'string',
-              description: 'Target screen ("DOPAMINE" | "AGENT" | "RHYTHM") when action is NAVIGATE_SCREEN.'
+              description: 'Target screen or sub-tab when action is NAVIGATE_SCREEN: "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SAVED_MOMENTS" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".'
             },
             extra_actions: {
               type: 'array',
-              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color while proposing a song or navigating).',
+              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color, setting default player, navigating to For You / Vault / Stats, or adjusting volume).',
               items: {
                 type: 'object',
                 properties: {
@@ -701,6 +842,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                   stay_in_tunemind_enabled: { type: 'boolean' },
                   strict_no_app_switch_enabled: { type: 'boolean' },
                   never_open_external_app: { type: 'boolean' },
+                  target_player: { type: 'string' },
+                  remember_default_player: { type: 'boolean' },
                   volume_percent: { type: 'number' },
                   target_screen: { type: 'string' },
                   track_title: { type: 'string' },
@@ -710,7 +853,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             expect_follow_up: {
               type: 'boolean',
-              description: 'Set to true whenever you ask a question, greet, converse, or propose a track so the microphone re-opens smoothly for their reply.'
+              description: 'Set to true whenever you ask a question, ask which player to use, greet, converse, or propose a track so the microphone re-opens smoothly for their reply.'
             }
           },
           required: ['voice_agent_tts', 'flow_state_analysis', 'calculated_satiety_percentage', 'action', 'expect_follow_up']
@@ -724,43 +867,48 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
 
 CORE IDENTITY & CONVERSATIONAL FREEDOM:
 - You ALWAYS know your name is TuneMind! When the user greets you ("Hi TuneMind", "Hey TuneMind", "Hello", "How are you?", "What's your name?", "Who are you?"), respond warmly and naturally as TuneMind using action="ADVISE_ONLY", leaving track_title/track_artist EMPTY, with expect_follow_up=true!
-- NEVER force, pitch, or propose a song when the user is simply greeting you, asking how you are, chatting about their day, asking about you, or asking to change an app setting or theme color!
-- You can discuss anything naturally like ChatGPT Voice or Siri: their mood, their music history, ear health, dopamine fatigue, artists, life, or how TuneMind works.
+- NEVER force, pitch, or propose a song when the user is simply greeting you, asking how you are, chatting, asking about stats, or asking to change a setting/volume/navigation!
+- You can discuss anything naturally like ChatGPT Voice or Siri: their mood, stats, ear health, dopamine fatigue, artists, playlists, or anything on any TuneMind screen.
 
-STRICT NEW-SONG DISCOVERY vs. FAVORITES:
-- When the user asks for a **NEW** song, fresh recommendation, surprise, or discovery ("recommend a new song", "play something new", "give me songs outside what I listen to daily"), call 'discover_and_recommend_spotify_tracks' with exclude_overplayed=true. That tool inspects their full Supabase database + Spotify API history and returns UNHEARD tracks (never repeating tracks they already play daily!). Pick one of those fresh discoveries and propose it with action="PROPOSE_TRACK".
-- When the user explicitly asks for their **most played / favorite** song, call 'query_user_listening_history' with sort_by="most_played" and propose that #1 track.
-- When the user names a specific track or artist ("play Calm Down by Rema"), call 'search_spotify_catalog' to resolve the exact canonical URI and verify both title and artist match cleanly before proposing it.
+FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
+- FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful.
+- COOLDOWN VAULT & FRESH POOL: When the user says "play for me a song in the vault", asks what's resting in the Vault, wants to un-vault/restore a track, or asks for a fresh song from their rotation -> call 'inspect_vault_tracks' first! Never invent Vault songs. You can propose playing/restoring a real Vault track (with RESTORE_FROM_VAULT or PROPOSE_TRACK) or pick from 'fresh_low_satiety_user_tracks'.
+- STATS, WEEKLY RECAP & HEARING HEALTH: When the user asks about listening time, top artists, completion rate, fresh mix %, skips, peak hours, or safe ear headroom -> call 'query_listening_stats'! Give exact numbers from telemetry cleanly in spoken form, and optionally navigate to "STATS", "WEEKLY_REPORT", or "HEARING_HEALTH".
+- SPOTIFY LIBRARY PLAYLISTS & LIKED SONGS: When the user asks about their playlists ("play my workout playlist", "what's in my Spotify library?", "play from my liked songs") -> call 'query_spotify_library'! Match the exact playlist or liked song and pass its exact canonical spotify_uri (e.g. spotify:playlist:... or spotify:track:...) with exact track_title and track_artist. If they ask to view it, include NAVIGATE_SCREEN("SPOTIFY_LIBRARY") in extra_actions.
+- DIRECT SONG REQUEST FROM TUNEMIND TO SPOTIFY: When the user asks for any specific track or artist ("request Calm Down by Rema on Spotify", "play Blinding Lights by The Weeknd", or a new artist discovery) -> ALWAYS call 'search_spotify_catalog' (for specific artist/song) or 'discover_and_recommend_spotify_tracks' (for fresh unseen recommendations) so you get an exact verified title, artist, and canonical spotify:track:<id> URI with zero typos or hallucinations!
+
+SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
+- Check 'player_preferences' in the telemetry! It tells you:
+  - 'has_explicit_default_player': true if the user already chose a default music player, false if they have NOT chosen one yet.
+  - 'default_player_name' / 'default_player_package'
+  - 'available_players': list of genuine music players installed on their phone (e.g. Spotify, Boomplay, YouTube Music, Audiomack, TuneMind In-App, Local Audio).
+- RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet (for example they only said "suggest a song for me" or "play a fresh song"):
+  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, spotify_uri, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to play it on (naming 2-4 actual choices from 'player_preferences.available_players', e.g., Spotify, Boomplay, YouTube Music, or TuneMind In-App), and whether they want to make it their default!
+- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use Spotify", "Boomplay please, make it default", "Audiomack", "TuneMind"):
+  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and spotify_uri, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players', and set 'remember_default_player'=true if they agreed/asked to save it as default (or when no explicit default was set yet and they confirmed a player!).
+- RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to Spotify" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
 
 TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ:
-- By default, NEVER auto-play a song on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they'd like you to spin it right now.
-- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, and spotify_uri so it plays the exact approved song cleanly.
-- If the user rejects a proposal ("no", "another one", "different vibe"), discover a new track and propose that instead.
-- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled by the user. Call 'discover_and_recommend_spotify_tracks' to pick a fresh unheard song and call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and expect_follow_up=false.
+- By default, NEVER jump straight to playing an unapproved track on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they want it played (and which player if no default is set).
+- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, spotify_uri, and target_player (honoring default player or explicitly chosen player).
+- If the user rejects a proposal ("no", "another one", "different vibe"), discover a fresh alternative and propose that instead.
+- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_spotify_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
-STAY-IN-TUNEMIND ARCHITECTURE (OPTIONS 1, 2 & 3 — CRITICAL):
-- TuneMind has three playback architectures visible in 'app_state':
-  1. Strict Never-Leave-TuneMind Mode ('strict_no_app_switch_enabled'): NEVER switches away to Spotify or any external player UI. Toggle via action="TOGGLE_STRICT_NO_APP_SWITCH".
-  2. Stay-in-TuneMind Smart Remote & Overlay Bounce-Back ('stay_in_tunemind_enabled' + 'app_remote_connected' + 'has_overlay_permission'): Silent playback via Spotify App Remote SDK / Web API / background MediaSession, plus automatic instant bounce-back into TuneMind if Spotify cold-starts.
-  3. Built-In TuneMind Native In-App Audio Engine ('prefer_in_app_player_enabled' / 'inapp_player_active'): Plays matching local device audio files and instant 30s Spotify catalog previews natively inside TuneMind.
-- WHENEVER the user says "without opening Spotify", "don't open Spotify", "stay in TuneMind", "don't leave TuneMind", or "strict_no_app_switch_enabled" is true:
-  -> Set "never_open_external_app": true!
-  -> NEVER say "I'll open Spotify" or promise to launch an external app! Instead honestly state whether TuneMind will play it natively inside TuneMind or silently via connected Spotify Remote / Web API / background MediaSession—and if neither 'app_remote_connected' nor 'spotify_connected' is true and local/preview audio isn't available, honestly tell them you will keep them inside TuneMind and guide them to Settings -> Connect Remote.
+STAY-IN-TUNEMIND ARCHITECTURE:
+- Respect app_state flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'app_remote_connected', 'has_overlay_permission', 'prefer_in_app_player_enabled').
+- WHENEVER the user says "without opening Spotify", "don't open an external app", "stay in TuneMind", or 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true and never claim you are switching away to an external app UI!
 
-FULL APP-WIDE CONTROL (YOU UNDERSTAND ALL OF TUNEMIND via app_state):
-- Inspect 'app_state' in the telemetry to know the current screen, theme accent hex, theme behavior, Autonomous DJ state, Stay-in-TuneMind / Strict Mode / In-App Player flags, and Spotify Remote SDK connection!
-- Change accent/theme color anytime the user asks ("make the app emerald green", "switch theme to neon pink", "change color to violet purple", "reset theme to auto adaptive"):
-  -> Use action="SET_THEME_COLOR" with custom_accent_hex (e.g. "#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") and optional theme_behavior ("STATIC" or "ADAPTIVE").
-- Shift circadian atmosphere palette -> action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
-- Turn Autonomous End-of-Song DJ on or off -> action="TOGGLE_AUTONOMOUS_DJ" (autonomous_dj_enabled: true/false).
-- Turn Stay-in-TuneMind playback mode on or off -> action="TOGGLE_STAY_IN_TUNEMIND" (stay_in_tunemind_enabled: true/false).
-- Turn Strict Never-Leave-TuneMind Mode on or off -> action="TOGGLE_STRICT_NO_APP_SWITCH" (strict_no_app_switch_enabled: true/false).
-- Open Settings screen -> action="OPEN_SETTINGS".
-- Navigate tabs -> action="NAVIGATE_SCREEN" (target_screen: "DOPAMINE" | "AGENT" | "RHYTHM").
-- Pause / Resume / Skip / Volume / Cooldown Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT".
-- You may also attach 'extra_actions' if the user asks for multiple actions at once (e.g. "open settings and switch color to violet" or "dim the theme purple and suggest a chill track").
+FULL APP-WIDE CONTROL ACTIONS:
+- Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
+- Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
+- Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH".
+- Volume: action="SET_VOLUME_PERCENT" (volume_percent: 10-100).
+- Navigation: action="NAVIGATE_SCREEN" with target_screen in:
+  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SAVED_MOMENTS" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
+- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
+- Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
-Always finish by calling 'submit_agent_turn' with concise, natural spoken text (1-3 sentences).`;
+Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken text (1-3 sentences).`;
   }
 
   private async getSpotifyAccessToken(userOAuthToken?: string): Promise<string | null> {
@@ -1169,6 +1317,16 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         autonomous_dj_enabled: false,
         stay_in_tunemind_enabled: true
       },
+      player_preferences: context.player_preferences || {
+        has_explicit_default_player: false,
+        default_player_package: targetPlayerDefault,
+        default_player_name: 'Spotify',
+        available_players: []
+      },
+      for_you_picks_count: Array.isArray(context.for_you_picks) ? context.for_you_picks.length : 0,
+      spotify_playlists_count: Array.isArray(context.spotify_playlists) ? context.spotify_playlists.length : 0,
+      spotify_liked_tracks_count: Array.isArray(context.spotify_liked_tracks) ? context.spotify_liked_tracks.length : 0,
+      has_listening_stats: Boolean(context.listening_stats),
       current_track: context.current_track,
       pending_proposed_track_awaiting_user_approval: pending,
       top_most_played_user_tracks: mostPlayedTracks.slice(0, 6),
@@ -1213,7 +1371,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
           }
         ];
 
-        for (let step = 0; step < 3; step++) {
+        for (let step = 0; step < 5; step++) {
           const response = await this.callClaudeMessagesWithTools(
             systemPrompt,
             messages,
@@ -1461,6 +1619,80 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
                   }))
                 })
               });
+            } else if (toolName === 'inspect_for_you_suggestions') {
+              const filter = String(input.category_filter || '').toLowerCase().trim();
+              const limit = Math.min(20, Math.max(1, Number(input.limit || 10)));
+              let picks = Array.isArray(context.for_you_picks) ? [...context.for_you_picks] : [];
+              if (filter) {
+                if (filter === 'saved') {
+                  picks = picks.filter(p => p.is_saved);
+                } else if (filter === 'wildcard') {
+                  picks = picks.filter(p => p.is_wildcard || (p.sub_tier || '').toLowerCase().includes('wildcard'));
+                } else {
+                  picks = picks.filter(p =>
+                    p.title.toLowerCase().includes(filter) ||
+                    p.artist.toLowerCase().includes(filter) ||
+                    (p.category || '').toLowerCase().includes(filter) ||
+                    (p.genre_tag || '').toLowerCase().includes(filter) ||
+                    (p.reason || '').toLowerCase().includes(filter)
+                  );
+                }
+              }
+              const sliced = picks.slice(0, limit);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolCall.id,
+                content: JSON.stringify({
+                  total_for_you_picks: picks.length,
+                  picks: sliced
+                })
+              });
+            } else if (toolName === 'query_spotify_library') {
+              const scope = String(input.scope || 'all');
+              const q = String(input.query || '').toLowerCase().trim();
+              let playlists = Array.isArray(context.spotify_playlists) ? [...context.spotify_playlists] : [];
+              let liked = Array.isArray(context.spotify_liked_tracks) ? [...context.spotify_liked_tracks] : [];
+              if (q) {
+                playlists = playlists.filter(pl =>
+                  pl.name.toLowerCase().includes(q) ||
+                  (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                );
+                liked = liked.filter(t =>
+                  t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q)
+                );
+              }
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolCall.id,
+                content: JSON.stringify({
+                  playlists: scope === 'liked_tracks' ? [] : playlists.slice(0, 12),
+                  liked_tracks: scope === 'playlists' ? [] : liked.slice(0, 15),
+                  total_playlists: Array.isArray(context.spotify_playlists) ? context.spotify_playlists.length : 0,
+                  total_liked_tracks: Array.isArray(context.spotify_liked_tracks) ? context.spotify_liked_tracks.length : 0
+                })
+              });
+            } else if (toolName === 'query_listening_stats') {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolCall.id,
+                content: JSON.stringify({
+                  listening_stats: context.listening_stats || null,
+                  hearing_telemetry: context.hearing_telemetry || null,
+                  top_user_artists: topUserArtists,
+                  top_most_played_tracks: mostPlayedTracks.slice(0, 6)
+                })
+              });
+            } else if (toolName === 'inspect_vault_tracks') {
+              const includeFresh = input.include_fresh_pool !== false;
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolCall.id,
+                content: JSON.stringify({
+                  vault_count: (context.vault_tracks || []).length,
+                  vault_tracks: context.vault_tracks || [],
+                  fresh_tracks: includeFresh ? freshTracks.slice(0, 10) : []
+                })
+              });
             } else {
               toolResults.push({
                 type: 'tool_result',
@@ -1529,13 +1761,51 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         ? String(submittedTurnDecision.spotify_uri || lastDiscoveredOrSearchedTrack?.uri || '').trim()
         : '';
 
-      if (spotifyUri && (!spotifyUri.startsWith('spotify:track:') && !spotifyUri.startsWith('https://open.spotify.com/track/'))) {
-        if (/^[A-Za-z0-9]{22}$/.test(spotifyUri)) {
-          spotifyUri = `spotify:track:${spotifyUri}`;
-        } else {
-          spotifyUri = '';
+      if (spotifyUri) {
+        const isAllowedSpotifyUri =
+          spotifyUri.startsWith('spotify:track:') ||
+          spotifyUri.startsWith('spotify:playlist:') ||
+          spotifyUri.startsWith('spotify:album:') ||
+          spotifyUri.startsWith('spotify:artist:') ||
+          spotifyUri.startsWith('spotify:episode:') ||
+          /^https:\/\/open\.spotify\.com\/(track|playlist|album|artist|episode)\//i.test(spotifyUri);
+        if (!isAllowedSpotifyUri) {
+          if (/^[A-Za-z0-9]{22}$/.test(spotifyUri)) {
+            spotifyUri = `spotify:track:${spotifyUri}`;
+          } else {
+            spotifyUri = '';
+          }
         }
       }
+
+      const resolvePlayerPackage = (rawPlayer?: string): string => {
+        const cleaned = String(rawPlayer || '').trim();
+        const availablePlayers = context.player_preferences?.available_players || [];
+        if (cleaned) {
+          const lower = cleaned.toLowerCase();
+          const matched = availablePlayers.find(
+            p =>
+              p.package_name.toLowerCase() === lower ||
+              p.id.toLowerCase() === lower ||
+              p.name.toLowerCase() === lower ||
+              p.name.toLowerCase().includes(lower) ||
+              lower.includes(p.name.toLowerCase()) ||
+              lower.includes(p.id.toLowerCase())
+          );
+          if (matched) return matched.package_name || matched.id;
+          if (lower.includes('boomplay')) return 'com.afmobi.boomplayer';
+          if (lower.includes('youtube music') || lower.includes('yt music') || lower.includes('youtube_music')) {
+            return 'com.google.android.apps.youtube.music';
+          }
+          if (lower.includes('audiomack')) return 'com.audiomack';
+          if (lower.includes('apple')) return 'com.apple.android.music';
+          if (lower.includes('tunemind') || lower.includes('inapp') || lower.includes('built-in')) return 'tunemind_inapp';
+          if (lower.includes('local')) return 'local_files';
+          if (lower.includes('spotify')) return 'com.spotify.music';
+          return cleaned;
+        }
+        return context.player_preferences?.default_player_package || targetPlayerDefault;
+      };
 
       const isAutoCurateNextTrack = /^AUTO_CURATE_NEXT_TRACK\b/i.test(userCommandRaw);
 
@@ -1597,7 +1867,7 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
       const cleanTitleForSearch = trackTitle ? ClaudeMusicReasoningProvider.sanitizeTrackTitle(trackTitle) : '';
       const cleanArtistForSearch = trackArtist ? ClaudeMusicReasoningProvider.sanitizeArtistName(trackArtist) : '';
       const cleanSearchQuery = trackTitle ? `${cleanTitleForSearch} ${cleanArtistForSearch}`.trim() : '';
-      const targetPlayer = targetPlayerDefault;
+      const targetPlayer = resolvePlayerPackage(submittedTurnDecision.target_player || pending?.source);
       const trackIdentity = trackTitle
         ? resolveCanonicalTrackIdentity({
             trackId: candidateTrackId || pending?.trackId,
@@ -1718,6 +1988,8 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
             typeof ea.strict_no_app_switch_enabled === 'boolean' ? ea.strict_no_app_switch_enabled : undefined,
           never_open_external_app:
             typeof ea.never_open_external_app === 'boolean' ? ea.never_open_external_app : undefined,
+          target_player: ea.target_player ? resolvePlayerPackage(ea.target_player) : undefined,
+          remember_default_player: typeof ea.remember_default_player === 'boolean' ? ea.remember_default_player : undefined,
           volume_percent: typeof ea.volume_percent === 'number' ? ea.volume_percent : undefined,
           target_screen: ea.target_screen || undefined,
           track_title: ea.track_title || undefined,
@@ -1731,6 +2003,10 @@ Always finish by calling 'submit_agent_turn' with concise, natural spoken text (
         track_artist: (cleanArtistForSearch || trackArtist) || undefined,
         spotify_uri: spotifyUri || undefined,
         target_player: targetPlayer,
+        remember_default_player:
+          typeof submittedTurnDecision.remember_default_player === 'boolean'
+            ? submittedTurnDecision.remember_default_player
+            : undefined,
         volume_percent: typeof submittedTurnDecision.volume_percent === 'number' ? submittedTurnDecision.volume_percent : undefined,
         palette_id: submittedTurnDecision.palette_id || undefined,
         custom_accent_hex: submittedTurnDecision.custom_accent_hex || undefined,

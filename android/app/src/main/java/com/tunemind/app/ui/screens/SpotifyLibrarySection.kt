@@ -92,7 +92,7 @@ fun SpotifyLibrarySection(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(bottom = 110.dp)
+        contentPadding = PaddingValues(bottom = 124.dp)
     ) {
         // 1. Live Spotify Playback Hero (only when active)
         if (liveState != null) {

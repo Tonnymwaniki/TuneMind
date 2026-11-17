@@ -34,10 +34,10 @@ fun StudioAmbientBackground(
     val midBg = theme.secondaryBackground
     val deepBg = lerp(theme.secondaryBackground, theme.recessedBackground, 0.42f)
 
-    val topGlowAlpha = if (isActivePulse) (0.20f * intensity).coerceIn(0.08f, 0.24f)
-    else (0.14f * intensity).coerceIn(0.06f, 0.17f)
-    val bottomGlowAlpha = if (isActivePulse) (0.12f * intensity).coerceIn(0.05f, 0.15f)
-    else (0.08f * intensity).coerceIn(0.04f, 0.11f)
+    val topGlowAlpha = if (isActivePulse) (0.20f * intensity).coerceIn(0.10f, 0.24f)
+    else (0.14f * intensity).coerceIn(0.07f, 0.17f)
+    val bottomGlowAlpha = if (isActivePulse) (0.11f * intensity).coerceIn(0.05f, 0.14f)
+    else (0.07f * intensity).coerceIn(0.03f, 0.10f)
 
     Box(
         modifier = modifier

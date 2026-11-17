@@ -89,10 +89,10 @@ fun SearchScreen(
     var localAudioTracks by remember { mutableStateOf<List<LocalAudioMatch>>(emptyList()) }
     var feedbackBanner by remember { mutableStateOf<String?>(null) }
 
-    val neonCyan = Color(0xFF00F0FF)
+    val neonCyan = theme.primaryAccent
     val spotifyGreen = Color(0xFF1DB954)
-    val vaultAmber = Color(0xFFFFB000)
-    val electricPurple = Color(0xFF8A2BE2)
+    val vaultAmber = Color(0xFFF59E0B)
+    val electricPurple = theme.secondaryAccent
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -352,9 +352,9 @@ fun SearchScreen(
                     onValueChange = { query = it },
                     placeholder = {
                         Text(
-                            text = "Search songs, artists, Spotify, Vault, local audio…",
+                            text = "Search songs, artists, or playlists",
                             color = Color.White.copy(alpha = 0.45f),
-                            fontSize = 13.5.sp,
+                            fontSize = 14.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -382,14 +382,14 @@ fun SearchScreen(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFFF8FAFC),
-                        unfocusedTextColor = Color(0xFFF8FAFC),
-                        focusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.78f),
-                        unfocusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.60f),
-                        focusedBorderColor = neonCyan,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.16f),
+                        focusedTextColor = Color(0xFFFAFAFA),
+                        unfocusedTextColor = Color(0xFFFAFAFA),
+                        focusedContainerColor = theme.cardSurface.copy(alpha = 0.92f),
+                        unfocusedContainerColor = theme.cardSurface.copy(alpha = 0.72f),
+                        focusedBorderColor = neonCyan.copy(alpha = 0.65f),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.10f),
                         cursorColor = neonCyan
                     ),
                     modifier = Modifier.weight(1f)
@@ -407,7 +407,8 @@ fun SearchScreen(
                     MagicalTabItem("Local", theme.primaryAccent)
                 ),
                 selectedIndex = selectedTab,
-                onSelectTab = { selectedTab = it }
+                onSelectTab = { selectedTab = it },
+                height = 42.dp
             )
 
             if (!feedbackBanner.isNullOrBlank()) {
@@ -533,28 +534,21 @@ fun SearchScreen(
                                 spotifyUri = item.spotifyUri,
                                 fallbackAlbumArtUrl = null
                             )
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = vaultAmber.copy(alpha = 0.08f),
-                                border = BorderStroke(1.dp, vaultAmber.copy(alpha = 0.28f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable { playUniversalItem(item) }
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { playUniversalItem(item) }
+                                        .padding(horizontal = 4.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(44.dp)
                                             .clip(CircleShape)
-                                            .background(vaultAmber.copy(alpha = 0.16f)),
+                                            .background(vaultAmber.copy(alpha = 0.12f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(Icons.Rounded.Lock, contentDescription = null, tint = vaultAmber, modifier = Modifier.size(18.dp))
@@ -562,27 +556,32 @@ fun SearchScreen(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = item.title,
-                                            color = Color(0xFFF8FAFC),
-                                            fontSize = 14.5.sp,
+                                            color = Color(0xFFFAFAFA),
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = "${item.artist} · ${item.subtitle}",
-                                            color = Color.White.copy(alpha = 0.58f),
+                                            color = Color.White.copy(alpha = 0.56f),
                                             fontSize = 12.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                    TextButton(
-                                        onClick = {
-                                            vm.restoreFromVault(item.vaultId)
-                                            feedbackBanner = "Restored \"${item.title}\" from Vault"
-                                        }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(neonCyan.copy(alpha = 0.12f))
+                                            .clickable {
+                                                vm.restoreFromVault(item.vaultId)
+                                                feedbackBanner = "Restored \"${item.title}\" from Vault"
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 6.dp)
                                     ) {
-                                        Text("Restore", color = neonCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Restore", color = neonCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                     }
                                     LayeredSongArtistBadge(
                                         albumArtUrl = vaultMedia.albumArtUrl,
@@ -590,9 +589,14 @@ fun SearchScreen(
                                         title = item.title,
                                         artist = item.artist,
                                         accentColor = vaultAmber,
-                                        size = 44.dp
+                                        size = 46.dp
                                     )
                                 }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = 60.dp),
+                                    thickness = 0.5.dp,
+                                    color = Color.White.copy(alpha = 0.06f)
+                                )
                             }
                         } else {
                             TuneMindTrackCard(

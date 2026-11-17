@@ -153,8 +153,8 @@ fun MusicalMomentsScreen(
                 ) {
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF0E131D),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        color = theme.cardSurface,
+                        border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.10f)),
                         modifier = Modifier
                             .size(40.dp)
                             .clickable { onBack() }

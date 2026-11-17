@@ -162,9 +162,9 @@ fun TuneMindTrackCard(
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (isCurrentlyPlaying) liveGreen.copy(alpha = 0.08f) else Color.Transparent)
                 .clickable { (onCardClick ?: onPlayClick).invoke() }
-                .padding(horizontal = 4.dp, vertical = 11.dp),
+                .padding(horizontal = 4.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (leadingIndex != null) {
                 Text(
@@ -261,7 +261,7 @@ fun TuneMindTrackCard(
 
         HorizontalDivider(
             modifier = Modifier.padding(start = if (leadingIndex != null) 88.dp else 60.dp),
-            thickness = 1.dp,
+            thickness = 0.5.dp,
             color = Color.White.copy(alpha = 0.06f)
         )
     }

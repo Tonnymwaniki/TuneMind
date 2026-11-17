@@ -41,11 +41,15 @@ fun MusicPlayerChooserSheet(
     onDismiss: () -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val curatedProviders = remember(installedProviders) {
+        MusicPlayerUiHelper.filterMusicPlayers(context, installedProviders)
+    }
     var rememberAsDefault by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF0E131D),
+        containerColor = theme.cardSurface,
         dragHandle = {
             Surface(
                 modifier = Modifier
@@ -107,7 +111,7 @@ fun MusicPlayerChooserSheet(
                     .fillMaxWidth()
                     .heightIn(max = 340.dp)
             ) {
-                items(installedProviders, key = { it.providerId }) { provider ->
+                items(curatedProviders, key = { it.providerId }) { provider ->
                     val isBackgroundActive = activeSessionPackage != null &&
                         activeSessionPackage.contains(provider.packageName, ignoreCase = true)
 
@@ -118,7 +122,7 @@ fun MusicPlayerChooserSheet(
                         provider.providerId == "apple_music" -> Color(0xFFFA243C)
                         provider.providerId == "audiomack" -> Color(0xFFFFA200)
                         provider.providerId == "local_files" -> theme.primaryAccent
-                        provider.providerId.startsWith("pkg_") -> Color(0xFFA855F7)
+                        provider.providerId.startsWith("pkg_") -> theme.secondaryAccent
                         else -> theme.secondaryAccent
                     }
 

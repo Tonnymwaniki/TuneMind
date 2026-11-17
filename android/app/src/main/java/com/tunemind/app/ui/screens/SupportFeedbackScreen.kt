@@ -57,9 +57,9 @@ fun SupportFeedbackScreen(
     val authManager = remember { TuneMindAuthSessionManager.getInstance(context) }
     val authSession by authManager.sessionFlow.collectAsState()
 
-    val neonCyan = Color(0xFF00F0FF)
+    val neonCyan = theme.primaryAccent
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
+    val warnAmber = Color(0xFFF59E0B)
 
     val categories = listOf("Bug Report", "Spotify Sync", "Voice & Agent", "Feature Idea", "Other")
     var selectedCategory by remember { mutableStateOf(categories.first()) }
@@ -72,12 +72,12 @@ fun SupportFeedbackScreen(
     var expandedGuideIdx by remember { mutableStateOf(0) }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedTextColor = Color(0xFFF8FAFC),
-        unfocusedTextColor = Color(0xFFF8FAFC),
-        focusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.85f),
-        unfocusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.60f),
+        focusedTextColor = Color(0xFFFAFAFA),
+        unfocusedTextColor = Color(0xFFFAFAFA),
+        focusedContainerColor = theme.cardSurface.copy(alpha = 0.92f),
+        unfocusedContainerColor = theme.cardSurface.copy(alpha = 0.68f),
         focusedBorderColor = neonCyan,
-        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+        unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
         focusedLabelColor = neonCyan,
         unfocusedLabelColor = Color.White.copy(alpha = 0.56f),
         cursorColor = neonCyan

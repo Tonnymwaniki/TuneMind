@@ -72,14 +72,14 @@ fun SoftGlassCard(
     val shape = RoundedCornerShape(cornerRadius)
     val rimAccent = accentTint ?: theme.primaryAccent
 
-    val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.08f).copy(alpha = 0.78f)
-    val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.25f).copy(alpha = 0.88f)
+    val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.03f).copy(alpha = 0.88f)
+    val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.18f).copy(alpha = 0.94f)
 
     val borderBrush = Brush.verticalGradient(
         colors = listOf(
-            Color.White.copy(alpha = 0.16f),
-            rimAccent.copy(alpha = 0.22f),
-            theme.border.copy(alpha = 0.42f)
+            Color.White.copy(alpha = 0.10f),
+            rimAccent.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.05f)
         )
     )
 
@@ -214,8 +214,8 @@ fun MagicalSegmentedTabs(
         label = "tab_accent_color"
     )
 
-    val outerShape = RoundedCornerShape(16.dp)
-    val trackColor = lerp(theme.cardSurface, Color(0xFF06080E), 0.38f).copy(alpha = 0.84f)
+    val outerShape = RoundedCornerShape(14.dp)
+    val trackColor = theme.recessedBackground.copy(alpha = 0.76f)
 
     BoxWithConstraints(
         modifier = modifier
@@ -224,18 +224,13 @@ fun MagicalSegmentedTabs(
             .clip(outerShape)
             .background(trackColor)
             .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.12f),
-                        theme.border.copy(alpha = 0.45f)
-                    )
-                ),
+                width = 0.8.dp,
+                color = Color.White.copy(alpha = 0.08f),
                 shape = outerShape
             )
             .padding(4.dp)
     ) {
-        val tabGap = 6.dp
+        val tabGap = 4.dp
         val totalGaps = tabGap * (tabs.size - 1).coerceAtLeast(0)
         val slotWidth = ((maxWidth - totalGaps) / tabs.size).coerceAtLeast(1.dp)
         val targetOffset = (slotWidth + tabGap) * safeIndex
@@ -243,37 +238,25 @@ fun MagicalSegmentedTabs(
         val indicatorOffset by animateDpAsState(
             targetValue = targetOffset,
             animationSpec = spring(
-                dampingRatio = 0.74f,
+                dampingRatio = 0.78f,
                 stiffness = Spring.StiffnessMediumLow
             ),
             label = "magical_tab_offset"
         )
 
-        val pillShape = RoundedCornerShape(12.dp)
+        val pillShape = RoundedCornerShape(10.dp)
 
-        // Sliding glowing capsule behind selected tab
+        // Sliding tonal capsule behind selected tab
         Box(
             modifier = Modifier
                 .offset(x = indicatorOffset)
                 .width(slotWidth)
                 .fillMaxHeight()
                 .clip(pillShape)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            animatedAccent.copy(alpha = 0.28f),
-                            animatedAccent.copy(alpha = 0.12f)
-                        )
-                    )
-                )
+                .background(animatedAccent.copy(alpha = 0.16f))
                 .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            animatedAccent.copy(alpha = 0.62f),
-                            animatedAccent.copy(alpha = 0.24f)
-                        )
-                    ),
+                    width = 0.8.dp,
+                    color = animatedAccent.copy(alpha = 0.36f),
                     shape = pillShape
                 )
         )
@@ -285,12 +268,9 @@ fun MagicalSegmentedTabs(
         ) {
             tabs.forEachIndexed { idx, tab ->
                 val isSelected = idx == safeIndex
-                val aiCyan = Color(0xFF38BDF8)
-                val aiViolet = Color(0xFFA855F7)
                 val textColor by animateColorAsState(
                     targetValue = when {
-                        isSelected -> Color(0xFFF8FAFC)
-                        tab.isAiHighlighted -> Color(0xFFBAE6FD)
+                        isSelected -> Color(0xFFFAFAFA)
                         else -> Color.White.copy(alpha = 0.56f)
                     },
                     animationSpec = tween(180),
@@ -301,31 +281,6 @@ fun MagicalSegmentedTabs(
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(pillShape)
-                        .then(
-                            if (tab.isAiHighlighted && !isSelected) {
-                                Modifier
-                                    .background(
-                                        brush = Brush.horizontalGradient(
-                                            colors = listOf(
-                                                aiCyan.copy(alpha = 0.16f),
-                                                aiViolet.copy(alpha = 0.16f)
-                                            )
-                                        )
-                                    )
-                                    .border(
-                                        width = 0.9.dp,
-                                        brush = Brush.horizontalGradient(
-                                            colors = listOf(
-                                                aiCyan.copy(alpha = 0.52f),
-                                                aiViolet.copy(alpha = 0.45f)
-                                            )
-                                        ),
-                                        shape = pillShape
-                                    )
-                            } else {
-                                Modifier
-                            }
-                        )
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,

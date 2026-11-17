@@ -274,21 +274,21 @@ private fun AuthLoginStep(
     }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedTextColor = Color(0xFFF8FAFC),
-        unfocusedTextColor = Color(0xFFF8FAFC),
-        focusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.78f),
-        unfocusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.56f),
-        focusedBorderColor = Color(0xFF00F0FF),
-        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
-        focusedLabelColor = Color(0xFF00F0FF),
+        focusedTextColor = Color(0xFFFAFAFA),
+        unfocusedTextColor = Color(0xFFFAFAFA),
+        focusedContainerColor = Color(0xFF131318),
+        unfocusedContainerColor = Color(0xFF131318).copy(alpha = 0.72f),
+        focusedBorderColor = Color(0xFF38BDF8),
+        unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+        focusedLabelColor = Color(0xFF38BDF8),
         unfocusedLabelColor = Color.White.copy(alpha = 0.58f),
-        cursorColor = Color(0xFF00F0FF)
+        cursorColor = Color(0xFF38BDF8)
     )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF07020D))
+            .background(Color(0xFF09090B))
             .navigationBarsPadding()
     ) {
         // Upper 50%: Lottie Brain-to-Soundwave Neural Loop Hero + Emblem
@@ -298,15 +298,15 @@ private fun AuthLoginStep(
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            // Subtle dark indigo / violet ambient glow behind Lottie loop
+            // Subtle atmospheric glow behind emblem
             Box(
                 modifier = Modifier
                     .size(260.dp)
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF8A2BE2).copy(alpha = 0.24f),
-                                Color(0xFF00F0FF).copy(alpha = 0.10f),
+                                Color(0xFFA78BFA).copy(alpha = 0.16f),
+                                Color(0xFF38BDF8).copy(alpha = 0.08f),
                                 Color.Transparent
                             )
                         )
@@ -341,13 +341,13 @@ private fun AuthLoginStep(
             ) {
                 Text(
                     text = "Continue as Guest",
-                    color = Color(0xFF00F0FF),
+                    color = Color(0xFF38BDF8),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
 
-            // Soft bottom fade transitioning neural graphic seamlessly into dark action container
+            // Soft bottom fade transitioning graphic seamlessly into obsidian container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -355,7 +355,7 @@ private fun AuthLoginStep(
                     .align(Alignment.BottomCenter)
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color(0xFF07020D))
+                            colors = listOf(Color.Transparent, Color(0xFF09090B))
                         )
                     )
             )
@@ -427,8 +427,8 @@ private fun AuthLoginStep(
                         savedAccounts.take(2).forEach { saved ->
                             Surface(
                                 shape = RoundedCornerShape(28.dp),
-                                color = Color(0xFF00F0FF).copy(alpha = 0.08f),
-                                border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.38f)),
+                                color = Color(0xFF38BDF8).copy(alpha = 0.08f),
+                                border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.36f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(28.dp))
@@ -461,7 +461,7 @@ private fun AuthLoginStep(
                                     }
                                     Text(
                                         text = "Switch",
-                                        color = Color(0xFF00F0FF),
+                                        color = Color(0xFF38BDF8),
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -601,8 +601,8 @@ private fun AuthLoginStep(
                             .height(50.dp),
                         shape = RoundedCornerShape(28.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF00F0FF),
-                            contentColor = Color(0xFF0D0D0D)
+                            containerColor = Color(0xFF38BDF8),
+                            contentColor = Color(0xFF09090B)
                         )
                     ) {
                         Text(
@@ -635,7 +635,7 @@ private fun AuthLoginStep(
                     )
                     Text(
                         text = "Log In",
-                        color = Color(0xFF00F0FF),
+                        color = Color(0xFF38BDF8),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
@@ -701,8 +701,8 @@ private fun AuthLoginStep(
 
                 MagicalSegmentedTabs(
                     tabs = listOf(
-                        MagicalTabItem("Create Account", Color(0xFF00F0FF)),
-                        MagicalTabItem("Log In", Color(0xFF8A2BE2))
+                        MagicalTabItem("Create Account", Color(0xFF38BDF8)),
+                        MagicalTabItem("Log In", Color(0xFFA78BFA))
                     ),
                     selectedIndex = if (isSignUpMode) 0 else 1,
                     onSelectTab = { idx ->
@@ -780,8 +780,8 @@ private fun AuthLoginStep(
                     onClick = { submitEmailAuth() },
                     enabled = !isSubmitting,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00F0FF),
-                        contentColor = Color(0xFF0D0D0D)
+                        containerColor = Color(0xFFFAFAFA),
+                        contentColor = Color(0xFF09090B)
                     ),
                     shape = RoundedCornerShape(28.dp),
                     modifier = Modifier

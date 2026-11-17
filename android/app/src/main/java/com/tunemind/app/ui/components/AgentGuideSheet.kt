@@ -39,58 +39,58 @@ fun AgentGuideSheet(
 ) {
     val theme = LocalAdaptiveTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val neonCyan = Color(0xFF00F0FF)
-    val electricPurple = Color(0xFF8A2BE2)
+    val neonCyan = theme.primaryAccent
+    val electricPurple = theme.secondaryAccent
     val safeGreen = Color(0xFF10B981)
-    val warmGold = Color(0xFFFFB000)
+    val warmGold = Color(0xFFF59E0B)
 
     val categories = listOf(
         GuideCategory(
-            title = "Play & Discover",
-            subtitle = "Queue songs from Spotify, local audio, or your fresh pool",
+            title = "Play, Discover & Spotify",
+            subtitle = "Suggest For You picks, launch playlists, or request any artist",
             icon = Icons.Rounded.PlayArrow,
             accent = neonCyan,
             prompts = listOf(
+                "What do you have for me in For You today?",
+                "Play a playlist from my Spotify library",
                 "Play something fresh I haven't overplayed",
-                "Play my morning dopamine mix",
-                "Play something calm for late night focus",
-                "Suggest three songs matching what is playing now"
+                "Request a new song on Spotify by Burna Boy"
             )
         ),
         GuideCategory(
-            title = "Dopamine Protection",
-            subtitle = "Protect favorite tracks from fatigue & manage your Vault",
+            title = "Vault & Dopamine Protection",
+            subtitle = "Play rested songs, inspect your Vault, and guard fresh taste",
             icon = Icons.Rounded.Shield,
             accent = warmGold,
             prompts = listOf(
+                "Play for me a song in the Vault",
                 "Quarantine the current track to the Vault",
                 "Which songs are getting overplayed this week?",
-                "Are any resting Vault tracks ready to come back?",
-                "How fresh is my listening queue right now?"
+                "Open my Cooldown Vault screen"
             )
         ),
         GuideCategory(
-            title = "Atmosphere & Visuals",
-            subtitle = "Shape TuneMind's ambient mood & player controls",
+            title = "Player, Volume & Theme",
+            subtitle = "Control system volume, default player, and studio lighting",
             icon = Icons.Rounded.Palette,
             accent = electricPurple,
             prompts = listOf(
+                "Set media volume to 65 percent",
+                "Set Boomplay as my default music player",
                 "Shift the atmosphere to deep violet night",
-                "Match the theme color to the current song",
-                "Turn on Hands-Free DJ mode",
-                "Switch to Built-in Audio Player preference"
+                "Turn on Hands-Free DJ mode"
             )
         ),
         GuideCategory(
-            title = "Hearing & Analytics",
-            subtitle = "Acoustic safety headroom, listening stats & moments",
+            title = "Stats, Hearing & Screens",
+            subtitle = "Voice analytics, acoustic headroom, and hands-free navigation",
             icon = Icons.Rounded.Hearing,
             accent = safeGreen,
             prompts = listOf(
+                "How are my listening stats this week?",
                 "Check my safe listening headroom right now",
                 "Give me my weekly listening recap",
-                "Open my listening stats",
-                "Open my notifications and alerts"
+                "Open my Spotify library screen"
             )
         )
     )

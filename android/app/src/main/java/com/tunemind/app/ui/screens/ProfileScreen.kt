@@ -114,18 +114,18 @@ fun ProfileScreen(
     val effectiveArchetype = session.tasteArchetype.ifBlank { userProfile.archetype }
 
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
+    val warnAmber = Color(0xFFF59E0B)
     val dangerRed = Color(0xFFFF4D6D)
-    val neonCyan = Color(0xFF00F0FF)
-    val electricPurple = Color(0xFF8A2BE2)
+    val neonCyan = theme.primaryAccent
+    val electricPurple = theme.secondaryAccent
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedTextColor = Color(0xFFF8FAFC),
-        unfocusedTextColor = Color(0xFFF8FAFC),
-        focusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.85f),
-        unfocusedContainerColor = Color(0xFF0D0D0D).copy(alpha = 0.60f),
+        focusedTextColor = Color(0xFFFAFAFA),
+        unfocusedTextColor = Color(0xFFFAFAFA),
+        focusedContainerColor = theme.cardSurface.copy(alpha = 0.92f),
+        unfocusedContainerColor = theme.cardSurface.copy(alpha = 0.68f),
         focusedBorderColor = neonCyan,
-        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+        unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
         focusedLabelColor = neonCyan,
         unfocusedLabelColor = Color.White.copy(alpha = 0.56f),
         cursorColor = neonCyan
@@ -436,44 +436,43 @@ fun ProfileScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 2. Relocated App Settings & Taste Profile Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Settings & Taste")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 2. Open-Canvas Settings & Taste Section
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Settings & Taste")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
-                    ProfileNavRow(
-                        icon = Icons.Rounded.Settings,
-                        iconTint = neonCyan,
-                        title = "App Settings",
-                        subtitle = "Playback players, Spotify Remote, voice companion & theme",
-                        onClick = onOpenSettings
-                    )
-                    StudioHairlineDivider()
+                ProfileNavRow(
+                    icon = Icons.Rounded.Settings,
+                    iconTint = neonCyan,
+                    title = "App Settings",
+                    subtitle = "Players, Spotify Remote, voice & theme",
+                    onClick = onOpenSettings
+                )
+                StudioHairlineDivider()
 
-                    ProfileNavRow(
-                        icon = Icons.Rounded.GraphicEq,
-                        iconTint = Color(0xFFA855F7),
-                        title = "Taste Profile & Genres",
-                        subtitle = "$effectiveArchetype · Tap to edit favorite genres & artists",
-                        onClick = onOpenTasteProfile
-                    )
-                    StudioHairlineDivider()
+                ProfileNavRow(
+                    icon = Icons.Rounded.GraphicEq,
+                    iconTint = electricPurple,
+                    title = "Taste Profile & Genres",
+                    subtitle = "$effectiveArchetype · Edit favorite genres & artists",
+                    onClick = onOpenTasteProfile
+                )
+                StudioHairlineDivider()
 
-                    ProfileNavRow(
-                        icon = Icons.Rounded.AutoGraph,
-                        iconTint = safeGreen,
-                        title = "Weekly Listening Recap",
-                        subtitle = "Your top shifts, discoveries & listening balance",
-                        onClick = onOpenWeeklyReport
-                    )
-                }
+                ProfileNavRow(
+                    icon = Icons.Rounded.AutoGraph,
+                    iconTint = safeGreen,
+                    title = "Weekly Listening Recap",
+                    subtitle = "Top shifts, discoveries & listening balance",
+                    onClick = onOpenWeeklyReport
+                )
+                StudioHairlineDivider()
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 3. Connected Music Data Source (Spotify is strictly for pulling user data)
             SoftGlassCard(
@@ -588,261 +587,234 @@ fun ProfileScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 4. Privacy & Permissions Health Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Privacy & Permissions")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 4. Open-Canvas Privacy & Permissions
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Privacy & Permissions")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
-                    ProfileSwitchRow(
-                        title = "Private Session",
-                        description = "Pauses listening tracking, history logging & cloud sync while active.",
-                        checked = privateSession,
-                        accent = neonCyan,
-                        onCheckedChange = { enabled ->
-                            AgentSettingsStore.setPrivateSessionEnabled(context, enabled)
-                            scope.launch {
-                                authManager.updateProfileAndPreferences(
-                                    displayName = effectiveDisplayName,
-                                    tasteArchetype = effectiveArchetype,
-                                    privateSessionEnabled = enabled,
-                                    mergeDuplicatePlays = mergeDuplicatePlays
-                                )
-                            }
-                        }
-                    )
-                    StudioHairlineDivider()
-
-                    ProfileSwitchRow(
-                        title = "Merge Duplicate Plays",
-                        description = "Combines matching tracks played across Spotify and local players.",
-                        checked = mergeDuplicatePlays,
-                        accent = neonCyan,
-                        onCheckedChange = { enabled ->
-                            AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, enabled)
-                            scope.launch {
-                                authManager.updateProfileAndPreferences(
-                                    displayName = effectiveDisplayName,
-                                    tasteArchetype = effectiveArchetype,
-                                    privateSessionEnabled = privateSession,
-                                    mergeDuplicatePlays = enabled
-                                )
-                            }
-                        }
-                    )
-                    StudioHairlineDivider()
-
-                    ProfilePermissionRow(
-                        title = "Microphone Access",
-                        subtitle = if (hasMicPermission) "Ready for \"Hey TuneMind\" voice commands" else "Tap to allow voice interactions",
-                        granted = hasMicPermission,
-                        safeGreen = safeGreen,
-                        warnAmber = warnAmber,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(
-                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        android.net.Uri.parse("package:${context.packageName}")
-                                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                                )
-                            }
-                        }
-                    )
-                    StudioHairlineDivider()
-
-                    ProfilePermissionRow(
-                        title = "Music Playback Detection",
-                        subtitle = if (hasNotificationAccess) "Detects active tracks across music players" else "Tap to grant Notification Listener access",
-                        granted = hasNotificationAccess,
-                        safeGreen = safeGreen,
-                        warnAmber = warnAmber,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    PermissionUtils.getNotificationListenerIntent().apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                )
-                            }
-                        }
-                    )
-                    StudioHairlineDivider()
-
-                    ProfilePermissionRow(
-                        title = "Background Sync & Return",
-                        subtitle = if (isBatteryIgnored && hasOverlayPermission) {
-                            "Unrestricted background sync & auto-return active"
-                        } else {
-                            "Tap to review background battery & overlay permissions"
-                        },
-                        granted = isBatteryIgnored && hasOverlayPermission,
-                        safeGreen = safeGreen,
-                        warnAmber = warnAmber,
-                        onClick = {
-                            if (!isBatteryIgnored) {
-                                vm.requestIgnoreBatteryOptimization(context)
-                            } else {
-                                runCatching {
-                                    context.startActivity(PermissionUtils.getOverlayPermissionIntent(context))
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 4b. Notifications, Support & Legal
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Alerts, Help & Legal")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
-
-                    ProfileNavRow(
-                        icon = Icons.Rounded.NotificationsNone,
-                        iconTint = neonCyan,
-                        title = "Notifications & Alerts",
-                        subtitle = "Vault comeback alerts, hearing warnings & alert categories",
-                        onClick = onOpenNotifications
-                    )
-                    StudioHairlineDivider()
-
-                    ProfileNavRow(
-                        icon = Icons.Rounded.HelpOutline,
-                        iconTint = warnAmber,
-                        title = "Help, Troubleshooting & Feedback",
-                        subtitle = "Spotify wake steps, battery tips & bug reports",
-                        onClick = onOpenSupport
-                    )
-                    StudioHairlineDivider()
-
-                    ProfileNavRow(
-                        icon = Icons.Rounded.Policy,
-                        iconTint = Color(0xFFA855F7),
-                        title = "Privacy Policy, Terms & About",
-                        subtitle = "Permissions transparency, legal terms & app version",
-                        onClick = { onOpenLegal(0) }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 5. Account Controls: Switch Accounts, Log Out & Data Management
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StudioSectionHeader(title = "Account & Data Controls")
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    // Switch Account
-                    Button(
-                        onClick = { showSwitchAccountsSheet = true },
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White.copy(alpha = 0.08f),
-                            contentColor = Color(0xFFF8FAFC)
-                        ),
-                        border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.42f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    ) {
-                        Icon(Icons.Rounded.ManageAccounts, contentDescription = null, tint = neonCyan, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (savedAccounts.size > 1) {
-                                "Switch Accounts (${savedAccounts.size} saved)"
-                            } else {
-                                "Switch or Add Account"
-                            },
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Export My Data (JSON)
-                    OutlinedButton(
-                        onClick = {
-                            val exportJson = vm.buildUserDataExportJson(context)
-                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/json"
-                                putExtra(Intent.EXTRA_SUBJECT, "TuneMind Data Export")
-                                putExtra(Intent.EXTRA_TEXT, exportJson)
-                            }
-                            val chooser = Intent.createChooser(sendIntent, "Export TuneMind Data").apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            runCatching { context.startActivity(chooser) }
-                        },
-                        shape = RoundedCornerShape(28.dp),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Icon(Icons.Rounded.Download, contentDescription = null, tint = Color(0xFFF8FAFC), modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Export My Data (JSON)", color = Color(0xFFF8FAFC), fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // Clear Listening History
-                    OutlinedButton(
-                        onClick = { showClearHistorySheet = true },
-                        shape = RoundedCornerShape(28.dp),
-                        border = BorderStroke(1.dp, warnAmber.copy(alpha = 0.42f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Icon(Icons.Rounded.History, contentDescription = null, tint = warnAmber, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Clear Listening History", color = warnAmber, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // Log Out
-                    Button(
-                        onClick = { showLogoutSheet = true },
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = dangerRed.copy(alpha = 0.14f),
-                            contentColor = dangerRed
-                        ),
-                        border = BorderStroke(1.dp, dangerRed.copy(alpha = 0.48f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = if (hasExplicitAccount) "Log Out" else "Exit Guest Session",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Delete Account
-                    if (hasExplicitAccount) {
-                        TextButton(
-                            onClick = { showDeleteAccountSheet = true },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text(
-                                text = "Delete Account & Wipe Data",
-                                color = dangerRed.copy(alpha = 0.85f),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
+                ProfileSwitchRow(
+                    title = "Private Session",
+                    description = "Pauses listening tracking, history logging & cloud sync while active.",
+                    checked = privateSession,
+                    accent = neonCyan,
+                    onCheckedChange = { enabled ->
+                        AgentSettingsStore.setPrivateSessionEnabled(context, enabled)
+                        scope.launch {
+                            authManager.updateProfileAndPreferences(
+                                displayName = effectiveDisplayName,
+                                tasteArchetype = effectiveArchetype,
+                                privateSessionEnabled = enabled,
+                                mergeDuplicatePlays = mergeDuplicatePlays
                             )
                         }
+                    }
+                )
+                StudioHairlineDivider()
+
+                ProfileSwitchRow(
+                    title = "Merge Duplicate Plays",
+                    description = "Combines matching tracks played across Spotify and local players.",
+                    checked = mergeDuplicatePlays,
+                    accent = neonCyan,
+                    onCheckedChange = { enabled ->
+                        AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, enabled)
+                        scope.launch {
+                            authManager.updateProfileAndPreferences(
+                                displayName = effectiveDisplayName,
+                                tasteArchetype = effectiveArchetype,
+                                privateSessionEnabled = privateSession,
+                                mergeDuplicatePlays = enabled
+                            )
+                        }
+                    }
+                )
+                StudioHairlineDivider()
+
+                ProfilePermissionRow(
+                    title = "Microphone Access",
+                    subtitle = if (hasMicPermission) "Ready for \"Hey TuneMind\" voice commands" else "Tap to allow voice interactions",
+                    granted = hasMicPermission,
+                    safeGreen = safeGreen,
+                    warnAmber = warnAmber,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.parse("package:${context.packageName}")
+                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                            )
+                        }
+                    }
+                )
+                StudioHairlineDivider()
+
+                ProfilePermissionRow(
+                    title = "Music Playback Detection",
+                    subtitle = if (hasNotificationAccess) "Detects active tracks across music players" else "Tap to grant Notification Listener access",
+                    granted = hasNotificationAccess,
+                    safeGreen = safeGreen,
+                    warnAmber = warnAmber,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                PermissionUtils.getNotificationListenerIntent().apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
+                        }
+                    }
+                )
+                StudioHairlineDivider()
+
+                ProfilePermissionRow(
+                    title = "Background Sync & Return",
+                    subtitle = if (isBatteryIgnored && hasOverlayPermission) {
+                        "Unrestricted background sync & auto-return active"
+                    } else {
+                        "Tap to review background battery & overlay permissions"
+                    },
+                    granted = isBatteryIgnored && hasOverlayPermission,
+                    safeGreen = safeGreen,
+                    warnAmber = warnAmber,
+                    onClick = {
+                        if (!isBatteryIgnored) {
+                            vm.requestIgnoreBatteryOptimization(context)
+                        } else {
+                            runCatching {
+                                context.startActivity(PermissionUtils.getOverlayPermissionIntent(context))
+                            }
+                        }
+                    }
+                )
+                StudioHairlineDivider()
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // 4b. Open-Canvas Alerts, Help & Legal
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Alerts, Help & Legal")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.NotificationsNone,
+                    iconTint = neonCyan,
+                    title = "Notifications & Alerts",
+                    subtitle = "Vault alerts, hearing warnings & categories",
+                    onClick = onOpenNotifications
+                )
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.HelpOutline,
+                    iconTint = warnAmber,
+                    title = "Help & Feedback",
+                    subtitle = "Spotify wake steps, battery tips & bug reports",
+                    onClick = onOpenSupport
+                )
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.Policy,
+                    iconTint = electricPurple,
+                    title = "Privacy Policy, Terms & About",
+                    subtitle = "Permissions transparency, legal terms & version",
+                    onClick = { onOpenLegal(0) }
+                )
+                StudioHairlineDivider()
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // 5. Open-Canvas Account & Data Controls
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                StudioSectionHeader(title = "Account & Data")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.ManageAccounts,
+                    iconTint = neonCyan,
+                    title = if (savedAccounts.size > 1) "Switch Accounts (${savedAccounts.size} saved)" else "Switch or Add Account",
+                    subtitle = "Manage signed-in profiles on this device",
+                    onClick = { showSwitchAccountsSheet = true }
+                )
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.Download,
+                    iconTint = Color(0xFFFAFAFA),
+                    title = "Export My Data (JSON)",
+                    subtitle = "Share a copy of your listening history & preferences",
+                    onClick = {
+                        val exportJson = vm.buildUserDataExportJson(context)
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_SUBJECT, "TuneMind Data Export")
+                            putExtra(Intent.EXTRA_TEXT, exportJson)
+                        }
+                        val chooser = Intent.createChooser(sendIntent, "Export TuneMind Data").apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { context.startActivity(chooser) }
+                    }
+                )
+                StudioHairlineDivider()
+
+                ProfileNavRow(
+                    icon = Icons.Rounded.History,
+                    iconTint = warnAmber,
+                    title = "Clear Listening History",
+                    subtitle = "Reset locally tracked plays and stats",
+                    onClick = { showClearHistorySheet = true }
+                )
+                StudioHairlineDivider()
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Log Out
+                Button(
+                    onClick = { showLogoutSheet = true },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = dangerRed.copy(alpha = 0.14f),
+                        contentColor = dangerRed
+                    ),
+                    border = BorderStroke(0.8.dp, dangerRed.copy(alpha = 0.42f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (hasExplicitAccount) "Log Out" else "Exit Guest Session",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                // Delete Account
+                if (hasExplicitAccount) {
+                    TextButton(
+                        onClick = { showDeleteAccountSheet = true },
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(top = 6.dp)
+                    ) {
+                        Text(
+                            text = "Delete Account & Wipe Data",
+                            color = dangerRed.copy(alpha = 0.85f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             }

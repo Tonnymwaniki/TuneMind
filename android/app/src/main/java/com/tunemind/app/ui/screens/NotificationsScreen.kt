@@ -81,10 +81,10 @@ fun NotificationsScreen(
         AgentSettingsStore.ensureLoaded(context)
     }
 
-    val neonCyan = Color(0xFF00F0FF)
+    val neonCyan = theme.primaryAccent
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
-    val electricPurple = Color(0xFF8A2BE2)
+    val warnAmber = Color(0xFFF59E0B)
+    val electricPurple = theme.secondaryAccent
 
     val liveAlerts = remember(
         vaultTracks,

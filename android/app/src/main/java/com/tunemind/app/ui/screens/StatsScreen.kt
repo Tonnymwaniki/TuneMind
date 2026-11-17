@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -105,26 +107,27 @@ fun StatsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        val theme = LocalAdaptiveTheme.current
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFF0E131D),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                            color = theme.cardSurface,
+                            border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.10f)),
                             modifier = Modifier
                                 .size(40.dp)
                                 .clickable { onBack() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Rounded.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                                     contentDescription = "Back",
-                                    tint = Color.White,
+                                    tint = Color(0xFFFAFAFA),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                         Text(
-                            text = "Stats & Habits",
-                            color = Color(0xFFF8FAFC),
+                            text = "Stats",
+                            color = Color(0xFFFAFAFA),
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -198,7 +201,7 @@ fun StatsDashboardContent(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(18.dp),
-        contentPadding = PaddingValues(bottom = 110.dp)
+        contentPadding = PaddingValues(bottom = 124.dp)
     ) {
         statsDashboardItems(
             windowStats = windowStats,
@@ -227,232 +230,234 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenMoments: () -> Unit,
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary()
 ) {
-    // 1. Single Hero Card: Time Window + Listening Summary (state hoisted so scrolling never resets selected tab)
+    // 1. Open-Canvas Hero Listening Summary (No outer card box)
     item(key = "stats_hero_card") {
         val theme = LocalAdaptiveTheme.current
         val activeDurationText = formatListeningDuration(windowStats.totalListeningMs)
 
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                MagicalSegmentedTabs(
-                    tabs = StatsTimeWindow.entries.map { MagicalTabItem(it.label, theme.primaryAccent) },
-                    selectedIndex = StatsTimeWindow.entries.indexOf(selectedWindow),
-                    onSelectTab = { idx -> onSelectWindow(StatsTimeWindow.entries[idx]) },
-                    height = 42.dp
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            MagicalSegmentedTabs(
+                tabs = StatsTimeWindow.entries.map { MagicalTabItem(it.label, theme.primaryAccent) },
+                selectedIndex = StatsTimeWindow.entries.indexOf(selectedWindow),
+                onSelectTab = { idx -> onSelectWindow(StatsTimeWindow.entries[idx]) },
+                height = 42.dp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = windowStats.windowRangeLabel.ifBlank { "Listening Time (${selectedWindow.label})" },
+                        color = Color.White.copy(alpha = 0.56f),
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = activeDurationText,
+                        color = Color(0xFFFAFAFA),
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                }
+
+                Text(
+                    text = if (windowStats.totalVerifiedPlays > 0) "Peak · ${windowStats.peakWindowLabel}" else windowStats.peakWindowLabel,
+                    color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.50f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
                 )
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = windowStats.windowRangeLabel.ifBlank { "Listening Time (${selectedWindow.label})" },
-                            color = Color.White.copy(alpha = 0.56f),
-                            fontSize = 12.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = activeDurationText,
-                            color = Color(0xFFF8FAFC),
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+            if (selectedWindow == StatsTimeWindow.ALL_TIME &&
+                windowStats.allTimeMatchesThirtyDays &&
+                windowStats.totalVerifiedPlays > 0
+            ) {
+                Text(
+                    text = "Matches 30 Days because all tracked listening began ${windowStats.trackedSpanDays} ${if (windowStats.trackedSpanDays == 1) "day" else "days"} ago.",
+                    color = Color.White.copy(alpha = 0.52f),
+                    fontSize = 11.5.sp
+                )
+            }
 
-                    Text(
-                        text = if (windowStats.totalVerifiedPlays > 0) "Peak · ${windowStats.peakWindowLabel}" else windowStats.peakWindowLabel,
-                        color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.50f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+            StudioHairlineDivider()
 
-                if (selectedWindow == StatsTimeWindow.ALL_TIME &&
-                    windowStats.allTimeMatchesThirtyDays &&
-                    windowStats.totalVerifiedPlays > 0
-                ) {
-                    Text(
-                        text = "Matches 30 Days because all tracked listening began ${windowStats.trackedSpanDays} ${if (windowStats.trackedSpanDays == 1) "day" else "days"} ago.",
-                        color = Color.White.copy(alpha = 0.52f),
-                        fontSize = 11.5.sp
-                    )
-                }
-
-                StudioHairlineDivider()
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    MetricMiniColumn(
-                        label = "Verified Plays",
-                        value = "${windowStats.totalVerifiedPlays}",
-                        accent = theme.primaryAccent,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricMiniColumn(
-                        label = "Songs",
-                        value = "${windowStats.uniqueTrackCount}",
-                        accent = theme.secondaryAccent,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricMiniColumn(
-                        label = "Artists",
-                        value = "${windowStats.uniqueArtistCount}",
-                        accent = Color(0xFF10B981),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                MetricMiniColumn(
+                    label = "Verified Plays",
+                    value = "${windowStats.totalVerifiedPlays}",
+                    accent = theme.primaryAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniColumn(
+                    label = "Songs",
+                    value = "${windowStats.uniqueTrackCount}",
+                    accent = theme.secondaryAccent,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricMiniColumn(
+                    label = "Artists",
+                    value = "${windowStats.uniqueArtistCount}",
+                    accent = Color(0xFF10B981),
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 
-    // 2. Listening Habits (Paired Metric Cards — live for selected window)
+    // 2. Listening Habits (Sleek Hairline Tiles)
     item(key = "stats_habits_row") {
         val theme = LocalAdaptiveTheme.current
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            SoftGlassCard(
-                modifier = Modifier.weight(1f),
-                accentTint = Color(0xFF10B981),
-                contentPadding = PaddingValues(14.dp)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(theme.cardSurface.copy(alpha = 0.72f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Completion Rate",
-                        color = Color.White.copy(alpha = 0.62f),
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.completionRatePercent}%" else "--",
-                        color = Color(0xFF10B981),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    LinearProgressIndicator(
-                        progress = { windowStats.completionRatePercent / 100f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                        color = Color(0xFF10B981),
-                        trackColor = Color.White.copy(alpha = 0.10f)
-                    )
-                    Text(
-                        text = when {
-                            windowStats.totalVerifiedPlays == 0 -> "No plays in window"
-                            windowStats.skippedCount == 0 -> "Low skip rate"
-                            else -> "${windowStats.skippedCount} quick skips filtered"
-                        },
-                        color = Color.White.copy(alpha = 0.54f),
-                        fontSize = 11.sp
-                    )
-                }
+                Text(
+                    text = "Completion Rate",
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.completionRatePercent}%" else "--",
+                    color = Color(0xFF10B981),
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                LinearProgressIndicator(
+                    progress = { windowStats.completionRatePercent / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = Color(0xFF10B981),
+                    trackColor = Color.White.copy(alpha = 0.10f)
+                )
+                Text(
+                    text = when {
+                        windowStats.totalVerifiedPlays == 0 -> "No plays in window"
+                        windowStats.skippedCount == 0 -> "Low skip rate"
+                        else -> "${windowStats.skippedCount} quick skips filtered"
+                    },
+                    color = Color.White.copy(alpha = 0.54f),
+                    fontSize = 11.sp
+                )
             }
 
-            SoftGlassCard(
-                modifier = Modifier.weight(1f),
-                accentTint = theme.primaryAccent,
-                contentPadding = PaddingValues(14.dp)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(theme.cardSurface.copy(alpha = 0.72f))
+                    .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Fresh Mix Ratio",
-                        color = Color.White.copy(alpha = 0.62f),
-                        fontSize = 12.sp
-                    )
-                    Text(
-                        text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.discoveryRatePercent}%" else "--",
-                        color = theme.primaryAccent,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    LinearProgressIndicator(
-                        progress = { windowStats.discoveryRatePercent / 100f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                        color = theme.primaryAccent,
-                        trackColor = Color.White.copy(alpha = 0.10f)
-                    )
-                    Text(
-                        text = if (windowStats.totalVerifiedPlays > 0) "${100 - windowStats.discoveryRatePercent}% on repeat" else "No plays in window",
-                        color = Color.White.copy(alpha = 0.54f),
-                        fontSize = 11.sp
-                    )
-                }
+                Text(
+                    text = "Fresh Mix Ratio",
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = if (windowStats.totalVerifiedPlays > 0) "${windowStats.discoveryRatePercent}%" else "--",
+                    color = theme.primaryAccent,
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                LinearProgressIndicator(
+                    progress = { windowStats.discoveryRatePercent / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = theme.primaryAccent,
+                    trackColor = Color.White.copy(alpha = 0.10f)
+                )
+                Text(
+                    text = if (windowStats.totalVerifiedPlays > 0) "${100 - windowStats.discoveryRatePercent}% on repeat" else "No plays in window",
+                    color = Color.White.copy(alpha = 0.54f),
+                    fontSize = 11.sp
+                )
             }
         }
     }
 
-    // 3. Cross-App Breakdown Card (filtered by selected window)
+    // 3. Open-Canvas Cross-App Breakdown
     item(key = "stats_apps_breakdown") {
         val theme = LocalAdaptiveTheme.current
-        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                StudioSectionHeader(
-                    title = "Music Apps Used",
-                    actionLabel = selectedWindow.label
-                )
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            StudioSectionHeader(
+                title = "Music Apps Used",
+                actionLabel = selectedWindow.label
+            )
 
-                if (windowStats.appBreakdown.isEmpty()) {
-                    Text(
-                        text = "No playback recorded for ${selectedWindow.label.lowercase()} yet. Play music in any supported app or switch timeframe above.",
-                        color = Color.White.copy(alpha = 0.62f),
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp
-                    )
-                } else {
-                    windowStats.appBreakdown.forEach { app ->
-                        val appColor = resolveAppAccentColor(app.packageName, theme.primaryAccent)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (windowStats.appBreakdown.isEmpty()) {
+                Text(
+                    text = "No playback recorded for ${selectedWindow.label.lowercase()} yet.",
+                    color = Color.White.copy(alpha = 0.60f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            } else {
+                windowStats.appBreakdown.forEach { app ->
+                    val appColor = resolveAppAccentColor(app.packageName, theme.primaryAccent)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(appColor)
-                                    )
-                                    Text(
-                                        text = "${app.displayName} · ${app.playCount} ${if (app.playCount == 1) "play" else "plays"}",
-                                        color = Color(0xFFF8FAFC),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(appColor)
+                                )
                                 Text(
-                                    text = "${formatListeningDuration(app.listeningMs)} (${(app.shareFraction * 100).toInt()}%)",
-                                    color = appColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = "${app.displayName} · ${app.playCount} ${if (app.playCount == 1) "play" else "plays"}",
+                                    color = Color(0xFFFAFAFA),
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
-                            LinearProgressIndicator(
-                                progress = { app.shareFraction.coerceIn(0.03f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
+                            Text(
+                                text = "${formatListeningDuration(app.listeningMs)} (${(app.shareFraction * 100).toInt()}%)",
                                 color = appColor,
-                                trackColor = Color.White.copy(alpha = 0.10f)
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
+                        LinearProgressIndicator(
+                            progress = { app.shareFraction.coerceIn(0.03f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = appColor,
+                            trackColor = Color.White.copy(alpha = 0.08f)
+                        )
                     }
                 }
             }
+            StudioHairlineDivider()
         }
     }
 
@@ -676,52 +681,48 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
         }
     }
 
-    // 6b. Real Spotify Genre Breakdown (Zero AI Tokens)
+    // 6b. Open-Canvas Genre Breakdown
     if (tasteShiftSummary.topGenres.isNotEmpty()) {
         item(key = "stats_spotify_genres") {
             val theme = LocalAdaptiveTheme.current
-            SoftGlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                accentTint = Color(0xFF1DB954)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StudioSectionHeader(
-                        title = "Genre DNA · Spotify",
-                        actionLabel = "Taste Profile",
-                        onActionClick = onOpenMusicProfile
-                    )
-                    tasteShiftSummary.topGenres.take(5).forEach { g ->
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = g.genre.replaceFirstChar { it.uppercase() },
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "${g.sharePercent}%",
-                                    color = theme.secondaryAccent,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            LinearProgressIndicator(
-                                progress = { (g.sharePercent / 100f).coerceIn(0.06f, 1f) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp)),
-                                color = Color(0xFF1DB954),
-                                trackColor = Color.White.copy(alpha = 0.08f)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                StudioSectionHeader(
+                    title = "Top Genres",
+                    actionLabel = "Taste Profile",
+                    onActionClick = onOpenMusicProfile
+                )
+                tasteShiftSummary.topGenres.take(5).forEach { g ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = g.genre.replaceFirstChar { it.uppercase() },
+                                color = Color(0xFFFAFAFA),
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${g.sharePercent}%",
+                                color = theme.secondaryAccent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
+                        LinearProgressIndicator(
+                            progress = { (g.sharePercent / 100f).coerceIn(0.06f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = Color(0xFF1DB954),
+                            trackColor = Color.White.copy(alpha = 0.08f)
+                        )
                     }
                 }
+                StudioHairlineDivider()
             }
         }
     }
@@ -798,16 +799,16 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                 title = "Taste Profile",
                 subtitle = "Genres & favorite artists",
                 icon = Icons.Rounded.PersonOutline,
-                accent = Color(0xFFA855F7),
+                accent = theme.secondaryAccent,
                 onClick = onOpenMusicProfile
             )
             StudioHairlineDivider()
 
             InsightHubTile(
-                title = "Sound Moments",
+                title = "Saved Moments",
                 subtitle = "Saved song highlights",
                 icon = Icons.Rounded.BookmarkBorder,
-                accent = Color(0xFFFFB000),
+                accent = Color(0xFFF59E0B),
                 onClick = onOpenMoments
             )
             StudioHairlineDivider()

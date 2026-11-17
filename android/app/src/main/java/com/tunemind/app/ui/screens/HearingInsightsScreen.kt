@@ -173,7 +173,7 @@ fun HearingInsightsScreen(
         "BLUETOOTH_HEADPHONES" -> Triple("Bluetooth Headphones", "Over-Ear", theme.primaryAccent)
         "WIRED_EARPHONES" -> Triple("Wired Earphones", "In-Ear", safeGreen)
         "WIRED_HEADPHONES" -> Triple("Wired Headphones", "Over-Ear", theme.secondaryAccent)
-        "USB_EARPHONES", "USB_DAC" -> Triple("USB Digital Audio", "Direct", Color(0xFFA855F7))
+        "USB_EARPHONES", "USB_DAC" -> Triple("USB Digital Audio", "Direct", Color(0xFFA78BFA))
         "BUILTIN_SPEAKER" -> Triple("Speaker", "Open Air", warnAmber)
         else -> Triple(AudioDeviceObserver.sanitizeOutputDeviceLabel(snapshot.deviceType, snapshot.transducerCategory), "Audio Output", theme.secondaryAccent)
     }

@@ -54,7 +54,12 @@ fun SettingsScreen(
     val registry = remember(context) { com.tunemind.app.provider.MusicProviderRegistry.getInstance(context) }
     var selectedProviderId by remember { mutableStateOf(registry.getPreferredProviderId()) }
     var alwaysAsk by remember { mutableStateOf(registry.isAlwaysAskEnabled()) }
-    val providers = remember { registry.getInstalledProviders() }
+    val providers = remember(registry) {
+        com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+            context = context,
+            rawProviders = registry.getInstalledProviders()
+        )
+    }
     var showResetSheet by remember { mutableStateOf(false) }
 
     val isBatteryIgnored by vm.isBatteryOptimizationIgnored.collectAsState()
@@ -95,7 +100,7 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
     val colors = TuneMindTheme.colors
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
+    val warnAmber = Color(0xFFF59E0B)
     val dangerRed = Color(0xFFFF4D6D)
 
     val refreshAllSystemStates: () -> Unit = remember(context) {
@@ -182,12 +187,11 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 1. Voice & Playback Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Voice & Playback")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 1. Voice & Playback (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Voice & Playback")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Hands-Free DJ",
@@ -410,18 +414,16 @@ fun SettingsScreen(
                             .padding(vertical = 4.dp)
                     )
                 }
-            }
-            }
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 2. Permissions Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Permissions")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 2. Permissions (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Permissions")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
             SettingsPermissionRow(
                 title = "Return to TuneMind",
@@ -506,16 +508,14 @@ fun SettingsScreen(
                 onClick = { vm.requestIgnoreBatteryOptimization(context) }
             )
             }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 3. Audio & Hearing Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Audio & Hearing")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 3. Audio & Hearing (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Audio & Hearing")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Safe Listening Alerts",
@@ -573,11 +573,10 @@ fun SettingsScreen(
                 }
             }
             }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 4. Appearance Card
+            // 4. Appearance Section
             SoftGlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 accentTint = colors.primaryAccent
@@ -585,14 +584,13 @@ fun SettingsScreen(
                 AdaptiveAtmosphereSection(vm = vm)
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 5. Default Music Player Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Default Music Player")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 5. Default Music Player (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Default Music Player")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
             SettingsSwitchRow(
                 title = "Always Ask Before Playing",
@@ -605,61 +603,27 @@ fun SettingsScreen(
             )
             StudioHairlineDivider()
 
-            providers.forEach { provider ->
-                val isSelected = provider.providerId == selectedProviderId
-                val isInstalled = provider.isInstalled(context)
-                val capDesc = if (provider.supportedCapabilities.contains(com.tunemind.app.provider.ProviderCapability.CAN_DEEP_LINK)) {
-                    "Direct track playback"
-                } else {
-                    "Opens track search"
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedProviderId = provider.providerId
-                            vm.setPreferredProviderId(context, provider.providerId)
-                        }
-                        .padding(vertical = 12.dp, horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    RadioButton(
-                        selected = isSelected,
-                        onClick = {
-                            selectedProviderId = provider.providerId
-                            vm.setPreferredProviderId(context, provider.providerId)
-                        },
-                        colors = RadioButtonDefaults.colors(selectedColor = colors.primaryAccent)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = provider.displayName,
-                            fontSize = 15.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = Color(0xFFF8FAFC)
-                        )
-                        Text(
-                            text = "$capDesc · ${if (isInstalled) "Installed" else "Web"}",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.56f)
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            com.tunemind.app.ui.components.CompactMusicPlayerGrid(
+                providers = providers,
+                isProviderSelected = { provider -> provider.providerId == selectedProviderId },
+                onSelectProvider = { provider ->
+                    selectedProviderId = provider.providerId
+                    vm.setPreferredProviderId(context, provider.providerId)
+                },
+                context = context
+            )
+
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // 6. Freshness & Privacy (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Freshness & Privacy")
+                Spacer(modifier = Modifier.height(6.dp))
                 StudioHairlineDivider()
-            }
-
-            }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 6. Freshness & Privacy Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Freshness & Privacy")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
 
             Column(
                 modifier = Modifier
@@ -735,17 +699,15 @@ fun SettingsScreen(
                     com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)
                 }
             )
-                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(22.dp))
 
-            // 6b. Help & Legal Card
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    StudioSectionHeader(title = "Help & Legal")
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
+            // 6b. Help & Legal (Open-Canvas Section)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "Help & Legal")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
 
                     Row(
                         modifier = Modifier
@@ -772,12 +734,12 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Privacy Policy, Terms & About", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text("Privacy Policy, Terms & About", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFAFAFA))
                             Text("Version, permissions disclosure & open-source notices", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
                         }
                         Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.45f))
                     }
-                }
+                    StudioHairlineDivider()
             }
 
             Spacer(modifier = Modifier.height(20.dp))

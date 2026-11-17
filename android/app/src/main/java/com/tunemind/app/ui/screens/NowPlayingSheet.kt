@@ -128,10 +128,10 @@ fun NowPlayingSheet(
     var actionStatus by remember { mutableStateOf<String?>(null) }
     val displayActionStatus = vmActionStatus ?: actionStatus
 
-    val neonCyan = Color(0xFF00F0FF)
-    val electricPurple = Color(0xFF8A2BE2)
+    val neonCyan = theme.primaryAccent
+    val electricPurple = theme.secondaryAccent
     val safeGreen = Color(0xFF10B981)
-    val warnAmber = Color(0xFFFFB000)
+    val warnAmber = Color(0xFFF59E0B)
 
     val hasTrack = effectiveTitle != "Nothing Playing"
     val matchedLiveSpotify = remember(liveSpotify, effectiveTitle, effectiveArtist, hasTrack) {
@@ -228,33 +228,32 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Glowing artwork disc + mini Artist avatar badge
+            // Studio Artwork Frame (Rounded-square cover + Artist badge)
             Box(
                 modifier = Modifier
-                    .size(214.dp)
+                    .size(228.dp)
                     .graphicsLayer {
-                        scaleX = discScale
-                        scaleY = discScale
+                        scaleX = if (effectivePlaying) 1.0f else 0.98f
+                        scaleY = if (effectivePlaying) 1.0f else 0.98f
                     },
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
-                        .size(210.dp)
-                        .clip(CircleShape)
+                        .size(220.dp)
+                        .clip(RoundedCornerShape(24.dp))
                         .background(
-                            Brush.radialGradient(
+                            Brush.verticalGradient(
                                 colors = listOf(
-                                    electricPurple.copy(alpha = 0.45f),
-                                    neonCyan.copy(alpha = 0.16f),
-                                    Color(0xFF0D0D0D)
+                                    theme.elevatedSurface,
+                                    theme.cardSurface
                                 )
                             )
                         )
                         .border(
-                            width = 1.5.dp,
-                            brush = Brush.linearGradient(listOf(neonCyan.copy(alpha = 0.7f), electricPurple.copy(alpha = 0.6f))),
-                            shape = CircleShape
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(24.dp)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -272,20 +271,20 @@ fun NowPlayingSheet(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = if (effectivePlaying) 0.28f else 0.16f))
+                                .background(Color.Black.copy(alpha = if (effectivePlaying) 0.18f else 0.08f))
                         )
                     }
-                    if (effectivePlaying) {
+                    if (effectivePlaying && artUrl == null) {
                         AnimatedEqualizerBars(
                             color = neonCyan,
-                            modifier = Modifier.size(64.dp, 52.dp)
+                            modifier = Modifier.size(56.dp, 46.dp)
                         )
                     } else if (artUrl == null) {
                         Icon(
                             imageVector = Icons.Rounded.MusicNote,
                             contentDescription = null,
-                            tint = neonCyan,
-                            modifier = Modifier.size(64.dp)
+                            tint = neonCyan.copy(alpha = 0.85f),
+                            modifier = Modifier.size(56.dp)
                         )
                     }
                 }
@@ -294,13 +293,13 @@ fun NowPlayingSheet(
                     SpotifyAvatarCircle(
                         imageUrl = activeMedia?.artistImageUrl,
                         fallbackInitial = effectiveArtist,
-                        size = 48.dp,
+                        size = 46.dp,
                         accentColor = neonCyan,
                         borderWidth = 2.dp,
-                        borderColor = Color(0xFF070A12),
+                        borderColor = theme.primaryBackground,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .offset(x = (-6).dp, y = (-6).dp)
+                            .offset(x = (-2).dp, y = (-2).dp)
                     )
                 }
             }
@@ -382,17 +381,17 @@ fun NowPlayingSheet(
 
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(68.dp)
                         .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(neonCyan, electricPurple)))
+                        .background(Color(0xFFFAFAFA))
                         .clickable { vm.togglePlayback() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (effectivePlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (effectivePlaying) "Pause" else "Play",
-                        tint = Color(0xFF0D0D0D),
-                        modifier = Modifier.size(36.dp)
+                        tint = Color(0xFF09090B),
+                        modifier = Modifier.size(34.dp)
                     )
                 }
 

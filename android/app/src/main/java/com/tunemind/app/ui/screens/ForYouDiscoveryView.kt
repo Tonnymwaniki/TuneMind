@@ -387,16 +387,15 @@ fun LazyListScope.forYouDiscoveryItems(
             ) {
                 Column {
                     Text(
-                        text = "2 PICKS PER YOUR GENRE",
-                        color = Color(0xFF38BDF8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.1.sp
+                        text = "Picked by Genre",
+                        color = LocalAdaptiveTheme.current.primaryAccent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Unheard predictions matched to your rotation",
-                        color = Color.White.copy(alpha = 0.62f),
+                        text = "Unheard tracks matched to your taste",
+                        color = Color.White.copy(alpha = 0.60f),
                         fontSize = 12.sp
                     )
                 }
@@ -481,11 +480,10 @@ fun LazyListScope.forYouDiscoveryItems(
                 ) {
                     Column {
                         Text(
-                            text = "NEW FROM YOUR ARTISTS",
+                            text = "New Releases",
                             color = Color(0xFF1DB954),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.1.sp
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -546,8 +544,8 @@ private fun ForYouAiHeroCard(
     onExportPlaylist: (() -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
-    val aiCyan = Color(0xFF38BDF8)
-    val aiViolet = Color(0xFFA855F7)
+    val aiCyan = theme.primaryAccent
+    val aiViolet = theme.secondaryAccent
 
     // Live ticker updating the exact countdown to 12:00 PM local time
     var countdownText by remember { mutableStateOf(NoonDropSchedule.formatCountdownToNoon()) }
@@ -586,23 +584,22 @@ private fun ForYouAiHeroCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "TUNEMIND AI DISCOVERY",
+                            text = "Daily Discovery",
                             color = aiCyan,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.0.sp
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(aiViolet.copy(alpha = 0.22f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(aiCyan.copy(alpha = 0.14f))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "IQ ${learningState.intelligenceScorePercent}%",
-                                color = Color(0xFFE9D5FF),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "${learningState.intelligenceScorePercent}% match",
+                                color = Color(0xFFFAFAFA),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -1730,12 +1727,13 @@ private fun ForYouGenreTrackCard(
 
 @Composable
 private fun AiMemoryEvolutionCard(learningState: ForYouLearningSummary) {
-    val aiCyan = Color(0xFF38BDF8)
-    val aiViolet = Color(0xFFA855F7)
+    val theme = LocalAdaptiveTheme.current
+    val aiCyan = theme.primaryAccent
+    val aiViolet = theme.secondaryAccent
 
     SoftGlassCard(
         modifier = Modifier.fillMaxWidth(),
-        accentTint = aiViolet,
+        accentTint = aiCyan,
         cornerRadius = 18.dp,
         contentPadding = PaddingValues(16.dp)
     ) {
@@ -1747,15 +1745,14 @@ private fun AiMemoryEvolutionCard(learningState: ForYouLearningSummary) {
                 Icon(
                     imageVector = Icons.Rounded.Psychology,
                     contentDescription = null,
-                    tint = aiViolet,
+                    tint = aiCyan,
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = "WHAT AI LEARNED ABOUT YOU",
-                    color = Color(0xFFE9D5FF),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.9.sp
+                    text = "Taste Insights",
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
 
@@ -1828,9 +1825,10 @@ private fun AiMemoryEvolutionCard(learningState: ForYouLearningSummary) {
                         verticalAlignment = Alignment.Top
                     ) {
                         Text(
-                            text = "✦",
+                            text = "•",
                             color = aiCyan,
-                            fontSize = 11.sp
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = trait,

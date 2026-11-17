@@ -261,7 +261,7 @@ fun MusicProfileScreen(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF0E131D))
+                            .background(theme.cardSurface)
                             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
                             .padding(start = 12.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -445,7 +445,7 @@ fun MusicProfileScreen(
         ModalBottomSheet(
             onDismissRequest = { showEditProfileDialog = false },
             sheetState = sheetState,
-            containerColor = Color(0xFF0E131D),
+            containerColor = theme.cardSurface,
             contentColor = Color(0xFFF8FAFC),
             dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
         ) {
@@ -529,7 +529,7 @@ fun MusicProfileScreen(
         ModalBottomSheet(
             onDismissRequest = { showAddAnchorDialog = false },
             sheetState = sheetState,
-            containerColor = Color(0xFF0E131D),
+            containerColor = theme.cardSurface,
             contentColor = Color(0xFFF8FAFC),
             dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
         ) {

@@ -56,6 +56,10 @@ class AgentVoiceManager(
     private val getHearingInsights: (() -> com.tunemind.app.ui.HearingInsightsState)? = null,
     private val getVaultTracks: (() -> List<com.tunemind.app.ui.VaultTrack>)? = null,
     private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState)? = null,
+    private val getForYouPicks: (() -> List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>)? = null,
+    private val getSpotifyPlaylists: (() -> List<com.tunemind.app.data.ingestion.SpotifyPlaylistEntity>)? = null,
+    private val getSpotifyLikedTracks: (() -> List<com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity>)? = null,
+    private val getListeningStats: (() -> com.tunemind.app.domain.memory.OverallListeningStats)? = null,
     private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
@@ -952,6 +956,136 @@ class AgentVoiceManager(
                         put("dopamine_capsule", capArr)
                     }
 
+                    val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+                    val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+                        context,
+                        registry.getInstalledProviders()
+                    )
+                    val hasExplicitPlayer = registry.hasExplicitDefault()
+                    val preferredId = registry.getPreferredProviderId()
+                    val preferredProvider = registry.getProvider(preferredId)
+                    put("player_preferences", JSONObject().apply {
+                        put("has_explicit_default_player", hasExplicitPlayer)
+                        put("default_player_id", preferredId)
+                        put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
+                        put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
+                        put("available_players", org.json.JSONArray().apply {
+                            installedPlayers.take(8).forEach { p ->
+                                put(JSONObject().apply {
+                                    put("id", p.providerId)
+                                    put("name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p))
+                                    put("package_name", p.packageName.ifBlank { p.providerId })
+                                })
+                            }
+                        })
+                    })
+
+                    val forYouList = getForYouPicks?.invoke()?.filter { !it.isDismissed }.orEmpty()
+                    if (forYouList.isNotEmpty()) {
+                        put("for_you_picks", org.json.JSONArray().apply {
+                            forYouList.take(15).forEach { rec ->
+                                put(JSONObject().apply {
+                                    put("title", rec.title)
+                                    put("artist", rec.artist)
+                                    put("match_percent", rec.matchScorePercent)
+                                    put("category", rec.category)
+                                    put("sub_tier", rec.subTier)
+                                    put("genre_tag", rec.genreTag)
+                                    put("is_wildcard", rec.isWildcard)
+                                    put("is_saved", rec.isSaved)
+                                    put("reason", rec.reason)
+                                    put("spotify_uri", rec.spotifyUri ?: "")
+                                    put("track_id", rec.resolvedCanonicalTrackId())
+                                })
+                            }
+                        })
+                    }
+
+                    val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
+                    if (playlistsList.isNotEmpty()) {
+                        put("spotify_playlists", org.json.JSONArray().apply {
+                            playlistsList.take(15).forEach { pl ->
+                                val decoded = pl.decodeTracks()
+                                put(JSONObject().apply {
+                                    put("playlist_id", pl.playlistId)
+                                    put("name", pl.name)
+                                    put("owner", pl.ownerName)
+                                    put("track_count", maxOf(pl.trackCount, decoded.size))
+                                    put("spotify_uri", "spotify:playlist:${pl.playlistId}")
+                                    put("tracks", org.json.JSONArray().apply {
+                                        decoded.take(8).forEach { tr ->
+                                            put(JSONObject().apply {
+                                                put("title", tr.title)
+                                                put("artist", tr.artist)
+                                                put("spotify_uri", tr.spotifyUri)
+                                                put("track_id", tr.trackId)
+                                            })
+                                        }
+                                    })
+                                })
+                            }
+                        })
+                    }
+
+                    val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
+                    if (likedList.isNotEmpty()) {
+                        put("spotify_liked_tracks", org.json.JSONArray().apply {
+                            likedList.take(15).forEach { lk ->
+                                put(JSONObject().apply {
+                                    put("title", lk.trackTitle)
+                                    put("artist", lk.artistName)
+                                    put("spotify_uri", lk.spotifyUri)
+                                    put("track_id", lk.trackId)
+                                })
+                            }
+                        })
+                    }
+
+                    val statsSnapshot = getListeningStats?.invoke()
+                    if (statsSnapshot != null) {
+                        put("listening_stats", JSONObject().apply {
+                            put("today_minutes", (statsSnapshot.todayListeningMs / 60_000L).toInt())
+                            put("seven_day_minutes", (statsSnapshot.sevenDayListeningMs / 60_000L).toInt())
+                            put("thirty_day_minutes", (statsSnapshot.thirtyDayListeningMs / 60_000L).toInt())
+                            put("all_time_minutes", (statsSnapshot.allTimeListeningMs / 60_000L).toInt())
+                            put("total_verified_plays", statsSnapshot.totalVerifiedPlays)
+                            put("unique_tracks", statsSnapshot.uniqueTrackCount)
+                            put("unique_artists", statsSnapshot.uniqueArtistCount)
+                            put("completion_rate_percent", statsSnapshot.completionRatePercent)
+                            put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
+                            put("peak_window_label", statsSnapshot.peakWindowLabel)
+                            put("top_artists", org.json.JSONArray().apply {
+                                statsSnapshot.topArtists.take(6).forEach { a ->
+                                    put(JSONObject().apply {
+                                        put("artist", a.artistName)
+                                        put("plays", a.playCount)
+                                        put("minutes", (a.listeningMs / 60_000L).toInt())
+                                    })
+                                }
+                            })
+                            put("top_tracks", org.json.JSONArray().apply {
+                                statsSnapshot.topTracks.take(8).forEach { tr ->
+                                    put(JSONObject().apply {
+                                        put("title", tr.title)
+                                        put("artist", tr.artist)
+                                        put("plays", tr.verifiedPlayCount)
+                                        put("freshness_percent", tr.freshnessPercent)
+                                        put("app", tr.primaryAppName)
+                                    })
+                                }
+                            })
+                            put("app_breakdown", org.json.JSONArray().apply {
+                                statsSnapshot.appBreakdown.take(5).forEach { ap ->
+                                    put(JSONObject().apply {
+                                        put("app", ap.displayName)
+                                        put("plays", ap.playCount)
+                                        put("share_percent", (ap.shareFraction * 100f).toInt())
+                                    })
+                                }
+                            })
+                        })
+                    }
+
                     val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
                     put("user_id", identity.userId)
                     put("user_email", identity.email)
@@ -1484,6 +1618,85 @@ class AgentVoiceManager(
         startNativeSpeechRecognizer()
     }
 
+    private fun isSpotifyCollectionUri(uri: String?): Boolean {
+        val t = uri?.trim().orEmpty()
+        return t.startsWith("spotify:playlist:", ignoreCase = true) ||
+            t.startsWith("spotify:album:", ignoreCase = true) ||
+            t.startsWith("spotify:artist:", ignoreCase = true) ||
+            t.startsWith("spotify:episode:", ignoreCase = true) ||
+            t.startsWith("https://open.spotify.com/playlist/", ignoreCase = true) ||
+            t.startsWith("https://open.spotify.com/album/", ignoreCase = true)
+    }
+
+    private fun normalizePlayableSpotifyUri(raw: String?): String? {
+        val t = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (isSpotifyCollectionUri(t)) return t
+        return com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t)
+    }
+
+    private fun getFilteredInstalledPlayers(): List<com.tunemind.app.provider.MusicProvider> {
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        return com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+            context,
+            registry.getInstalledProviders()
+        )
+    }
+
+    private fun detectSpokenPlayerSelection(transcriptLower: String): String? {
+        if (transcriptLower.isBlank()) return null
+        val players = getFilteredInstalledPlayers()
+        for (p in players) {
+            val shortName = com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p).lowercase()
+            if (shortName.isNotBlank() && Regex("\\b${Regex.escape(shortName)}\\b").containsMatchIn(transcriptLower)) {
+                return p.packageName.ifBlank { p.providerId }
+            }
+        }
+        return when {
+            transcriptLower.contains("boomplay") -> "com.afmobi.boomplayer"
+            transcriptLower.contains("youtube music") || transcriptLower.contains("yt music") -> "com.google.android.apps.youtube.music"
+            transcriptLower.contains("audiomack") -> "com.audiomack"
+            transcriptLower.contains("apple music") -> "com.apple.android.music"
+            transcriptLower.contains("built-in") || transcriptLower.contains("in-app player") || transcriptLower.contains("in app player") -> "tunemind_inapp"
+            transcriptLower.contains("local audio") || transcriptLower.contains("local files") || transcriptLower.contains("phone storage") -> "local_files"
+            Regex("\\bon spotify\\b|\\bwith spotify\\b|\\buse spotify\\b|\\bto spotify\\b|\\bspotify\\b").containsMatchIn(transcriptLower) &&
+                !Regex("\\bspotify\\s+(history|playlist|library|liked|saved)\\b").containsMatchIn(transcriptLower) -> "com.spotify.music"
+            else -> null
+        }
+    }
+
+    private fun resolveTargetPlayerPackage(rawPlayer: String?, fallbackPkg: String? = null): String {
+        val players = getFilteredInstalledPlayers()
+        val candidate = rawPlayer?.trim()?.takeIf { it.isNotBlank() }
+        if (candidate != null) {
+            val matched = players.firstOrNull { p ->
+                p.packageName.equals(candidate, ignoreCase = true) ||
+                    p.providerId.equals(candidate, ignoreCase = true) ||
+                    p.displayName.equals(candidate, ignoreCase = true) ||
+                    com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p).equals(candidate, ignoreCase = true)
+            }
+            if (matched != null) {
+                return matched.packageName.ifBlank { matched.providerId }
+            }
+            val lower = candidate.lowercase()
+            when {
+                lower.contains("boomplay") -> return "com.afmobi.boomplayer"
+                lower.contains("youtube") -> return "com.google.android.apps.youtube.music"
+                lower.contains("audiomack") -> return "com.audiomack"
+                lower.contains("tunemind") || lower.contains("inapp") -> return "tunemind_inapp"
+                lower.contains("local") -> return "local_files"
+                lower.contains("spotify") -> return "com.spotify.music"
+            }
+            return candidate
+        }
+        if (!fallbackPkg.isNullOrBlank()) return fallbackPkg
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        if (registry.hasExplicitDefault()) {
+            val pref = registry.getProvider(registry.getPreferredProviderId())
+            return pref.packageName.ifBlank { pref.providerId }
+        }
+        return players.firstOrNull()?.let { it.packageName.ifBlank { it.providerId } } ?: "com.spotify.music"
+    }
+
     fun dispatchReasoningResult(dataObj: JSONObject?, explicitTtsPayload: String = "") {
         val wasAwaitingEndOfSongChoice = isAwaitingEndOfSongUserChoice
         isAwaitingEndOfSongUserChoice = false
@@ -1501,9 +1714,12 @@ class AgentVoiceManager(
             userTranscriptLower.startsWith("brief me on my") ||
             userTranscriptLower.startsWith("suggest a different fresh song")
 
-        val isRejectingPending = Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\\b")
+        val spokenPlayerPkg = detectSpokenPlayerSelection(userTranscriptLower)
+        val isRejectingPending = Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|skip|else|next)\\b")
             .containsMatchIn(userTranscriptLower)
         val isApprovingPending = pendingBeforeTurn != null && !isSyntheticPrompt && !isRejectingPending && (
+            rawAction == "PLAY_TRACK_NOW" ||
+            spokenPlayerPkg != null ||
             Regex("\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|please|approve|confirm|start|spin it|guess|yet|yea|yah)\\b")
                 .containsMatchIn(userTranscriptLower) ||
             (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
@@ -1518,7 +1734,7 @@ class AgentVoiceManager(
             ?: cmdObj?.optString("trackId", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("trackId", "")?.takeIf { it.isNotBlank() }
         var rawSearchQuery = cmdObj?.optString("search_query", "") ?: ""
-        var resolvedSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+        var resolvedSpotifyUri = normalizePlayableSpotifyUri(
             cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
                 ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
         )
@@ -1527,7 +1743,7 @@ class AgentVoiceManager(
             rawTrackTitle = pendingBeforeTurn.title
             rawTrackArtist = pendingBeforeTurn.artist
             rawTrackId = pendingBeforeTurn.trackId ?: rawTrackId
-            resolvedSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+            resolvedSpotifyUri = normalizePlayableSpotifyUri(
                 pendingBeforeTurn.spotifyUri ?: pendingBeforeTurn.trackId
             ) ?: resolvedSpotifyUri
             rawSearchQuery = "${pendingBeforeTurn.title} ${pendingBeforeTurn.artist}".trim()
@@ -1613,10 +1829,20 @@ class AgentVoiceManager(
             }
         }
 
-        val targetPlayerPkg = toolObj?.optString("target_player", "com.spotify.music")
-            ?.takeIf { it.isNotBlank() }
-            ?: cmdObj?.optString("target_player", "com.spotify.music")
-            ?: "com.spotify.music"
+        val targetPlayerPkg = resolveTargetPlayerPackage(
+            rawPlayer = spokenPlayerPkg
+                ?: toolObj?.optString("target_player", "")?.takeIf { it.isNotBlank() }
+                ?: cmdObj?.optString("target_player", "")?.takeIf { it.isNotBlank() },
+            fallbackPkg = pendingBeforeTurn?.source
+        )
+        val hasExplicitDefaultPlayer = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).hasExplicitDefault()
+        val rememberDefaultPlayer: Boolean? = when {
+            toolObj != null && toolObj.has("remember_default_player") -> toolObj.optBoolean("remember_default_player")
+            Regex("\\b(default|remember|always use|save as default)\\b").containsMatchIn(userTranscriptLower) &&
+                (spokenPlayerPkg != null || rawAction == "SELECT_MUSIC_PLAYER") -> true
+            !hasExplicitDefaultPlayer && (spokenPlayerPkg != null || rawAction == "SELECT_MUSIC_PLAYER") -> true
+            else -> null
+        }
 
         // Determine whether this turn is proposing a song (must wait for user approval) vs executing an approved song
         val isTrackProposalOrPlayAttempt = !rawTrackTitle.isNullOrBlank() && (
@@ -1642,13 +1868,17 @@ class AgentVoiceManager(
         val resolvedIdentity = if (!rawTrackTitle.isNullOrBlank()) {
             com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
                 trackId = rawTrackId,
-                spotifyUri = resolvedSpotifyUri,
+                spotifyUri = if (isSpotifyCollectionUri(resolvedSpotifyUri)) null else resolvedSpotifyUri,
                 title = rawTrackTitle,
                 artist = rawTrackArtist
             )
         } else null
         val finalCanonicalTrackId = resolvedIdentity?.trackId
-        resolvedSpotifyUri = resolvedIdentity?.spotifyUri ?: resolvedSpotifyUri
+        resolvedSpotifyUri = if (isSpotifyCollectionUri(resolvedSpotifyUri)) {
+            resolvedSpotifyUri
+        } else {
+            resolvedIdentity?.spotifyUri ?: resolvedSpotifyUri
+        }
 
         if (isApprovingPending && pendingBeforeTurn != null) {
             effectiveAction = "PLAY_TRACK_NOW"
@@ -1657,7 +1887,7 @@ class AgentVoiceManager(
             updatePendingProposedTrack(null)
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
             spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
-                ?: "Awesome, playing ${rawTrackTitle}$artistPart inside TuneMind right now."
+                ?: "Awesome, playing ${rawTrackTitle}$artistPart right now."
         } else if (wasAwaitingEndOfSongChoice && isTrackProposalOrPlayAttempt && !rawTrackTitle.isNullOrBlank()) {
             // When the user responds to the End-of-Song prompt ("Tell me what song you want next"),
             // immediately play their requested song without requiring a second confirmation!
@@ -1687,7 +1917,22 @@ class AgentVoiceManager(
                 .replace(Regex("^(spinning|playing|launching)\\s+", RegexOption.IGNORE_CASE), "I picked ")
                 .replace(Regex("\\s+right now[.!]*$", RegexOption.IGNORE_CASE), ".")
                 .trim()
-            if (!spokenTts.contains("?")) {
+            val needsPlayerPrompt = !hasExplicitDefaultPlayer &&
+                spokenPlayerPkg == null &&
+                !Regex("\\b(which player|which music player|what player|spotify|boomplay|audiomack|youtube|tunemind in-app)\\b", RegexOption.IGNORE_CASE)
+                    .containsMatchIn(spokenTts)
+            if (needsPlayerPrompt) {
+                val playerNames = getFilteredInstalledPlayers()
+                    .take(3)
+                    .map { com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(it) }
+                    .distinct()
+                val choicesText = if (playerNames.isNotEmpty()) playerNames.joinToString(", ") else "Spotify, Boomplay, or TuneMind"
+                val baseSentence = spokenTts.trimEnd('.', '!', '?').ifBlank {
+                    val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
+                    "I picked $rawTrackTitle$artistPart for your vibe"
+                }
+                spokenTts = "$baseSentence. Which music player should I use to play it — like $choicesText?"
+            } else if (!spokenTts.contains("?")) {
                 val cleanSentence = spokenTts.trimEnd('.', '!').ifBlank {
                     val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
                     "I picked $rawTrackTitle$artistPart for your vibe"
@@ -1717,9 +1962,12 @@ class AgentVoiceManager(
                             track_artist = item.optString("track_artist", "").takeIf { it.isNotBlank() },
                             track_id = item.optString("track_id", "").takeIf { it.isNotBlank() }
                                 ?: item.optString("trackId", "").takeIf { it.isNotBlank() },
-                            spotify_uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(
+                            spotify_uri = normalizePlayableSpotifyUri(
                                 item.optString("spotify_uri", "").takeIf { it.isNotBlank() }
                             ),
+                            target_player = item.optString("target_player", "").takeIf { it.isNotBlank() }
+                                ?.let { resolveTargetPlayerPackage(it) },
+                            remember_default_player = if (item.has("remember_default_player")) item.optBoolean("remember_default_player") else null,
                             volume_percent = if (item.has("volume_percent")) item.optInt("volume_percent", 60) else null,
                             palette_id = item.optString("palette_id", "").takeIf { it.isNotBlank() },
                             custom_accent_hex = item.optString("custom_accent_hex", "").takeIf { it.isNotBlank() },
@@ -1742,6 +1990,7 @@ class AgentVoiceManager(
             track_id = finalCanonicalTrackId,
             spotify_uri = resolvedSpotifyUri,
             target_player = targetPlayerPkg,
+            remember_default_player = rememberDefaultPlayer,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
             palette_id = toolObj?.optString("palette_id", "")?.takeIf { it.isNotBlank() },
             custom_accent_hex = toolObj?.optString("custom_accent_hex", "")?.takeIf { it.isNotBlank() },
@@ -2019,6 +2268,136 @@ class AgentVoiceManager(
                             put("source", pendingProp.source)
                         })
                     }
+                    val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+                    val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+                        context,
+                        registry.getInstalledProviders()
+                    )
+                    val hasExplicitPlayer = registry.hasExplicitDefault()
+                    val preferredId = registry.getPreferredProviderId()
+                    val preferredProvider = registry.getProvider(preferredId)
+                    put("player_preferences", JSONObject().apply {
+                        put("has_explicit_default_player", hasExplicitPlayer)
+                        put("default_player_id", preferredId)
+                        put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
+                        put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
+                        put("available_players", org.json.JSONArray().apply {
+                            installedPlayers.take(8).forEach { p ->
+                                put(JSONObject().apply {
+                                    put("id", p.providerId)
+                                    put("name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(p))
+                                    put("package_name", p.packageName.ifBlank { p.providerId })
+                                })
+                            }
+                        })
+                    })
+
+                    val forYouList = getForYouPicks?.invoke()?.filter { !it.isDismissed }.orEmpty()
+                    if (forYouList.isNotEmpty()) {
+                        put("for_you_picks", org.json.JSONArray().apply {
+                            forYouList.take(15).forEach { rec ->
+                                put(JSONObject().apply {
+                                    put("title", rec.title)
+                                    put("artist", rec.artist)
+                                    put("match_percent", rec.matchScorePercent)
+                                    put("category", rec.category)
+                                    put("sub_tier", rec.subTier)
+                                    put("genre_tag", rec.genreTag)
+                                    put("is_wildcard", rec.isWildcard)
+                                    put("is_saved", rec.isSaved)
+                                    put("reason", rec.reason)
+                                    put("spotify_uri", rec.spotifyUri ?: "")
+                                    put("track_id", rec.resolvedCanonicalTrackId())
+                                })
+                            }
+                        })
+                    }
+
+                    val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
+                    if (playlistsList.isNotEmpty()) {
+                        put("spotify_playlists", org.json.JSONArray().apply {
+                            playlistsList.take(15).forEach { pl ->
+                                val decoded = pl.decodeTracks()
+                                put(JSONObject().apply {
+                                    put("playlist_id", pl.playlistId)
+                                    put("name", pl.name)
+                                    put("owner", pl.ownerName)
+                                    put("track_count", maxOf(pl.trackCount, decoded.size))
+                                    put("spotify_uri", "spotify:playlist:${pl.playlistId}")
+                                    put("tracks", org.json.JSONArray().apply {
+                                        decoded.take(8).forEach { tr ->
+                                            put(JSONObject().apply {
+                                                put("title", tr.title)
+                                                put("artist", tr.artist)
+                                                put("spotify_uri", tr.spotifyUri)
+                                                put("track_id", tr.trackId)
+                                            })
+                                        }
+                                    })
+                                })
+                            }
+                        })
+                    }
+
+                    val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
+                    if (likedList.isNotEmpty()) {
+                        put("spotify_liked_tracks", org.json.JSONArray().apply {
+                            likedList.take(15).forEach { lk ->
+                                put(JSONObject().apply {
+                                    put("title", lk.trackTitle)
+                                    put("artist", lk.artistName)
+                                    put("spotify_uri", lk.spotifyUri)
+                                    put("track_id", lk.trackId)
+                                })
+                            }
+                        })
+                    }
+
+                    val statsSnapshot = getListeningStats?.invoke()
+                    if (statsSnapshot != null) {
+                        put("listening_stats", JSONObject().apply {
+                            put("today_minutes", (statsSnapshot.todayListeningMs / 60_000L).toInt())
+                            put("seven_day_minutes", (statsSnapshot.sevenDayListeningMs / 60_000L).toInt())
+                            put("thirty_day_minutes", (statsSnapshot.thirtyDayListeningMs / 60_000L).toInt())
+                            put("all_time_minutes", (statsSnapshot.allTimeListeningMs / 60_000L).toInt())
+                            put("total_verified_plays", statsSnapshot.totalVerifiedPlays)
+                            put("unique_tracks", statsSnapshot.uniqueTrackCount)
+                            put("unique_artists", statsSnapshot.uniqueArtistCount)
+                            put("completion_rate_percent", statsSnapshot.completionRatePercent)
+                            put("discovery_rate_percent", statsSnapshot.discoveryRatePercent)
+                            put("peak_window_label", statsSnapshot.peakWindowLabel)
+                            put("top_artists", org.json.JSONArray().apply {
+                                statsSnapshot.topArtists.take(6).forEach { a ->
+                                    put(JSONObject().apply {
+                                        put("artist", a.artistName)
+                                        put("plays", a.playCount)
+                                        put("minutes", (a.listeningMs / 60_000L).toInt())
+                                    })
+                                }
+                            })
+                            put("top_tracks", org.json.JSONArray().apply {
+                                statsSnapshot.topTracks.take(8).forEach { tr ->
+                                    put(JSONObject().apply {
+                                        put("title", tr.title)
+                                        put("artist", tr.artist)
+                                        put("plays", tr.verifiedPlayCount)
+                                        put("freshness_percent", tr.freshnessPercent)
+                                        put("app", tr.primaryAppName)
+                                    })
+                                }
+                            })
+                            put("app_breakdown", org.json.JSONArray().apply {
+                                statsSnapshot.appBreakdown.take(5).forEach { ap ->
+                                    put(JSONObject().apply {
+                                        put("app", ap.displayName)
+                                        put("plays", ap.playCount)
+                                        put("share_percent", (ap.shareFraction * 100f).toInt())
+                                    })
+                                }
+                            })
+                        })
+                    }
+
                     val identity = com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.resolveUserIdentity(context)
                     put("user_id", identity.userId)
                     put("user_email", identity.email)

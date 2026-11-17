@@ -19,6 +19,7 @@ data class AgentToolCallPayload(
     val track_id: String? = null,
     val spotify_uri: String? = null,
     val target_player: String? = null,
+    val remember_default_player: Boolean? = null,
     val volume_percent: Int? = null,
     val palette_id: String? = null,
     val custom_accent_hex: String? = null,
@@ -417,9 +418,54 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     else ""
                 }
 
-                // Resolve exact spotify:track:<22-char-id> URI on IO thread so we NEVER fall back to a static search screen
-                var canonicalSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(spotifyUri)
-                if (canonicalSpotifyUri.isNullOrBlank() && targetPackage.contains("spotify", ignoreCase = true)) {
+                // Resolve exact music provider matching package name, providerId, or display name
+                val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+                val targetTrim = targetPackage.trim()
+                val resolvedProvider = registry.getInstalledProviders().firstOrNull { p ->
+                    p.packageName.equals(targetTrim, ignoreCase = true) ||
+                        p.providerId.equals(targetTrim, ignoreCase = true) ||
+                        p.displayName.equals(targetTrim, ignoreCase = true) ||
+                        p.displayName.contains(targetTrim, ignoreCase = true)
+                }
+                val finalProviderId = resolvedProvider?.providerId ?: when {
+                    targetTrim.contains("spotify", ignoreCase = true) -> "spotify"
+                    targetTrim.contains("boomplay", ignoreCase = true) -> "boomplay"
+                    targetTrim.contains("youtube", ignoreCase = true) -> "youtube_music"
+                    targetTrim.contains("audiomack", ignoreCase = true) -> "audiomack"
+                    targetTrim.contains("tunemind", ignoreCase = true) -> "tunemind_inapp"
+                    else -> targetTrim
+                }
+                val finalPackageName = resolvedProvider?.packageName ?: when (finalProviderId) {
+                    "tunemind_inapp" -> "com.tunemind.app"
+                    "boomplay" -> "com.afmobi.boomplayer"
+                    "youtube_music" -> "com.google.android.apps.youtube.music"
+                    "audiomack" -> "com.audiomack"
+                    else -> targetTrim
+                }
+                val finalDisplayName = resolvedProvider?.displayName ?: when (finalProviderId) {
+                    "spotify" -> "Spotify"
+                    "boomplay" -> "Boomplay"
+                    "youtube_music" -> "YouTube Music"
+                    "audiomack" -> "Audiomack"
+                    "tunemind_inapp" -> "TuneMind In-App Player"
+                    else -> "Target Player"
+                }
+
+                // Preserve collection URIs (spotify:playlist/album/artist/episode) as-is; normalize track URIs
+                val trimmedUri = spotifyUri?.trim().orEmpty()
+                val isCollectionUri = trimmedUri.startsWith("spotify:playlist:", ignoreCase = true) ||
+                    trimmedUri.startsWith("spotify:album:", ignoreCase = true) ||
+                    trimmedUri.startsWith("spotify:artist:", ignoreCase = true) ||
+                    trimmedUri.startsWith("spotify:episode:", ignoreCase = true) ||
+                    trimmedUri.startsWith("https://open.spotify.com/playlist/", ignoreCase = true) ||
+                    trimmedUri.startsWith("https://open.spotify.com/album/", ignoreCase = true)
+
+                var canonicalSpotifyUri: String? = if (isCollectionUri) {
+                    trimmedUri
+                } else {
+                    com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(trimmedUri)
+                }
+                if (canonicalSpotifyUri.isNullOrBlank() && finalPackageName.contains("spotify", ignoreCase = true)) {
                     canonicalSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
                         context = context,
                         cleanTitle = resolvedTitle,
@@ -430,10 +476,11 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
                 val canonicalIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
                     trackId = trackId,
-                    spotifyUri = canonicalSpotifyUri,
+                    spotifyUri = if (isCollectionUri) null else canonicalSpotifyUri,
                     title = resolvedTitle,
                     artist = resolvedArtist
                 )
+                val finalDeepLinkUri = if (isCollectionUri) canonicalSpotifyUri else canonicalIdentity.spotifyUri
 
                 val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
                     id = canonicalIdentity.trackId,
@@ -442,19 +489,26 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     reason = "Autonomous neuro-acoustic flow match",
                     confidence = 0.98f,
                     trackId = canonicalIdentity.trackId,
-                    spotifyUri = canonicalIdentity.spotifyUri
+                    spotifyUri = finalDeepLinkUri
                 )
 
-                val launchRes = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
-                    context = context,
-                    providerId = if (targetPackage.contains("spotify", ignoreCase = true)) "spotify" else targetPackage,
-                    displayName = if (targetPackage.contains("spotify", ignoreCase = true)) "Spotify" else "Target Player",
-                    packageName = targetPackage,
-                    track = targetTrack,
-                    query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
-                    deepLinkUri = canonicalIdentity.spotifyUri,
-                    neverOpenExternalApp = neverOpenExternalApp
-                )
+                val useInAppNow = finalProviderId == "tunemind_inapp" ||
+                    finalPackageName.equals("com.tunemind.app", ignoreCase = true)
+
+                val launchRes = if (useInAppNow) {
+                    registry.launchRecommendation(targetTrack, "tunemind_inapp")
+                } else {
+                    com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
+                        context = context,
+                        providerId = finalProviderId,
+                        displayName = finalDisplayName,
+                        packageName = finalPackageName,
+                        track = targetTrack,
+                        query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
+                        deepLinkUri = finalDeepLinkUri,
+                        neverOpenExternalApp = neverOpenExternalApp
+                    )
+                }
                 mainHandler.post {
                     onLaunchResult?.invoke(launchRes)
                 }

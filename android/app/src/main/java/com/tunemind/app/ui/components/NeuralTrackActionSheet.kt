@@ -115,15 +115,15 @@ fun NeuralTrackActionDialog(
         spotifyUri = canonicalIdentity.spotifyUri,
         fallbackAlbumArtUrl = albumArtUrl
     )
-    val ringColor = if (isCoolingDown) Color(0xFFFFB000) else theme.primaryAccent
+    val ringColor = if (isCoolingDown) Color(0xFFF59E0B) else theme.primaryAccent
     val genreHint = resolvedMedia.genres.take(2).joinToString(" · ")
         .takeIf { it.isNotBlank() } ?: detectedMood.label
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF0E131D),
-        contentColor = Color.White,
+        containerColor = theme.cardSurface,
+        contentColor = Color(0xFFFAFAFA),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(
@@ -254,7 +254,7 @@ fun NeuralTrackActionDialog(
                 icon = Icons.Rounded.Palette,
                 title = "Match colors to this song",
                 subtitle = "Extract palette from cover art or mood tone",
-                accent = Color(0xFFA855F7),
+                accent = theme.secondaryAccent,
                 onClick = {
                     onSyncAtmosphereToTrack()
                     onDismiss()

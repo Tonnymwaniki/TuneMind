@@ -93,8 +93,8 @@ fun FloatingGlassDock(
     )
 
     val dockShape = RoundedCornerShape(30.dp)
-    val dockSurfaceTop = lerp(theme.elevatedSurface, Color(0xFF0B0F19), 0.35f).copy(alpha = 0.92f)
-    val dockSurfaceBottom = lerp(theme.primaryBackground, Color(0xFF05070C), 0.45f).copy(alpha = 0.96f)
+    val dockSurfaceTop = Color(0xFF141419).copy(alpha = 0.97f)
+    val dockSurfaceBottom = Color(0xFF0C0C10).copy(alpha = 0.98f)
 
     Box(
         modifier = modifier
@@ -106,12 +106,12 @@ fun FloatingGlassDock(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(66.dp)
+                .height(64.dp)
                 .shadow(
-                    elevation = 18.dp,
+                    elevation = 12.dp,
                     shape = dockShape,
-                    ambientColor = activeAccent.copy(alpha = 0.22f),
-                    spotColor = activeAccent.copy(alpha = 0.25f)
+                    ambientColor = Color.Black.copy(alpha = 0.55f),
+                    spotColor = Color.Black.copy(alpha = 0.55f)
                 )
                 .clip(dockShape)
                 .background(
@@ -123,9 +123,8 @@ fun FloatingGlassDock(
                     width = 1.dp,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.20f),
-                            activeAccent.copy(alpha = 0.24f),
-                            theme.border.copy(alpha = 0.45f)
+                            Color.White.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.06f)
                         )
                     ),
                     shape = dockShape

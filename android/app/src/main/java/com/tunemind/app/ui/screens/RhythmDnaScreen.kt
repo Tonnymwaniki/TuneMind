@@ -104,7 +104,9 @@ fun RhythmDnaScreen(
     onOpenAccountAuth: () -> Unit = {},
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
     momentsCount: Int = 0,
-    onRefreshStats: () -> Unit = {}
+    onRefreshStats: () -> Unit = {},
+    requestedSubDeck: Int? = null,
+    onConsumeRequestedSubDeck: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -207,6 +209,13 @@ fun RhythmDnaScreen(
     var selectedStatsWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
     var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Spotify, 2 = Most Played
 
+    LaunchedEffect(requestedSubDeck) {
+        if (requestedSubDeck != null && requestedSubDeck in 0..3) {
+            activeRhythmSubDeck = requestedSubDeck
+            onConsumeRequestedSubDeck()
+        }
+    }
+
     val effectiveSpotifyConnected = isSpotifyConnected || authSession.isSpotifyConnected
 
     LaunchedEffect(effectiveSpotifyConnected, activeRhythmSubDeck) {
@@ -257,7 +266,7 @@ fun RhythmDnaScreen(
                     letterSpacing = (-0.4).sp
                 )
                 Text(
-                    text = theme.musicMood.label,
+                    text = "${activePhase.label} · ${activePhase.hoursLabel}",
                     color = activeSubDeckAccent.copy(alpha = 0.85f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
@@ -531,8 +540,8 @@ fun RhythmDnaScreen(
                     else -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
-                            contentPadding = PaddingValues(top = 6.dp, bottom = 112.dp)
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 124.dp)
                         ) {
                             // 1. Primary Hero Card: Daily Rhythm Ring
                             item(key = "overview_rhythm_ring") {
@@ -688,10 +697,10 @@ fun RhythmDnaScreen(
                                             modifier = Modifier.weight(1f)
                                         )
                                         FlowInsightCard(
-                                            title = "Sound Moments",
+                                            title = "Saved Moments",
                                             value = if (momentsCount > 0) "$momentsCount saved" else "Save clip hooks",
                                             icon = Icons.Rounded.BookmarkBorder,
-                                            accent = Color(0xFFFFB000),
+                                            accent = Color(0xFFF59E0B),
                                             onClick = onOpenMoments,
                                             modifier = Modifier.weight(1f)
                                         )
@@ -753,13 +762,15 @@ fun RhythmDnaScreen(
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
                                                 text = if (hasExplicitAccount) "Profile" else "Sign In",
-                                                color = theme.primaryAccent,
-                                                fontSize = 13.sp,
+                                                color = Color(0xFFFAFAFA),
+                                                fontSize = 12.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color.White.copy(alpha = 0.06f))
+                                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
                                                     .clickable { onOpenAccountAuth() }
-                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                                             )
                                         }
                                     }
@@ -775,7 +786,7 @@ fun RhythmDnaScreen(
                                 ) {
                                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                         StudioSectionHeader(
-                                            title = "Adaptive Appearance",
+                                            title = "Appearance",
                                             actionLabel = if (isAuto) "Auto · ${theme.activePalette.name}" else "Enable Auto",
                                             onActionClick = {
                                                 onUpdateThemePreferences(
@@ -789,10 +800,10 @@ fun RhythmDnaScreen(
                                         )
 
                                         val atmospherePresets = listOf(
-                                            Triple("morning", "Glacier", Color(0xFF00E5FF)),
+                                            Triple("morning", "Glacier", Color(0xFF38BDF8)),
                                             Triple("afternoon", "Emerald", Color(0xFF10B981)),
-                                            Triple("evening", "Ember", Color(0xFFFFB000)),
-                                            Triple("night", "Violet", Color(0xFFA855F7))
+                                            Triple("evening", "Ember", Color(0xFFF59E0B)),
+                                            Triple("night", "Violet", Color(0xFFA78BFA))
                                         )
 
                                         Row(
@@ -808,11 +819,11 @@ fun RhythmDnaScreen(
                                                         .weight(1f)
                                                         .clip(RoundedCornerShape(10.dp))
                                                         .background(
-                                                            if (isSelected) color.copy(alpha = 0.20f) else Color(0xFF080C15).copy(alpha = 0.65f)
+                                                            if (isSelected) color.copy(alpha = 0.16f) else Color(0xFF18181D)
                                                         )
                                                         .border(
                                                             1.dp,
-                                                            if (isSelected) color.copy(alpha = 0.78f) else Color.White.copy(alpha = 0.10f),
+                                                            if (isSelected) color.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.08f),
                                                             RoundedCornerShape(10.dp)
                                                         )
                                                         .clickable {
@@ -885,68 +896,46 @@ fun RhythmDnaScreen(
                                 }
                             }
 
-                            // 6. Playback Output Card (clean "Speaker · XX dB" with zero phone model names)
+                            // 6. Playback Output (Compact 2-Column Music Player Selector)
                             item(key = "overview_playback_output") {
                                 val registry = remember(context) {
                                     com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
                                 }
-                                val installedProviders = remember(registry) {
-                                    registry.getInstalledProviders()
+                                val curatedProviders = remember(registry) {
+                                    com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
+                                        context = context,
+                                        rawProviders = registry.getInstalledProviders()
+                                    )
                                 }
                                 var preferredProviderId by remember(registry) {
                                     mutableStateOf(registry.getPreferredProviderId())
                                 }
 
                                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
                                         StudioSectionHeader(
                                             title = "Playback Output",
                                             actionLabel = "$audioRouteLabel · $dbValue dB",
                                             onActionClick = onOpenHearingHealth
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        StudioHairlineDivider()
 
-                                        installedProviders.forEachIndexed { idx, provider ->
-                                            val isSelected = preferredProviderId == provider.providerId ||
-                                                (provider.packageName != "*" && selectedTargetPlayer == provider.packageName)
-                                            val shortName = when (provider.providerId) {
-                                                "local_files" -> "Local Audio"
-                                                "tunemind_inapp" -> "TuneMind Player"
-                                                else -> provider.displayName
-                                            }
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        preferredProviderId = provider.providerId
-                                                        registry.setPreferredProviderId(provider.providerId)
-                                                        val pkg = provider.packageName.takeIf { it != "*" } ?: provider.providerId
-                                                        onSelectTargetPlayer(pkg)
-                                                    }
-                                                    .padding(vertical = 13.dp, horizontal = 2.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = shortName,
-                                                    color = if (isSelected) theme.primaryAccent else Color(0xFFF8FAFC),
-                                                    fontSize = 15.sp,
-                                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
-                                                )
-                                                if (isSelected) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.Check,
-                                                        contentDescription = "Selected",
-                                                        tint = theme.primaryAccent,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            }
-                                            if (idx < installedProviders.lastIndex) {
-                                                StudioHairlineDivider()
-                                            }
-                                        }
+                                        com.tunemind.app.ui.components.CompactMusicPlayerGrid(
+                                            providers = curatedProviders,
+                                            isProviderSelected = { provider ->
+                                                preferredProviderId == provider.providerId ||
+                                                    (provider.packageName != "*" && selectedTargetPlayer == provider.packageName)
+                                            },
+                                            onSelectProvider = { provider ->
+                                                preferredProviderId = provider.providerId
+                                                registry.setPreferredProviderId(provider.providerId)
+                                                val pkg = provider.packageName.takeIf { it != "*" } ?: provider.providerId
+                                                onSelectTargetPlayer(pkg)
+                                            },
+                                            context = context
+                                        )
                                     }
                                 }
                             }
@@ -995,46 +984,50 @@ private fun FlowInsightCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    SoftGlassCard(
+    val theme = LocalAdaptiveTheme.current
+    Row(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
-        accentTint = accent,
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(14.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(theme.cardSurface.copy(alpha = 0.72f))
+            .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(accent.copy(alpha = 0.16f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = title,
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = value,
-                    color = Color.White.copy(alpha = 0.62f),
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = title,
+                color = Color(0xFFFAFAFA),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 11.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

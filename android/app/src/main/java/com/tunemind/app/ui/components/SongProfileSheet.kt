@@ -129,13 +129,13 @@ data class SongProfileData(
                     name = "Familiar Feel",
                     weightPercent = harmonicFamiliarity,
                     description = "Comfort of melody and chord structure",
-                    color = Color(0xFF00E5FF)
+                    color = Color(0xFF38BDF8)
                 ),
                 TrackAnchorWeight(
                     name = "Rhythm & Groove",
                     weightPercent = rhythmicDrive,
                     description = "Tempo drive and beat momentum",
-                    color = Color(0xFFA855F7)
+                    color = Color(0xFFA78BFA)
                 ),
                 TrackAnchorWeight(
                     name = "Novelty & Spark",
@@ -887,7 +887,7 @@ fun SongProfileSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF0E131D),
+        containerColor = LocalAdaptiveTheme.current.cardSurface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         dragHandle = {
             Surface(

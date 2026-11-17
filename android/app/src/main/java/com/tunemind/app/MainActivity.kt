@@ -187,6 +187,8 @@ open class MainActivity : ComponentActivity() {
 
                     val coroutineScope = rememberCoroutineScope()
                     var requestedScreenPage by remember { mutableStateOf<Int?>(null) }
+                    var requestedDopamineSubTab by remember { mutableStateOf<Int?>(null) }
+                    var requestedRhythmSubDeck by remember { mutableStateOf<Int?>(null) }
                     var showSettingsScreen by remember { mutableStateOf(false) }
                     var showProfileScreen by remember { mutableStateOf(false) }
                     var showStatsScreen by remember { mutableStateOf(false) }
@@ -214,8 +216,42 @@ open class MainActivity : ComponentActivity() {
                         com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
                     }
 
+                    fun applyPlayerPreferenceUpdate(rawPlayer: String?, rememberDefault: Boolean) {
+                        val target = rawPlayer?.trim()?.takeIf { it.isNotBlank() } ?: return
+                        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+                        val matched = registry.getInstalledProviders().firstOrNull { p ->
+                            p.packageName.equals(target, ignoreCase = true) ||
+                                p.providerId.equals(target, ignoreCase = true) ||
+                                p.displayName.equals(target, ignoreCase = true) ||
+                                p.displayName.contains(target, ignoreCase = true)
+                        }
+                        val resolvedPkg = matched?.packageName?.ifBlank { matched.providerId } ?: target
+                        val resolvedId = matched?.providerId ?: when {
+                            resolvedPkg.contains("boomplay", ignoreCase = true) -> "boomplay"
+                            resolvedPkg.contains("youtube", ignoreCase = true) -> "youtube_music"
+                            resolvedPkg.contains("audiomack", ignoreCase = true) -> "audiomack"
+                            resolvedPkg.contains("tunemind", ignoreCase = true) -> "tunemind_inapp"
+                            resolvedPkg.contains("local", ignoreCase = true) -> "local_files"
+                            else -> "spotify"
+                        }
+                        selectedTargetPlayer = resolvedPkg
+                        if (rememberDefault) {
+                            playerPrefs.edit().putString("target_player_pkg", resolvedPkg).apply()
+                            registry.selectPlayer(resolvedId, true)
+                        }
+                    }
+
                     fun executeSingleAppToolAction(tool: com.tunemind.app.domain.execution.AgentToolCallPayload) {
+                        if (tool.remember_default_player == true && !tool.target_player.isNullOrBlank() && tool.action != "SELECT_MUSIC_PLAYER") {
+                            applyPlayerPreferenceUpdate(tool.target_player, rememberDefault = true)
+                        }
                         when (tool.action) {
+                            "SELECT_MUSIC_PLAYER" -> {
+                                applyPlayerPreferenceUpdate(
+                                    rawPlayer = tool.target_player,
+                                    rememberDefault = tool.remember_default_player != false
+                                )
+                            }
                             "PAUSE_PLAYBACK" -> {
                                 vm.pausePlayback()
                             }
@@ -294,7 +330,7 @@ open class MainActivity : ComponentActivity() {
                                         showSettingsScreen = false
                                         showSearchScreen = true
                                     }
-                                    screen.contains("NOW_PLAYING") || screen.contains("PLAYER") || screen.contains("QUEUE") -> {
+                                    screen.contains("NOW_PLAYING") || screen.contains("MINI_PLAYER") || screen.contains("QUEUE") -> {
                                         showNowPlayingScreen = true
                                     }
                                     screen.contains("NOTIF") || screen.contains("ALERT") -> {
@@ -353,10 +389,34 @@ open class MainActivity : ComponentActivity() {
                                         showNotificationsScreen = false
                                         showSupportScreen = false
                                         showLegalScreen = false
-                                        requestedScreenPage = when {
-                                            screen.contains("DOPAMINE") || screen.contains("VAULT") -> 0
-                                            screen.contains("RHYTHM") || screen.contains("DNA") || screen.contains("SPOTIFY") || screen.contains("HISTORY") -> 2
-                                            else -> 1
+                                        when {
+                                            screen.contains("FOR_YOU") || screen.contains("SUGGEST") || screen.contains("DISCOVER") -> {
+                                                requestedScreenPage = 0
+                                                requestedDopamineSubTab = 2
+                                            }
+                                            screen.contains("RESTING") || screen.contains("VAULT") || screen.contains("COOL") -> {
+                                                requestedScreenPage = 0
+                                                requestedDopamineSubTab = 1
+                                            }
+                                            screen.contains("FRESH") || screen.contains("DOPAMINE") -> {
+                                                requestedScreenPage = 0
+                                                requestedDopamineSubTab = 0
+                                            }
+                                            screen.contains("SPOTIFY") || screen.contains("LIBRARY") || screen.contains("PLAYLIST") -> {
+                                                requestedScreenPage = 2
+                                                requestedRhythmSubDeck = 2
+                                            }
+                                            screen.contains("HISTORY") -> {
+                                                requestedScreenPage = 2
+                                                requestedRhythmSubDeck = 3
+                                            }
+                                            screen.contains("RHYTHM") || screen.contains("DNA") -> {
+                                                requestedScreenPage = 2
+                                                requestedRhythmSubDeck = 0
+                                            }
+                                            else -> {
+                                                requestedScreenPage = 1
+                                            }
                                         }
                                     }
                                 }
@@ -375,6 +435,10 @@ open class MainActivity : ComponentActivity() {
                             getHearingInsights = { vm.hearingInsightsState.value },
                             getVaultTracks = { vm.vaultState.value },
                             getDopamineCapsule = { vm.compileDopamineCapsule() },
+                            getForYouPicks = { vm.aiDiscoveryCrate.value },
+                            getSpotifyPlaylists = { vm.spotifyPlaylists.value },
+                            getSpotifyLikedTracks = { vm.spotifyLikedTracks.value },
+                            getListeningStats = { vm.listeningStats.value },
                             getAppState = {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
@@ -715,7 +779,9 @@ open class MainActivity : ComponentActivity() {
                                                 onExportForYouPlaylist = { recs ->
                                                     val triples = recs.map { Triple(it.title, it.artist, it.spotifyUri) }
                                                     vm.exportForYouDropAsPlaylist("TuneMind Daily Drop", triples)
-                                                }
+                                                },
+                                                requestedSubTab = requestedDopamineSubTab,
+                                                onConsumeRequestedSubTab = { requestedDopamineSubTab = null }
                                             )
                                         }
                                         1 -> {
@@ -860,7 +926,9 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 tasteShiftSummary = tasteShiftSummary,
                                                 momentsCount = musicalMomentsState.confirmedMoments.size,
-                                                onRefreshStats = { vm.refreshLiveListeningStatsNow() }
+                                                onRefreshStats = { vm.refreshLiveListeningStatsNow() },
+                                                requestedSubDeck = requestedRhythmSubDeck,
+                                                onConsumeRequestedSubDeck = { requestedRhythmSubDeck = null }
                                             )
                                         }
                                     }

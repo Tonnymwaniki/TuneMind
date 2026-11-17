@@ -32,10 +32,10 @@ fun AdaptiveAtmosphereSection(
     val colors = TuneMindTheme.colors
 
     val themes = listOf(
-        Triple("morning", "Glacier", "#00E5FF"),
+        Triple("morning", "Glacier", "#38BDF8"),
         Triple("afternoon", "Emerald", "#10B981"),
-        Triple("evening", "Ember", "#FFB000"),
-        Triple("night", "Violet", "#A855F7")
+        Triple("evening", "Ember", "#F59E0B"),
+        Triple("night", "Violet", "#A78BFA")
     )
 
     Column(
