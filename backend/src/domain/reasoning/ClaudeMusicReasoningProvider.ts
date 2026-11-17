@@ -4,6 +4,7 @@ import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
 import { SelfLearningDiscoveryEngine } from '../recommendation/SelfLearningDiscoveryEngine';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
+import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import {
   coerceNonNegativePlayCount,
   normalizeSpotifyUri,
@@ -1321,9 +1322,74 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       if (rej.title) excludedSet.add(rej.title.toLowerCase().trim());
     }
 
-    let freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()) && t.playCount <= 4);
-    if (freshTracks.length === 0) {
-      freshTracks = allUserTracks.filter(t => !excludedSet.has(t.title.toLowerCase().trim()));
+    // Strict active Resting Vault exclusion: tracks currently cooling in Vault NEVER leak into Fresh pool
+    const activeVaultTitles = new Set<string>();
+    const activeVaultTrackIds = new Set<string>();
+    for (const vt of context.vault_tracks || []) {
+      if (vt?.title) activeVaultTitles.add(String(vt.title).toLowerCase().trim());
+      if ((vt as any)?.trackId) activeVaultTrackIds.add(String((vt as any).trackId).trim());
+    }
+    const isLockedInVault = (title: string, trackId?: string) =>
+      activeVaultTitles.has(title.toLowerCase().trim()) ||
+      (trackId ? activeVaultTrackIds.has(trackId.trim()) : false);
+
+    // Enrich candidate Fresh pool with untouched Spotify Liked Songs (not already heard / vaulted)
+    const freshCandidatePool: Array<typeof allUserTracks[number] & {
+      readinessScore?: number;
+      freshCategory?: string;
+      freshReason?: string;
+    }> = [];
+
+    for (const t of allUserTracks) {
+      if (isLockedInVault(t.title, t.trackId)) continue;
+      if (excludedSet.has(t.title.toLowerCase().trim())) continue;
+      const estimatedSatiety = Math.min(95, t.playCount * 20);
+      const baseFresh = Math.max(8, 100 - estimatedSatiety);
+      if (baseFresh < 35 && allUserTracks.length > 5) continue;
+      const assessed = RestingVaultEngine.computeFreshReadiness({
+        baseFreshnessPercent: baseFresh,
+        playCount: t.playCount,
+        isLikedOrSaved: false
+      });
+      freshCandidatePool.push({
+        ...t,
+        readinessScore: assessed.readinessScore,
+        freshCategory: assessed.category,
+        freshReason: assessed.freshReason
+      });
+    }
+
+    for (const liked of context.spotify_liked_tracks || []) {
+      const cleanTitle = String(liked.title || '').trim();
+      if (!cleanTitle || excludedSet.has(cleanTitle.toLowerCase())) continue;
+      if (isLockedInVault(cleanTitle, liked.track_id)) continue;
+      const cleanArtist = String(liked.artist || 'Spotify Library').trim();
+      const dupKey = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
+      if (historyMap.has(dupKey)) continue;
+      const assessed = RestingVaultEngine.computeFreshReadiness({
+        baseFreshnessPercent: 99,
+        playCount: 0,
+        isLikedOrSaved: true,
+        sourceLabel: 'Liked Song'
+      });
+      freshCandidatePool.push({
+        title: cleanTitle,
+        artist: cleanArtist,
+        trackId: liked.track_id || `trk:${cleanTitle.toLowerCase()}`,
+        spotifyUri: normalizeSpotifyUri(liked.spotify_uri),
+        source: 'com.spotify.music',
+        playCount: 0,
+        readinessScore: assessed.readinessScore,
+        freshCategory: assessed.category,
+        freshReason: assessed.freshReason
+      });
+    }
+
+    freshCandidatePool.sort((a, b) => (b.readinessScore || 0) - (a.readinessScore || 0));
+
+    let freshTracks = freshCandidatePool;
+    if (freshTracks.length === 0 && allUserTracks.length > 0) {
+      freshTracks = allUserTracks.filter(t => !isLockedInVault(t.title, t.trackId));
     }
     if (freshTracks.length === 0 && allUserTracks.length > 0) {
       freshTracks = [...allUserTracks];

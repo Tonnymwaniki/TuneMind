@@ -1,6 +1,7 @@
 package com.tunemind.app.domain.vault
 
 import java.util.Locale
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -45,6 +46,20 @@ object RestingVaultEngine {
         val freshnessPercent: Int,
         val isGraduated: Boolean,
         val remainingLabel: String
+    )
+
+    enum class FreshCategory {
+        COMEBACK,
+        UNPLAYED_GEM,
+        PEAK_FRESH,
+        WARMING_UP
+    }
+
+    data class FreshReadinessResult(
+        val readinessScore: Int,
+        val baseFreshnessPercent: Int,
+        val category: FreshCategory,
+        val freshReason: String
     )
 
     fun normalizeTrackKey(title: String?, artist: String?): String {
@@ -211,5 +226,83 @@ object RestingVaultEngine {
                 if (hours > 0) "${days}d ${hours}h left" else "${days}d left"
             }
         }
+    }
+
+    /**
+     * Mathematical Fresh Readiness [6, 100] & tier classification for non-Vault songs.
+     * Combines temporal base freshness, dormancy/rediscovery spacing, Vault graduation bonus,
+     * and library affinity / completion signals.
+     */
+    fun computeFreshReadiness(
+        baseFreshnessPercent: Int,
+        playCount: Int,
+        lastPlayedAtMs: Long = 0L,
+        isLikedOrSaved: Boolean = false,
+        isGraduatedComeback: Boolean = false,
+        restedDays: Float = 0f,
+        avgCompletionRatio: Float? = null,
+        sourceLabel: String? = null,
+        nowMs: Long = System.currentTimeMillis()
+    ): FreshReadinessResult {
+        val plays = max(0, playCount)
+        val baseFresh = baseFreshnessPercent.coerceIn(6, 99)
+        val daysSinceLast = if (lastPlayedAtMs > 0L) {
+            max(0.0, (nowMs - lastPlayedAtMs).toDouble() / DAY_MS.toDouble())
+        } else {
+            0.0
+        }
+
+        val dormancyBonus = if (plays == 0) {
+            6.0
+        } else {
+            (ln(1.0 + daysSinceLast) * 4.2).coerceIn(0.0, 10.0)
+        }
+        val comebackBonus = if (isGraduatedComeback) 10.0 else 0.0
+        val affinityBonus = if (isLikedOrSaved) 4.0 else 0.0
+        val completionAdj = when {
+            avgCompletionRatio == null || avgCompletionRatio <= 0f -> 0.0
+            avgCompletionRatio >= 0.75f -> 3.0
+            avgCompletionRatio < 0.35f -> -6.0
+            else -> 0.0
+        }
+
+        val readinessScore = (baseFresh + dormancyBonus + comebackBonus + affinityBonus + completionAdj)
+            .roundToInt()
+            .coerceIn(6, 100)
+
+        val category: FreshCategory
+        val freshReason: String
+        when {
+            isGraduatedComeback -> {
+                category = FreshCategory.COMEBACK
+                val restedTxt = if (restedDays > 0f) String.format(Locale.US, "%.1fd", restedDays) else "fully"
+                freshReason = "Graduated comeback · Rested $restedTxt"
+            }
+            plays == 0 -> {
+                category = FreshCategory.UNPLAYED_GEM
+                val prefix = sourceLabel?.takeIf { it.isNotBlank() }
+                    ?: if (isLikedOrSaved) "Liked Song" else "Library Gem"
+                freshReason = "$prefix · Untouched"
+            }
+            baseFresh >= 75 -> {
+                category = FreshCategory.PEAK_FRESH
+                freshReason = if (daysSinceLast >= 2.0) {
+                    "Crisp · ${daysSinceLast.toInt()}d since last play"
+                } else {
+                    "Low rotation · $plays ${if (plays == 1) "play" else "plays"}"
+                }
+            }
+            else -> {
+                category = FreshCategory.WARMING_UP
+                freshReason = "Approaching Vault · $baseFresh% fresh"
+            }
+        }
+
+        return FreshReadinessResult(
+            readinessScore = readinessScore,
+            baseFreshnessPercent = baseFresh,
+            category = category,
+            freshReason = freshReason
+        )
     }
 }

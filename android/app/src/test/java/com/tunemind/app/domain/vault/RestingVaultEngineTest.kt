@@ -68,4 +68,26 @@ class RestingVaultEngineTest {
         assertEquals(99, metrics.freshnessPercent)
         assertFalse(metrics.shouldAutoQuarantine)
     }
+
+    @Test
+    fun freshReadinessRewardsComebacksAndUntouchedLibraryGems() {
+        val comeback = RestingVaultEngine.computeFreshReadiness(
+            baseFreshnessPercent = 94,
+            playCount = 3,
+            isGraduatedComeback = true,
+            restedDays = 4.0f,
+            nowMs = now
+        )
+        val gem = RestingVaultEngine.computeFreshReadiness(
+            baseFreshnessPercent = 99,
+            playCount = 0,
+            isLikedOrSaved = true,
+            sourceLabel = "Liked Song",
+            nowMs = now
+        )
+        assertEquals(RestingVaultEngine.FreshCategory.COMEBACK, comeback.category)
+        assertEquals(100, comeback.readinessScore)
+        assertEquals(RestingVaultEngine.FreshCategory.UNPLAYED_GEM, gem.category)
+        assertEquals(100, gem.readinessScore)
+    }
 }

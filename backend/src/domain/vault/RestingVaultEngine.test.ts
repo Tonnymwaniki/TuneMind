@@ -130,4 +130,34 @@ describe('RestingVaultEngine mathematical model', () => {
     expect(memory.graduatedVaultTracks?.length).toBe(1);
     expect(memory.graduatedVaultTracks?.[0].title).toBe('Graduated Comeback');
   });
+
+  test('computeFreshReadiness rewards graduated comebacks and untouched liked gems cleanly', () => {
+    const comeback = RestingVaultEngine.computeFreshReadiness({
+      baseFreshnessPercent: 94,
+      playCount: 3,
+      isGraduatedComeback: true,
+      restedDays: 4.0,
+      nowMs: now
+    });
+    const gem = RestingVaultEngine.computeFreshReadiness({
+      baseFreshnessPercent: 99,
+      playCount: 0,
+      isLikedOrSaved: true,
+      sourceLabel: 'Liked Song',
+      nowMs: now
+    });
+    const warming = RestingVaultEngine.computeFreshReadiness({
+      baseFreshnessPercent: 48,
+      playCount: 3,
+      lastPlayedAtMs: now - 3_600_000,
+      nowMs: now
+    });
+
+    expect(comeback.category).toBe('COMEBACK');
+    expect(comeback.readinessScore).toBe(100);
+    expect(gem.category).toBe('UNPLAYED_GEM');
+    expect(gem.readinessScore).toBe(100);
+    expect(warming.category).toBe('WARMING_UP');
+    expect(warming.readinessScore).toBeLessThan(comeback.readinessScore);
+  });
 });

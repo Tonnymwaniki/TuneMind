@@ -160,6 +160,71 @@ export function createApp(): express.Express {
     }
   });
 
+  app.post('/api/v1/intelligence/fresh/rank', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
+      const sensitivity = Number(body.repetition_sensitivity ?? 0.75);
+      const rawCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+      const activeVault = Array.isArray(body.vault_tracks) ? body.vault_tracks : [];
+      const vaultKeys = new Set(
+        activeVault
+          .filter((v: any) => v && v.title)
+          .map((v: any) => `${String(v.title).trim().toLowerCase()}::${String(v.artist || '').trim().toLowerCase()}`)
+      );
+
+      const nowMs = Date.now();
+      const ranked = rawCandidates
+        .filter((c: any) => c && c.title)
+        .filter((c: any) => {
+          const k = `${String(c.title).trim().toLowerCase()}::${String(c.artist || '').trim().toLowerCase()}`;
+          return !vaultKeys.has(k);
+        })
+        .map((c: any) => {
+          const playTimestamps = Array.isArray(c.playTimestampsMs)
+            ? c.playTimestampsMs.map(Number).filter(Number.isFinite)
+            : [];
+          const fatigue = RestingVaultEngine.evaluateTrackFatigue({
+            playTimestampsMs: playTimestamps,
+            sensitivity,
+            lastRestoredAtMs: Number(c.lastRestoredAtMs || 0),
+            nowMs
+          });
+          const readiness = RestingVaultEngine.computeFreshReadiness({
+            baseFreshnessPercent: fatigue.freshnessPercent,
+            playCount: Number(c.playCount ?? playTimestamps.length ?? 0),
+            lastPlayedAtMs: Number(c.lastPlayedAtMs || playTimestamps[0] || 0),
+            isLikedOrSaved: Boolean(c.isLikedOrSaved),
+            isGraduatedComeback: Boolean(c.isGraduatedComeback),
+            restedDays: Number(c.restedDays || 0),
+            sourceLabel: c.sourceLabel,
+            nowMs
+          });
+          return {
+            title: String(c.title).trim(),
+            artist: String(c.artist || 'Unknown Artist').trim(),
+            trackId: c.trackId,
+            spotifyUri: c.spotifyUri,
+            playCount: Number(c.playCount ?? playTimestamps.length ?? 0),
+            shouldAutoQuarantine: fatigue.shouldAutoQuarantine,
+            ...readiness
+          };
+        })
+        .filter((r: any) => !r.shouldAutoQuarantine)
+        .sort((a: any, b: any) => b.readinessScore - a.readinessScore);
+
+      res.json({
+        status: 'ok',
+        user_id: identity.userId,
+        fresh_count: ranked.length,
+        fresh_tracks: ranked
+      });
+    } catch (err: any) {
+      console.error('[FreshRank] Error:', err);
+      res.status(500).json({ error: err?.message || 'Fresh ranking failed' });
+    }
+  });
+
   app.get('/api/v1/intelligence/growth', async (req: Request, res: Response) => {
     try {
       const identity = resolveEffectiveUserIdentity(

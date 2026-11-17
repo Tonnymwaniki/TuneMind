@@ -44,6 +44,15 @@ export interface TrackFatigueMetrics {
   entryReason: string;
 }
 
+export type FreshCategory = 'COMEBACK' | 'UNPLAYED_GEM' | 'PEAK_FRESH' | 'WARMING_UP';
+
+export interface FreshReadinessResult {
+  readinessScore: number;
+  baseFreshnessPercent: number;
+  category: FreshCategory;
+  freshReason: string;
+}
+
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
@@ -313,5 +322,75 @@ export class RestingVaultEngine {
     }
 
     return { activeVault, graduatedTracks };
+  }
+
+  /**
+   * Computes mathematical Fresh Readiness [0, 100] & category for tracks outside the active Vault.
+   * Combines temporal base freshness, dormancy/rediscovery spacing, Vault graduation comeback boost,
+   * and library affinity / completion signals.
+   */
+  public static computeFreshReadiness(params: {
+    baseFreshnessPercent: number;
+    playCount: number;
+    lastPlayedAtMs?: number;
+    isLikedOrSaved?: boolean;
+    isGraduatedComeback?: boolean;
+    restedDays?: number;
+    avgCompletionRatio?: number;
+    sourceLabel?: string;
+    nowMs?: number;
+  }): FreshReadinessResult {
+    const nowMs = params.nowMs ?? Date.now();
+    const plays = Math.max(0, Math.round(params.playCount || 0));
+    const baseFresh = clamp(Math.round(params.baseFreshnessPercent ?? 96), 6, 99);
+    const lastPlayed = params.lastPlayedAtMs || 0;
+    const daysSinceLast = lastPlayed > 0 ? Math.max(0, (nowMs - lastPlayed) / DAY_MS) : 0;
+
+    const dormancyBonus = plays === 0
+      ? 6
+      : clamp(Math.log1p(daysSinceLast) * 4.2, 0, 10);
+    const comebackBonus = params.isGraduatedComeback ? 10 : 0;
+    const affinityBonus = params.isLikedOrSaved ? 4 : 0;
+    const completionAdj =
+      typeof params.avgCompletionRatio === 'number' && params.avgCompletionRatio > 0
+        ? params.avgCompletionRatio >= 0.75
+          ? 3
+          : params.avgCompletionRatio < 0.35
+            ? -6
+            : 0
+        : 0;
+
+    const readinessScore = Math.round(
+      clamp(baseFresh + dormancyBonus + comebackBonus + affinityBonus + completionAdj, 6, 100)
+    );
+
+    let category: FreshCategory;
+    let freshReason: string;
+    if (params.isGraduatedComeback) {
+      category = 'COMEBACK';
+      const restedTxt = params.restedDays && params.restedDays > 0 ? `${params.restedDays.toFixed(1)}d` : 'fully';
+      freshReason = `Graduated comeback · Rested ${restedTxt}`;
+    } else if (plays === 0) {
+      category = 'UNPLAYED_GEM';
+      const prefix = params.sourceLabel || (params.isLikedOrSaved ? 'Liked Song' : 'Library Gem');
+      freshReason = `${prefix} · Untouched`;
+    } else if (baseFresh >= 75) {
+      category = 'PEAK_FRESH';
+      if (daysSinceLast >= 2) {
+        freshReason = `Crisp · ${Math.floor(daysSinceLast)}d since last play`;
+      } else {
+        freshReason = `Low rotation · ${plays} ${plays === 1 ? 'play' : 'plays'}`;
+      }
+    } else {
+      category = 'WARMING_UP';
+      freshReason = `Approaching Vault · ${baseFresh}% fresh`;
+    }
+
+    return {
+      readinessScore,
+      baseFreshnessPercent: baseFresh,
+      category,
+      freshReason
+    };
   }
 }

@@ -1277,11 +1277,21 @@ class TuneMindViewModel : ViewModel() {
     val currentTimeSlot: TimeSlot
         get() = TimeSlot.currentSlot()
 
+    fun getRestoredVaultTimestampsSnapshot(): Map<String, Long> = loadRestoredVaultMapFromPrefs()
+
     private fun buildFreshQueueCandidates(): List<DopamineCapsuleTrack> {
         val slot = currentTimeSlot
+        val nowMs = System.currentTimeMillis()
         val vault = _vaultState.value
         val coolingKeys = vault
-            .filter { it.recoveryProgress < 0.50f }
+            .filter {
+                !com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                    quarantinedAtMs = it.quarantinedAtMs,
+                    totalDays = it.totalDays,
+                    baseSatietyScore = it.satietyScore,
+                    nowMs = nowMs
+                ).isGraduated
+            }
             .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
             .toSet()
 
@@ -1313,22 +1323,17 @@ class TuneMindViewModel : ViewModel() {
             rawCandidates.add(track)
         }
 
-        // 1. Cooldown Vault comebacks ready for high-dopamine return (>= 50% recovered)
-        vault.filter { it.recoveryProgress >= 0.50f }.forEach { vt ->
-            val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(vt.spotifyUri)
+        // 1. Graduated Vault comebacks (completed full cooldown & ready for peak return)
+        _recentlyGraduatedVaultTracks.value.forEach { grad ->
+            val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(grad.spotifyUri)
             addCandidateIfEligible(
                 DopamineCapsuleTrack(
-                    title = vt.title,
-                    artist = vt.artist,
+                    title = grad.title,
+                    artist = grad.artist,
                     spotifyUri = cleanUri,
-                    freshnessPercent = (vt.recoveryProgress * 100).toInt().coerceIn(72, 98),
-                    reason = "Rested in Cooldown Vault • Ready for high-dopamine comeback",
-                    trackId = TrackIdentityResolver.resolveCanonicalTrackId(
-                        trackId = vt.trackId.ifBlank { null },
-                        spotifyUri = cleanUri,
-                        title = vt.title,
-                        artist = vt.artist
-                    )
+                    freshnessPercent = 98,
+                    reason = "Graduated Vault Comeback (${grad.totalRestedDays}d rest complete)",
+                    trackId = grad.trackId
                 )
             )
         }
@@ -1343,41 +1348,42 @@ class TuneMindViewModel : ViewModel() {
                         title = rec.title,
                         artist = rec.artist,
                         spotifyUri = cleanUri,
-                        freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(82, 97),
+                        freshnessPercent = (rec.confidence * 100f).toInt().coerceIn(84, 98),
                         reason = rec.reason.takeIf { it.isNotBlank() } ?: "AI Discovery pick for ${slot.label}",
                         trackId = rec.resolvedCanonicalTrackId()
                     )
                 )
             }
 
-        // 3. Low-habituation Unified / Recent tracks
-        val recents = _historyState.value.tracks.ifEmpty { _homeState.value.recentTracks }
-        recents
-            .filter { !it.title.isNullOrBlank() }
-            .sortedWith(
-                compareBy<TrackMemoryEntry> { it.distinctAppearanceCount }
-                    .thenBy { it.lastObservedAppearanceAtMs }
-            )
-            .forEach { entry ->
-                val tTitle = entry.title?.trim() ?: return@forEach
-                val tArtist = entry.artist?.trim()?.ifBlank { "Your Library" } ?: "Your Library"
-                val plays = entry.distinctAppearanceCount.coerceAtLeast(0)
-                val freshness = (100 - minOf(84, plays * 14)).coerceIn(70, 96)
-                val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(entry.providerTrackId)
-                val playLabel = if (plays > 0) "Low receptor habituation ($plays ${if (plays == 1) "play" else "plays"})" else "Fresh track"
-                addCandidateIfEligible(
-                    DopamineCapsuleTrack(
-                        title = tTitle,
-                        artist = tArtist,
-                        spotifyUri = cleanUri,
-                        freshnessPercent = freshness,
-                        reason = "$playLabel • Calibrated for ${slot.label}",
-                        trackId = entry.canonicalTrackId()
-                    )
+        // 3. Mathematically Fresh Unified / Recent tracks ranked by RestingVaultEngine.computeFreshReadiness
+        val unifiedRanked = _unifiedTracks.value
+            .filter { !it.isCoolingDown && it.title.isNotBlank() }
+            .map { ut ->
+                val readiness = com.tunemind.app.domain.vault.RestingVaultEngine.computeFreshReadiness(
+                    baseFreshnessPercent = ut.freshnessPercent,
+                    playCount = ut.verifiedPlayCount,
+                    lastPlayedAtMs = ut.lastPlayedAtMs,
+                    nowMs = nowMs
                 )
+                ut to readiness
             }
+            .sortedByDescending { it.second.readinessScore }
 
-        // 4. Saved AI recommendations & Spotify Liked Songs for deep non-repeating variety
+        unifiedRanked.forEach { (ut, readiness) ->
+            val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(ut.spotifyUri)
+            addCandidateIfEligible(
+                DopamineCapsuleTrack(
+                    title = ut.title,
+                    artist = ut.artist,
+                    spotifyUri = cleanUri,
+                    freshnessPercent = readiness.readinessScore,
+                    reason = "${readiness.freshReason} • Calibrated for ${slot.label}",
+                    trackId = ut.trackId
+                )
+            )
+        }
+
+        // 4. Saved AI recommendations & untouched Spotify Liked Songs for deep non-repeating variety
         _savedAiRecommendations.value.forEach { rec ->
             val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
             addCandidateIfEligible(
@@ -1385,7 +1391,7 @@ class TuneMindViewModel : ViewModel() {
                     title = rec.title,
                     artist = rec.artist,
                     spotifyUri = cleanUri,
-                    freshnessPercent = 88,
+                    freshnessPercent = 94,
                     reason = "Saved For You • Calibrated for ${slot.label}",
                     trackId = rec.resolvedCanonicalTrackId()
                 )
@@ -1394,13 +1400,23 @@ class TuneMindViewModel : ViewModel() {
 
         _spotifyLikedTracks.value.forEach { liked ->
             val cleanUri = TrackIdentityResolver.normalizeSpotifyUri(liked.spotifyUri)
+            val resolvedPlays = resolvePlayCount(liked.trackTitle, liked.artistName, cleanUri, liked.trackId)
+            val vStatus = resolveTrackVaultStatus(liked.trackTitle, liked.artistName, cleanUri, liked.trackId)
+            if (vStatus.isInVault || vStatus.isCoolingDown) return@forEach
+            val readiness = com.tunemind.app.domain.vault.RestingVaultEngine.computeFreshReadiness(
+                baseFreshnessPercent = if (resolvedPlays == 0) 99 else vStatus.freshnessPercent,
+                playCount = resolvedPlays,
+                isLikedOrSaved = true,
+                sourceLabel = "Liked Song",
+                nowMs = nowMs
+            )
             addCandidateIfEligible(
                 DopamineCapsuleTrack(
                     title = liked.trackTitle,
                     artist = liked.artistName.ifBlank { "Spotify Library" },
                     spotifyUri = cleanUri,
-                    freshnessPercent = 84,
-                    reason = "From your Spotify Liked Songs • Fresh rotation",
+                    freshnessPercent = readiness.readinessScore,
+                    reason = "${readiness.freshReason} • Calibrated for ${slot.label}",
                     trackId = TrackIdentityResolver.resolveCanonicalTrackId(
                         trackId = liked.trackId,
                         spotifyUri = cleanUri,
@@ -1468,8 +1484,16 @@ class TuneMindViewModel : ViewModel() {
             recordConsumedQueueTrack(activeTitle, activeArtist)
         }
 
+        val nowMs = System.currentTimeMillis()
         val coolingKeys = _vaultState.value
-            .filter { it.recoveryProgress < 0.50f }
+            .filter {
+                !com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                    quarantinedAtMs = it.quarantinedAtMs,
+                    totalDays = it.totalDays,
+                    baseSatietyScore = it.satietyScore,
+                    nowMs = nowMs
+                ).isGraduated
+            }
             .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
             .toSet()
 

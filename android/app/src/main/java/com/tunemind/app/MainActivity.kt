@@ -138,6 +138,7 @@ open class MainActivity : ComponentActivity() {
                     val loadedPlaylistIds by vm.loadedPlaylistIds.collectAsState()
                     val playlistTrackErrors by vm.playlistTrackErrors.collectAsState()
                     val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
+                    val savedAiRecommendations by vm.savedAiRecommendations.collectAsState()
                     val forYouLearningState by vm.forYouLearningState.collectAsState()
                     val isDiscovering by vm.isDiscovering.collectAsState()
                     val spotifyUserProfile by vm.spotifyUserProfile.collectAsState()
@@ -799,7 +800,11 @@ open class MainActivity : ComponentActivity() {
                                                 onTickVaultLifecycle = { vm.refreshVaultLifecycleNow(syncWithBackend = false) },
                                                 resolveTrackVaultStatus = { t, a, uri, id ->
                                                     vm.resolveTrackVaultStatus(t, a, uri, id)
-                                                }
+                                                },
+                                                likedTracks = spotifyLikedTracks,
+                                                playlists = spotifyPlaylists,
+                                                savedRecommendations = savedAiRecommendations,
+                                                restoredAtMap = vm.getRestoredVaultTimestampsSnapshot()
                                             )
                                         }
                                         1 -> {
