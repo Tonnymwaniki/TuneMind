@@ -76,6 +76,32 @@ object TrackIdentityResolver {
         return "$prefix:$artistSlug::$titleSlug"
     }
 
+    /**
+     * Strips featuring tags, remaster/radio-edit suffixes, and secondary artists so
+     * Spotify tracks and MediaSession tracks resolve to one consistent lookup key.
+     */
+    fun buildNormalizedMatchKey(title: String?, artist: String?): String {
+        val cleanTitle = title.orEmpty()
+            .trim()
+            .lowercase()
+            .replace(Regex("\\s*\\([^)]*\\)"), "")
+            .replace(Regex("\\s*\\[[^\\]]*\\]"), "")
+            .replace(Regex("\\s+-\\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+        val primaryArtist = artist.orEmpty()
+            .trim()
+            .lowercase()
+            .split(Regex("\\s*(,|&|feat\\.?|ft\\.?|\\bx\\b)\\s*"), limit = 2)
+            .firstOrNull()
+            .orEmpty()
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+            .takeIf { it.isNotBlank() && it != "unknown artist" }
+            .orEmpty()
+        return "$cleanTitle|$primaryArtist"
+    }
+
     fun isEphemeralUiListKey(rawId: String?): Boolean {
         val lower = rawId?.trim()?.lowercase().orEmpty()
         if (lower.isEmpty()) return false

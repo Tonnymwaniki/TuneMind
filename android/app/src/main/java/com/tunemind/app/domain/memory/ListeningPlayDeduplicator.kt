@@ -619,11 +619,25 @@ object ListeningPlayDeduplicator {
             )
         }.sortedByDescending { it.lastPlayedAtMs }
 
-        val countByKey = unifiedTracks.associate { it.trackKey to it.verifiedPlayCount }
+        val countByKey = buildMap {
+            for (track in unifiedTracks) {
+                put(track.trackKey, maxOf(get(track.trackKey) ?: 0, track.verifiedPlayCount))
+                val normMatch = TrackIdentityResolver.buildNormalizedMatchKey(track.title, track.artist)
+                if (normMatch.isNotBlank() && normMatch != "|") {
+                    put(normMatch, maxOf(get(normMatch) ?: 0, track.verifiedPlayCount))
+                }
+            }
+        }
         val countByUri = unifiedTracks.mapNotNull { track ->
             track.spotifyUri?.let { it.lowercase(Locale.ROOT) to track.verifiedPlayCount }
         }.toMap()
-        val countByTrackId = unifiedTracks.associate { it.trackId to it.verifiedPlayCount }
+        val countByTrackId = buildMap {
+            for (track in unifiedTracks) {
+                put(track.trackId, maxOf(get(track.trackId) ?: 0, track.verifiedPlayCount))
+                val detId = TrackIdentityResolver.buildDeterministicTrackId(track.title, track.artist)
+                put(detId, maxOf(get(detId) ?: 0, track.verifiedPlayCount))
+            }
+        }
 
         // 4. Compute Cross-App Stats & Habit Analytics
         val calStartOfToday = Calendar.getInstance().apply {

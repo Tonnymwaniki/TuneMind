@@ -55,6 +55,31 @@ export function buildDeterministicTrackId(
   return `${prefix}:${artistSlug}::${titleSlug}`;
 }
 
+/**
+ * Normalizes title/artist variations (stripping feat/remaster suffixes and secondary artists)
+ * so Spotify library/API entries and device MediaSession plays converge onto one track record.
+ */
+export function buildNormalizedMatchKey(
+  title?: string | null,
+  artist?: string | null
+): string {
+  const cleanTitle = (title || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/\s*\[[^\]]*\]/g, '')
+    .replace(/\s+-\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  const rawPrimary = (artist || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s*(?:,|&|feat\.?|ft\.?|\bx\b)\s*/)[0] || '';
+  const cleanArtist = rawPrimary.replace(/[^a-z0-9]+/g, ' ').trim();
+  const finalArtist = cleanArtist && cleanArtist !== 'unknown artist' ? cleanArtist : '';
+  return `${cleanTitle}|${finalArtist}`;
+}
+
 const UI_LIST_KEY_PREFIXES = [
   'hist_',
   'sp_like_',

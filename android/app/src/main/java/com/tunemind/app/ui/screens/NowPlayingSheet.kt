@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.voice.PendingProposedTrack
 import com.tunemind.app.provider.SpotifyAppRemoteManager
 import com.tunemind.app.provider.TuneMindInAppPlayer
@@ -41,6 +42,7 @@ import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
+import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
@@ -61,6 +63,7 @@ fun NowPlayingSheet(
     val homeState by vm.homeState.collectAsState()
     val liveSpotify by vm.spotifyLiveState.collectAsState()
     val vaultState by vm.vaultState.collectAsState()
+    val unifiedTracks by vm.unifiedTracks.collectAsState()
     val manualFreshTracks by vm.manualFreshTracks.collectAsState()
     val freshExcludedKeys by vm.freshExcludedKeys.collectAsState()
     val upNextQueueState by vm.upNextQueueState.collectAsState()
@@ -345,10 +348,38 @@ fun NowPlayingSheet(
 
             if (hasTrack) {
                 Spacer(modifier = Modifier.height(8.dp))
+                val currentCanonicalTrackId = remember(
+                    nowPlaying?.trackId,
+                    activeSpotifyUri,
+                    effectiveTitle,
+                    effectiveArtist
+                ) {
+                    TrackIdentityResolver.resolveCanonicalTrackId(
+                        trackId = nowPlaying?.trackId,
+                        spotifyUri = activeSpotifyUri,
+                        title = effectiveTitle,
+                        artist = effectiveArtist
+                    )
+                }
+                val currentPlayCount = remember(
+                    effectiveTitle,
+                    effectiveArtist,
+                    activeSpotifyUri,
+                    currentCanonicalTrackId,
+                    unifiedTracks
+                ) {
+                    vm.resolvePlayCount(
+                        title = effectiveTitle,
+                        artist = effectiveArtist,
+                        spotifyUri = activeSpotifyUri,
+                        trackId = currentCanonicalTrackId
+                    )
+                }
+                val playsLabel = "$currentPlayCount ${if (currentPlayCount == 1) "play" else "plays"}"
                 val statusLabel = when {
-                    currentVaultStatus.isInVault -> "Resting · ${currentVaultStatus.cooldownRemainingLabel ?: "Locked"}"
-                    currentVaultStatus.isManualFresh -> "In Fresh · ${currentVaultStatus.freshnessPercent}% ready"
-                    else -> "${currentVaultStatus.freshnessPercent}% fresh"
+                    currentVaultStatus.isInVault -> "$playsLabel · Resting · ${currentVaultStatus.cooldownRemainingLabel ?: "Locked"}"
+                    currentVaultStatus.isManualFresh -> "$playsLabel · In Fresh · ${currentVaultStatus.freshnessPercent}% ready"
+                    else -> "$playsLabel · ${currentVaultStatus.freshnessPercent}% fresh"
                 }
                 val statusColor = if (currentVaultStatus.isInVault) warnAmber else safeGreen
                 Box(
@@ -662,97 +693,74 @@ fun NowPlayingSheet(
                         )
                     } else {
                         queueTracks.forEachIndexed { idx, capTrack ->
-                            val capMedia = rememberResolvedTrackMedia(
-                                title = capTrack.title,
-                                artist = capTrack.artist,
-                                spotifyUri = capTrack.spotifyUri
-                            )
                             val isNext = idx == 0
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (isNext) neonCyan.copy(alpha = 0.08f) else Color.Transparent
-                                    )
-                                    .clickable {
-                                        vm.playQueuedTrack(capTrack, selectedTargetPlayer)
-                                        actionStatus = null
-                                    }
-                                    .padding(vertical = 7.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            val canonicalCapId = TrackIdentityResolver.resolveCanonicalTrackId(
+                                trackId = capTrack.trackId.ifBlank { null },
+                                spotifyUri = capTrack.spotifyUri,
+                                title = capTrack.title,
+                                artist = capTrack.artist
+                            )
+                            val livePlays = remember(
+                                capTrack.title,
+                                capTrack.artist,
+                                capTrack.spotifyUri,
+                                canonicalCapId,
+                                capTrack.playCount,
+                                unifiedTracks
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (isNext) neonCyan.copy(alpha = 0.22f)
-                                            else Color.White.copy(alpha = 0.07f)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${idx + 1}",
-                                        color = if (isNext) neonCyan else Color.White.copy(alpha = 0.65f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                LayeredSongArtistBadge(
-                                    albumArtUrl = capMedia.albumArtUrl,
-                                    artistImageUrl = capMedia.artistImageUrl,
+                                vm.resolvePlayCount(
                                     title = capTrack.title,
                                     artist = capTrack.artist,
-                                    accentColor = if (isNext) neonCyan else theme.primaryAccent,
-                                    size = 42.dp
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = capTrack.title,
-                                        color = Color(0xFFF8FAFC),
-                                        fontSize = 14.sp,
-                                        fontWeight = if (isNext) FontWeight.Bold else FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${capTrack.artist} · ${capTrack.freshnessPercent}% fresh",
-                                        color = if (isNext) neonCyan.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.58f),
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                if (idx > 0) {
+                                    spotifyUri = capTrack.spotifyUri,
+                                    trackId = canonicalCapId
+                                ).coerceAtLeast(capTrack.playCount)
+                            }
+                            TuneMindTrackCard(
+                                title = capTrack.title,
+                                artist = capTrack.artist,
+                                playCount = livePlays,
+                                showUnplayedLabel = true,
+                                isCurrentlyPlaying = false,
+                                freshnessPercent = capTrack.freshnessPercent,
+                                accentColor = if (isNext) neonCyan else theme.primaryAccent,
+                                leadingIndex = idx + 1,
+                                spotifyUri = capTrack.spotifyUri,
+                                trackId = canonicalCapId,
+                                trailingActions = {
+                                    if (idx > 0) {
+                                        IconButton(
+                                            onClick = { vm.moveUpNextTrackToTop(capTrack) },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.VerticalAlignTop,
+                                                contentDescription = "Move to #1",
+                                                tint = Color.White.copy(alpha = 0.65f),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                     IconButton(
-                                        onClick = { vm.moveUpNextTrackToTop(capTrack) },
+                                        onClick = { vm.removeFromUpNextQueue(capTrack) },
                                         modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Rounded.VerticalAlignTop,
-                                            contentDescription = "Move to #1",
-                                            tint = Color.White.copy(alpha = 0.65f),
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = "Swap track",
+                                            tint = Color.White.copy(alpha = 0.48f),
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
+                                },
+                                onPlayClick = {
+                                    vm.playQueuedTrack(capTrack, selectedTargetPlayer)
+                                    actionStatus = null
+                                },
+                                onCardClick = {
+                                    vm.playQueuedTrack(capTrack, selectedTargetPlayer)
+                                    actionStatus = null
                                 }
-                                IconButton(
-                                    onClick = { vm.removeFromUpNextQueue(capTrack) },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Close,
-                                        contentDescription = "Swap track",
-                                        tint = Color.White.copy(alpha = 0.48f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            if (idx < queueTracks.lastIndex) {
-                                StudioHairlineDivider()
-                            }
+                            )
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 import { getLiveSupabaseClient, isSupabaseLive } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
 import {
+  buildNormalizedMatchKey,
   coerceNonNegativePlayCount,
   normalizeSpotifyUri,
   resolveCanonicalTrackIdentity
@@ -96,6 +97,55 @@ export class SupabaseIntelligenceStore {
     return 'tunemind-default-user';
   }
 
+  private static upsertLearnedTrack(
+    userPrefix: string,
+    raw: {
+      title: string;
+      artist?: string;
+      trackId?: string;
+      spotifyUri?: string;
+      playCount?: unknown;
+      source?: string;
+      lastPlayedAt?: string;
+    }
+  ): void {
+    const cleanTitle = raw.title.trim();
+    if (!cleanTitle) return;
+    const cleanArtist = (raw.artist || 'Unknown Artist').trim();
+    const identity = resolveCanonicalTrackIdentity({
+      trackId: raw.trackId,
+      spotifyUri: raw.spotifyUri,
+      title: cleanTitle,
+      artist: cleanArtist
+    });
+    const normKey = buildNormalizedMatchKey(cleanTitle, cleanArtist);
+    const key = `${userPrefix}${normKey || `${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`}`;
+    const existing = this.inMemoryLearnedTracks.get(key);
+    const count = coerceNonNegativePlayCount(raw.playCount);
+    if (!existing) {
+      this.inMemoryLearnedTracks.set(key, {
+        trackId: identity.trackId,
+        title: cleanTitle,
+        artist: cleanArtist,
+        spotifyUri: identity.spotifyUri,
+        playCount: count,
+        source: raw.source || 'com.spotify.music',
+        lastPlayedAt: raw.lastPlayedAt
+      });
+      return;
+    }
+    existing.playCount = Math.max(existing.playCount, count);
+    if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
+      existing.trackId = identity.trackId;
+    }
+    if (!existing.spotifyUri && identity.spotifyUri) {
+      existing.spotifyUri = identity.spotifyUri;
+    }
+    if (raw.lastPlayedAt) {
+      existing.lastPlayedAt = raw.lastPlayedAt;
+    }
+  }
+
   /**
    * Syncs a batch of Spotify / OS listening history tracks from the Android phone into:
    * 1. Live Supabase (`listening_events`, `user_taste_genome`, and `agent_interventions` snapshot)
@@ -130,37 +180,15 @@ export class SupabaseIntelligenceStore {
     const nowIso = new Date().toISOString();
 
     for (const t of validTracks) {
-      const cleanTitle = t.title.trim();
-      const cleanArtist = (t.artist || 'Unknown Artist').trim();
-      const identity = resolveCanonicalTrackIdentity({
+      this.upsertLearnedTrack(`${cleanUserId}::`, {
+        title: t.title,
+        artist: t.artist,
         trackId: t.trackId,
         spotifyUri: t.spotifyUri,
-        title: cleanTitle,
-        artist: cleanArtist
+        playCount: t.playCount,
+        source: t.source,
+        lastPlayedAt: nowIso
       });
-      const count = coerceNonNegativePlayCount(t.playCount);
-      const key = `${cleanUserId}::${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
-      const existing = this.inMemoryLearnedTracks.get(key);
-      if (!existing) {
-        this.inMemoryLearnedTracks.set(key, {
-          trackId: identity.trackId,
-          title: cleanTitle,
-          artist: cleanArtist,
-          spotifyUri: identity.spotifyUri,
-          playCount: count,
-          source: t.source || 'com.spotify.music',
-          lastPlayedAt: nowIso
-        });
-      } else {
-        existing.playCount = Math.max(existing.playCount, count);
-        if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
-          existing.trackId = identity.trackId;
-        }
-        if (!existing.spotifyUri && identity.spotifyUri) {
-          existing.spotifyUri = identity.spotifyUri;
-        }
-        existing.lastPlayedAt = nowIso;
-      }
     }
 
     // Mirror into persistent EventStore
@@ -507,36 +535,15 @@ export class SupabaseIntelligenceStore {
         if (!eventErr && Array.isArray(eventRows)) {
           for (const row of eventRows) {
             if (row.track_title) {
-              const cleanTitle = String(row.track_title).trim();
-              const cleanArtist = String(row.track_artist || 'Unknown Artist').trim();
-              const identity = resolveCanonicalTrackIdentity({
+              this.upsertLearnedTrack(userPrefix, {
+                title: String(row.track_title),
+                artist: String(row.track_artist || 'Unknown Artist'),
                 trackId: row.track_id,
                 spotifyUri: row.spotify_uri,
-                title: cleanTitle,
-                artist: cleanArtist
+                playCount: row.play_count,
+                source: row.media_source,
+                lastPlayedAt: row.observed_at
               });
-              const key = `${userPrefix}${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
-              const existing = this.inMemoryLearnedTracks.get(key);
-              const count = coerceNonNegativePlayCount(row.play_count);
-              if (!existing) {
-                this.inMemoryLearnedTracks.set(key, {
-                  trackId: identity.trackId,
-                  title: cleanTitle,
-                  artist: cleanArtist,
-                  spotifyUri: identity.spotifyUri,
-                  playCount: count,
-                  source: row.media_source || 'com.spotify.music',
-                  lastPlayedAt: row.observed_at
-                });
-              } else {
-                existing.playCount = Math.max(existing.playCount, count);
-                if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
-                  existing.trackId = identity.trackId;
-                }
-                if (!existing.spotifyUri && identity.spotifyUri) {
-                  existing.spotifyUri = identity.spotifyUri;
-                }
-              }
             }
           }
         }
@@ -581,36 +588,15 @@ export class SupabaseIntelligenceStore {
             if (Array.isArray(topTracks)) {
               for (const t of topTracks) {
                 if (!t?.title) continue;
-                const cleanTitle = String(t.title).trim();
-                const cleanArtist = String(t.artist || 'Unknown Artist').trim();
-                const identity = resolveCanonicalTrackIdentity({
+                this.upsertLearnedTrack(userPrefix, {
+                  title: String(t.title),
+                  artist: String(t.artist || 'Unknown Artist'),
                   trackId: t.trackId,
                   spotifyUri: t.spotifyUri,
-                  title: cleanTitle,
-                  artist: cleanArtist
+                  playCount: t.playCount,
+                  source: t.source,
+                  lastPlayedAt: t.lastPlayedAt
                 });
-                const key = `${userPrefix}${cleanTitle.toLowerCase()}::${cleanArtist.toLowerCase()}`;
-                const existing = this.inMemoryLearnedTracks.get(key);
-                const count = coerceNonNegativePlayCount(t.playCount);
-                if (!existing) {
-                  this.inMemoryLearnedTracks.set(key, {
-                    trackId: identity.trackId,
-                    title: cleanTitle,
-                    artist: cleanArtist,
-                    spotifyUri: identity.spotifyUri,
-                    playCount: count,
-                    source: t.source || 'com.spotify.music',
-                    lastPlayedAt: t.lastPlayedAt
-                  });
-                } else {
-                  existing.playCount = Math.max(existing.playCount, count);
-                  if ((!existing.trackId || existing.trackId.startsWith('trk:')) && !identity.trackId.startsWith('trk:')) {
-                    existing.trackId = identity.trackId;
-                  }
-                  if (!existing.spotifyUri && identity.spotifyUri) {
-                    existing.spotifyUri = identity.spotifyUri;
-                  }
-                }
               }
             }
           }

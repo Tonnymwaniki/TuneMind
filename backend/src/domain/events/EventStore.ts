@@ -8,7 +8,11 @@
 
 import fs from 'fs';
 import path from 'path';
-import { coerceNonNegativePlayCount, resolveCanonicalTrackIdentity } from '../identity/trackIdentity';
+import {
+  buildNormalizedMatchKey,
+  coerceNonNegativePlayCount,
+  resolveCanonicalTrackIdentity
+} from '../identity/trackIdentity';
 
 export interface StoredEvent {
   event_id: string;
@@ -202,7 +206,8 @@ export class EventStore {
         artist: cleanArtist
       });
       const playCount = coerceNonNegativePlayCount(t.playCount);
-      const safeKey = `${cleanTitle.toLowerCase()}-${cleanArtist.toLowerCase()}`.replace(/[^a-z0-9-]/g, '_');
+      const normMatch = buildNormalizedMatchKey(cleanTitle, cleanArtist) || `${cleanTitle.toLowerCase()}-${cleanArtist.toLowerCase()}`;
+      const safeKey = normMatch.replace(/[^a-z0-9-]/g, '_');
       const eventId = `client-sync-${userSlug}-${safeKey}`;
       const now = new Date().toISOString();
       const payloadJson = JSON.stringify({
@@ -325,7 +330,7 @@ export class EventStore {
             ? 1
             : 0;
 
-          const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
+          const key = buildNormalizedMatchKey(cleanTitle, cleanArtist) || `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
           const existing = tracksMap.get(key);
           if (existing) {
             if (isClientSync || hasExplicitPlayCount) {

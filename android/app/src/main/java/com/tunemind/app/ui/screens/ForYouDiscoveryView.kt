@@ -188,6 +188,7 @@ fun LazyListScope.forYouDiscoveryItems(
     isDiscovering: Boolean,
     totalWildcardsInCycle: Int = 0,
     lockedWildcardsCount: Int = 0,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onRefreshForYou: () -> Unit,
     onPlayTrack: (AiRecommendationEntity) -> Unit,
@@ -305,6 +306,7 @@ fun LazyListScope.forYouDiscoveryItems(
                 wildcards = wildcards,
                 totalInCycle = maxOf(wildcards.size, totalWildcardsInCycle),
                 lockedCount = lockedWildcardsCount,
+                resolvePlayCount = resolvePlayCount,
                 isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                 onPlayTrack = onPlayTrack,
                 onPreviewTrack = onPreviewTrack,
@@ -398,8 +400,10 @@ fun LazyListScope.forYouDiscoveryItems(
                     }
 
                     tracks.forEach { rec ->
+                        val plays = resolvePlayCount(rec.title, rec.artist, rec.spotifyUri)
                         ForYouGenreTrackCard(
                             rec = rec,
+                            playCount = plays,
                             isPlaying = isTrackCurrentlyPlaying(rec.title, rec.artist, rec.spotifyUri),
                             onPlayClick = { onPlayTrack(rec) },
                             onPreviewClick = { onPreviewTrack(rec) },
@@ -612,6 +616,7 @@ private fun WildcardTrioShowcaseCard(
     wildcards: List<AiRecommendationEntity>,
     totalInCycle: Int,
     lockedCount: Int,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onPlayTrack: (AiRecommendationEntity) -> Unit,
     onPreviewTrack: (AiRecommendationEntity) -> Unit,
@@ -760,8 +765,10 @@ private fun WildcardTrioShowcaseCard(
                                     )
                                 }
                             }
+                            val wildcardPlays = resolvePlayCount(rec.title, rec.artist, rec.spotifyUri)
+                            val wildcardPlaysLabel = "$wildcardPlays ${if (wildcardPlays == 1) "play" else "plays"}"
                             Text(
-                                text = rec.artist,
+                                text = "${rec.artist} · $wildcardPlaysLabel",
                                 color = Color.White.copy(alpha = 0.66f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -864,6 +871,7 @@ private fun SmallActionChip(
 @Composable
 private fun ForYouGenreTrackCard(
     rec: AiRecommendationEntity,
+    playCount: Int,
     isPlaying: Boolean,
     onPlayClick: () -> Unit,
     onPreviewClick: () -> Unit,
@@ -954,8 +962,9 @@ private fun ForYouGenreTrackCard(
                             )
                         }
                     }
+                    val playsLabel = "$playCount ${if (playCount == 1) "play" else "plays"}"
                     Text(
-                        text = "${rec.artist} · $statusBadge",
+                        text = "${rec.artist} · $playsLabel · $statusBadge",
                         color = Color.White.copy(alpha = 0.66f),
                         fontSize = 12.sp,
                         maxLines = 1,

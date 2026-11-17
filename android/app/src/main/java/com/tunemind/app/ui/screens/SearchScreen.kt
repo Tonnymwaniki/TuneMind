@@ -533,49 +533,21 @@ fun SearchScreen(
                             SearchOrigin.HISTORY -> theme.primaryAccent
                         }
                         if (item.vaultId != null) {
-                            val vaultMedia = rememberResolvedTrackMedia(
+                            val vStatus = vm.resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
+                            TuneMindTrackCard(
                                 title = item.title,
                                 artist = item.artist,
+                                playCount = item.playCount,
+                                showUnplayedLabel = true,
+                                isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
+                                freshnessPercent = vStatus.freshnessPercent,
+                                isCoolingDown = true,
+                                cooldownRemainingLabel = vStatus.cooldownRemainingLabel ?: item.subtitle,
+                                recoveryPercent = vStatus.recoveryPercent.takeIf { vStatus.isInVault },
+                                accentColor = vaultAmber,
                                 spotifyUri = item.spotifyUri,
-                                fallbackAlbumArtUrl = null
-                            )
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { playUniversalItem(item) }
-                                        .padding(horizontal = 4.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(44.dp)
-                                            .clip(CircleShape)
-                                            .background(vaultAmber.copy(alpha = 0.12f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Rounded.Lock, contentDescription = null, tint = vaultAmber, modifier = Modifier.size(18.dp))
-                                    }
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.title,
-                                            color = Color(0xFFFAFAFA),
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "${item.artist} · ${item.subtitle}",
-                                            color = Color.White.copy(alpha = 0.56f),
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                trackId = item.trackId,
+                                trailingActions = {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(10.dp))
@@ -588,21 +560,10 @@ fun SearchScreen(
                                     ) {
                                         Text("Restore", color = neonCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                     }
-                                    LayeredSongArtistBadge(
-                                        albumArtUrl = vaultMedia.albumArtUrl,
-                                        artistImageUrl = vaultMedia.artistImageUrl,
-                                        title = item.title,
-                                        artist = item.artist,
-                                        accentColor = vaultAmber,
-                                        size = 46.dp
-                                    )
-                                }
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 60.dp),
-                                    thickness = 0.5.dp,
-                                    color = Color.White.copy(alpha = 0.06f)
-                                )
-                            }
+                                },
+                                onPlayClick = { playUniversalItem(item) },
+                                onSyncClick = { inspectedSearchItem = item }
+                            )
                         } else {
                             val vStatus = vm.resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
                             TuneMindTrackCard(

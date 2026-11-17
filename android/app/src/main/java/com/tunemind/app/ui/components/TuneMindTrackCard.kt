@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -105,12 +106,13 @@ fun TuneMindTrackCard(
     accentColor: Color = LocalAdaptiveTheme.current.primaryAccent,
     secondaryAccent: Color = LocalAdaptiveTheme.current.secondaryAccent,
     leadingIndex: Int? = null,
-    showUnplayedLabel: Boolean = false,
+    showUnplayedLabel: Boolean = true,
     spotifyUri: String? = null,
     albumArtUrl: String? = null,
     artistImageUrl: String? = null,
     trackId: String = "",
     zeroPlayLabel: String = "0 plays",
+    trailingActions: (@Composable RowScope.() -> Unit)? = null,
     onSyncClick: (() -> Unit)? = null,
     onCardClick: (() -> Unit)? = null
 ) {
@@ -249,6 +251,9 @@ fun TuneMindTrackCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            // Optional custom inline trailing actions (e.g. Promote/Swap in Up Next)
+            trailingActions?.invoke(this)
 
             // Gently left of the end photo: Neural Sonic Action button when provided
             if (onSyncClick != null) {

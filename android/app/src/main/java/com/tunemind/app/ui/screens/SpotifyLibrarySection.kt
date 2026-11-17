@@ -179,6 +179,8 @@ fun SpotifyLibrarySection(
                                 Text(
                                     text = buildString {
                                         append(liveState.artistOrShow)
+                                        val livePlays = resolvePlayCount(liveState.title, liveState.artistOrShow, liveState.spotifyUri)
+                                        append(" · $livePlays ${if (livePlays == 1) "play" else "plays"}")
                                         if (liveState.albumOrSubtitle.isNotBlank()) {
                                             append(" · ${liveState.albumOrSubtitle}")
                                         }

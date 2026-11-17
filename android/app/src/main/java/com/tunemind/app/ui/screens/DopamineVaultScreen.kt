@@ -786,6 +786,7 @@ fun DopamineVaultScreen(
                             isDiscovering = isDiscovering,
                             totalWildcardsInCycle = allWildcardsInCycle.size,
                             lockedWildcardsCount = allWildcardsInCycle.count { it.isSaved && !it.isDismissed },
+                            resolvePlayCount = resolvePlayCount,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
                             onRefreshForYou = onRefreshForYou,
                             onPlayTrack = onPlayForYouTrack,
@@ -945,6 +946,7 @@ fun DopamineVaultScreen(
             recentTracks = recentTracks,
             likedTracks = likedTracks,
             playlists = playlists,
+            resolvePlayCount = resolvePlayCount,
             resolveTrackVaultStatus = resolveTrackVaultStatus,
             onAddToFresh = { title, artist, pkg, uri, tid, art ->
                 onAddToFresh(title, artist, pkg, uri, tid, art)
@@ -979,6 +981,7 @@ private fun ManualVaultFreshPickerSheet(
     recentTracks: List<TrackMemoryEntry>,
     likedTracks: List<SpotifyLikedTrackEntity>,
     playlists: List<SpotifyPlaylistEntity>,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus,
     onAddToFresh: (String, String, String?, String?, String?, String?) -> Unit,
     onRemoveFromFresh: (String, String, String?, String?) -> Unit,
@@ -1150,6 +1153,8 @@ private fun ManualVaultFreshPickerSheet(
             ) {
                 items(filtered, key = { "${it.title}|${it.artist}|${it.trackId}" }) { item ->
                     val status = resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
+                    val plays = resolvePlayCount(item.title, item.artist, item.spotifyUri)
+                    val playsLabel = "$plays ${if (plays == 1) "play" else "plays"}"
                     val activeInTarget = if (isRestingMode) status.isInVault || status.isCoolingDown else status.isInFresh && !status.isCoolingDown
                     Row(
                         modifier = Modifier
@@ -1174,7 +1179,7 @@ private fun ManualVaultFreshPickerSheet(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = item.artist,
+                                text = "${item.artist} · $playsLabel · ${status.freshnessPercent}% fresh",
                                 color = Color.White.copy(alpha = 0.58f),
                                 fontSize = 12.sp,
                                 maxLines = 1,

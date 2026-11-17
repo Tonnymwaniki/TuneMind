@@ -929,7 +929,7 @@ private fun NowPlayingCard(
                 )
                 val meta = buildString {
                     append(artistName ?: "Start a song or ask TuneMind")
-                    if (!trackTitle.isNullOrBlank() && playCount > 0) {
+                    if (!trackTitle.isNullOrBlank()) {
                         append(" · $playCount ${if (playCount == 1) "play" else "plays"}")
                     }
                     if (isMusicPlaying) append(" · Playing")
