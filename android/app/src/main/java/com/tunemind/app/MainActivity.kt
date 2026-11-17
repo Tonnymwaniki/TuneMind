@@ -818,7 +818,8 @@ open class MainActivity : ComponentActivity() {
                                                     showProfileScreen = true
                                                 },
                                                 tasteShiftSummary = tasteShiftSummary,
-                                                momentsCount = musicalMomentsState.confirmedMoments.size
+                                                momentsCount = musicalMomentsState.confirmedMoments.size,
+                                                onRefreshStats = { vm.refreshLiveListeningStatsNow() }
                                             )
                                         }
                                     }

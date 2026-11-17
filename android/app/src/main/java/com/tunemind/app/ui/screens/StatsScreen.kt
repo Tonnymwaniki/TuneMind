@@ -67,7 +67,18 @@ fun StatsScreen(
     val liveSpotify by vm.spotifyLiveState.collectAsState()
 
     var selectedWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
-    val windowStats = remember(selectedWindow, cleanPlayHistory, stats) {
+    var liveTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        vm.refreshLiveListeningStatsNow()
+        while (true) {
+            kotlinx.coroutines.delay(5_000L)
+            vm.refreshLiveListeningStatsNow()
+            liveTickMs = System.currentTimeMillis()
+        }
+    }
+
+    val windowStats = remember(selectedWindow, cleanPlayHistory, stats, liveTickMs) {
         ListeningPlayDeduplicator.buildWindowedStats(
             cleanPlayHistory = cleanPlayHistory,
             overallStats = stats,
@@ -158,6 +169,7 @@ fun StatsDashboardContent(
     cleanPlayHistory: List<UnifiedPlayEvent> = emptyList(),
     selectedWindow: StatsTimeWindow = StatsTimeWindow.SEVEN_DAYS,
     onSelectWindow: ((StatsTimeWindow) -> Unit)? = null,
+    onRefreshStats: () -> Unit = {},
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean,
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
@@ -170,6 +182,10 @@ fun StatsDashboardContent(
     var internalWindow by rememberSaveable { mutableStateOf(selectedWindow) }
     val activeWindow = if (onSelectWindow != null) selectedWindow else internalWindow
     val handleWindowSelect: (StatsTimeWindow) -> Unit = onSelectWindow ?: { internalWindow = it }
+
+    LaunchedEffect(Unit) {
+        onRefreshStats()
+    }
 
     val windowStats = remember(activeWindow, cleanPlayHistory, stats) {
         ListeningPlayDeduplicator.buildWindowedStats(
@@ -230,9 +246,9 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Listening Time (${selectedWindow.label})",
+                            text = windowStats.windowRangeLabel.ifBlank { "Listening Time (${selectedWindow.label})" },
                             color = Color.White.copy(alpha = 0.56f),
                             fontSize = 12.sp
                         )
@@ -250,6 +266,17 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                         color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.50f),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
+                    )
+                }
+
+                if (selectedWindow == StatsTimeWindow.ALL_TIME &&
+                    windowStats.allTimeMatchesThirtyDays &&
+                    windowStats.totalVerifiedPlays > 0
+                ) {
+                    Text(
+                        text = "Matches 30 Days because all tracked listening began ${windowStats.trackedSpanDays} ${if (windowStats.trackedSpanDays == 1) "day" else "days"} ago.",
+                        color = Color.White.copy(alpha = 0.52f),
+                        fontSize = 11.5.sp
                     )
                 }
 
@@ -860,7 +887,11 @@ private fun MetricMiniColumn(
 }
 
 fun formatListeningDuration(ms: Long): String {
-    val totalMins = (ms / 60_000L).coerceAtLeast(0L)
+    val safeMs = ms.coerceAtLeast(0L)
+    if (safeMs in 1_000L until 60_000L) {
+        return "${safeMs / 1000L}s"
+    }
+    val totalMins = safeMs / 60_000L
     if (totalMins < 60L) {
         return "${totalMins}m"
     }

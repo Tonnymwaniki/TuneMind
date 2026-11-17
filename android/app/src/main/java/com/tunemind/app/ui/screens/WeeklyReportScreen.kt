@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
+import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.SpotifyAvatarCircle
@@ -35,16 +37,29 @@ fun WeeklyReportScreen(
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit = { _, _, _, _ -> }
 ) {
     val stats by vm.listeningStats.collectAsState()
+    val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
     val vaultTracks by vm.vaultState.collectAsState()
     val homeState by vm.homeState.collectAsState()
     val liveSpotify by vm.spotifyLiveState.collectAsState()
     val theme = LocalAdaptiveTheme.current
 
-    val sevenDayDuration = formatListeningDuration(stats.sevenDayListeningMs)
-    val totalPlays = stats.totalVerifiedPlays
+    LaunchedEffect(Unit) {
+        vm.refreshLiveListeningStatsNow()
+    }
 
-    val avgFreshness = if (stats.topTracks.isNotEmpty()) {
-        stats.topTracks.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
+    val weekStats = remember(cleanPlayHistory, stats) {
+        ListeningPlayDeduplicator.buildWindowedStats(
+            cleanPlayHistory = cleanPlayHistory,
+            overallStats = stats,
+            window = StatsTimeWindow.SEVEN_DAYS
+        )
+    }
+
+    val sevenDayDuration = formatListeningDuration(weekStats.totalListeningMs)
+    val totalPlays = weekStats.totalVerifiedPlays
+
+    val avgFreshness = if (weekStats.topTracks.isNotEmpty()) {
+        weekStats.topTracks.map { it.freshnessPercent }.average().toInt().coerceIn(20, 99)
     } else 0
 
     StudioAmbientBackground {
@@ -92,16 +107,21 @@ fun WeeklyReportScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "$sevenDayDuration across $totalPlays plays",
+                            text = weekStats.windowRangeLabel.ifBlank { "Last 7 Days" },
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.56f)
+                        )
+                        Text(
+                            text = "$sevenDayDuration across $totalPlays ${if (totalPlays == 1) "play" else "plays"}",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF8FAFC)
                         )
                         Text(
-                            text = if (stats.appBreakdown.isEmpty()) {
+                            text = if (weekStats.appBreakdown.isEmpty()) {
                                 "Play music in any supported app or connect Spotify to populate your 7-day recap."
                             } else {
-                                "Built from your verified plays across ${stats.appBreakdown.size} music ${if (stats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries."
+                                "Built from your verified 7-day plays across ${weekStats.appBreakdown.size} music ${if (weekStats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries."
                             },
                             fontSize = 13.sp,
                             color = Color.White.copy(alpha = 0.62f),
@@ -128,14 +148,14 @@ fun WeeklyReportScreen(
                         )
                         RecapMetricColumn(
                             label = "Peak Hours",
-                            value = stats.peakWindowLabel.substringBefore(" "),
-                            note = stats.peakWindowLabel.substringAfter("(", "").removeSuffix(")").ifBlank { "Active" },
+                            value = weekStats.peakWindowLabel.substringBefore(" "),
+                            note = weekStats.peakWindowLabel.substringAfter("(", "").removeSuffix(")").ifBlank { "Active" },
                             accent = theme.primaryAccent,
                             modifier = Modifier.weight(1f)
                         )
                         RecapMetricColumn(
                             label = "Completion",
-                            value = "${stats.completionRatePercent}%",
+                            value = if (weekStats.totalVerifiedPlays > 0) "${weekStats.completionRatePercent}%" else "--",
                             note = "Full listens",
                             accent = theme.secondaryAccent,
                             modifier = Modifier.weight(1f)
@@ -145,7 +165,7 @@ fun WeeklyReportScreen(
             }
 
             // Top Tracks This Week (Hairline rows)
-            if (stats.topTracks.isNotEmpty()) {
+            if (weekStats.topTracks.isNotEmpty()) {
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -159,25 +179,27 @@ fun WeeklyReportScreen(
                             color = Color(0xFFF8FAFC)
                         )
                         Text(
-                            text = "${stats.uniqueTrackCount} songs total",
+                            text = "${weekStats.uniqueTrackCount} songs this week",
                             fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.56f)
                         )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    stats.topTracks.take(5).forEachIndexed { index, track ->
+                    weekStats.topTracks.take(5).forEachIndexed { index, track ->
                         val _np = homeState.nowPlaying
                         val _ls = liveSpotify
                         val isPlaying = vm.isTrackCurrentlyPlaying(track.title, track.artist, track.spotifyUri)
-                        val strictCount = vm.resolvePlayCount(track.title, track.artist, track.spotifyUri)
-                            .takeIf { it > 0 } ?: track.verifiedPlayCount
+                        val weekSubtitle = listOfNotNull(
+                            track.album?.takeIf { it.isNotBlank() },
+                            formatListeningDuration(track.totalListeningMs)
+                        ).joinToString(" · ")
 
                         TuneMindTrackCard(
                             title = track.title,
                             artist = track.artist,
-                            subtitle = track.album,
-                            playCount = strictCount,
+                            subtitle = weekSubtitle.ifBlank { track.album },
+                            playCount = track.verifiedPlayCount,
                             isCurrentlyPlaying = isPlaying,
                             appLabel = track.primaryAppName,
                             freshnessPercent = track.freshnessPercent,
@@ -193,12 +215,12 @@ fun WeeklyReportScreen(
             }
 
             // Top Artists Card (with End Artist Profile Photos)
-            if (stats.topArtists.isNotEmpty()) {
+            if (weekStats.topArtists.isNotEmpty()) {
                 SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StudioSectionHeader(title = "Top Artists")
-                        val maxPlays = stats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
-                        stats.topArtists.take(4).forEach { artist ->
+                        StudioSectionHeader(title = "Top Artists", actionLabel = "7 Days")
+                        val maxPlays = weekStats.topArtists.maxOfOrNull { it.playCount }?.coerceAtLeast(1) ?: 1
+                        weekStats.topArtists.take(4).forEach { artist ->
                             val frac = (artist.playCount.toFloat() / maxPlays.toFloat()).coerceIn(0.1f, 1f)
                             val artistPhotoUrl = rememberResolvedArtistPhoto(artist.artistName)
                             Row(
@@ -261,7 +283,7 @@ fun WeeklyReportScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF10B981)
                     )
-                    val heavyRepeatTrack = stats.topTracks.firstOrNull { it.verifiedPlayCount >= 4 }
+                    val heavyRepeatTrack = weekStats.topTracks.firstOrNull { it.verifiedPlayCount >= 4 }
                     Text(
                         text = buildString {
                             when {
@@ -269,15 +291,15 @@ fun WeeklyReportScreen(
                                     append("• Keep ${vaultTracks.size} resting ${if (vaultTracks.size == 1) "track" else "tracks"} in your Vault a little longer so freshness rebounds.\n")
                                 }
                                 heavyRepeatTrack != null -> {
-                                    append("• Consider resting \"${heavyRepeatTrack.title}\" (${heavyRepeatTrack.verifiedPlayCount} plays) in the Vault to prevent ear fatigue.\n")
+                                    append("• Consider resting \"${heavyRepeatTrack.title}\" (${heavyRepeatTrack.verifiedPlayCount} plays this week) in the Vault to prevent ear fatigue.\n")
                                 }
                                 else -> {
-                                    append("• Your rotation has zero overplayed tracks — keep mixing in fresh discoveries.\n")
+                                    append("• Your 7-day rotation has zero overplayed tracks — keep mixing in fresh discoveries.\n")
                                 }
                             }
-                            if (stats.totalVerifiedPlays > 0) {
-                                append("• Peak listening lands around ${stats.peakWindowLabel} — great window for longer sessions.\n")
-                                append("• Mix in picks from For You to keep your ${stats.discoveryRatePercent}% fresh balance steady.")
+                            if (weekStats.totalVerifiedPlays > 0) {
+                                append("• Peak listening lands around ${weekStats.peakWindowLabel} — great window for longer sessions.\n")
+                                append("• Mix in picks from For You to keep your ${weekStats.discoveryRatePercent}% fresh balance steady.")
                             } else {
                                 append("• Start playing music across Spotify or other players to unlock peak window & freshness insights.")
                             }

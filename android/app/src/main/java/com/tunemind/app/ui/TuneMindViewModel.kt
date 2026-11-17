@@ -57,6 +57,7 @@ data class HearingInsightsState(
     val estimatedAverageDb: Float = 58f,
     val currentHeadroomDb: Float = 27f,
     val dailyExposureMinutes: Int = 0,
+    val dailyExposureMs: Long = 0L,
     val soundDoseFraction: Float = 0f,
     val safeHoursRemaining: Float = 24f,
     val safetyGuidance: String = "Listening exposure within comfortable limits (<80 dBA)."
@@ -292,6 +293,144 @@ class TuneMindViewModel : ViewModel() {
     private var statusClearJob: kotlinx.coroutines.Job? = null
     private var snapshotMonitorListener: ((com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit)? = null
     private var inAppCompletionQueueListener: ((String, String, String) -> Unit)? = null
+
+    @Volatile
+    private var cachedRowsForStats: List<PlaybackObservation> = emptyList()
+    @Volatile
+    private var cachedSpotifyHistoryForStats: List<com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity> = emptyList()
+    @Volatile
+    private var cachedMergeDuplicatesForStats: Boolean = true
+    @Volatile
+    private var cachedRepetitionSensitivityForStats: Float = 0.75f
+    @Volatile
+    private var liveStatsRecomputeJob: kotlinx.coroutines.Job? = null
+
+    private fun resolveBestNowPlayingForStats(
+        rows: List<PlaybackObservation> = cachedRowsForStats,
+        liveSpotify: SpotifyLiveTrackState? = _spotifyLiveState.value
+    ): NowPlayingObservation? {
+        val nowMs = System.currentTimeMillis()
+        if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+            val inAppTitle = com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value
+            if (!inAppTitle.isNullOrBlank()) {
+                return NowPlayingObservation(
+                    title = inAppTitle,
+                    artist = com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value,
+                    album = null,
+                    sourcePackage = AppHolder.context?.packageName ?: "com.tunemind.app",
+                    isPlaying = com.tunemind.app.provider.TuneMindInAppPlayer.isPlayingFlow.value,
+                    playbackStateCode = if (com.tunemind.app.provider.TuneMindInAppPlayer.isPlayingFlow.value) 3 else 2,
+                    positionMs = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value,
+                    durationMs = com.tunemind.app.provider.TuneMindInAppPlayer.durationMsFlow.value,
+                    speed = 1.0f,
+                    updatedAtMs = nowMs
+                )
+            }
+        }
+
+        val serviceSnap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
+        if (serviceSnap != null && serviceSnap.title.isNotBlank()) {
+            val ageMs = (android.os.SystemClock.elapsedRealtime() - serviceSnap.updatedAtElapsedMs).coerceAtLeast(0L)
+            if (ageMs < 12 * 60 * 1000L) {
+                return NowPlayingObservation(
+                    title = serviceSnap.title,
+                    artist = serviceSnap.artist,
+                    album = null,
+                    sourcePackage = serviceSnap.packageName,
+                    isPlaying = serviceSnap.isPlaying,
+                    playbackStateCode = if (serviceSnap.isPlaying) 3 else 2,
+                    positionMs = serviceSnap.positionMs,
+                    durationMs = serviceSnap.durationMs,
+                    speed = 1.0f,
+                    updatedAtMs = nowMs - ageMs
+                )
+            }
+        }
+
+        val deviceObs = rows.filter { it.observerSessionId != "spotify_web_api_ingestion" }
+        val latestStateObs = deviceObs.firstOrNull {
+            it.playbackStateCode != null &&
+                !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
+        }
+        val latestTrackMeta = deviceObs.firstOrNull {
+            !it.trackTitle.isNullOrBlank() &&
+                !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
+        }
+        val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
+        val isRecentObservation = (nowMs - latestObsTimeMs) < 12 * 60 * 1000L
+        val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
+
+        val overrideObs = manualActiveTrackOverride
+        val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
+        val freshLiveSpotify = liveSpotify != null && (nowMs - liveSpotify.updatedAtMs) < 12 * 60 * 1000L
+
+        return when {
+            useAgentOverride -> overrideObs
+            (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
+                NowPlayingObservation(
+                    title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
+                    artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
+                    album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
+                    sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
+                    isPlaying = isPlayingNow,
+                    playbackStateCode = latestStateObs?.playbackStateCode,
+                    positionMs = latestStateObs?.positionMs ?: 0L,
+                    durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
+                    speed = latestStateObs?.playbackSpeed ?: 1.0f,
+                    updatedAtMs = latestObsTimeMs
+                )
+            }
+            freshLiveSpotify && liveSpotify != null -> {
+                NowPlayingObservation(
+                    title = liveSpotify.title,
+                    artist = liveSpotify.artistOrShow,
+                    album = liveSpotify.albumOrSubtitle.ifBlank { null },
+                    sourcePackage = "com.spotify.music",
+                    isPlaying = liveSpotify.isPlaying,
+                    playbackStateCode = if (liveSpotify.isPlaying) 3 else 2,
+                    positionMs = liveSpotify.progressMs,
+                    durationMs = liveSpotify.durationMs,
+                    speed = 1.0f,
+                    updatedAtMs = liveSpotify.updatedAtMs
+                )
+            }
+            overrideObs != null -> overrideObs
+            else -> _homeState.value.nowPlaying
+        }
+    }
+
+    fun refreshLiveListeningStatsNow() {
+        val rows = cachedRowsForStats
+        val spHistory = cachedSpotifyHistoryForStats
+        if (rows.isEmpty() && spHistory.isEmpty() && _homeState.value.nowPlaying == null) return
+        if (liveStatsRecomputeJob?.isActive == true) return
+        liveStatsRecomputeJob = viewModelScope.launch {
+            val nowMs = System.currentTimeMillis()
+            val np = resolveBestNowPlayingForStats(rows, _spotifyLiveState.value)
+            val snapshot = withContext(Dispatchers.Default) {
+                ListeningPlayDeduplicator.buildSnapshot(
+                    rawObservations = rows,
+                    spotifyHistory = spHistory,
+                    nowPlayingTitle = np?.title,
+                    nowPlayingArtist = np?.artist,
+                    nowPlayingSourcePkg = np?.sourcePackage,
+                    isMusicPlayingNow = np?.isPlaying == true,
+                    nowMs = nowMs,
+                    mergeDuplicatePlays = cachedMergeDuplicatesForStats,
+                    repetitionSensitivity = cachedRepetitionSensitivityForStats,
+                    nowPlayingPositionMs = np?.positionMs ?: 0L,
+                    nowPlayingDurationMs = np?.durationMs ?: 0L,
+                    nowPlayingUpdatedAtMs = np?.updatedAtMs ?: 0L
+                )
+            }
+            _unifiedTracks.value = snapshot.unifiedTracks
+            _cleanPlayHistory.value = snapshot.cleanPlayHistory
+            _listeningStats.value = snapshot.stats
+            _playCountByKey.value = snapshot.playCountByTrackKey
+            _playCountByUri.value = snapshot.playCountByUri
+            refreshHearingInsights()
+        }
+    }
 
     fun resolvePlayCount(title: String?, artist: String?, spotifyUri: String? = null): Int {
         val cleanUri = spotifyUri?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
@@ -787,6 +926,7 @@ class TuneMindViewModel : ViewModel() {
         _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
         markTrackPlayedFromQueueOrExternal(cleanTitle, cleanArtist, null)
         syncAtmosphereToTrack(cleanTitle, cleanArtist)
+        refreshLiveListeningStatsNow()
     }
 
     fun setAgentPlaybackPaused() {
@@ -799,6 +939,7 @@ class TuneMindViewModel : ViewModel() {
         manualActiveTrackOverride = pausedObs
         _homeState.value = _homeState.value.copy(nowPlaying = pausedObs)
         recomputeAdaptiveTheme()
+        refreshLiveListeningStatsNow()
     }
 
     fun setAgentPlaybackResumed() {
@@ -812,6 +953,7 @@ class TuneMindViewModel : ViewModel() {
             manualActiveTrackOverride = resumedObs
             _homeState.value = _homeState.value.copy(nowPlaying = resumedObs)
             recomputeAdaptiveTheme()
+            refreshLiveListeningStatsNow()
         }
     }
 
@@ -1570,11 +1712,24 @@ class TuneMindViewModel : ViewModel() {
             runCatching { db?.spotifyListeningHistoryDao()?.deletePollingDuplicates() }
         }
 
+        // Live listening clock: updates active Today/7d/30d/All-Time durations every 5s while playback is running
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5_000L)
+                val playingAny = _homeState.value.nowPlaying?.isPlaying == true ||
+                    com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+                    _spotifyLiveState.value?.isPlaying == true
+                if (playingAny) {
+                    refreshLiveListeningStatsNow()
+                }
+            }
+        }
+
         // Unified Authoritative Pipeline: Combine Device MediaSessions + Verified Spotify History + Live State
         viewModelScope.launch {
             try {
                 val obsFlow = repo?.observeRecent() ?: flowOf(emptyList())
-                val spotifyHistoryFlow = db?.spotifyListeningHistoryDao()?.observeRecentHistory(200) ?: flowOf(emptyList())
+                val spotifyHistoryFlow = db?.spotifyListeningHistoryDao()?.observeRecentHistory(10_000) ?: flowOf(emptyList())
 
                 combine(
                     obsFlow,
@@ -1592,60 +1747,15 @@ class TuneMindViewModel : ViewModel() {
                     val liveSpotify = values[2] as com.tunemind.app.data.ingestion.SpotifyLiveTrackState?
                     val mergeDuplicates = values[3] as Boolean
                     val repetitionSensitivity = values[4] as Float
+
+                    cachedRowsForStats = rows
+                    cachedSpotifyHistoryForStats = spotifyHistory
+                    cachedMergeDuplicatesForStats = mergeDuplicates
+                    cachedRepetitionSensitivityForStats = repetitionSensitivity
+
                     val memory: ListeningMemory
                     val coverage: CoverageAssessment
-                    val deviceObs = rows.filter { it.observerSessionId != "spotify_web_api_ingestion" }
-
-                    val latestStateObs = deviceObs.firstOrNull {
-                        it.playbackStateCode != null &&
-                            !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
-                    }
-                    val latestTrackMeta = deviceObs.firstOrNull {
-                        !it.trackTitle.isNullOrBlank() &&
-                            !ListeningPlayDeduplicator.isExcludedBrowserOrWeb(it.sourcePackage, it.trackTitle, it.trackArtist)
-                    }
-                    val latestObsTimeMs = maxOf(latestStateObs?.eventTimeMs ?: 0L, latestTrackMeta?.eventTimeMs ?: 0L)
-                    val isRecentObservation = (System.currentTimeMillis() - latestObsTimeMs) < 12 * 60 * 1000L
-                    val isPlayingNow = (latestStateObs?.playbackStateCode == 3) && isRecentObservation
-
-                    val overrideObs = manualActiveTrackOverride
-                    val useAgentOverride = overrideObs != null && overrideObs.updatedAtMs > latestObsTimeMs
-                    val freshLiveSpotify = liveSpotify != null &&
-                        (System.currentTimeMillis() - liveSpotify.updatedAtMs) < 12 * 60 * 1000L
-
-                    val nowPlayingObs = when {
-                        useAgentOverride -> overrideObs
-                        (latestTrackMeta != null || latestStateObs != null) && isRecentObservation -> {
-                            NowPlayingObservation(
-                                title = latestTrackMeta?.trackTitle ?: latestStateObs?.trackTitle,
-                                artist = latestTrackMeta?.trackArtist ?: latestStateObs?.trackArtist,
-                                album = latestTrackMeta?.trackAlbum ?: latestStateObs?.trackAlbum,
-                                sourcePackage = latestStateObs?.sourcePackage ?: latestTrackMeta?.sourcePackage,
-                                isPlaying = isPlayingNow,
-                                playbackStateCode = latestStateObs?.playbackStateCode,
-                                positionMs = latestStateObs?.positionMs ?: 0L,
-                                durationMs = latestTrackMeta?.durationMs ?: latestStateObs?.durationMs ?: 0L,
-                                speed = latestStateObs?.playbackSpeed ?: 1.0f,
-                                updatedAtMs = latestObsTimeMs
-                            )
-                        }
-                        freshLiveSpotify && liveSpotify != null -> {
-                            NowPlayingObservation(
-                                title = liveSpotify.title,
-                                artist = liveSpotify.artistOrShow,
-                                album = liveSpotify.albumOrSubtitle.ifBlank { null },
-                                sourcePackage = "com.spotify.music",
-                                isPlaying = liveSpotify.isPlaying,
-                                playbackStateCode = if (liveSpotify.isPlaying) 3 else 2,
-                                positionMs = liveSpotify.progressMs,
-                                durationMs = liveSpotify.durationMs,
-                                speed = 1.0f,
-                                updatedAtMs = liveSpotify.updatedAtMs
-                            )
-                        }
-                        overrideObs != null -> overrideObs
-                        else -> null
-                    }
+                    val nowPlayingObs = resolveBestNowPlayingForStats(rows, liveSpotify)
 
                     val snapshot: com.tunemind.app.domain.memory.DeduplicatedListeningSnapshot
                     withContext(Dispatchers.Default) {
@@ -1660,8 +1770,12 @@ class TuneMindViewModel : ViewModel() {
                             nowPlayingArtist = nowPlayingObs?.artist,
                             nowPlayingSourcePkg = nowPlayingObs?.sourcePackage,
                             isMusicPlayingNow = nowPlayingObs?.isPlaying == true,
+                            nowMs = System.currentTimeMillis(),
                             mergeDuplicatePlays = mergeDuplicates,
-                            repetitionSensitivity = repetitionSensitivity
+                            repetitionSensitivity = repetitionSensitivity,
+                            nowPlayingPositionMs = nowPlayingObs?.positionMs ?: 0L,
+                            nowPlayingDurationMs = nowPlayingObs?.durationMs ?: 0L,
+                            nowPlayingUpdatedAtMs = nowPlayingObs?.updatedAtMs ?: 0L
                         )
                     }
 
@@ -2445,7 +2559,9 @@ class TuneMindViewModel : ViewModel() {
         val snapshot = com.tunemind.app.domain.audio.AudioDeviceObserver.getActiveAudioDeviceSnapshot(ctx)
         val estDb = snapshot.estimatedDb
         val headroom = snapshot.headroomDb
-        val todayMins = ((_listeningStats.value.todayListeningMs) / 60_000L).toInt().coerceAtLeast(0)
+        val todayMs = _listeningStats.value.todayListeningMs.coerceAtLeast(0L)
+        val todayMins = (todayMs / 60_000L).toInt().coerceAtLeast(0)
+        val todayLabel = if (todayMs in 1_000L until 60_000L) "${todayMs / 1000L}s" else "${todayMins}m"
 
         // NIOSH 3 dB exchange rule: 8h max at 85 dBA; halves every +3 dB above 85 dBA
         val safeWindowHours = if (estDb <= 72f) {
@@ -2453,11 +2569,11 @@ class TuneMindViewModel : ViewModel() {
         } else {
             (8.0 / Math.pow(2.0, ((estDb - 85f) / 3f).toDouble())).toFloat().coerceIn(0.05f, 24f)
         }
-        val elapsedHours = todayMins / 60f
+        val elapsedHours = todayMs.toFloat() / 3_600_000f
         val safeHoursLeft = (safeWindowHours - elapsedHours).coerceAtLeast(0f)
 
-        // Real accumulated dose based on today's listened minutes vs safe NIOSH ceiling at current dBA
-        val timeWeightedDose = if (todayMins > 0) {
+        // Real accumulated dose based on today's listened time vs safe NIOSH ceiling at current dBA
+        val timeWeightedDose = if (todayMs > 0L) {
             (elapsedHours / safeWindowHours).coerceIn(0.01f, 1.0f)
         } else {
             0f
@@ -2467,8 +2583,8 @@ class TuneMindViewModel : ViewModel() {
             estDb >= 92f -> "High volume (${estDb.toInt()} dBA). Lowering to ~70% protects inner-ear hair cells."
             headroom < 0f -> "Above 85 dBA daily threshold (%.1f dB over). Shorten session or step volume down.".format(kotlin.math.abs(headroom))
             headroom < 4f -> "Approaching 85 dBA guide (+%.1f dB margin). Safe for up to %.1fh today.".format(headroom, safeHoursLeft)
-            todayMins == 0 -> "Comfortable level (+%.1f dB headroom). Ready to monitor today's sound dose.".format(headroom)
-            else -> "${todayMins}m listened today with +%.1f dB margin — comfortable within safe limits.".format(headroom)
+            todayMs <= 0L -> "Comfortable level (+%.1f dB headroom). Ready to monitor today's sound dose.".format(headroom)
+            else -> "$todayLabel listened today with +%.1f dB margin — comfortable within safe limits.".format(headroom)
         }
 
         _hearingInsightsState.value = _hearingInsightsState.value.copy(
@@ -2476,6 +2592,7 @@ class TuneMindViewModel : ViewModel() {
             estimatedAverageDb = estDb,
             currentHeadroomDb = headroom,
             dailyExposureMinutes = todayMins,
+            dailyExposureMs = todayMs,
             soundDoseFraction = timeWeightedDose,
             safeHoursRemaining = safeHoursLeft,
             safetyGuidance = guidance

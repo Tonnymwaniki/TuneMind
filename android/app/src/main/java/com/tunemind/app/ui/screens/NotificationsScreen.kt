@@ -23,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
+import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
+import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
@@ -58,7 +60,15 @@ fun NotificationsScreen(
     val vaultTracks by vm.vaultState.collectAsState()
     val hearingInsights by vm.hearingInsightsState.collectAsState()
     val listeningStats by vm.listeningStats.collectAsState()
+    val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
     val needsScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
+    val weeklyTrackCount = remember(cleanPlayHistory, listeningStats) {
+        ListeningPlayDeduplicator.buildWindowedStats(
+            cleanPlayHistory = cleanPlayHistory,
+            overallStats = listeningStats,
+            window = StatsTimeWindow.SEVEN_DAYS
+        ).uniqueTrackCount
+    }
 
     val vaultAlertsEnabled by AgentSettingsStore.vaultRecoveryAlertsEnabled.collectAsState()
     val weeklyRecapEnabled by AgentSettingsStore.weeklyRecapAlertsEnabled.collectAsState()
@@ -79,7 +89,7 @@ fun NotificationsScreen(
     val liveAlerts = remember(
         vaultTracks,
         hearingInsights,
-        listeningStats,
+        weeklyTrackCount,
         needsScopeUpgrade,
         authSession.isSpotifyConnected,
         vaultAlertsEnabled,
@@ -167,12 +177,12 @@ fun NotificationsScreen(
                 }
             }
 
-            if (weeklyRecapEnabled && listeningStats.uniqueTrackCount > 0) {
+            if (weeklyRecapEnabled && weeklyTrackCount > 0) {
                 add(
                     TuneMindAlertItem(
                         id = "weekly_recap_ready",
                         title = "Your listening balance recap is ready",
-                        body = "${listeningStats.uniqueTrackCount} unique tracks tracked across your sessions this week.",
+                        body = "$weeklyTrackCount unique ${if (weeklyTrackCount == 1) "track" else "tracks"} tracked across your sessions this week.",
                         icon = Icons.Rounded.AutoGraph,
                         accent = electricPurple,
                         actionLabel = "View Recap",

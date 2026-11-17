@@ -94,7 +94,12 @@ data class WindowedListeningStats(
     val hourlyPlayCounts: List<Int>,
     val appBreakdown: List<AppListeningStats>,
     val topTracks: List<UnifiedTrackStats>,
-    val topArtists: List<ArtistListeningStats>
+    val topArtists: List<ArtistListeningStats>,
+    val earliestEventMs: Long? = null,
+    val latestEventMs: Long? = null,
+    val trackedSpanDays: Int = 0,
+    val windowRangeLabel: String = "",
+    val allTimeMatchesThirtyDays: Boolean = false
 )
 
 data class OverallListeningStats(
@@ -131,7 +136,7 @@ object ListeningPlayDeduplicator {
     private const val MERGE_WINDOW_MS = 240_000L // 4 minutes collapse window
     private const val MIN_REAL_PLAY_DWELL_MS = 20_000L
     private const val QUICK_SKIP_THRESHOLD_MS = 14_000L
-    private const val MAX_SESSION_ESTIMATE_MS = 420_000L
+    private const val MAX_SESSION_ESTIMATE_MS = 600_000L
 
     fun normalizeText(value: String?): String =
         value?.trim()
@@ -210,6 +215,8 @@ object ListeningPlayDeduplicator {
         var durationMs: Long,
         var maxObservedPositionMs: Long,
         var activeDwellMs: Long,
+        var lastPlaybackStateCode: Int? = null,
+        var hadPauseGap: Boolean = false,
         var hadTransitionOut: Boolean = false
     )
 
@@ -222,7 +229,10 @@ object ListeningPlayDeduplicator {
         isMusicPlayingNow: Boolean,
         nowMs: Long = System.currentTimeMillis(),
         mergeDuplicatePlays: Boolean = true,
-        repetitionSensitivity: Float = 0.75f
+        repetitionSensitivity: Float = 0.75f,
+        nowPlayingPositionMs: Long = 0L,
+        nowPlayingDurationMs: Long = 0L,
+        nowPlayingUpdatedAtMs: Long = 0L
     ): DeduplicatedListeningSnapshot {
         // 1. Reconstruct genuine plays from raw MediaSession observations (ignoring mirrored spotify_web_api_ingestion rows & browser clutter)
         val filteredObs = rawObservations
@@ -234,7 +244,7 @@ object ListeningPlayDeduplicator {
             .sortedBy { it.eventTimeMs }
 
         val segments = mutableListOf<CandidateSegment>()
-        var currentBySource = mutableMapOf<String, CandidateSegment>()
+        val currentBySource = mutableMapOf<String, CandidateSegment>()
         var skippedCount = 0
         val skippedTimestampsMs = mutableListOf<Long>()
 
@@ -248,24 +258,36 @@ object ListeningPlayDeduplicator {
             val obsUri = obs.trackId?.trim()?.takeIf { it.startsWith("spotify:track:") }
             val obsDur = (obs.durationMs ?: 0L).coerceAtLeast(0L)
             val obsPos = (obs.positionMs ?: 0L).coerceAtLeast(0L)
+            val obsState = obs.playbackStateCode
 
             if (prev != null &&
                 prev.key == key &&
                 (obs.eventTimeMs - prev.endMs) <= MERGE_WINDOW_MS
             ) {
-                val delta = (obs.eventTimeMs - prev.endMs).coerceIn(0L, 60_000L)
-                if (obs.playbackStateCode == 3 || delta > 0L) {
+                val delta = (obs.eventTimeMs - prev.endMs).coerceIn(0L, MAX_SESSION_ESTIMATE_MS)
+                val wasActivelyPlaying = prev.lastPlaybackStateCode == 3 ||
+                    (prev.lastPlaybackStateCode == null && (obsState == 3 || obsPos > prev.maxObservedPositionMs))
+                if (wasActivelyPlaying && delta > 0L) {
                     prev.activeDwellMs += delta
+                }
+                if (obsState == 2 || obsState == 1 || obsState == 0) {
+                    prev.hadPauseGap = true
                 }
                 prev.endMs = maxOf(prev.endMs, obs.eventTimeMs)
                 if (obsDur > 0L) prev.durationMs = maxOf(prev.durationMs, obsDur)
                 prev.maxObservedPositionMs = maxOf(prev.maxObservedPositionMs, obsPos)
+                if (obsState != null) {
+                    prev.lastPlaybackStateCode = obsState
+                }
             } else {
                 if (prev != null) {
-                    // Close previous track segment cleanly
+                    // Close previous track segment cleanly without adding paused idle time
                     val gapSincePrevEnd = (obs.eventTimeMs - prev.endMs).coerceAtLeast(0L)
-                    if (gapSincePrevEnd in 1..MAX_SESSION_ESTIMATE_MS && obs.sourcePackage == prev.sourcePackage) {
-                        prev.activeDwellMs += minOf(gapSincePrevEnd, prev.durationMs.takeIf { it > 0L } ?: 210_000L)
+                    val prevWasPlaying = prev.lastPlaybackStateCode == 3 || prev.lastPlaybackStateCode == null
+                    if (prevWasPlaying && gapSincePrevEnd in 1..MAX_SESSION_ESTIMATE_MS && obs.sourcePackage == prev.sourcePackage) {
+                        val capDuration = prev.durationMs.takeIf { it > 0L } ?: 210_000L
+                        val remainingAllowance = (capDuration - prev.activeDwellMs).coerceAtLeast(0L)
+                        prev.activeDwellMs += minOf(gapSincePrevEnd, remainingAllowance)
                     }
                     prev.hadTransitionOut = true
                 }
@@ -280,20 +302,52 @@ object ListeningPlayDeduplicator {
                     endMs = obs.eventTimeMs,
                     durationMs = obsDur,
                     maxObservedPositionMs = obsPos,
-                    activeDwellMs = 0L
+                    activeDwellMs = 0L,
+                    lastPlaybackStateCode = obsState,
+                    hadPauseGap = (obsState == 2 || obsState == 1 || obsState == 0)
                 )
                 segments += newSeg
                 currentBySource[pkg] = newSeg
             }
         }
 
+        val liveElapsedSinceUpdateMs = if (isMusicPlayingNow && nowPlayingUpdatedAtMs > 0L) {
+            (nowMs - nowPlayingUpdatedAtMs).coerceIn(0L, MAX_SESSION_ESTIMATE_MS)
+        } else {
+            0L
+        }
+        val liveEffectivePosMs = if (nowPlayingPositionMs > 0L || liveElapsedSinceUpdateMs > 0L) {
+            nowPlayingPositionMs.coerceAtLeast(0L) + liveElapsedSinceUpdateMs
+        } else {
+            0L
+        }
+
         // Convert valid segments into PlayEvents (filtering quick accidental skips)
         val localPlayEvents = mutableListOf<UnifiedPlayEvent>()
         for (seg in segments) {
-            val estimatedListenedMs = maxOf(seg.activeDwellMs, seg.maxObservedPositionMs)
             val isCurrentlyActiveSeg = !nowPlayingTitle.isNullOrBlank() &&
                 isSameTrack(seg.title, seg.artist, seg.spotifyUri, nowPlayingTitle, nowPlayingArtist, null) &&
-                (nowMs - seg.endMs) <= 10 * 60_000L
+                (nowMs - seg.endMs) <= 15 * 60_000L &&
+                !seg.hadTransitionOut
+
+            val segDuration = maxOf(
+                seg.durationMs,
+                if (isCurrentlyActiveSeg) nowPlayingDurationMs else 0L
+            )
+            val finalDuration = segDuration.takeIf { it > 0L } ?: 195_000L
+
+            val liveWallDwellMs = if (isCurrentlyActiveSeg && isMusicPlayingNow && seg.lastPlaybackStateCode != 2 && seg.lastPlaybackStateCode != 1) {
+                seg.activeDwellMs + (nowMs - seg.endMs).coerceIn(0L, MAX_SESSION_ESTIMATE_MS)
+            } else {
+                seg.activeDwellMs
+            }
+
+            val estimatedListenedMs = maxOf(
+                seg.activeDwellMs,
+                seg.maxObservedPositionMs,
+                liveWallDwellMs,
+                if (isCurrentlyActiveSeg) liveEffectivePosMs else 0L
+            )
 
             val isQuickSkip = seg.hadTransitionOut &&
                 estimatedListenedMs in 1 until QUICK_SKIP_THRESHOLD_MS &&
@@ -317,9 +371,12 @@ object ListeningPlayDeduplicator {
                 continue
             }
 
-            val finalDuration = seg.durationMs.takeIf { it > 0L } ?: 195_000L
             val finalListened = when {
-                estimatedListenedMs >= 10_000L -> minOf(estimatedListenedMs, finalDuration)
+                isCurrentlyActiveSeg -> {
+                    maxOf(estimatedListenedMs, if (isMusicPlayingNow) 1_000L else 0L)
+                        .coerceAtMost(finalDuration)
+                }
+                estimatedListenedMs > 0L -> minOf(estimatedListenedMs, finalDuration)
                 else -> minOf(finalDuration, 180_000L)
             }
 
@@ -336,7 +393,7 @@ object ListeningPlayDeduplicator {
                 playedAtMs = seg.startMs,
                 durationMs = finalDuration,
                 listenedMs = finalListened,
-                isNowPlaying = false
+                isNowPlaying = isCurrentlyActiveSeg && isMusicPlayingNow
             )
         }
 
@@ -434,11 +491,26 @@ object ListeningPlayDeduplicator {
             }
             if (existingRecentIdx >= 0) {
                 val matched = finalTimeline.removeAt(existingRecentIdx)
-                finalTimeline.add(0, matched.copy(isNowPlaying = isMusicPlayingNow))
+                val updatedDur = maxOf(matched.durationMs, nowPlayingDurationMs).coerceAtLeast(1L)
+                val updatedListened = maxOf(
+                    matched.listenedMs,
+                    liveEffectivePosMs.coerceAtMost(updatedDur)
+                ).coerceAtMost(updatedDur)
+                finalTimeline.add(
+                    0,
+                    matched.copy(
+                        durationMs = updatedDur,
+                        listenedMs = updatedListened,
+                        isNowPlaying = isMusicPlayingNow
+                    )
+                )
             } else if (isMusicPlayingNow) {
                 val knownMatch = finalTimeline.firstOrNull {
                     isSameTrack(it.title, it.artist, it.spotifyUri, nowPlayingTitle, nowPlayingArtist, null)
                 }
+                val resolvedDur = maxOf(knownMatch?.durationMs ?: 0L, nowPlayingDurationMs)
+                    .takeIf { it > 0L } ?: 195_000L
+                val resolvedListened = maxOf(1_000L, liveEffectivePosMs).coerceAtMost(resolvedDur)
                 finalTimeline.add(
                     0,
                     UnifiedPlayEvent(
@@ -452,8 +524,8 @@ object ListeningPlayDeduplicator {
                         sourcePackage = nowPlayingSourcePkg?.takeIf { it.isNotBlank() } ?: "com.spotify.music",
                         appDisplayName = resolveAppDisplayName(nowPlayingSourcePkg ?: "com.spotify.music"),
                         playedAtMs = nowMs,
-                        durationMs = knownMatch?.durationMs ?: 195_000L,
-                        listenedMs = 30_000L,
+                        durationMs = resolvedDur,
+                        listenedMs = resolvedListened,
                         isNowPlaying = true
                     )
                 )
@@ -519,12 +591,12 @@ object ListeningPlayDeduplicator {
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
-        val sevenDaysAgo = nowMs - 7L * 86_400_000L
-        val thirtyDaysAgo = nowMs - 30L * 86_400_000L
+        val sevenDaysStart = calStartOfToday - 6L * 86_400_000L
+        val thirtyDaysStart = calStartOfToday - 29L * 86_400_000L
 
         val todayMs = finalTimeline.filter { it.playedAtMs >= calStartOfToday }.sumOf { it.listenedMs }
-        val sevenDayMs = finalTimeline.filter { it.playedAtMs >= sevenDaysAgo }.sumOf { it.listenedMs }
-        val thirtyDayMs = finalTimeline.filter { it.playedAtMs >= thirtyDaysAgo }.sumOf { it.listenedMs }
+        val sevenDayMs = finalTimeline.filter { it.playedAtMs >= sevenDaysStart }.sumOf { it.listenedMs }
+        val thirtyDayMs = finalTimeline.filter { it.playedAtMs >= thirtyDaysStart }.sumOf { it.listenedMs }
         val allTimeMs = finalTimeline.sumOf { it.listenedMs }
 
         val hourlyCounts = IntArray(24)
@@ -878,6 +950,34 @@ object ListeningPlayDeduplicator {
             }
         }
 
+        val allEarliestMs = cleanPlayHistory.minOfOrNull { it.playedAtMs }
+        val allLatestMs = cleanPlayHistory.maxOfOrNull { it.playedAtMs }
+        val trackedSpanDays = if (allEarliestMs != null) {
+            val earliestDayStart = Calendar.getInstance().apply {
+                timeInMillis = allEarliestMs
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            (((calStartOfToday - earliestDayStart) / 86_400_000L).toInt() + 1).coerceAtLeast(1)
+        } else 0
+        val cutoff30Days = calStartOfToday - 29L * 86_400_000L
+        val allTimeMatchesThirtyDays = allEarliestMs != null && allEarliestMs >= cutoff30Days
+
+        val shortDateFmt = java.text.SimpleDateFormat("d MMM", Locale.getDefault())
+        val monthYearFmt = java.text.SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+        val windowRangeLabel = when (window) {
+            StatsTimeWindow.TODAY -> "Today · ${shortDateFmt.format(java.util.Date(nowMs))}"
+            StatsTimeWindow.SEVEN_DAYS -> "${shortDateFmt.format(java.util.Date(calStartOfToday - 6L * 86_400_000L))} – Today"
+            StatsTimeWindow.THIRTY_DAYS -> "${shortDateFmt.format(java.util.Date(cutoff30Days))} – Today"
+            StatsTimeWindow.ALL_TIME -> if (allEarliestMs != null) {
+                "Tracked since ${monthYearFmt.format(java.util.Date(allEarliestMs))} (${trackedSpanDays}d)"
+            } else {
+                "All recorded history"
+            }
+        }
+
         return WindowedListeningStats(
             window = window,
             chartTitle = chartTitle,
@@ -894,7 +994,12 @@ object ListeningPlayDeduplicator {
             hourlyPlayCounts = hourlyCounts.toList(),
             appBreakdown = appBreakdown,
             topTracks = windowTracks,
-            topArtists = topArtists
+            topArtists = topArtists,
+            earliestEventMs = allEarliestMs,
+            latestEventMs = allLatestMs,
+            trackedSpanDays = trackedSpanDays,
+            windowRangeLabel = windowRangeLabel,
+            allTimeMatchesThirtyDays = allTimeMatchesThirtyDays
         )
     }
 

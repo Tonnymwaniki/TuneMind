@@ -95,11 +95,17 @@ fun HearingInsightsScreen(
         }
     }
 
-    // Light 450ms safety poll while screen is on top so Bluetooth AVRCP absolute-volume steps always reflect live
     LaunchedEffect(Unit) {
+        vm.refreshLiveListeningStatsNow()
+        var ticks = 0
         while (true) {
             kotlinx.coroutines.delay(450L)
-            vm.refreshHearingInsights()
+            ticks++
+            if (ticks % 10 == 0 && isMusicPlaying) {
+                vm.refreshLiveListeningStatsNow()
+            } else {
+                vm.refreshHearingInsights()
+            }
         }
     }
 
@@ -443,7 +449,7 @@ fun HearingInsightsScreen(
                 Column(modifier = Modifier.fillMaxWidth()) {
                     StudioSectionHeader(
                         title = "Daily Sound Dose",
-                        actionLabel = "${hearingState.dailyExposureMinutes}m today"
+                        actionLabel = "${formatListeningDuration(hearingState.dailyExposureMs)} today"
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(
@@ -492,7 +498,7 @@ fun HearingInsightsScreen(
                         ) {
                             Text(
                                 text = when {
-                                    hearingState.dailyExposureMinutes == 0 -> "No dose logged today"
+                                    hearingState.dailyExposureMs <= 0L -> "No dose logged today"
                                     soundDoseFraction < 0.6f -> "Healthy range"
                                     soundDoseFraction < 0.85f -> "Approaching daily limit"
                                     else -> "Daily limit reached"

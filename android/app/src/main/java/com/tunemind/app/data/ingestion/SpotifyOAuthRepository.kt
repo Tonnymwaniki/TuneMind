@@ -86,7 +86,7 @@ class SpotifyOAuthRepository(context: Context) {
      * Local-First reactive streams directly from SQLite Room cache.
      * The UI subscribes to these Flows so screens render in < 2ms without waiting on network calls.
      */
-    fun observeLocalRecentlyPlayed(limit: Int = 200): Flow<List<SpotifyListeningHistoryEntity>> =
+    fun observeLocalRecentlyPlayed(limit: Int = 10_000): Flow<List<SpotifyListeningHistoryEntity>> =
         historyDao.observeRecentHistory(limit)
 
     fun observeLocalAggregatedTracks(limit: Int = 100): Flow<List<SpotifyTrackAggregate>> =
@@ -359,9 +359,9 @@ class SpotifyOAuthRepository(context: Context) {
             mirrorIntoEventQueueForUnifiedIntelligence(recentlyPlayedEntities)
         }
 
-        // Keep local history lean (prune records older than 90 days)
-        val ninetyDaysAgoMs = nowMs - (90L * 24L * 3600L * 1000L)
-        historyDao.pruneHistoryOlderThan(ninetyDaysAgoMs)
+        // Retain up to 5 years of Spotify play history locally so All-Time stats remain distinct from 30 Days
+        val retentionCutoffMs = nowMs - (1825L * 24L * 3600L * 1000L)
+        historyDao.pruneHistoryOlderThan(retentionCutoffMs)
 
         // E. Push synced Spotify tracks to Live Supabase Taste Genome for long-term intelligence growth
         com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.syncSpotifyHistoryToSupabase(appContext)

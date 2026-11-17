@@ -13,12 +13,22 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.MediaStore
 import android.util.Log
+import com.tunemind.app.data.local.EventBufferRepository
+import com.tunemind.app.data.local.TuneMindDatabase
+import com.tunemind.app.domain.event.ObservationEventType
+import com.tunemind.app.domain.model.PlaybackObservation
+import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.media.ActivePlaybackSnapshot
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.util.PermissionUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.util.UUID
 import java.util.concurrent.Executors
 
 data class LocalAudioMatch(
@@ -73,6 +83,9 @@ object TuneMindInAppPlayer {
     private val _durationMsFlow = MutableStateFlow(0L)
     val durationMsFlow: StateFlow<Long> = _durationMsFlow.asStateFlow()
 
+    private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile
+    private var cachedAppContext: Context? = null
     @Volatile
     private var currentAlbumName: String? = null
     @Volatile
@@ -349,6 +362,7 @@ object TuneMindInAppPlayer {
         isAsyncRemote: Boolean,
         configureSource: (MediaPlayer) -> Unit
     ) {
+        cachedAppContext = appContext
         stopInternal(resetTrackMeta = false)
 
         _currentTitleFlow.value = title.trim()
@@ -373,12 +387,25 @@ object TuneMindInAppPlayer {
             setOnCompletionListener { completedMp ->
                 val doneTitle = _currentTitleFlow.value ?: title
                 val doneArtist = _currentArtistFlow.value ?: artist
+                val doneDuration = runCatching { completedMp.duration.toLong() }.getOrDefault(0L)
+                    .coerceAtLeast(currentDurationMs)
                 _isPlayingFlow.value = false
                 mainHandler.removeCallbacks(progressTicker)
                 publishSnapshot(
                     isPlaying = false,
-                    positionMs = completedMp.duration.toLong().coerceAtLeast(currentDurationMs),
-                    durationMs = completedMp.duration.toLong().coerceAtLeast(currentDurationMs)
+                    positionMs = doneDuration,
+                    durationMs = doneDuration
+                )
+                persistInAppObservation(
+                    context = appContext,
+                    eventType = ObservationEventType.PLAYBACK_STATE_CHANGED,
+                    title = doneTitle,
+                    artist = doneArtist,
+                    album = currentAlbumName,
+                    trackUri = sourceTag,
+                    durationMs = doneDuration,
+                    positionMs = doneDuration,
+                    playbackStateCode = 2
                 )
                 Log.i(TAG, "In-App playback completed: $doneTitle")
                 onTrackCompletedListener?.invoke(doneTitle, doneArtist, appPackageName)
@@ -406,6 +433,17 @@ object TuneMindInAppPlayer {
                 preparedMp.start()
                 _isPlayingFlow.value = true
                 publishSnapshot(isPlaying = true, positionMs = 0L, durationMs = currentDurationMs)
+                persistInAppObservation(
+                    context = appContext,
+                    eventType = ObservationEventType.METADATA_CHANGED,
+                    title = _currentTitleFlow.value ?: title,
+                    artist = _currentArtistFlow.value ?: artist,
+                    album = currentAlbumName,
+                    trackUri = sourceTag,
+                    durationMs = currentDurationMs,
+                    positionMs = 0L,
+                    playbackStateCode = 3
+                )
                 mainHandler.removeCallbacks(progressTicker)
                 mainHandler.postDelayed(progressTicker, 900L)
                 Log.i(TAG, "✅ Started native TuneMind In-App stream for '$title'")
@@ -423,6 +461,17 @@ object TuneMindInAppPlayer {
             mp.start()
             _isPlayingFlow.value = true
             publishSnapshot(isPlaying = true, positionMs = 0L, durationMs = currentDurationMs)
+            persistInAppObservation(
+                context = appContext,
+                eventType = ObservationEventType.METADATA_CHANGED,
+                title = _currentTitleFlow.value ?: title,
+                artist = _currentArtistFlow.value ?: artist,
+                album = currentAlbumName,
+                trackUri = sourceTag,
+                durationMs = currentDurationMs,
+                positionMs = 0L,
+                playbackStateCode = 3
+            )
             mainHandler.removeCallbacks(progressTicker)
             mainHandler.postDelayed(progressTicker, 900L)
             Log.i(TAG, "✅ Started native TuneMind In-App local playback for '$title'")
@@ -432,6 +481,7 @@ object TuneMindInAppPlayer {
     fun pause(): Boolean {
         val mp = mediaPlayer ?: return false
         return try {
+            val pos = runCatching { mp.currentPosition.toLong().coerceAtLeast(0L) }.getOrDefault(_positionMsFlow.value)
             if (mp.isPlaying) {
                 mp.pause()
             }
@@ -439,9 +489,24 @@ object TuneMindInAppPlayer {
             mainHandler.removeCallbacks(progressTicker)
             publishSnapshot(
                 isPlaying = false,
-                positionMs = runCatching { mp.currentPosition.toLong() }.getOrDefault(0L),
+                positionMs = pos,
                 durationMs = currentDurationMs
             )
+            cachedAppContext?.let { ctx ->
+                _currentTitleFlow.value?.takeIf { it.isNotBlank() }?.let { activeTitle ->
+                    persistInAppObservation(
+                        context = ctx,
+                        eventType = ObservationEventType.PLAYBACK_STATE_CHANGED,
+                        title = activeTitle,
+                        artist = _currentArtistFlow.value.orEmpty(),
+                        album = currentAlbumName,
+                        trackUri = _currentUriFlow.value,
+                        durationMs = currentDurationMs,
+                        positionMs = pos,
+                        playbackStateCode = 2
+                    )
+                }
+            }
             true
         } catch (_: Exception) {
             false
@@ -451,15 +516,31 @@ object TuneMindInAppPlayer {
     fun resume(): Boolean {
         val mp = mediaPlayer ?: return false
         return try {
+            val pos = runCatching { mp.currentPosition.toLong().coerceAtLeast(0L) }.getOrDefault(_positionMsFlow.value)
             if (!mp.isPlaying) {
                 mp.start()
             }
             _isPlayingFlow.value = true
             publishSnapshot(
                 isPlaying = true,
-                positionMs = runCatching { mp.currentPosition.toLong() }.getOrDefault(0L),
+                positionMs = pos,
                 durationMs = currentDurationMs
             )
+            cachedAppContext?.let { ctx ->
+                _currentTitleFlow.value?.takeIf { it.isNotBlank() }?.let { activeTitle ->
+                    persistInAppObservation(
+                        context = ctx,
+                        eventType = ObservationEventType.PLAYBACK_STATE_CHANGED,
+                        title = activeTitle,
+                        artist = _currentArtistFlow.value.orEmpty(),
+                        album = currentAlbumName,
+                        trackUri = _currentUriFlow.value,
+                        durationMs = currentDurationMs,
+                        positionMs = pos,
+                        playbackStateCode = 3
+                    )
+                }
+            }
             mainHandler.removeCallbacks(progressTicker)
             mainHandler.postDelayed(progressTicker, 900L)
             true
@@ -477,11 +558,27 @@ object TuneMindInAppPlayer {
         return try {
             val target = positionMs.coerceAtLeast(0L).toInt()
             mp.seekTo(target)
+            val playingNow = _isPlayingFlow.value
             publishSnapshot(
-                isPlaying = _isPlayingFlow.value,
+                isPlaying = playingNow,
                 positionMs = target.toLong(),
                 durationMs = currentDurationMs
             )
+            cachedAppContext?.let { ctx ->
+                _currentTitleFlow.value?.takeIf { it.isNotBlank() }?.let { activeTitle ->
+                    persistInAppObservation(
+                        context = ctx,
+                        eventType = ObservationEventType.PLAYBACK_STATE_CHANGED,
+                        title = activeTitle,
+                        artist = _currentArtistFlow.value.orEmpty(),
+                        album = currentAlbumName,
+                        trackUri = _currentUriFlow.value,
+                        durationMs = currentDurationMs,
+                        positionMs = target.toLong(),
+                        playbackStateCode = if (playingNow) 3 else 2
+                    )
+                }
+            }
             true
         } catch (_: Exception) {
             false
@@ -496,6 +593,24 @@ object TuneMindInAppPlayer {
 
     fun stop() {
         loopEnabled = false
+        val posSnapshot = runCatching { mediaPlayer?.currentPosition?.toLong()?.coerceAtLeast(0L) }
+            .getOrNull() ?: _positionMsFlow.value
+        val activeTitle = _currentTitleFlow.value?.takeIf { it.isNotBlank() }
+        if (activeTitle != null && _hasActiveTrackFlow.value) {
+            cachedAppContext?.let { ctx ->
+                persistInAppObservation(
+                    context = ctx,
+                    eventType = ObservationEventType.PLAYBACK_STATE_CHANGED,
+                    title = activeTitle,
+                    artist = _currentArtistFlow.value.orEmpty(),
+                    album = currentAlbumName,
+                    trackUri = _currentUriFlow.value,
+                    durationMs = currentDurationMs,
+                    positionMs = posSnapshot,
+                    playbackStateCode = 2
+                )
+            }
+        }
         stopInternal(resetTrackMeta = true)
     }
 
@@ -521,6 +636,43 @@ object TuneMindInAppPlayer {
             currentDurationMs = 0L
             _positionMsFlow.value = 0L
             _durationMsFlow.value = 0L
+        }
+    }
+
+    private fun persistInAppObservation(
+        context: Context,
+        eventType: ObservationEventType,
+        title: String,
+        artist: String,
+        album: String?,
+        trackUri: String?,
+        durationMs: Long,
+        positionMs: Long,
+        playbackStateCode: Int
+    ) {
+        val cleanTitle = title.trim().takeIf { it.isNotBlank() } ?: return
+        val appCtx = context.applicationContext
+        if (AgentSettingsStore.isPrivateSessionEnabled(appCtx)) return
+        val pkg = appPackageName.ifBlank { appCtx.packageName }
+        val obs = PlaybackObservation(
+            eventId = UUID.randomUUID().toString(),
+            observerSessionId = "tunemind_inapp_player",
+            eventType = eventType,
+            eventTimeMs = System.currentTimeMillis(),
+            sourcePackage = pkg,
+            trackId = trackUri?.takeIf { it.isNotBlank() },
+            trackTitle = cleanTitle,
+            trackArtist = artist.trim().takeIf { it.isNotBlank() },
+            trackAlbum = album?.trim()?.takeIf { it.isNotBlank() },
+            durationMs = durationMs.takeIf { it > 0L },
+            positionMs = positionMs.coerceAtLeast(0L),
+            playbackStateCode = playbackStateCode,
+            playbackSpeed = 1.0f
+        )
+        persistenceScope.launch {
+            runCatching {
+                EventBufferRepository(TuneMindDatabase.getInstance(appCtx).eventQueueDao()).record(obs)
+            }
         }
     }
 

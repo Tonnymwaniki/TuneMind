@@ -103,7 +103,8 @@ fun RhythmDnaScreen(
     onOpenMoments: () -> Unit = {},
     onOpenAccountAuth: () -> Unit = {},
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
-    momentsCount: Int = 0
+    momentsCount: Int = 0,
+    onRefreshStats: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -144,9 +145,9 @@ fun RhythmDnaScreen(
             counts[idx]++
             durationsMs[idx] += ev.listenedMs.coerceAtLeast(0L)
         }
-        (0..3).associateWith { idx -> counts[idx] to ((durationsMs[idx] / 60_000L).toInt()) }
+        (0..3).associateWith { idx -> counts[idx] to durationsMs[idx] }
     }
-    val (activePhasePlays, activePhaseMins) = phaseActivityMap[selectedPhaseIndex] ?: (0 to 0)
+    val (activePhasePlays, activePhaseMs) = phaseActivityMap[selectedPhaseIndex] ?: (0 to 0L)
 
     var activeSyncTrack by remember { mutableStateOf<TrackMemoryEntry?>(null) }
 
@@ -209,6 +210,9 @@ fun RhythmDnaScreen(
     val effectiveSpotifyConnected = isSpotifyConnected || authSession.isSpotifyConnected
 
     LaunchedEffect(effectiveSpotifyConnected, activeRhythmSubDeck) {
+        if (activeRhythmSubDeck == 0 || activeRhythmSubDeck == 1) {
+            onRefreshStats()
+        }
         if (effectiveSpotifyConnected &&
             activeRhythmSubDeck == 2 &&
             likedTracks.isEmpty() && playlists.isEmpty() && podcasts.isEmpty() && !isLibrarySyncing
@@ -291,6 +295,7 @@ fun RhythmDnaScreen(
                             cleanPlayHistory = cleanPlayHistory,
                             selectedWindow = selectedStatsWindow,
                             onSelectWindow = { selectedStatsWindow = it },
+                            onRefreshStats = onRefreshStats,
                             tasteShiftSummary = tasteShiftSummary,
                             resolvePlayCount = resolvePlayCount,
                             isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
@@ -552,7 +557,7 @@ fun RhythmDnaScreen(
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Text(
-                                                    text = if (activePhasePlays > 0) "${activePhaseMins}m · $dbValue dB" else "${activePhase.hoursLabel} · $dbValue dB",
+                                                    text = if (activePhasePlays > 0) "${formatListeningDuration(activePhaseMs)} · $dbValue dB" else "${activePhase.hoursLabel} · $dbValue dB",
                                                     color = Color.White.copy(alpha = 0.62f),
                                                     fontSize = 12.sp
                                                 )
