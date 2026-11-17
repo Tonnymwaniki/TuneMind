@@ -1972,10 +1972,11 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Initialize Telemetry Reasoning Report & schedule periodic Claude Worker
+        // Initialize Telemetry Reasoning Report & schedule periodic Claude + Noon Drop Workers
         AppHolder.context?.let { ctx ->
             _reasoningReport.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.getLatestReport(ctx)
             com.tunemind.app.domain.ai.ClaudeTelemetryReasoningWorker.schedulePeriodic(ctx)
+            com.tunemind.app.domain.ai.ForYouDailyDropWorker.scheduleNextNoonDrop(ctx)
         }
         refreshTelemetryReasoningReport()
         recomputeAdaptiveTheme()
@@ -3436,7 +3437,7 @@ class TuneMindViewModel : ViewModel() {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
                 if (!forceRefresh) {
-                    if (existingInFlow.isNotEmpty()) {
+                    if (existingInFlow.size >= 10) {
                         autoTriggeredNoonCycleKey = todayNoonKey
                         return@launch
                     }
@@ -3444,7 +3445,7 @@ class TuneMindViewModel : ViewModel() {
                     val existingInRoom = withContext(Dispatchers.IO) {
                         aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()
                     }
-                    if (existingInRoom.isNotEmpty()) {
+                    if (existingInRoom.size >= 10) {
                         autoTriggeredNoonCycleKey = todayNoonKey
                         return@launch
                     }
@@ -3462,16 +3463,13 @@ class TuneMindViewModel : ViewModel() {
                     val likedTitles = _spotifyLikedTracks.value.map { it.trackTitle }
                     val historyTitles = _historyState.value.tracks.mapNotNull { it.title }
                     val vaultTitles = _vaultState.value.map { it.title }
-                    val combinedExclusions = if (forceRefresh) {
-                        (likedTitles + historyTitles + vaultTitles).distinct()
-                    } else {
-                        (knownFromCrate + likedTitles + historyTitles + vaultTitles).distinct()
-                    }
+                    // Strictly never repeat yesterday's or previously suggested songs even on manual refresh
+                    val combinedExclusions = (knownFromCrate + likedTitles + historyTitles + vaultTitles).distinct()
                     DataQuad(
                         combinedExclusions,
                         aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
                         aiRecDao?.getDismissedSignals() ?: emptyList(),
-                        aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 24) ?: emptyList()
+                        aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 30) ?: emptyList()
                     )
                 }
 
@@ -3572,8 +3570,45 @@ class TuneMindViewModel : ViewModel() {
     }
 
     private fun evaluateActiveForYouSessionTransition(nowPlayingObs: NowPlayingObservation?) {
+        // Passive recognition: even if played directly from Spotify/Boomplay without tapping inside For You,
+        // detect if the currently playing track matches a For You recommendation and begin tracking completion vs skip!
+        if (activeTrackedForYouSession == null && nowPlayingObs != null && nowPlayingObs.isPlaying && !nowPlayingObs.title.isNullOrBlank()) {
+            val matchedRec = _aiDiscoveryCrate.value.firstOrNull { rec ->
+                ListeningPlayDeduplicator.isSameTrack(
+                    nowPlayingObs.title,
+                    nowPlayingObs.artist,
+                    null,
+                    rec.title,
+                    rec.artist,
+                    rec.spotifyUri
+                )
+            }
+            if (matchedRec != null) {
+                activeTrackedForYouSession = TrackedForYouSession(
+                    rec = matchedRec,
+                    startedAtMs = System.currentTimeMillis(),
+                    matchedNowPlayingAtMs = System.currentTimeMillis(),
+                    observedTrackDurationMs = nowPlayingObs.durationMs.takeIf { it > 0L } ?: matchedRec.trackDurationMs
+                )
+            }
+        }
+
         val session = activeTrackedForYouSession ?: return
-        if (session.reportedOutcome) return
+        if (session.reportedOutcome) {
+            if (nowPlayingObs != null &&
+                !ListeningPlayDeduplicator.isSameTrack(
+                    nowPlayingObs.title,
+                    nowPlayingObs.artist,
+                    null,
+                    session.rec.title,
+                    session.rec.artist,
+                    session.rec.spotifyUri
+                )
+            ) {
+                activeTrackedForYouSession = null
+            }
+            return
+        }
 
         val matches = nowPlayingObs != null &&
             ListeningPlayDeduplicator.isSameTrack(
@@ -3612,6 +3647,7 @@ class TuneMindViewModel : ViewModel() {
             } else if (listenedMs in 2_500L..24_999L && listenedMs < (effectiveDurMs * 0.25).toLong()) {
                 finalizeTrackedForYouOutcome(session, outcome = "SKIPPED", listenedMs = listenedMs, durationMs = effectiveDurMs)
             }
+            activeTrackedForYouSession = null
         }
     }
 

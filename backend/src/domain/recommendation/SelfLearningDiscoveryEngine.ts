@@ -806,9 +806,22 @@ export class SelfLearningDiscoveryEngine {
         score: Number(this.scoreGenreForContext(model, genre, timeSlot).toFixed(3))
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5); // Up to 5 top genres -> 2 picks each = up to 10 genre picks + 2 wildcards (10-12 tracks)
+      .slice(0, 6);
 
-    return ranked.map((r) => ({ genre: r.genre, slots: 2, score: r.score }));
+    // Distribute exactly 12 personalized slots across all active user genres
+    const targetTotalGenreSlots = 12;
+    const basePerGenre = Math.floor(targetTotalGenreSlots / ranked.length);
+    let remainder = targetTotalGenreSlots % ranked.length;
+
+    return ranked.map((r) => {
+      const extra = remainder > 0 ? 1 : 0;
+      if (remainder > 0) remainder -= 1;
+      return {
+        genre: r.genre,
+        slots: basePerGenre + extra,
+        score: r.score
+      };
+    });
   }
 
   private normalizeKey(title: string, artist: string): string {
@@ -1080,9 +1093,9 @@ export class SelfLearningDiscoveryEngine {
 
     // Cost Protection: return today's cached 12:00 PM drop immediately (0 Claude tokens) unless manually refreshed past cooldown
     const existingDropForCycle = (model.recentDrops || []).find(
-      (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= 6
+      (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= 10
     );
-    const forceRefreshCooldownMs = 2 * 60_000; // Prevent accidental double-tap/loop within 2 minutes even when forceRefresh=true
+    const forceRefreshCooldownMs = 15 * 60_000; // Prevent repeated paid Anthropic calls within 15 minutes even on manual refresh
     if (
       existingDropForCycle &&
       (!payload.forceRefresh || Date.now() - (existingDropForCycle.generatedAtMs || 0) < forceRefreshCooldownMs)
@@ -1140,20 +1153,20 @@ export class SelfLearningDiscoveryEngine {
     }
 
     const desiredWildcards = 3;
-    const genreTargetCount = genreAllocation.length * 2;
-    const totalTargetCount = genreTargetCount + desiredWildcards; // 2 per active genre + 1 Wildcard deck (3 songs) ≈ 11–13 tracks daily
+    const genreTargetCount = genreAllocation.reduce((sum, g) => sum + g.slots, 0); // Always 12 across active user genres
+    const totalTargetCount = genreTargetCount + desiredWildcards; // 12 genre picks + 1 Wildcard showcase (3 uncharted-genre songs) = 15 daily
     let candidates: ScoredDiscoveryTrack[] = [];
     let isAiGenerated = false;
     let modelUsed = 'tunemind-contextual-bandit';
 
-    // 4. AI Deep Reasoning Synthesis (Claude Sonnet/Haiku with live model resolution)
+    // 4. AI Deep Reasoning Synthesis (Single cost-capped Haiku-first pass per daily cycle)
     if (this.anthropic) {
       const allocationInstruction = genreAllocation
-        .map((g) => `- 2 UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
+        .map((g) => `- ${g.slots} UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
         .join('\n');
 
       const outcomeFeedback = [
-        ...(payload.yesterdayOutcomes || []).slice(0, 10).map(
+        ...(payload.yesterdayOutcomes || []).slice(0, 12).map(
           (o) => `${o.title} by ${o.artist} [${o.genre || 'Music'}]: ${o.outcome} (listened ${Math.round(((o.listenedMs || 0) / Math.max(1, o.durationMs || 180000)) * 100)}%, volume ${Math.round((o.volumeRatio || 0.6) * 100)}%)`
         ),
         ...(payload.playedFeedback || []).slice(0, 6).map((s) => `PLAYED & LIKED: ${s}`),
@@ -1172,20 +1185,21 @@ export class SelfLearningDiscoveryEngine {
 
       const prompt = `TuneMind Daily Drop (${dropDate}, ${timeSlot}, Vol ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%).
 Top Artists: ${(payload.topArtists || []).concat(payload.userTasteAnchors || []).slice(0, 8).join(', ') || 'Diverse global'}
-Feedback: ${outcomeFeedback.split('\n').slice(0, 5).join('; ') || 'Calibrating'}
-Quota (${totalTargetCount} UNHEARD real songs):
+Feedback: ${outcomeFeedback.split('\n').slice(0, 6).join('; ') || 'Calibrating'}
+Quota (${totalTargetCount} UNHEARD real songs = ${genreTargetCount} across your genres + 3 global wildcards):
 ${allocationInstruction}
-- 3 "GLOBAL_WILDCARD" songs in DISTINCT genres NOT in [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., ${foreignSceneHints.slice(0, 4).join(', ')}), each with 1 crisp bridge reason.
-Exclude: ${Array.from(excludedTitlesLower).slice(0, 40).join(', ')}
+- 3 "GLOBAL_WILDCARD" songs in 3 COMPLETELY NEW DISTINCT genres across the world NOT in [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., ${foreignSceneHints.slice(0, 5).join(', ')}), each with 1 crisp bridge reason.
+NEVER repeat any excluded song: ${Array.from(excludedTitlesLower).slice(0, 60).join(', ')}
 Return ONLY a raw JSON array:
 [{"title":"","artist":"","album":"","genre":"","category":"DOPAMINE_FLOW|PALATE_CLEANSER|CHRONO_RESTORE|NOVEL_EXPLORATION","subTier":"GENRE_PICK|GLOBAL_WILDCARD","isWildcard":false,"reason":"1 short sentence","confidence":0.93}]`;
 
       const candidateModels = await this.getCandidateClaudeModels();
-      for (const candidateModelId of candidateModels) {
+      // Try at most 2 fast Haiku/fallback models so we never burn quota looping through expensive tiers
+      for (const candidateModelId of candidateModels.slice(0, 2)) {
         try {
           const aiResp = await this.anthropic.messages.create({
             model: candidateModelId,
-            max_tokens: 1350,
+            max_tokens: 1850,
             messages: [{ role: 'user', content: prompt }]
           });
           const rawText = aiResp.content
@@ -1273,6 +1287,19 @@ Return ONLY a raw JSON array:
           finalGenrePicks.push({ ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' });
           countForAlloc += 1;
         }
+      }
+    }
+
+    // Guarantee full 12 genre picks if any active genre's pool ran tight
+    if (finalGenrePicks.length < genreTargetCount) {
+      for (const b of CURATED_GLOBAL_DISCOVERY_BANK.filter((x) => !x.isWildcard)) {
+        if (finalGenrePicks.length >= genreTargetCount) break;
+        const k = this.normalizeKey(b.title, b.artist);
+        if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
+        seenDropKeys.add(k);
+        const score = this.scoreGenreForContext(model, b.genre, timeSlot);
+        const mlScore = Number((b.confidence * 0.5 + score * 0.5).toFixed(3));
+        finalGenrePicks.push({ ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' });
       }
     }
 

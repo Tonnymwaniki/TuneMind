@@ -239,77 +239,9 @@ fun DopamineVaultScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Unboxed Readiness Strip (Less Card Clutter)
-            AnimatedVisibility(visible = selectedTab != 2) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawArc(
-                                    color = Color.White.copy(alpha = 0.10f),
-                                    startAngle = 135f,
-                                    sweepAngle = 270f,
-                                    useCenter = false,
-                                    style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
-                                )
-                                drawArc(
-                                    color = activeTabAccent,
-                                    startAngle = 135f,
-                                    sweepAngle = if (allSongs.isEmpty()) 0f else 270f * (averageFreshness / 100f),
-                                    useCenter = false,
-                                    style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
-                                )
-                            }
-                            Text(
-                                text = if (allSongs.isEmpty()) "--" else "$averageFreshness%",
-                                color = Color(0xFFFAFAFA),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = when {
-                                    selectedTab == 1 -> "${coolingDownSongs.size} resting tracks"
-                                    allSongs.isEmpty() -> "No tracks tracked yet"
-                                    else -> "${peakFreshSongs.size} fresh tracks"
-                                },
-                                color = Color(0xFFFAFAFA),
-                                fontSize = 15.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = when {
-                                    selectedTab == 1 -> "Resting in your vault to keep them feeling fresh."
-                                    allSongs.isEmpty() -> "Play music in Spotify or any player to build your Fresh mix."
-                                    else -> "Ready to play without feeling repetitive."
-                                },
-                                color = Color.White.copy(alpha = 0.62f),
-                                fontSize = 12.5.sp,
-                                lineHeight = 17.sp
-                            )
-                        }
-                    }
-
-                    com.tunemind.app.ui.components.StudioHairlineDivider()
-                    Spacer(modifier = Modifier.height(14.dp))
-                }
-            }
-
-            // Spring-sliding capsule tabs (Fresh | Resting | For You)
+            // Spring-sliding capsule tabs (Fresh | Resting | For You) — permanently anchored at top
             MagicalSegmentedTabs(
                 tabs = listOf(
                     MagicalTabItem("Fresh (${peakFreshSongs.size})", theme.primaryAccent),
@@ -340,11 +272,91 @@ fun DopamineVaultScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 2.dp, bottom = 124.dp)
                 ) {
+                    if (currentTab != 2) {
+                        item(key = "fresh_readiness_strip") {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.size(54.dp)
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawArc(
+                                                color = Color.White.copy(alpha = 0.10f),
+                                                startAngle = 135f,
+                                                sweepAngle = 270f,
+                                                useCenter = false,
+                                                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+                                            )
+                                            drawArc(
+                                                color = activeTabAccent,
+                                                startAngle = 135f,
+                                                sweepAngle = if (allSongs.isEmpty()) 0f else 270f * (averageFreshness / 100f),
+                                                useCenter = false,
+                                                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+                                            )
+                                        }
+                                        Text(
+                                            text = if (allSongs.isEmpty()) "--" else "$averageFreshness%",
+                                            color = Color(0xFFFAFAFA),
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = when {
+                                                currentTab == 1 -> "${coolingDownSongs.size} resting tracks"
+                                                allSongs.isEmpty() -> "No tracks tracked yet"
+                                                else -> "${peakFreshSongs.size} fresh tracks"
+                                            },
+                                            color = Color(0xFFFAFAFA),
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = when {
+                                                currentTab == 1 -> "Resting in your vault to keep them feeling fresh."
+                                                allSongs.isEmpty() -> "Play music in Spotify or any player to build your Fresh mix."
+                                                else -> "Ready to play without feeling repetitive."
+                                            },
+                                            color = Color.White.copy(alpha = 0.62f),
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 17.sp
+                                        )
+                                    }
+                                }
+                                com.tunemind.app.ui.components.StudioHairlineDivider()
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                        }
+                    }
+
                     if (currentTab == 2) {
-                        val activeRecs = forYouPicks.filter { !it.isDismissed }
+                        val todayKey = learningState.dropDateKey.ifBlank {
+                            com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+                        }
+                        val todayScopedRecs = forYouPicks.filter {
+                            !it.isDismissed && it.dropDateKey == todayKey
+                        }
+                        val activeRecs = if (todayScopedRecs.isNotEmpty()) {
+                            todayScopedRecs
+                        } else {
+                            forYouPicks.filter { !it.isDismissed }
+                        }
                         val allWildcardsInCycle = forYouPicks.filter {
                             (it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true)) &&
-                                (learningState.dropDateKey.isBlank() || it.dropDateKey == learningState.dropDateKey)
+                                it.dropDateKey == todayKey
+                        }.ifEmpty {
+                            activeRecs.filter { it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true) }
                         }
                         forYouDiscoveryItems(
                             activeRecs = activeRecs,
