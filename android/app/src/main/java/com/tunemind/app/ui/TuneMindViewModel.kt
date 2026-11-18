@@ -285,6 +285,8 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var queueMonitoredMaxPosMs: Long = 0L
     @Volatile
+    private var queueMonitoredStartedAtMs: Long = 0L
+    @Volatile
     private var expectedHandoverTargetTitle: String = ""
     @Volatile
     private var expectedHandoverTargetTrack: DopamineCapsuleTrack? = null
@@ -1192,7 +1194,13 @@ class TuneMindViewModel : ViewModel() {
         queueMonitoredPackage = sourcePackage
         queueMonitoredDurationMs = 0L
         queueMonitoredMaxPosMs = 0L
+        queueMonitoredStartedAtMs = now
         lastQueueHandoverSourceTitle = ""
+        expectedHandoverTargetTitle = ""
+        expectedHandoverTargetTrack = null
+        expectedHandoverWindowUntilMs = 0L
+        expectedHandoverRetryCount = 0
+        queueHandoverInFlight = false
         _homeState.value = _homeState.value.copy(nowPlaying = nowObs)
         markTrackPlayedFromQueueOrExternal(cleanTitle, cleanArtist, null)
         syncAtmosphereToTrack(cleanTitle, cleanArtist)
@@ -1893,6 +1901,10 @@ class TuneMindViewModel : ViewModel() {
             spotifyUri = resolvedIdentity.spotifyUri,
             trackId = resolvedIdentity.trackId
         )
+        expectedHandoverTargetTitle = track.title
+        expectedHandoverTargetTrack = track
+        expectedHandoverWindowUntilMs = now + 20_000L
+        expectedHandoverRetryCount = 0
         postNowPlayingStatus("Playing \"${track.title}\" from Up Next…")
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -2876,6 +2888,7 @@ class TuneMindViewModel : ViewModel() {
             queueMonitoredPackage = snap.packageName
             queueMonitoredDurationMs = snap.durationMs
             queueMonitoredMaxPosMs = snap.positionMs
+            queueMonitoredStartedAtMs = System.currentTimeMillis()
             return
         }
 
@@ -2901,11 +2914,13 @@ class TuneMindViewModel : ViewModel() {
             queueMonitoredPackage = snap.packageName
             if (snap.durationMs > 0L) queueMonitoredDurationMs = snap.durationMs
             queueMonitoredMaxPosMs = snap.positionMs
+            if (queueMonitoredStartedAtMs <= 0L) queueMonitoredStartedAtMs = now
             if (snap.isPlaying) {
                 expectedHandoverTargetTitle = ""
                 expectedHandoverTargetTrack = null
                 expectedHandoverWindowUntilMs = 0L
                 expectedHandoverRetryCount = 0
+                queueHandoverInFlight = false
             }
             return
         }
@@ -2915,8 +2930,8 @@ class TuneMindViewModel : ViewModel() {
             now < expectedHandoverWindowUntilMs &&
             !matchesFinishedSource &&
             !com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) &&
-            (now - lastHandoverRetryAtMs) >= 1_400L &&
-            expectedHandoverRetryCount < 3
+            (now - lastHandoverRetryAtMs) >= 900L &&
+            expectedHandoverRetryCount < 5
         ) {
             val nextRetryCount = expectedHandoverRetryCount + 1
             lastHandoverRetryAtMs = now
@@ -2937,13 +2952,14 @@ class TuneMindViewModel : ViewModel() {
             return
         }
 
-        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 3_000L) {
+        if (queueHandoverInFlight || (now - lastQueueHandoverAtMs) < 2_500L) {
             if (com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle)) {
                 queueMonitoredTitle = rawTitle
                 queueMonitoredArtist = snap.artist
                 queueMonitoredPackage = snap.packageName
                 if (snap.durationMs > 0L) queueMonitoredDurationMs = snap.durationMs
                 queueMonitoredMaxPosMs = snap.positionMs
+                queueMonitoredStartedAtMs = now
             }
             return
         }
@@ -2952,14 +2968,23 @@ class TuneMindViewModel : ViewModel() {
             ListeningPlayDeduplicator.isSameTrack(rawTitle, snap.artist, null, queueMonitoredTitle, queueMonitoredArtist, null)
 
         if (isSameTrack) {
+            if (queueMonitoredTitle.isBlank()) {
+                queueMonitoredStartedAtMs = now
+            }
             queueMonitoredTitle = rawTitle
             queueMonitoredArtist = snap.artist
             queueMonitoredPackage = snap.packageName
             if (snap.durationMs > 0L) queueMonitoredDurationMs = snap.durationMs
             if (snap.positionMs > queueMonitoredMaxPosMs) queueMonitoredMaxPosMs = snap.positionMs
 
-            // Trigger A: Song is within final window -> immediately stop player autoplay & spin TuneMind Up Next
-            val leadWindowMs = if (queueMonitoredDurationMs >= 35_000L) 3_200L else 1_600L
+            val elapsedWallMs = if (queueMonitoredStartedAtMs > 0L) (now - queueMonitoredStartedAtMs) else 0L
+            if (elapsedWallMs >= 15_000L && lastQueueHandoverSourceTitle.equals(rawTitle, ignoreCase = true)) {
+                // Track was freshly replayed later in session: re-arm end-of-song interception
+                lastQueueHandoverSourceTitle = ""
+            }
+
+            // Trigger A: Song is within final window -> preempt Spotify crossfade/playlist autoplay & spin TuneMind Up Next
+            val leadWindowMs = if (queueMonitoredDurationMs >= 35_000L) 4_200L else 1_800L
             if (snap.isPlaying &&
                 queueMonitoredDurationMs >= 15_000L &&
                 snap.positionMs >= (queueMonitoredDurationMs - leadWindowMs) &&
@@ -2977,11 +3002,13 @@ class TuneMindViewModel : ViewModel() {
         val prevTitle = queueMonitoredTitle
         val prevDur = queueMonitoredDurationMs
         val prevMax = queueMonitoredMaxPosMs
+        val elapsedWallMs = if (queueMonitoredStartedAtMs > 0L) (now - queueMonitoredStartedAtMs) else 0L
         val wasTuneMindLaunch = com.tunemind.app.provider.MusicPlayerAutoLauncher.wasRecentlyDispatched(rawTitle) ||
             (manualActiveTrackOverride?.title?.equals(rawTitle, ignoreCase = true) == true &&
                 (now - (manualActiveTrackOverride?.updatedAtMs ?: 0L)) < 12_000L)
-        val prevPlayedSubstantially = prevMax >= 10_000L ||
-            (prevDur >= 15_000L && (prevMax >= (prevDur * 40L) / 100L || prevMax >= (prevDur - 15_000L)))
+        val prevPlayedSubstantially = prevMax >= 8_000L ||
+            elapsedWallMs >= 12_000L ||
+            (prevDur >= 15_000L && (prevMax >= (prevDur * 35L) / 100L || prevMax >= (prevDur - 15_000L)))
 
         if (!wasTuneMindLaunch &&
             prevTitle.isNotBlank() &&
@@ -3000,6 +3027,7 @@ class TuneMindViewModel : ViewModel() {
         queueMonitoredPackage = snap.packageName
         queueMonitoredDurationMs = snap.durationMs
         queueMonitoredMaxPosMs = snap.positionMs
+        queueMonitoredStartedAtMs = now
     }
 
     private fun triggerAutoQueueHandover(finishedTitle: String, targetPkg: String) {
@@ -4962,8 +4990,8 @@ data class DopamineCapsuleTrack(
 }
 
 data class DopamineCapsuleState(
-    val slotLabel: String = "MORNING FOCUS",
-    val headline: String = "Morning Dopamine Capsule",
+    val slotLabel: String = "",
+    val headline: String = "Dopamine Capsule",
     val tracks: List<DopamineCapsuleTrack> = emptyList()
 )
 

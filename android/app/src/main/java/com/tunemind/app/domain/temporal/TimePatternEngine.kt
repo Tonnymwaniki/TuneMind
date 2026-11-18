@@ -7,11 +7,11 @@ import java.util.Calendar
  * Standard temporal categories for listening patterns.
  */
 enum class TimeSlot(val label: String, val startHour: Int, val endHour: Int) {
-    EARLY_MORNING("Dawn / Early Morning", 5, 8),
-    MORNING("Morning Focus", 8, 12),
-    AFTERNOON("Afternoon Receptivity", 12, 17),
-    EVENING("Evening Wind-down", 17, 21),
-    NIGHT("Night Listening", 21, 24),
+    EARLY_MORNING("Dawn / Early Morning", 5, 6),
+    MORNING("Morning Focus", 6, 12),
+    AFTERNOON("Midday Flow", 12, 17),
+    EVENING("Evening Wind-down", 17, 22),
+    NIGHT("Night Listening", 22, 24),
     LATE_NIGHT("Late Night Deep Dive", 0, 5);
 
     companion object {

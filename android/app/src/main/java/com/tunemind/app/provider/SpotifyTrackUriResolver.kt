@@ -963,7 +963,7 @@ object SpotifyTrackUriResolver {
         if (!spotifyTrackUri.startsWith("spotify:track:")) return false
         val appContext = context.applicationContext
         return runBlocking {
-            withTimeoutOrNull(1350L) {
+            withTimeoutOrNull(3000L) {
                 withContext(Dispatchers.IO) {
                     try {
                         val authManager = SpotifyAuthManager(appContext)

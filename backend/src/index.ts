@@ -96,7 +96,51 @@ wss.on('connection', async (ws: WebSocket) => {
 
   let clientContext: (Partial<TuneMindTelemetryContext> & {
     recent_tracks?: Array<{ title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; playCount?: number }>;
+    local_time?: string;
+    local_hour?: number;
+    local_minute?: number;
+    timezone?: string;
   }) | null = null;
+
+  const daypartFromHour = (h: number): 'Morning' | 'Midday' | 'Evening' | 'Late Night' => {
+    if (h >= 6 && h < 12) return 'Morning';
+    if (h >= 12 && h < 17) return 'Midday';
+    if (h >= 17 && h < 22) return 'Evening';
+    return 'Late Night';
+  };
+
+  const resolveClientTimeContext = (ctx: typeof clientContext) => {
+    const rawHour = Number(ctx?.local_hour);
+    let hour = Number.isFinite(rawHour) && rawHour >= 0 && rawHour <= 23 ? Math.floor(rawHour) : NaN;
+    let minute = Number.isFinite(Number(ctx?.local_minute)) ? Math.floor(Number(ctx?.local_minute)) : NaN;
+    const tz = (ctx?.timezone || '').trim();
+    if (Number.isNaN(hour) && tz) {
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).formatToParts(new Date());
+        const hp = Number(parts.find(p => p.type === 'hour')?.value);
+        const mp = Number(parts.find(p => p.type === 'minute')?.value);
+        if (Number.isFinite(hp)) hour = hp % 24;
+        if (Number.isFinite(mp)) minute = mp % 60;
+      } catch {
+        // Ignore invalid IANA timezone and fall back below
+      }
+    }
+    if (Number.isNaN(hour)) hour = new Date().getHours();
+    if (Number.isNaN(minute)) minute = new Date().getMinutes();
+
+    const rawDaypart = ctx?.circadian_daypart;
+    const validDayparts = ['Morning', 'Midday', 'Evening', 'Late Night'];
+    const circadianDaypart = (rawDaypart && validDayparts.includes(rawDaypart))
+      ? rawDaypart
+      : daypartFromHour(hour);
+    const localTime = ctx?.local_time || `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return { hour, minute, localTime, timezone: tz || undefined, circadianDaypart };
+  };
 
   const triggerReasoningForTranscript = async (rawFinalText: string) => {
     const finalText = normalizeMusicTranscript(rawFinalText);
@@ -173,15 +217,15 @@ wss.on('connection', async (ws: WebSocket) => {
             source_player: t.source
           }));
 
-      const hour = new Date().getHours();
-      const circadianDaypart = hour >= 6 && hour < 12 ? 'Morning'
-        : hour >= 12 && hour < 17 ? 'Midday'
-        : hour >= 17 && hour < 22 ? 'Evening'
-        : 'Late Night';
+      const timeCtx = resolveClientTimeContext(clientContext);
 
       const response = await provider.evaluateSatiety({
         timestamp_utc: new Date().toISOString(),
-        circadian_daypart: circadianDaypart,
+        circadian_daypart: timeCtx.circadianDaypart,
+        local_time: timeCtx.localTime,
+        local_hour: timeCtx.hour,
+        local_minute: timeCtx.minute,
+        timezone: timeCtx.timezone,
         current_track: {
           title: effectiveCurrentTrack.title,
           artist: effectiveCurrentTrack.artist,

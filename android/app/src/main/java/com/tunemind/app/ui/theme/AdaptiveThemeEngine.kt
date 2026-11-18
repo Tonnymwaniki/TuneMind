@@ -13,9 +13,9 @@ object AdaptiveThemeEngine {
     fun resolveTimePeriod(hour: Int, minute: Int = 0): TimePeriod {
         val totalMinutes = hour * 60 + minute
         return when {
-            totalMinutes in (5 * 60)..(11 * 60 + 59) -> TimePeriod.MORNING
+            totalMinutes in (6 * 60)..(11 * 60 + 59) -> TimePeriod.MORNING
             totalMinutes in (12 * 60)..(16 * 60 + 59) -> TimePeriod.AFTERNOON
-            totalMinutes in (17 * 60)..(20 * 60 + 59) -> TimePeriod.EVENING
+            totalMinutes in (17 * 60)..(21 * 60 + 59) -> TimePeriod.EVENING
             else -> TimePeriod.NIGHT
         }
     }

@@ -112,7 +112,19 @@ fun RhythmDnaScreen(
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
-    val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
+    var clockEpochMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            clockEpochMs = System.currentTimeMillis()
+        }
+    }
+    val nowCalendar = remember(clockEpochMs) {
+        Calendar.getInstance().apply { timeInMillis = clockEpochMs }
+    }
+    val currentHour = nowCalendar.get(Calendar.HOUR_OF_DAY)
+    val currentMinute = nowCalendar.get(Calendar.MINUTE)
+    val liveClockLabel = "%02d:%02d".format(currentHour, currentMinute)
 
     val phases = remember {
         listOf(
@@ -131,6 +143,9 @@ fun RhythmDnaScreen(
     }
 
     var selectedPhaseIndex by remember { mutableStateOf(livePhaseIndex) }
+    LaunchedEffect(livePhaseIndex) {
+        selectedPhaseIndex = livePhaseIndex
+    }
     val activePhase = phases[selectedPhaseIndex]
 
     val phaseActivityMap = remember(cleanPlayHistory) {
@@ -268,7 +283,7 @@ fun RhythmDnaScreen(
                     letterSpacing = (-0.4).sp
                 )
                 Text(
-                    text = "${activePhase.label} · ${activePhase.hoursLabel}",
+                    text = "${activePhase.label} · ${activePhase.hoursLabel} · $liveClockLabel",
                     color = activeSubDeckAccent.copy(alpha = 0.85f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium

@@ -253,9 +253,15 @@ router.post('/satiety-decision', async (req: Request, res: Response) => {
     const identity = resolveEffectiveUserIdentity(req, payload.user_id, payload.user_email);
     const { SatietyExecutionEngine } = await import('../../domain/reasoning/SatietyExecutionEngine');
     const engine = new SatietyExecutionEngine();
+    const rawDaypart = payload.circadian_daypart;
+    let resolvedDaypart = rawDaypart;
+    if (!resolvedDaypart && Number.isFinite(Number(payload.local_hour))) {
+      const h = Number(payload.local_hour);
+      resolvedDaypart = h >= 6 && h < 12 ? 'Morning' : h >= 12 && h < 17 ? 'Midday' : h >= 17 && h < 22 ? 'Evening' : 'Late Night';
+    }
     const decision = await engine.evaluateLast50Tracks({
       user_id: req.authUser ? identity.userId : payload.user_id,
-      circadian_daypart: payload.circadian_daypart,
+      circadian_daypart: resolvedDaypart,
       current_track: payload.current_track,
       tracks: Array.isArray(payload.tracks) ? payload.tracks : []
     });

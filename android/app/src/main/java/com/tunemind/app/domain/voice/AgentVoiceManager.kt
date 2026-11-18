@@ -468,7 +468,25 @@ class AgentVoiceManager(
         })
     }
 
+    private fun JSONObject.appendLocalTimeContextJson() {
+        val cal = java.util.Calendar.getInstance()
+        val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute = cal.get(java.util.Calendar.MINUTE)
+        val daypart = when (hour) {
+            in 6..11 -> "Morning"
+            in 12..16 -> "Midday"
+            in 17..21 -> "Evening"
+            else -> "Late Night"
+        }
+        put("circadian_daypart", daypart)
+        put("local_hour", hour)
+        put("local_minute", minute)
+        put("local_time", "%02d:%02d".format(hour, minute))
+        put("timezone", java.util.TimeZone.getDefault().id)
+    }
+
     private fun JSONObject.appendStudioContextJson() {
+        appendLocalTimeContextJson()
         val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
         val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
             context,

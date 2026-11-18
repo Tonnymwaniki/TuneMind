@@ -4,10 +4,10 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 enum class TimePeriod(val id: String, val label: String, val rangeLabel: String) {
-    MORNING("morning", "First Light", "05:00 – 11:59"),
-    AFTERNOON("afternoon", "Clarity", "12:00 – 16:59"),
-    EVENING("evening", "Transition", "17:00 – 20:59"),
-    NIGHT("night", "Deep Focus", "21:00 – 04:59")
+    MORNING("morning", "Morning", "06:00 – 12:00"),
+    AFTERNOON("afternoon", "Midday", "12:00 – 17:00"),
+    EVENING("evening", "Evening", "17:00 – 22:00"),
+    NIGHT("night", "Night", "22:00 – 06:00")
 }
 
 enum class ThemeBehavior(val label: String, val description: String) {

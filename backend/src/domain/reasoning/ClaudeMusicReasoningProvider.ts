@@ -64,6 +64,10 @@ export interface AgentToolCall {
 export interface TuneMindTelemetryContext {
   timestamp_utc: string;
   circadian_daypart: 'Morning' | 'Midday' | 'Evening' | 'Late Night';
+  local_time?: string;
+  local_hour?: number;
+  local_minute?: number;
+  timezone?: string;
   current_track: {
     title: string;
     artist: string;
@@ -1473,10 +1477,22 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     const systemPrompt = this.getAutonomousSystemPrompt();
     const tools = this.getAutonomousAgentTools();
 
+    const daypartWindow =
+      context.circadian_daypart === 'Morning'
+        ? '06:00 - 12:00'
+        : context.circadian_daypart === 'Midday'
+        ? '12:00 - 17:00'
+        : context.circadian_daypart === 'Evening'
+        ? '17:00 - 22:00'
+        : '22:00 - 06:00';
+
     const initialContextPayload = {
       user_id: userId,
       user_spoken_message: userCommandRaw,
       circadian_daypart: context.circadian_daypart,
+      circadian_window: `${context.circadian_daypart} (${daypartWindow})`,
+      user_local_time: context.local_time || undefined,
+      user_timezone: context.timezone || undefined,
       app_state: context.app_state || {
         current_screen: 'AGENT',
         theme_behavior: 'ADAPTIVE',
