@@ -2237,6 +2237,8 @@ class TuneMindViewModel : ViewModel() {
                 }.collect {
                     _tuneMindPlaylists.value = it
                 }
+            }.onFailure { err ->
+                android.util.Log.e("TuneMindDB", "Failed observing TuneMind playlists: ${err.message}", err)
             }
         }
         viewModelScope.launch(Dispatchers.Default) {
@@ -4975,80 +4977,87 @@ class TuneMindViewModel : ViewModel() {
         onComplete: ((TuneMindPlaylistEntity?) -> Unit)? = null
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val pDao = tuneMindPlaylistDao ?: return@launch
-            val cleanName = name.trim().ifBlank { "TuneMind Mix" }
-            val existing = if (appendIfExists) {
-                pDao.getAllPlaylistsOnce().firstOrNull {
-                    it.name.equals(cleanName, ignoreCase = true)
-                }
-            } else null
-
-            val now = System.currentTimeMillis()
-            val playlistId = existing?.playlistId ?: java.util.UUID.randomUUID().toString()
-            val targetPlaylist = existing?.copy(
-                description = description.ifBlank { existing.description },
-                moodOrAudience = moodOrAudience.ifBlank { existing.moodOrAudience },
-                updatedAtMs = now
-            ) ?: TuneMindPlaylistEntity(
-                playlistId = playlistId,
-                name = cleanName,
-                description = description.ifBlank { "Created inside TuneMind" },
-                moodOrAudience = moodOrAudience,
-                createdAtMs = now,
-                updatedAtMs = now
-            )
-            pDao.upsertPlaylist(targetPlaylist)
-
-            val existingTracks = pDao.getTracksForPlaylistOnce(playlistId)
-            var nextPos = (existingTracks.maxOfOrNull { it.positionIndex } ?: -1) + 1
-            val defaultPlayer = AppHolder.context?.let { ctx ->
-                val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(ctx)
-                val pid = registry.getPreferredProviderId()
-                registry.getProvider(pid).packageName.ifBlank { pid }
-            } ?: "com.spotify.music"
-
-            val newEntities = mutableListOf<TuneMindPlaylistTrackEntity>()
-            tracks.forEach { t ->
-                val cleanTitle = t.title.trim()
-                if (cleanTitle.isNotBlank()) {
-                    val cleanArtist = t.artist.trim()
-                    val canonical = TrackIdentityResolver.resolveCanonicalIdentity(
-                        trackId = t.track_id?.takeIf { it.isNotBlank() },
-                        spotifyUri = t.spotify_uri?.takeIf { it.isNotBlank() },
-                        title = cleanTitle,
-                        artist = cleanArtist
-                    )
-                    val dedupKey = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, cleanArtist)
-                    val alreadyHas = existingTracks.any {
-                        ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) == dedupKey
+            try {
+                val pDao = tuneMindPlaylistDao ?: return@launch
+                val cleanName = name.trim().ifBlank { "TuneMind Mix" }
+                val existing = if (appendIfExists) {
+                    pDao.getAllPlaylistsOnce().firstOrNull {
+                        it.name.equals(cleanName, ignoreCase = true)
                     }
-                    if (!alreadyHas) {
-                        newEntities.add(
-                            TuneMindPlaylistTrackEntity(
-                                entryId = "${playlistId}::$dedupKey",
-                                playlistId = playlistId,
-                                title = cleanTitle,
-                                artist = cleanArtist,
-                                spotifyUri = canonical.spotifyUri ?: t.spotify_uri.orEmpty(),
-                                trackId = canonical.trackId,
-                                sourcePlayer = t.source_player?.takeIf { it.isNotBlank() } ?: defaultPlayer,
-                                positionIndex = nextPos++,
-                                addedAtMs = now
-                            )
+                } else null
+
+                val now = System.currentTimeMillis()
+                val playlistId = existing?.playlistId ?: java.util.UUID.randomUUID().toString()
+                val targetPlaylist = existing?.copy(
+                    description = description.ifBlank { existing.description },
+                    moodOrAudience = moodOrAudience.ifBlank { existing.moodOrAudience },
+                    updatedAtMs = now
+                ) ?: TuneMindPlaylistEntity(
+                    playlistId = playlistId,
+                    name = cleanName,
+                    description = description.ifBlank { "Created inside TuneMind" },
+                    moodOrAudience = moodOrAudience,
+                    createdAtMs = now,
+                    updatedAtMs = now
+                )
+                pDao.upsertPlaylist(targetPlaylist)
+
+                val existingTracks = pDao.getTracksForPlaylistOnce(playlistId)
+                var nextPos = (existingTracks.maxOfOrNull { it.positionIndex } ?: -1) + 1
+                val defaultPlayer = AppHolder.context?.let { ctx ->
+                    val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(ctx)
+                    val pid = registry.getPreferredProviderId()
+                    registry.getProvider(pid).packageName.ifBlank { pid }
+                } ?: "com.spotify.music"
+
+                val newEntities = mutableListOf<TuneMindPlaylistTrackEntity>()
+                tracks.forEach { t ->
+                    val cleanTitle = t.title.trim()
+                    if (cleanTitle.isNotBlank()) {
+                        val cleanArtist = t.artist.trim()
+                        val canonical = TrackIdentityResolver.resolveCanonicalIdentity(
+                            trackId = t.track_id?.takeIf { it.isNotBlank() },
+                            spotifyUri = t.spotify_uri?.takeIf { it.isNotBlank() },
+                            title = cleanTitle,
+                            artist = cleanArtist
                         )
+                        val dedupKey = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, cleanArtist)
+                        val alreadyHas = existingTracks.any {
+                            ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) == dedupKey
+                        }
+                        if (!alreadyHas) {
+                            newEntities.add(
+                                TuneMindPlaylistTrackEntity(
+                                    entryId = "${playlistId}::$dedupKey",
+                                    playlistId = playlistId,
+                                    title = cleanTitle,
+                                    artist = cleanArtist,
+                                    spotifyUri = canonical.spotifyUri ?: t.spotify_uri.orEmpty(),
+                                    trackId = canonical.trackId,
+                                    sourcePlayer = t.source_player?.takeIf { it.isNotBlank() } ?: defaultPlayer,
+                                    positionIndex = nextPos++,
+                                    addedAtMs = now
+                                )
+                            )
+                        }
                     }
                 }
-            }
-            if (newEntities.isNotEmpty()) {
-                pDao.upsertPlaylistTracks(newEntities)
-                pDao.touchPlaylist(playlistId, now)
-            }
-            postNowPlayingStatus(
-                if (existing == null) "Created \"$cleanName\" in TuneMind (${newEntities.size} track${if (newEntities.size == 1) "" else "s"})"
-                else "Added ${newEntities.size} song${if (newEntities.size == 1) "" else "s"} to \"$cleanName\""
-            )
-            kotlinx.coroutines.withContext(Dispatchers.Main) {
-                onComplete?.invoke(targetPlaylist)
+                if (newEntities.isNotEmpty()) {
+                    pDao.upsertPlaylistTracks(newEntities)
+                    pDao.touchPlaylist(playlistId, now)
+                }
+                postNowPlayingStatus(
+                    if (existing == null) "Created \"$cleanName\" in TuneMind (${newEntities.size} track${if (newEntities.size == 1) "" else "s"})"
+                    else "Added ${newEntities.size} song${if (newEntities.size == 1) "" else "s"} to \"$cleanName\""
+                )
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete?.invoke(targetPlaylist)
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("TuneMindDB", "Failed creating/updating TuneMind playlist '$name': ${t.message}", t)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete?.invoke(null)
+                }
             }
         }
     }

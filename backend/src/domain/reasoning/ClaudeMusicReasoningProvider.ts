@@ -1882,6 +1882,20 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                 };
               }
             } else {
+              const needsToolEnforcement =
+                step === 0 &&
+                /\b(playlist|add|create|play|song|track|music|pause|resume|skip|stop|volume|kid|child|timer|vault|stat|theme|color|setting|screen|open|queue)\b/i.test(
+                  userCommandRaw
+                );
+              if (needsToolEnforcement) {
+                messages.push({ role: 'assistant', content: contentBlocks });
+                messages.push({
+                  role: 'user',
+                  content:
+                    'You must respond by invoking the submit_agent_turn tool (calling any lookup tools first if needed) so the TuneMind app executes the request accurately.'
+                });
+                continue;
+              }
               submittedTurnDecision = {
                 voice_agent_tts: rawText.trim(),
                 flow_state_analysis: 'Conversational Studio Advisor active.',

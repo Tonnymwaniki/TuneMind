@@ -65,7 +65,7 @@ import com.tunemind.app.domain.study.StudyEntity
         TuneMindPlaylistEntity::class,
         TuneMindPlaylistTrackEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -110,7 +110,9 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_12_13,
                         MIGRATION_13_14,
                         MIGRATION_14_15,
-                        MIGRATION_15_16
+                        MIGRATION_15_16,
+                        MIGRATION_16_17,
+                        MIGRATION_15_17
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -505,37 +507,39 @@ abstract class TuneMindDatabase : RoomDatabase() {
 
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS tunemind_playlists (
-                        playlist_id TEXT PRIMARY KEY NOT NULL,
-                        name TEXT NOT NULL,
-                        description TEXT NOT NULL DEFAULT '',
-                        mood_or_audience TEXT NOT NULL DEFAULT '',
-                        created_at_ms INTEGER NOT NULL,
-                        updated_at_ms INTEGER NOT NULL
-                    )
-                    """.trimIndent()
-                )
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlists_updated_at_ms ON tunemind_playlists(updated_at_ms)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `tunemind_playlists` (`playlist_id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `mood_or_audience` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`playlist_id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlists_updated_at_ms` ON `tunemind_playlists` (`updated_at_ms` DESC)")
 
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS tunemind_playlist_tracks (
-                        entry_id TEXT PRIMARY KEY NOT NULL,
-                        playlist_id TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        artist TEXT NOT NULL DEFAULT '',
-                        spotify_uri TEXT NOT NULL DEFAULT '',
-                        track_id TEXT NOT NULL DEFAULT '',
-                        source_player TEXT NOT NULL DEFAULT 'com.spotify.music',
-                        position_index INTEGER NOT NULL DEFAULT 0,
-                        added_at_ms INTEGER NOT NULL
-                    )
-                    """.trimIndent()
-                )
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlist_tracks_playlist_id ON tunemind_playlist_tracks(playlist_id)")
-                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlist_tracks_added_at_ms ON tunemind_playlist_tracks(added_at_ms)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `tunemind_playlist_tracks` (`entry_id` TEXT NOT NULL, `playlist_id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `spotify_uri` TEXT NOT NULL, `track_id` TEXT NOT NULL, `source_player` TEXT NOT NULL, `position_index` INTEGER NOT NULL, `added_at_ms` INTEGER NOT NULL, PRIMARY KEY(`entry_id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_playlist_id` ON `tunemind_playlist_tracks` (`playlist_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_added_at_ms` ON `tunemind_playlist_tracks` (`added_at_ms`)")
+            }
+        }
+
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `_new_tunemind_playlists` (`playlist_id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `mood_or_audience` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`playlist_id`))")
+                runCatching {
+                    db.execSQL("INSERT OR IGNORE INTO `_new_tunemind_playlists` (`playlist_id`, `name`, `description`, `mood_or_audience`, `created_at_ms`, `updated_at_ms`) SELECT `playlist_id`, `name`, `description`, `mood_or_audience`, `created_at_ms`, `updated_at_ms` FROM `tunemind_playlists`")
+                }
+                db.execSQL("DROP TABLE IF EXISTS `tunemind_playlists`")
+                db.execSQL("ALTER TABLE `_new_tunemind_playlists` RENAME TO `tunemind_playlists`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlists_updated_at_ms` ON `tunemind_playlists` (`updated_at_ms` DESC)")
+
+                db.execSQL("CREATE TABLE IF NOT EXISTS `_new_tunemind_playlist_tracks` (`entry_id` TEXT NOT NULL, `playlist_id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `spotify_uri` TEXT NOT NULL, `track_id` TEXT NOT NULL, `source_player` TEXT NOT NULL, `position_index` INTEGER NOT NULL, `added_at_ms` INTEGER NOT NULL, PRIMARY KEY(`entry_id`))")
+                runCatching {
+                    db.execSQL("INSERT OR IGNORE INTO `_new_tunemind_playlist_tracks` (`entry_id`, `playlist_id`, `title`, `artist`, `spotify_uri`, `track_id`, `source_player`, `position_index`, `added_at_ms`) SELECT `entry_id`, `playlist_id`, `title`, `artist`, `spotify_uri`, `track_id`, `source_player`, `position_index`, `added_at_ms` FROM `tunemind_playlist_tracks`")
+                }
+                db.execSQL("DROP TABLE IF EXISTS `tunemind_playlist_tracks`")
+                db.execSQL("ALTER TABLE `_new_tunemind_playlist_tracks` RENAME TO `tunemind_playlist_tracks`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_playlist_id` ON `tunemind_playlist_tracks` (`playlist_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_added_at_ms` ON `tunemind_playlist_tracks` (`added_at_ms`)")
+            }
+        }
+
+        val MIGRATION_15_17 = object : Migration(15, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MIGRATION_15_16.migrate(db)
             }
         }
     }
