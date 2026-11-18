@@ -72,6 +72,7 @@ fun SettingsScreen(
     val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
     val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
+    val kidsModeEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.kidsModeEnabled.collectAsState()
     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
     val isConnectingRemote by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectingFlow.collectAsState()
     val appRemoteError by com.tunemind.app.provider.SpotifyAppRemoteManager.lastConnectionErrorFlow.collectAsState()
@@ -231,6 +232,20 @@ fun SettingsScreen(
                 checked = strictNoAppSwitchEnabled,
                 onCheckedChange = {
                     com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, it)
+                }
+            )
+            StudioHairlineDivider()
+
+            SettingsSwitchRow(
+                title = "Kids & Family Safe Mode",
+                description = if (kidsModeEnabled) {
+                    "Active: Filters explicit songs and favors kid-safe music on Spotify."
+                } else {
+                    "Off: Ask TuneMind for kids songs anytime or toggle safe mode here."
+                },
+                checked = kidsModeEnabled,
+                onCheckedChange = {
+                    com.tunemind.app.domain.voice.AgentSettingsStore.setKidsModeEnabled(context, it)
                 }
             )
             StudioHairlineDivider()

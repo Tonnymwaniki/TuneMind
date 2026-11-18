@@ -90,6 +90,7 @@ wss.on('connection', async (ws: WebSocket) => {
       .replace(/\bplay\s+(mia|mere|near|mayor)\s+song\b/gi, 'play me a song')
       .replace(/\b(kikuyo|kiku\s*you|keekoo|kikoo|gikuyo|geekuyo|kick\s*you(?=\s+(song|songs|music|track|tune|playlist|benga|mugithi))|key\s*cue(?=\s+(song|songs|music|track|tune|playlist)))\b/gi, 'Kikuyu')
       .replace(/\b(mugiti|mugizi|mogithi|mugihti)\b/gi, 'Mugithi')
+      .replace(/\b(co\s*co\s*melon|coco\s*mellan)\b/gi, 'Cocomelon')
       .replace(/\b(bongo\s+flower|bongo\s+lover|congo\s+flava|bongo\s+flavor)\b/gi, 'Bongo Flava')
       .replace(/\b(change|switch)\s+(the|this)\s+(some|son|sun|phone)\b/gi, '$1 $2 song')
       .replace(/\bplay\s+(some|son|sun)\b/gi, 'play a song');
@@ -102,6 +103,9 @@ wss.on('connection', async (ws: WebSocket) => {
     local_hour?: number;
     local_minute?: number;
     timezone?: string;
+    tunemind_playlists?: TuneMindTelemetryContext['tunemind_playlists'];
+    kids_mode_enabled?: boolean;
+    active_sleep_timer_minutes?: number;
   }) | null = null;
 
   const daypartFromHour = (h: number): 'Morning' | 'Midday' | 'Evening' | 'Late Night' => {
@@ -252,6 +256,9 @@ wss.on('connection', async (ws: WebSocket) => {
         for_you_picks: clientContext?.for_you_picks,
         spotify_playlists: clientContext?.spotify_playlists,
         spotify_liked_tracks: clientContext?.spotify_liked_tracks,
+        tunemind_playlists: clientContext?.tunemind_playlists,
+        kids_mode_enabled: clientContext?.kids_mode_enabled,
+        active_sleep_timer_minutes: clientContext?.active_sleep_timer_minutes,
         listening_stats: clientContext?.listening_stats,
         player_preferences: clientContext?.player_preferences,
         app_state: clientContext?.app_state

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -99,7 +100,10 @@ fun PulseAgentScreen(
     profileAvatarUrl: String = "",
     currentTrackSpotifyUri: String? = null,
     currentTrackPlayCount: Int = 0,
-    autonomousDjEnabled: Boolean = false
+    autonomousDjEnabled: Boolean = false,
+    tuneMindPlaylistCount: Int = 0,
+    kidsModeEnabled: Boolean = false,
+    onOpenPlaylists: () -> Unit = {}
 ) {
     val colors = LocalAdaptiveTheme.current
     val scrollState = rememberScrollState()
@@ -378,6 +382,53 @@ fun PulseAgentScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (tuneMindPlaylistCount > 0) activeAccent.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (tuneMindPlaylistCount > 0) activeAccent.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.12f)
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { onOpenPlaylists() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.QueueMusic,
+                                    contentDescription = "TuneMind Playlists",
+                                    tint = if (tuneMindPlaylistCount > 0) activeAccent else Color.White.copy(alpha = 0.72f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (tuneMindPlaylistCount > 0) "Playlists ($tuneMindPlaylistCount)" else "Playlists",
+                                    color = if (tuneMindPlaylistCount > 0) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.78f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        if (kidsModeEnabled) {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.14f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.48f))
+                            ) {
+                                Text(
+                                    text = "Kids Safe",
+                                    color = Color(0xFFE2FCEB),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                )
+                            }
                         }
                     }
                 }

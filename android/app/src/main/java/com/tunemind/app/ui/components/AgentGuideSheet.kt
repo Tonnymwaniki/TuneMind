@@ -92,6 +92,18 @@ fun AgentGuideSheet(
                 "Give me my weekly listening recap",
                 "Open my Spotify library screen"
             )
+        ),
+        GuideCategory(
+            title = "TuneMind Playlists, Kids & Sleep",
+            subtitle = "In-app playlists stored in TuneMind, kid-safe Spotify songs, and sleep timers",
+            icon = Icons.Rounded.QueueMusic,
+            accent = neonCyan,
+            prompts = listOf(
+                "Add this song to a new playlist",
+                "Build a workout TuneMind playlist and open it",
+                "Play kid-friendly bedtime songs from Spotify",
+                "Set a 20-minute sleep timer"
+            )
         )
     )
 

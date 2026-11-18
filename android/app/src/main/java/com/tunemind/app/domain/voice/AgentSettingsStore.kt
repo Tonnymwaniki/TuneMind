@@ -33,6 +33,7 @@ object AgentSettingsStore {
     private const val KEY_ALERTS_WEEKLY_RECAP = "alerts_weekly_recap_enabled"
     private const val KEY_ALERTS_HEARING = "alerts_hearing_enabled"
     private const val KEY_ALERTS_SYNC_STATUS = "alerts_sync_status_enabled"
+    private const val KEY_KIDS_MODE = "kids_mode_enabled"
 
     @Volatile
     private var initialized = false
@@ -82,6 +83,9 @@ object AgentSettingsStore {
     private val _syncStatusAlertsEnabled = MutableStateFlow(true)
     val syncStatusAlertsEnabled: StateFlow<Boolean> = _syncStatusAlertsEnabled.asStateFlow()
 
+    private val _kidsModeEnabled = MutableStateFlow(false)
+    val kidsModeEnabled: StateFlow<Boolean> = _kidsModeEnabled.asStateFlow()
+
     private fun prefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -106,6 +110,7 @@ object AgentSettingsStore {
             _weeklyRecapAlertsEnabled.value = p.getBoolean(KEY_ALERTS_WEEKLY_RECAP, true)
             _hearingAlertsEnabled.value = p.getBoolean(KEY_ALERTS_HEARING, true)
             _syncStatusAlertsEnabled.value = p.getBoolean(KEY_ALERTS_SYNC_STATUS, true)
+            _kidsModeEnabled.value = p.getBoolean(KEY_KIDS_MODE, false)
             initialized = true
         }
     }
@@ -274,5 +279,16 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_ALERTS_SYNC_STATUS, enabled).apply()
         _syncStatusAlertsEnabled.value = enabled
+    }
+
+    fun isKidsModeEnabled(context: Context): Boolean {
+        ensureLoaded(context)
+        return _kidsModeEnabled.value
+    }
+
+    fun setKidsModeEnabled(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        prefs(context).edit().putBoolean(KEY_KIDS_MODE, enabled).apply()
+        _kidsModeEnabled.value = enabled
     }
 }

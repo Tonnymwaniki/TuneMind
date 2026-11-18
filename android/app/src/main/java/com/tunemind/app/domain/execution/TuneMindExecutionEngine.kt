@@ -12,6 +12,14 @@ import java.io.FileOutputStream
 import java.util.Locale
 import kotlinx.coroutines.launch
 
+data class PlaylistTrackInput(
+    val title: String,
+    val artist: String = "",
+    val spotify_uri: String? = null,
+    val track_id: String? = null,
+    val source_player: String? = null
+)
+
 data class AgentToolCallPayload(
     val action: String = "ADVISE_ONLY",
     val track_title: String? = null,
@@ -30,6 +38,14 @@ data class AgentToolCallPayload(
     val never_open_external_app: Boolean? = null,
     val target_screen: String? = null,
     val expect_follow_up: Boolean = false,
+    val playlist_name: String? = null,
+    val playlist_description: String? = null,
+    val mood_or_audience: String? = null,
+    val playlist_tracks: List<PlaylistTrackInput> = emptyList(),
+    val queue_tracks: List<PlaylistTrackInput> = emptyList(),
+    val open_playlist_screen: Boolean? = null,
+    val sleep_timer_minutes: Int? = null,
+    val kids_mode_enabled: Boolean? = null,
     val extra_actions: List<AgentToolCallPayload> = emptyList()
 )
 

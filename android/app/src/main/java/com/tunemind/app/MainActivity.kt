@@ -201,6 +201,8 @@ open class MainActivity : ComponentActivity() {
                     var showMusicProfileScreen by remember { mutableStateOf(false) }
                     var showSearchScreen by remember { mutableStateOf(false) }
                     var showNowPlayingScreen by remember { mutableStateOf(false) }
+                    var showPlaylistsScreen by remember { mutableStateOf(false) }
+                    var selectedPlaylistNavName by remember { mutableStateOf<String?>(null) }
                     var showLegalScreen by remember { mutableStateOf(false) }
                     var legalInitialTab by remember { mutableStateOf(0) }
                     var showSupportScreen by remember { mutableStateOf(false) }
@@ -211,6 +213,8 @@ open class MainActivity : ComponentActivity() {
                     val autonomousDjEnabled by AgentSettingsStore.autonomousDjEnabled.collectAsState()
                     val stayInTuneMindEnabled by AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
                     val strictNoAppSwitchEnabled by AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
+                    val kidsModeEnabled by AgentSettingsStore.kidsModeEnabled.collectAsState()
+                    val tuneMindPlaylists by vm.tuneMindPlaylists.collectAsState()
                     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
                     val playbackLaunchFeedback by vm.playbackLaunchFeedback.collectAsState()
                     val spotifyAuthManager = remember { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
@@ -243,6 +247,8 @@ open class MainActivity : ComponentActivity() {
                             registry.selectPlayer(resolvedId, true)
                         }
                     }
+
+                    var playAnyTrackCallback: ((String, String, String?, String) -> Unit)? = null
 
                     fun executeSingleAppToolAction(tool: com.tunemind.app.domain.execution.AgentToolCallPayload) {
                         if (tool.remember_default_player == true && !tool.target_player.isNullOrBlank() && tool.action != "SELECT_MUSIC_PLAYER") {
@@ -318,6 +324,105 @@ open class MainActivity : ComponentActivity() {
                                     ?: !com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
                                 com.tunemind.app.domain.voice.AgentSettingsStore.setStrictNoAppSwitchEnabled(context, target)
                             }
+                            "CREATE_TUNEMIND_PLAYLIST", "ADD_TO_TUNEMIND_PLAYLIST" -> {
+                                val targetName = tool.playlist_name?.takeIf { it.isNotBlank() } ?: "TuneMind Mix"
+                                val resolvedTracks = when {
+                                    tool.playlist_tracks.isNotEmpty() -> tool.playlist_tracks
+                                    !tool.track_title.isNullOrBlank() -> listOf(
+                                        com.tunemind.app.domain.execution.PlaylistTrackInput(
+                                            title = tool.track_title,
+                                            artist = tool.track_artist.orEmpty(),
+                                            spotify_uri = tool.spotify_uri,
+                                            track_id = tool.track_id
+                                        )
+                                    )
+                                    else -> {
+                                        val np = vm.homeState.value.nowPlaying
+                                        val npTitle = np?.title
+                                        if (!npTitle.isNullOrBlank() && npTitle != "Standing By") {
+                                            listOf(
+                                                com.tunemind.app.domain.execution.PlaylistTrackInput(
+                                                    title = npTitle,
+                                                    artist = np.artist.orEmpty(),
+                                                    spotify_uri = np.spotifyUri,
+                                                    track_id = np.trackId,
+                                                    source_player = np.sourcePackage
+                                                )
+                                            )
+                                        } else {
+                                            emptyList()
+                                        }
+                                    }
+                                }
+                                vm.createOrAddToTuneMindPlaylistAsync(
+                                    name = targetName,
+                                    description = tool.playlist_description.orEmpty(),
+                                    moodOrAudience = tool.mood_or_audience.orEmpty(),
+                                    tracks = resolvedTracks,
+                                    appendIfExists = true
+                                ) {
+                                    if (tool.open_playlist_screen != false) {
+                                        coroutineScope.launch {
+                                            selectedPlaylistNavName = targetName
+                                            showPlaylistsScreen = true
+                                        }
+                                    }
+                                }
+                            }
+                            "PLAY_TUNEMIND_PLAYLIST" -> {
+                                val query = tool.playlist_name?.trim().orEmpty()
+                                val match = vm.tuneMindPlaylists.value.firstOrNull {
+                                    it.playlist.name.equals(query, ignoreCase = true) ||
+                                        (query.isNotBlank() && it.playlist.name.contains(query, ignoreCase = true))
+                                } ?: vm.tuneMindPlaylists.value.firstOrNull()
+                                if (match != null) {
+                                    val chosenPkg = tool.target_player?.takeIf { it.isNotBlank() }
+                                        ?: playerPrefs.getString("target_player_pkg", "com.spotify.music")
+                                        ?: "com.spotify.music"
+                                    vm.playTuneMindPlaylist(match, chosenPkg) { title, artist, uri, pkg ->
+                                        playAnyTrackCallback?.invoke(title, artist, uri, pkg)
+                                    }
+                                }
+                            }
+                            "QUEUE_TRACKS" -> {
+                                val tracksToQueue = when {
+                                    tool.queue_tracks.isNotEmpty() -> tool.queue_tracks
+                                    !tool.track_title.isNullOrBlank() -> listOf(
+                                        com.tunemind.app.domain.execution.PlaylistTrackInput(
+                                            title = tool.track_title,
+                                            artist = tool.track_artist.orEmpty(),
+                                            spotify_uri = tool.spotify_uri
+                                        )
+                                    )
+                                    else -> emptyList()
+                                }
+                                tracksToQueue.reversed().forEach { qt ->
+                                    vm.enqueueUpNextTrack(
+                                        title = qt.title,
+                                        artist = qt.artist,
+                                        spotifyUri = qt.spotify_uri,
+                                        reason = "Queued by TuneMind",
+                                        freshnessPercent = 96,
+                                        playNext = true
+                                    )
+                                }
+                                tracksToQueue.forEach { qt ->
+                                    vm.addTrackToSpotifyQueue(qt.title, qt.artist, qt.spotify_uri)
+                                }
+                            }
+                            "SET_SLEEP_TIMER" -> {
+                                val mins = tool.sleep_timer_minutes ?: 0
+                                if (mins > 0) {
+                                    vm.startSleepTimerMinutes(mins)
+                                } else {
+                                    vm.cancelSleepTimer()
+                                }
+                            }
+                            "TOGGLE_KIDS_MODE" -> {
+                                val target = tool.kids_mode_enabled
+                                    ?: !AgentSettingsStore.isKidsModeEnabled(context)
+                                AgentSettingsStore.setKidsModeEnabled(context, target)
+                            }
                             "OPEN_SETTINGS" -> {
                                 showProfileScreen = true
                                 showSettingsScreen = true
@@ -349,6 +454,13 @@ open class MainActivity : ComponentActivity() {
                                     screen.contains("LEGAL") || screen.contains("PRIVACY") || screen.contains("TERM") -> {
                                         legalInitialTab = if (screen.contains("TERM")) 1 else 0
                                         showLegalScreen = true
+                                    }
+                                    screen.contains("TUNEMIND_PLAYLIST") || screen.contains("MY_PLAYLIST") || screen == "PLAYLISTS" || screen == "PLAYLIST" -> {
+                                        showSettingsScreen = false
+                                        showProfileScreen = false
+                                        showStatsScreen = false
+                                        selectedPlaylistNavName = tool.playlist_name?.takeIf { it.isNotBlank() }
+                                        showPlaylistsScreen = true
                                     }
                                     screen.contains("STAT") || screen.contains("LISTENING_SUMMARY") -> {
                                         showSettingsScreen = false
@@ -383,6 +495,7 @@ open class MainActivity : ComponentActivity() {
                                         showMusicProfileScreen = false
                                         showSearchScreen = false
                                         showNowPlayingScreen = false
+                                        showPlaylistsScreen = false
                                         showNotificationsScreen = false
                                         showSupportScreen = false
                                         showLegalScreen = false
@@ -438,6 +551,12 @@ open class MainActivity : ComponentActivity() {
                                 vm.listeningStats.value
                             },
                             getCleanPlayHistory = { vm.cleanPlayHistory.value },
+                            getTuneMindPlaylists = { vm.tuneMindPlaylists.value },
+                            getSleepTimerRemainingMinutes = {
+                                vm.sleepTimerEndsAtMs.value?.let { endMs ->
+                                    ((endMs - System.currentTimeMillis()) / 60_000L).toInt().coerceAtLeast(1)
+                                }
+                            },
                             getAppState = {
                                 val prefs = vm.themePreferences.value
                                 val screenName = when {
@@ -446,6 +565,7 @@ open class MainActivity : ComponentActivity() {
                                     showNotificationsScreen -> "NOTIFICATIONS"
                                     showSettingsScreen -> "SETTINGS"
                                     showProfileScreen -> "PROFILE"
+                                    showPlaylistsScreen -> "TUNEMIND_PLAYLISTS"
                                     showSearchScreen -> "SEARCH"
                                     showNowPlayingScreen -> "NOW_PLAYING"
                                     showWeeklyReportScreen -> "WEEKLY_REPORT"
@@ -465,6 +585,8 @@ open class MainActivity : ComponentActivity() {
                                     put("stay_in_tunemind_enabled", AgentSettingsStore.isStayInTuneMindEnabled(context))
                                     put("strict_no_app_switch_enabled", AgentSettingsStore.isStrictNoAppSwitchEnabled(context))
                                     put("prefer_in_app_player_enabled", AgentSettingsStore.isPreferInAppPlayerEnabled(context))
+                                    put("kids_mode_enabled", AgentSettingsStore.isKidsModeEnabled(context))
+                                    put("tunemind_playlists_count", vm.tuneMindPlaylists.value.size)
                                     put("inapp_player_active", com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying())
                                     put("spotify_connected", spotifyAuthManager.isAuthenticated())
                                     put("app_remote_connected", com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected())
@@ -514,6 +636,7 @@ open class MainActivity : ComponentActivity() {
                             showStatsScreen = false
                             showSearchScreen = false
                             showNowPlayingScreen = false
+                            showPlaylistsScreen = false
                             showNotificationsScreen = false
                             showSupportScreen = false
                             showAgentGuideSheet = false
@@ -659,6 +782,7 @@ open class MainActivity : ComponentActivity() {
                                         targetPlayer = targetPkg
                                     )
                                 }
+                                playAnyTrackCallback = ::playAnyTrack
 
                                 val hasOverlayOpen = showLegalScreen ||
                                     showSupportScreen ||
@@ -671,6 +795,7 @@ open class MainActivity : ComponentActivity() {
                                     showStatsScreen ||
                                     showSearchScreen ||
                                     showNowPlayingScreen ||
+                                    showPlaylistsScreen ||
                                     showAgentGuideSheet
 
                                 androidx.activity.compose.BackHandler(enabled = hasOverlayOpen) {
@@ -684,6 +809,7 @@ open class MainActivity : ComponentActivity() {
                                         showWeeklyReportScreen -> showWeeklyReportScreen = false
                                         showHearingScreen -> showHearingScreen = false
                                         showStatsScreen -> showStatsScreen = false
+                                        showPlaylistsScreen -> showPlaylistsScreen = false
                                         showNowPlayingScreen -> showNowPlayingScreen = false
                                         showSearchScreen -> showSearchScreen = false
                                         showProfileScreen -> showProfileScreen = false
@@ -866,7 +992,13 @@ open class MainActivity : ComponentActivity() {
                                                 } else {
                                                     0
                                                 },
-                                                autonomousDjEnabled = autonomousDjEnabled
+                                                autonomousDjEnabled = autonomousDjEnabled,
+                                                tuneMindPlaylistCount = tuneMindPlaylists.size,
+                                                kidsModeEnabled = kidsModeEnabled,
+                                                onOpenPlaylists = {
+                                                    selectedPlaylistNavName = null
+                                                    showPlaylistsScreen = true
+                                                }
                                             )
                                         }
                                         2 -> {
@@ -1142,6 +1274,32 @@ open class MainActivity : ComponentActivity() {
                                                     targetPlayer = selectedTargetPlayer,
                                                     trackId = nowPlaying?.trackId?.takeIf { it.isNotBlank() }
                                                 )
+                                            }
+                                        }
+                                    )
+                                }
+
+                                // Fullscreen TuneMind-Owned Playlists Overlay
+                                if (showPlaylistsScreen) {
+                                    com.tunemind.app.ui.screens.TuneMindPlaylistsScreen(
+                                        vm = vm,
+                                        selectedTargetPlayer = selectedTargetPlayer,
+                                        initialSelectedPlaylistName = selectedPlaylistNavName,
+                                        onBack = {
+                                            showPlaylistsScreen = false
+                                            selectedPlaylistNavName = null
+                                        },
+                                        onPlayTrack = ::playAnyTrack,
+                                        onAskAgentForPlaylist = { prompt ->
+                                            showPlaylistsScreen = false
+                                            selectedPlaylistNavName = null
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(1)
+                                                if (prompt.isBlank()) {
+                                                    agentVoiceManager.simulateWakeWordDetected()
+                                                } else {
+                                                    agentVoiceManager.processFinalTranscriptWithFallback(prompt)
+                                                }
                                             }
                                         }
                                     )

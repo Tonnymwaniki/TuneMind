@@ -61,9 +61,11 @@ import com.tunemind.app.domain.study.StudyEntity
         SpotifyPlaylistEntity::class,
         SpotifyPodcastEntity::class,
         TrackVisualCacheEntity::class,
-        ArtistProfileCacheEntity::class
+        ArtistProfileCacheEntity::class,
+        TuneMindPlaylistEntity::class,
+        TuneMindPlaylistTrackEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -77,6 +79,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun spotifyListeningHistoryDao(): SpotifyListeningHistoryDao
     abstract fun spotifyLibraryDao(): SpotifyLibraryDao
     abstract fun spotifyVisualDao(): SpotifyVisualDao
+    abstract fun tuneMindPlaylistDao(): TuneMindPlaylistDao
 
     companion object {
         private const val DATABASE_NAME = "tunemind.db"
@@ -106,7 +109,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_11_12,
                         MIGRATION_12_13,
                         MIGRATION_13_14,
-                        MIGRATION_14_15
+                        MIGRATION_14_15,
+                        MIGRATION_15_16
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -496,6 +500,42 @@ abstract class TuneMindDatabase : RoomDatabase() {
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS musical_moments")
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS tunemind_playlists (
+                        playlist_id TEXT PRIMARY KEY NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        mood_or_audience TEXT NOT NULL DEFAULT '',
+                        created_at_ms INTEGER NOT NULL,
+                        updated_at_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlists_updated_at_ms ON tunemind_playlists(updated_at_ms)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS tunemind_playlist_tracks (
+                        entry_id TEXT PRIMARY KEY NOT NULL,
+                        playlist_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL DEFAULT '',
+                        spotify_uri TEXT NOT NULL DEFAULT '',
+                        track_id TEXT NOT NULL DEFAULT '',
+                        source_player TEXT NOT NULL DEFAULT 'com.spotify.music',
+                        position_index INTEGER NOT NULL DEFAULT 0,
+                        added_at_ms INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlist_tracks_playlist_id ON tunemind_playlist_tracks(playlist_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_tunemind_playlist_tracks_added_at_ms ON tunemind_playlist_tracks(added_at_ms)")
             }
         }
     }
