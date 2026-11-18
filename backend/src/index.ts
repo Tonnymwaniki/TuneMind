@@ -80,11 +80,22 @@ wss.on('connection', async (ws: WebSocket) => {
   let hasTriggeredReasoning = false;
   let silenceTimer: NodeJS.Timeout | null = null;
   let formatWaitTimer: NodeJS.Timeout | null = null;
+  let forceEndpointFallbackTimer: NodeJS.Timeout | null = null;
+  let hasSentDynamicKeyterms = false;
   let latestPartialText = '';
 
   const normalizeMusicTranscript = (raw: string): string => {
-    let cleaned = raw.trim();
+    let cleaned = raw.trim().replace(/\s+/g, ' ');
+    // If wake phrase leaked from pre-roll audio ahead of the real command, strip only the leading wake phrase
+    const strippedWake = cleaned
+      .replace(/^(?:hi|hey|hello|ok|okay)?\s*(?:tune\s*mind|tomb\s*mind|to\s*mind|two\s*mind|tune\s*my)\b[,:.!?\s]+(?=\S)/gi, '')
+      .trim();
+    if (strippedWake.length >= 2) {
+      cleaned = strippedWake;
+    }
     cleaned = cleaned
+      .replace(/\b(tomb\s*mind|to\s*mind|two\s*mind|tune\s*my)\b/gi, 'TuneMind')
+      .replace(/\bplay\s*list\b/gi, 'playlist')
       .replace(/\b(clean|claim|blame|flame|let|leave|bleed|plane|plan)\s+me\s+a\s+song\b/gi, 'play me a song')
       .replace(/\b(please|playing|played|place)\s+(me\s+)?a\s+song\b/gi, 'play me a song')
       .replace(/\bplay\s+(mia|mere|near|mayor)\s+song\b/gi, 'play me a song')
@@ -92,9 +103,47 @@ wss.on('connection', async (ws: WebSocket) => {
       .replace(/\b(mugiti|mugizi|mogithi|mugihti)\b/gi, 'Mugithi')
       .replace(/\b(co\s*co\s*melon|coco\s*mellan)\b/gi, 'Cocomelon')
       .replace(/\b(bongo\s+flower|bongo\s+lover|congo\s+flava|bongo\s+flavor)\b/gi, 'Bongo Flava')
+      .replace(/\b(add|put|save)\s+(?:this|that|the)?\s*(?:current\s+)?(some|son|sun|phone)\b/gi, '$1 this current song')
+      .replace(/\b(wrestling\s+vault|resting\s+(vote|bowl|volt))\b/gi, 'Resting Vault')
+      .replace(/\b(slip\s+timer|sleep\s+time\s+a)\b/gi, 'sleep timer')
       .replace(/\b(change|switch)\s+(the|this)\s+(some|son|sun|phone)\b/gi, '$1 $2 song')
       .replace(/\bplay\s+(some|son|sun)\b/gi, 'play a song');
-    return cleaned;
+    return cleaned.trim();
+  };
+
+  const buildDynamicKeyterms = (ctx: typeof clientContext): string[] => {
+    const terms = new Set<string>([
+      'TuneMind', 'Spotify', 'Boomplay', 'Audiomack', 'YouTube Music',
+      'Kikuyu', 'Mugithi', 'Benga', 'Bongo Flava', 'Afrobeats', 'Amapiano',
+      'Cocomelon', 'Super Simple Songs', 'Samidoh', 'Sauti Sol', 'Nyashinski',
+      'Wakadinali', 'Bien', 'Burna Boy', 'Wizkid', 'Diamond Platnumz', 'Harmonize',
+      'TuneMind playlist', 'Resting Vault', 'Dopamine Capsule', 'For You',
+      'Kids Mode', 'sleep timer', 'ndio', 'sawa'
+    ]);
+    const pushTerm = (val: unknown) => {
+      const s = String(val || '').replace(/[\r\n]+/g, ' ').trim();
+      if (s.length >= 2 && s.length <= 48 && terms.size < 95) {
+        terms.add(s);
+      }
+    };
+    if (ctx?.current_track) {
+      pushTerm(ctx.current_track.artist);
+      pushTerm(ctx.current_track.title);
+    }
+    for (const pl of (ctx?.tunemind_playlists || []).slice(0, 15)) {
+      pushTerm(pl?.name);
+    }
+    for (const pl of (ctx?.spotify_playlists || []).slice(0, 12)) {
+      pushTerm((pl as any)?.name);
+    }
+    for (const r of (ctx?.recent_tracks || []).slice(0, 20)) {
+      pushTerm(r?.artist);
+      pushTerm(r?.title);
+    }
+    for (const f of (ctx?.for_you_picks || []).slice(0, 10)) {
+      pushTerm((f as any)?.artist);
+    }
+    return Array.from(terms).slice(0, 95);
   };
 
   let clientContext: (Partial<TuneMindTelemetryContext> & {
@@ -159,6 +208,10 @@ wss.on('connection', async (ws: WebSocket) => {
     if (formatWaitTimer) {
       clearTimeout(formatWaitTimer);
       formatWaitTimer = null;
+    }
+    if (forceEndpointFallbackTimer) {
+      clearTimeout(forceEndpointFallbackTimer);
+      forceEndpointFallbackTimer = null;
     }
 
     console.log(`\n[STT] ⚡ Finalized Transcript: "${finalText}" (raw: "${rawFinalText}")`);
@@ -285,14 +338,33 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   };
 
-  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint
-  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true';
+  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint with max_accuracy turn handling
+  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true&mode=max_accuracy';
   const aaiSocket = new WebSocket(aaiUrl, {
     headers: { Authorization: apiKey }
   });
 
+  const pushAssemblyConfiguration = (reason: string) => {
+    if (!isAssemblyReady || aaiSocket.readyState !== WebSocket.OPEN) return;
+    try {
+      const keyterms = buildDynamicKeyterms(clientContext);
+      aaiSocket.send(JSON.stringify({
+        type: 'UpdateConfiguration',
+        keyterms_prompt: keyterms,
+        min_turn_silence: 800,
+        max_turn_silence: 2600
+      }));
+      if (clientContext) {
+        hasSentDynamicKeyterms = true;
+      }
+      console.log(`[STT] 🎯 Synced ${keyterms.length} keyterms (${reason}) with max_accuracy turn detection.`);
+    } catch (e) {
+      console.warn('[STT] UpdateConfiguration notice:', e);
+    }
+  };
+
   aaiSocket.on('open', () => {
-    console.log('[STT] 🟢 AssemblyAI v3 Real-Time connection opened.');
+    console.log('[STT] 🟢 AssemblyAI v3 Real-Time (max_accuracy) connection opened.');
   });
 
   aaiSocket.on('error', (error: Error) => {
@@ -310,6 +382,7 @@ wss.on('connection', async (ws: WebSocket) => {
         const sessionId = msg.id || msg.session_id || 'v3-session';
         console.log(`[STT] Session started: ${sessionId}`);
         isAssemblyReady = true;
+        pushAssemblyConfiguration('onBegin');
 
         if (audioAccumulator.length >= MIN_AAI_FRAME_BYTES && aaiSocket.readyState === WebSocket.OPEN) {
           console.log(`[STT] ⚡ Flushing ${audioAccumulator.length} buffered pre-session audio bytes to AssemblyAI...`);
@@ -326,13 +399,13 @@ wss.on('connection', async (ws: WebSocket) => {
         if (isEndOfTurn && isFormatted) {
           await triggerReasoningForTranscript(text);
         } else if (isEndOfTurn) {
-          // Brief 100ms window for AssemblyAI v3's context-formatted turn
+          // Give AssemblyAI v3's formatter 350ms to emit the clean context-spelled turn
           if (formatWaitTimer) clearTimeout(formatWaitTimer);
           formatWaitTimer = setTimeout(() => {
             if (!hasTriggeredReasoning) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 100);
+          }, 350);
         } else {
           process.stdout.write(`\r[STT] Partial: "${text}"`);
           if (ws.readyState === WebSocket.OPEN) {
@@ -344,13 +417,13 @@ wss.on('connection', async (ws: WebSocket) => {
             }));
           }
 
-          // Fast silence finalizer: finalize 850ms after speech pauses instead of 2000ms
+          // Patient fallback timer (2600ms) so multi-clause breaths & hesitations are never cut mid-sentence
           if (silenceTimer) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
             if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 850);
+          }, 2600);
         }
       } else if (msg.type === 'Error') {
         console.error('[STT] AssemblyAI Server Error:', msg);
@@ -371,16 +444,32 @@ wss.on('connection', async (ws: WebSocket) => {
         const textData = message.toString();
         const json = JSON.parse(textData);
         if (json.type === 'finalize_utterance') {
-          const overrideText = typeof json.transcript === 'string' && json.transcript.trim().length > 0
-            ? json.transcript.trim()
-            : latestPartialText.trim();
-          if (!hasTriggeredReasoning && overrideText.length >= 2) {
-            void triggerReasoningForTranscript(overrideText);
+          if (isAssemblyReady && aaiSocket.readyState === WebSocket.OPEN && !hasTriggeredReasoning) {
+            try {
+              aaiSocket.send(JSON.stringify({ type: 'ForceEndpoint' }));
+            } catch (_err) {}
+            if (forceEndpointFallbackTimer) clearTimeout(forceEndpointFallbackTimer);
+            const fallbackHint = typeof json.transcript === 'string' ? json.transcript.trim() : '';
+            forceEndpointFallbackTimer = setTimeout(() => {
+              const best = latestPartialText.trim() || fallbackHint;
+              if (!hasTriggeredReasoning && best.length >= 2) {
+                void triggerReasoningForTranscript(best);
+              }
+            }, 450);
+          } else {
+            const fallbackText = latestPartialText.trim() ||
+              (typeof json.transcript === 'string' ? json.transcript.trim() : '');
+            if (!hasTriggeredReasoning && fallbackText.length >= 2) {
+              void triggerReasoningForTranscript(fallbackText);
+            }
           }
           return;
         }
         if (json.type === 'client_context') {
           clientContext = json;
+          if (!hasSentDynamicKeyterms) {
+            pushAssemblyConfiguration('onClientContext');
+          }
           const recentsList = Array.isArray(json.recent_tracks) ? json.recent_tracks : [];
           console.log(`[VoiceStream] 📱 Received live client playback context: Now Playing: "${json.current_track?.title}" by "${json.current_track?.artist}", Recent tracks: ${recentsList.length}`);
           if (recentsList.length > 0) {
@@ -432,6 +521,10 @@ wss.on('connection', async (ws: WebSocket) => {
   ws.on('close', () => {
     console.log('[VoiceStream] 🔴 Android client disconnected.');
     isAssemblyReady = false;
+    hasTriggeredReasoning = true;
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    if (formatWaitTimer) { clearTimeout(formatWaitTimer); formatWaitTimer = null; }
+    if (forceEndpointFallbackTimer) { clearTimeout(forceEndpointFallbackTimer); forceEndpointFallbackTimer = null; }
     if (aaiSocket.readyState === WebSocket.OPEN) {
       try {
         aaiSocket.send(JSON.stringify({ type: 'Terminate' }));

@@ -172,6 +172,19 @@ class AgentVoiceManager(
     private var latestWsPartialText: String = ""
 
     @Volatile
+    private var lastWsPartialProgressAtMs: Long = 0L
+
+    @Volatile
+    private var latestNativePartialText: String = ""
+
+    @Volatile
+    private var adaptiveMicGain: Float = 1.0f
+
+    private val wakeTailLock = Any()
+    private val wakeTailFrames = ArrayDeque<ByteArray>()
+    private val pendingWakeTailFrames = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
+
+    @Volatile
     private var postAudioCooldownUntilMs: Long = 0L
 
     @Volatile
@@ -665,10 +678,20 @@ class AgentVoiceManager(
                 }
 
                 val chunk = ByteArray(3200) // 100ms @ 16kHz mono PCM16
+                synchronized(wakeTailLock) {
+                    wakeTailFrames.clear()
+                }
                 while (isActive && isVoskListening && _agentState.value == AgentState.IDLE && shouldKeepWakeWordListening()) {
                     val ar = localAudio ?: break
                     val read = ar.read(chunk, 0, chunk.size)
                     if (read > 0) {
+                        val copy = chunk.copyOf(read)
+                        synchronized(wakeTailLock) {
+                            while (wakeTailFrames.size >= 3) {
+                                wakeTailFrames.removeFirst()
+                            }
+                            wakeTailFrames.addLast(copy)
+                        }
                         val rec = localRec ?: break
                         val isFinal = rec.acceptWaveForm(chunk, read)
                         val jsonOut = if (isFinal) rec.result else rec.partialResult
@@ -1194,6 +1217,25 @@ class AgentVoiceManager(
         hasSpokenMorningPromptThisTurn = false
         hasCompletedCloudTurn = false
         latestWsPartialText = ""
+        lastWsPartialProgressAtMs = 0L
+        latestLocalVoskCommandText = ""
+        latestNativePartialText = ""
+        adaptiveMicGain = 1.0f
+        preConnectAudioBuffer.clear()
+        isWsOpenForAudio = false
+        pendingWakeTailFrames.clear()
+        if (fromHotword) {
+            synchronized(wakeTailLock) {
+                val frames = wakeTailFrames.toList()
+                wakeTailFrames.clear()
+                if (frames.isNotEmpty()) {
+                    val tailPeakRms = frames.maxOf { computePcm16Rms(it, it.size) }
+                    if (tailPeakRms > 210.0) {
+                        frames.forEach { pendingWakeTailFrames.offer(it) }
+                    }
+                }
+            }
+        }
         prewarmCloudConnectionAsync()
         refreshUnifiedTracksCacheAsync()
 
@@ -1209,7 +1251,11 @@ class AgentVoiceManager(
         }
 
         stopVoskWakeListener()
-        stopMicrophoneStream()
+        stopAudioRecordingOnly()
+        try {
+            webSocket?.close(1000, "New voice turn")
+        } catch (_: Exception) {}
+        webSocket = null
         stopNativeSpeechRecognizer()
 
         // Pause any playing background music immediately so speaker audio never bleeds into the microphone
@@ -1222,32 +1268,36 @@ class AgentVoiceManager(
         _agentState.value = AgentState.LISTENING
         requestAudioDucking()
 
+        // Open WebSocket immediately in parallel with chime/AudioRecord init so AssemblyAI Begin arrives sooner
+        val wsCandidates = com.tunemind.app.domain.network.BackendEndpointManager.getCandidateWebSocketUrls(context)
+        connectToCandidateWebSocket(wsCandidates, 0)
+
         val chimePlayed = if (fromHotword) {
             playReadyChimeIfEnabled()
         } else {
             false
         }
 
-        val startDelayMs = if (chimePlayed) 220L else if (fromHotword) 160L else 0L
+        val startDelayMs = if (chimePlayed) 80L else 0L
         if (startDelayMs > 0L) {
             mainHandler.postDelayed({
                 if (_agentState.value == AgentState.LISTENING) {
-                    startMicrophoneStream()
-                    if (fromHotword) startNoSpeechAfterWakeWatchdog()
+                    startLocalAudioCapture()
+                    startNoSpeechAfterWakeWatchdog()
                 }
             }, startDelayMs)
         } else {
-            startMicrophoneStream()
+            startLocalAudioCapture()
             if (fromHotword) startNoSpeechAfterWakeWatchdog()
         }
     }
 
     private fun playReadyChimeIfEnabled(): Boolean {
         return try {
-            val tg = chimeToneGenerator ?: ToneGenerator(AudioManager.STREAM_MUSIC, 72).also {
+            val tg = chimeToneGenerator ?: ToneGenerator(AudioManager.STREAM_MUSIC, 58).also {
                 chimeToneGenerator = it
             }
-            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 130)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 75)
             true
         } catch (e: Exception) {
             Log.w(TAG, "Ready chime playback notice: ${e.message}")
@@ -1271,7 +1321,7 @@ class AgentVoiceManager(
         noSpeechAfterWakeJob?.cancel()
         if (!wasTurnTriggeredByWakeWord || hasSpokenMorningPromptThisTurn) return
         noSpeechAfterWakeJob = scope.launch {
-            delay(1_250L)
+            delay(1_950L)
             if (_agentState.value == AgentState.LISTENING &&
                 isRecording &&
                 wasTurnTriggeredByWakeWord &&
@@ -1286,10 +1336,10 @@ class AgentVoiceManager(
                 val greeting = buildCircadianWakeGreeting()
                 scope.launch { _transcriptionFlow.emit(greeting) }
                 mainHandler.post {
-                    markPostAudioCooldown(3_200L)
+                    markPostAudioCooldown(2_400L)
                     executionEngine.speakPromptOnly(greeting) {
                         mainHandler.post {
-                            markPostAudioCooldown(2_600L)
+                            markPostAudioCooldown(650L)
                             hasReceivedSpeechThisTurn = false
                             _agentState.value = AgentState.LISTENING
                             requestAudioDucking()
@@ -2072,6 +2122,9 @@ class AgentVoiceManager(
             return
         }
 
+        isWsOpenForAudio = false
+        preConnectAudioBuffer.clear()
+        lastWsPartialProgressAtMs = 0L
         startLocalAudioCapture()
 
         val candidates = com.tunemind.app.domain.network.BackendEndpointManager.getCandidateWebSocketUrls(context)
@@ -2236,6 +2289,9 @@ class AgentVoiceManager(
 
                     if (transcript.isNotBlank()) {
                         markUserSpeechDetectedThisTurn()
+                        if (!transcript.equals(latestWsPartialText, ignoreCase = false)) {
+                            lastWsPartialProgressAtMs = System.currentTimeMillis()
+                        }
                         latestWsPartialText = transcript
                         lastUserTranscript = transcript
                         scope.launch {
@@ -3784,6 +3840,7 @@ class AgentVoiceManager(
                 }
 
                 stopNativeSpeechRecognizer()
+                latestNativePartialText = ""
 
                 nativeRecognizer = AndroidSpeechRecognizer.createSpeechRecognizer(context).apply {
                     setRecognitionListener(object : AndroidSpeechListener {
@@ -3808,6 +3865,18 @@ class AgentVoiceManager(
                         override fun onError(error: Int) {
                             Log.w(TAG, "Native SpeechRecognizer finished with code: $error")
                             stopNativeSpeechRecognizer()
+                            val capturedNativePartial = latestNativePartialText.trim()
+                            if (capturedNativePartial.length >= 2) {
+                                Log.i(TAG, "Recovering SpeechRecognizer error($error) with partial transcript: $capturedNativePartial")
+                                lastUserTranscript = capturedNativePartial
+                                endOfSongAutoPlayTimeoutJob?.cancel()
+                                setThinkingState()
+                                scope.launch {
+                                    _transcriptionFlow.emit(capturedNativePartial)
+                                    _finalTranscriptFlow.emit(capturedNativePartial)
+                                }
+                                return
+                            }
                             val capturedLocalVosk = latestLocalVoskCommandText.trim()
                             if (capturedLocalVosk.isNotBlank()) {
                                 Log.i(TAG, "Recovering SpeechRecognizer error($error) with on-device Vosk transcript: $capturedLocalVosk")
@@ -3863,6 +3932,7 @@ class AgentVoiceManager(
                             val transcript = matches?.firstOrNull()?.trim()
                             if (!transcript.isNullOrBlank()) {
                                 markUserSpeechDetectedThisTurn()
+                                latestNativePartialText = transcript
                                 scope.launch {
                                     _transcriptionFlow.emit(transcript)
                                 }
@@ -3875,8 +3945,12 @@ class AgentVoiceManager(
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1800L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2200L)
                 }
 
                 nativeRecognizer?.startListening(intent)
@@ -3926,9 +4000,8 @@ class AgentVoiceManager(
             handleVoiceError("Microphone permission missing")
             return
         }
+        // Only tear down any stale AudioRecord instance; preserve already-opening WS state & buffered pre-roll frames
         stopAudioRecordingOnly()
-        preConnectAudioBuffer.clear()
-        isWsOpenForAudio = false
 
         val sampleRate = 16000
         val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -3944,7 +4017,7 @@ class AgentVoiceManager(
             )
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 audioRecord?.release()
-                Thread.sleep(65)
+                Thread.sleep(50)
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
                     sampleRate,
@@ -3989,8 +4062,20 @@ class AgentVoiceManager(
             return
         }
 
+        // Enqueue any continuous post-wake speech tail ahead of live AudioRecord frames so opening syllables aren't clipped
+        while (pendingWakeTailFrames.isNotEmpty()) {
+            val tailBytes = pendingWakeTailFrames.poll() ?: break
+            val cleanTail = processPcm16CleanSpeech(tailBytes, tailBytes.size)
+            val tailStr = cleanTail.toByteString()
+            val activeWs = webSocket
+            if (isWsOpenForAudio && activeWs != null) {
+                activeWs.send(tailStr)
+            } else if (preConnectAudioBuffer.size < 45) {
+                preConnectAudioBuffer.offer(tailStr)
+            }
+        }
+
         latestLocalVoskCommandText = ""
-        latestWsPartialText = ""
         hasCompletedCloudTurn = false
         scope.launch(Dispatchers.IO) {
             val localCmdRec = runCatching {
@@ -4001,6 +4086,7 @@ class AgentVoiceManager(
             val frameBuffer = ByteArray(targetFrameBytes)
             var speechStartedAtMs = 0L
             var lastSpeechFrameAtMs = 0L
+            var noiseFloorRms = 135.0
             var hasSentFinalizeHint = false
             try {
                 while (isRecording && _agentState.value == AgentState.LISTENING) {
@@ -4018,12 +4104,17 @@ class AgentVoiceManager(
                     if (validLen >= 1600) {
                         val now = System.currentTimeMillis()
                         val frameRms = computePcm16Rms(frameBuffer, validLen)
-                        if (frameRms > 520.0) {
+                        val speechThreshold = maxOf(190.0, noiseFloorRms * 2.35)
+                        if (frameRms <= speechThreshold) {
+                            noiseFloorRms = (noiseFloorRms * 0.85 + frameRms * 0.15).coerceIn(80.0, 340.0)
+                        } else {
                             markUserSpeechDetectedThisTurn()
                             if (speechStartedAtMs == 0L) speechStartedAtMs = now
                             lastSpeechFrameAtMs = now
                         }
-                        if (localCmdRec != null) {
+
+                        // Feed passive offline Vosk fallback only as emergency backup (never to override cloud STT)
+                        if (localCmdRec != null && !isWsOpenForAudio) {
                             runCatching {
                                 val finalized = localCmdRec.acceptWaveForm(frameBuffer, validLen)
                                 val rawJson = if (finalized) localCmdRec.result else localCmdRec.partialResult
@@ -4040,41 +4131,49 @@ class AgentVoiceManager(
                             }
                         }
 
-                        // Fast local endpointing once user stops speaking cleanly
-                        if (speechStartedAtMs > 0L && lastSpeechFrameAtMs > 0L) {
-                            val silenceElapsedMs = now - lastSpeechFrameAtMs
-                            val bestText = latestWsPartialText.ifBlank { latestLocalVoskCommandText }.trim()
-                            if (silenceElapsedMs >= 550L && bestText.isNotBlank() && isInstantLocalCommand(bestText)) {
-                                Log.i(TAG, "⚡ Fast-Path executing instant command in <100ms: \"$bestText\"")
-                                lastUserTranscript = bestText
+                        val lastActivityAtMs = maxOf(lastSpeechFrameAtMs, lastWsPartialProgressAtMs)
+                        if ((speechStartedAtMs > 0L || latestWsPartialText.isNotBlank()) && lastActivityAtMs > 0L) {
+                            val silenceElapsedMs = now - lastActivityAtMs
+                            // Offline instant playback command shortcut only when cloud WS isn't streaming
+                            val offlineCmd = latestLocalVoskCommandText.trim()
+                            if (!isWsOpenForAudio && silenceElapsedMs >= 1150L && offlineCmd.isNotBlank() && isInstantLocalCommand(offlineCmd)) {
+                                Log.i(TAG, "⚡ Offline Fast-Path executing command: \"$offlineCmd\"")
+                                lastUserTranscript = offlineCmd
                                 hasCompletedCloudTurn = true
                                 cloudResponseTimeoutJob?.cancel()
                                 stopMicrophoneStream()
-                                val instantJson = buildLocalOnDeviceFallbackJson(bestText)
+                                val instantJson = buildLocalOnDeviceFallbackJson(offlineCmd)
                                 mainHandler.post {
                                     dispatchReasoningResult(instantJson, instantJson.optString("voice_agent_tts", ""))
                                 }
                                 break
                             }
-                            if (!hasSentFinalizeHint && silenceElapsedMs >= 750L && bestText.length >= 2) {
+                            // Wait patiently (1850ms) so multi-clause sentences and breaths aren't cut mid-thought,
+                            // then nudge AssemblyAI ForceEndpoint without replacing audio with offline Vosk guesses
+                            if (!hasSentFinalizeHint && silenceElapsedMs >= 1850L && isWsOpenForAudio && webSocket != null) {
                                 hasSentFinalizeHint = true
                                 val activeWs = webSocket
-                                if (isWsOpenForAudio && activeWs != null) {
+                                if (activeWs != null) {
                                     runCatching {
                                         activeWs.send(
                                             JSONObject().apply {
                                                 put("type", "finalize_utterance")
-                                                put("transcript", bestText)
+                                                if (latestWsPartialText.isNotBlank()) {
+                                                    put("transcript", latestWsPartialText.trim())
+                                                }
                                             }.toString()
                                         )
                                     }
-                                    scheduleCloudResponseWatchdog(bestText)
+                                    val watchdogText = latestWsPartialText.ifBlank { latestLocalVoskCommandText }.trim()
+                                    if (watchdogText.length >= 2) {
+                                        scheduleCloudResponseWatchdog(watchdogText)
+                                    }
                                 }
                             }
                         }
 
-                        val boostedBytes = boostPcm16VoiceClarity(frameBuffer, validLen)
-                        val byteStr = boostedBytes.toByteString()
+                        val cleanBytes = processPcm16CleanSpeech(frameBuffer, validLen)
+                        val byteStr = cleanBytes.toByteString()
                         val activeWs = webSocket
                         if (isWsOpenForAudio && activeWs != null) {
                             while (preConnectAudioBuffer.isNotEmpty()) {
@@ -4083,8 +4182,8 @@ class AgentVoiceManager(
                             }
                             activeWs.send(byteStr)
                         } else {
-                            // Keep up to 4 seconds (40 frames of 100ms) of pre-connection speech in memory while socket connects
-                            if (preConnectAudioBuffer.size < 40) {
+                            // Keep up to 4.5 seconds (45 frames of 100ms) of pre-connection speech in memory while socket connects
+                            if (preConnectAudioBuffer.size < 45) {
                                 preConnectAudioBuffer.offer(byteStr)
                             }
                         }
@@ -4092,11 +4191,13 @@ class AgentVoiceManager(
                 }
             } finally {
                 if (localCmdRec != null) {
-                    runCatching {
-                        val tailText = JSONObject(localCmdRec.finalResult).optString("text", "").trim()
-                        val strippedTail = if (wasTurnTriggeredByWakeWord) stripLeadingWakePhrase(tailText) else tailText
-                        if (strippedTail.isNotBlank()) {
-                            latestLocalVoskCommandText = strippedTail
+                    if (!isWsOpenForAudio) {
+                        runCatching {
+                            val tailText = JSONObject(localCmdRec.finalResult).optString("text", "").trim()
+                            val strippedTail = if (wasTurnTriggeredByWakeWord) stripLeadingWakePhrase(tailText) else tailText
+                            if (strippedTail.isNotBlank()) {
+                                latestLocalVoskCommandText = strippedTail
+                            }
                         }
                     }
                     runCatching { localCmdRec.close() }
@@ -4148,20 +4249,42 @@ class AgentVoiceManager(
     }
 
     /**
-     * Applies a clean 1.75x software microphone gain with soft saturation clamping on 16-bit little-endian PCM
-     * so quiet or arm's-length speech is crystal clear for AssemblyAI word recognition.
+     * Adaptive soft-knee PCM16 speech conditioner: passes close-range speech untouched at 1.0x
+     * so consonants never square-wave clip, gently raises quiet/distant voice, and limits peaks softly.
      */
-    private fun boostPcm16VoiceClarity(buffer: ByteArray, length: Int): ByteArray {
+    private fun processPcm16CleanSpeech(buffer: ByteArray, length: Int): ByteArray {
         val out = ByteArray(length)
+        var peakAbs = 0
         var i = 0
         while (i + 1 < length) {
             val low = buffer[i].toInt() and 0xFF
             val high = buffer[i + 1].toInt()
-            val sample = (high shl 8) or low // signed 16-bit
-            val boosted = (sample * 7) / 4   // 1.75x gain
-            val clamped = boosted.coerceIn(-32760, 32760)
-            out[i] = (clamped and 0xFF).toByte()
-            out[i + 1] = ((clamped shr 8) and 0xFF).toByte()
+            val sample = (high shl 8) or low
+            val absSample = kotlin.math.abs(sample)
+            if (absSample > peakAbs) peakAbs = absSample
+            i += 2
+        }
+        val targetGain = when {
+            peakAbs < 280 -> 1.0f // Never amplify room hiss
+            peakAbs >= 6000 -> 1.0f // Normal/close speech already crystal clear — preserve unclipped waveform
+            else -> (7500.0f / peakAbs.toFloat()).coerceIn(1.0f, 1.8f)
+        }
+        adaptiveMicGain = (adaptiveMicGain * 0.70f + targetGain * 0.30f).coerceIn(1.0f, 1.8f)
+        val gain = adaptiveMicGain
+        i = 0
+        while (i + 1 < length) {
+            val low = buffer[i].toInt() and 0xFF
+            val high = buffer[i + 1].toInt()
+            val sample = (high shl 8) or low
+            val scaled = if (gain <= 1.03f) sample else (sample * gain).toInt()
+            // Soft-knee peak protection above 24000 so loud plosives never flat-top clip
+            val limited = when {
+                scaled > 24000 -> 24000 + (scaled - 24000) / 3
+                scaled < -24000 -> -24000 + (scaled + 24000) / 3
+                else -> scaled
+            }.coerceIn(-32760, 32760)
+            out[i] = (limited and 0xFF).toByte()
+            out[i + 1] = ((limited shr 8) and 0xFF).toByte()
             i += 2
         }
         return out
@@ -4170,8 +4293,6 @@ class AgentVoiceManager(
     private fun stopAudioRecordingOnly() {
         lastOwnMicActivityAtMs = System.currentTimeMillis()
         isRecording = false
-        isWsOpenForAudio = false
-        preConnectAudioBuffer.clear()
         try {
             automaticGainControl?.release()
         } catch (_: Exception) {}
@@ -4191,11 +4312,13 @@ class AgentVoiceManager(
             Log.w(TAG, "Error stopping audioRecord", e)
         }
         audioRecord = null
-        Log.d(TAG, "Microphone recording stopped, socket kept open for reasoning response.")
+        Log.d(TAG, "Microphone recording stopped.")
     }
 
     private fun stopMicrophoneStream() {
         stopAudioRecordingOnly()
+        isWsOpenForAudio = false
+        preConnectAudioBuffer.clear()
         try {
             webSocket?.close(1000, "Finished speaking")
         } catch (e: Exception) {
