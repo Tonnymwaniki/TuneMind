@@ -1177,13 +1177,32 @@ export class SelfLearningDiscoveryEngine {
       const q = encodeURIComponent(`${candidate.title} ${candidate.artist}`);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2400);
-      const resp = await fetch(`https://api.deezer.com/search?q=${q}&limit=2`, {
+      const resp = await fetch(`https://api.deezer.com/search?q=${q}&limit=6`, {
         signal: controller.signal
       });
       clearTimeout(timer);
       if (resp.ok) {
         const json: any = await resp.json();
-        const match = Array.isArray(json?.data) ? json.data[0] : null;
+        const rows: any[] = Array.isArray(json?.data) ? json.data : [];
+        const normWantedTitle = candidate.title.toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+        const wantedTitleWords = new Set(normWantedTitle.split(/\s+/).filter(w => w.length >= 2));
+        const wantedArtistPrimary = candidate.artist.toLowerCase().split(/[,&]|feat\.?|ft\.?/)[0].replace(/[^a-z0-9]+/g, ' ').trim();
+
+        const match = rows.find((item: any) => {
+          const t = String(item?.title || '').toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+          const a = String(item?.artist?.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+          const artistOk = !wantedArtistPrimary || a.includes(wantedArtistPrimary) || wantedArtistPrimary.includes(a);
+          if (!artistOk) return false;
+          if (t === normWantedTitle || (normWantedTitle.length >= 4 && (t.includes(normWantedTitle) || normWantedTitle.includes(t)))) {
+            return true;
+          }
+          const tWords = new Set(t.split(/\s+/).filter(w => w.length >= 2));
+          let hits = 0;
+          wantedTitleWords.forEach(w => { if (tWords.has(w)) hits++; });
+          const overlapRatio = hits / Math.max(1, Math.min(wantedTitleWords.size, tWords.size));
+          return overlapRatio >= 0.6;
+        }) || null;
+
         if (match && match.title) {
           let realBpm: number | undefined;
           if (match.id) {

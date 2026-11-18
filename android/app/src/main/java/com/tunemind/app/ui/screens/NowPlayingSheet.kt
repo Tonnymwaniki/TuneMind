@@ -543,12 +543,12 @@ fun NowPlayingSheet(
                     )
 
                     NowPlayingQuickAction(
-                        icon = if (trackVaultStatus.isInFresh) Icons.Rounded.RemoveCircleOutline else Icons.Rounded.Bolt,
-                        label = if (trackVaultStatus.isInFresh) "Remove Fresh" else "Add to Fresh",
-                        accent = if (trackVaultStatus.isInFresh) Color.White.copy(alpha = 0.78f) else neonCyan,
+                        icon = if (trackVaultStatus.isManualFresh) Icons.Rounded.RemoveCircleOutline else Icons.Rounded.Bolt,
+                        label = if (trackVaultStatus.isManualFresh) "In Fresh ✓" else "Add to Fresh",
+                        accent = if (trackVaultStatus.isManualFresh) safeGreen else neonCyan,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            if (trackVaultStatus.isInFresh) {
+                            if (trackVaultStatus.isManualFresh) {
                                 vm.removeFromFresh(
                                     title = effectiveTitle,
                                     artist = effectiveArtist,

@@ -849,17 +849,49 @@ object SpotifyTrackUriResolver {
         }
     }
 
-    private fun querySpotifyTrackSearch(
+    private data class VerifiedSpotifyTrackHit(
+        val uri: String,
+        val trackId: String,
+        val title: String,
+        val artist: String,
+        val album: String?
+    )
+
+    private fun computeTitleMatchScore(expectedRaw: String, actualRaw: String): Int {
+        val exp = normalizeTitleForExactMatch(expectedRaw)
+        val act = normalizeTitleForExactMatch(actualRaw)
+        if (exp.isBlank() || act.isBlank()) return 0
+        if (exp == act) return 100
+        if (exp.length >= 4 && (act.contains(exp) || exp.contains(act))) return 80
+        val expTokens = exp.split(" ").filter { it.length >= 2 }.toSet()
+        val actTokens = act.split(" ").filter { it.length >= 2 }.toSet()
+        if (expTokens.isEmpty() || actTokens.isEmpty()) return 0
+        val overlap = expTokens.intersect(actTokens).size
+        val ratio = overlap.toFloat() / maxOf(1, minOf(expTokens.size, actTokens.size)).toFloat()
+        return if (ratio >= 0.65f) 60 else 0
+    }
+
+    private fun anyArtistMatches(artistsArr: JSONArray?, expectedArtist: String): Boolean {
+        if (expectedArtist.isBlank() || expectedArtist.equals("Unknown Artist", ignoreCase = true)) return true
+        if (artistsArr == null || artistsArr.length() == 0) return false
+        for (i in 0 until artistsArr.length()) {
+            val name = artistsArr.optJSONObject(i)?.optString("name", "").orEmpty()
+            if (name.isNotBlank() && artistMatchesLoose(name, expectedArtist)) return true
+        }
+        return false
+    }
+
+    private fun querySpotifyTrackSearchDetailed(
         bearerToken: String,
         query: String,
         expectedTitle: String,
         expectedArtist: String
-    ): String? {
+    ): VerifiedSpotifyTrackHit? {
         return try {
             val url = Uri.parse("https://api.spotify.com/v1/search").buildUpon()
                 .appendQueryParameter("q", query)
                 .appendQueryParameter("type", "track")
-                .appendQueryParameter("limit", "5")
+                .appendQueryParameter("limit", "10")
                 .build()
                 .toString()
 
@@ -876,36 +908,128 @@ object SpotifyTrackUriResolver {
                 val items = JSONObject(raw).optJSONObject("tracks")?.optJSONArray("items") ?: return null
                 if (items.length() == 0) return null
 
-                var bestUri: String? = null
+                var bestHit: VerifiedSpotifyTrackHit? = null
+                var bestScore = -1
+                val hasExpectedArtist = expectedArtist.isNotBlank() &&
+                    !expectedArtist.equals("Unknown Artist", ignoreCase = true)
+
                 for (i in 0 until items.length()) {
                     val trackObj = items.optJSONObject(i) ?: continue
                     val uri = trackObj.optString("uri", "")
-                    if (!uri.startsWith("spotify:track:")) continue
-                    if (bestUri == null) bestUri = uri
+                    val baseId = TrackIdentityResolver.extractSpotifyBase62Id(uri) ?: continue
+                    val normalizedUri = "spotify:track:$baseId"
 
-                    val name = trackObj.optString("name", "")
+                    val name = trackObj.optString("name", "").trim()
                     val artistsArr = trackObj.optJSONArray("artists")
-                    val firstArtist = artistsArr?.optJSONObject(0)?.optString("name", "") ?: ""
+                    val firstArtist = artistsArr?.optJSONObject(0)?.optString("name", "")?.trim().orEmpty()
+                    val albumName = trackObj.optJSONObject("album")?.optString("name", "")?.trim()?.takeIf { it.isNotBlank() }
 
-                    val titleMatches = expectedTitle.isBlank() ||
-                        name.contains(expectedTitle, ignoreCase = true) ||
-                        expectedTitle.contains(name, ignoreCase = true)
-                    val artistMatches = expectedArtist.isBlank() ||
-                        expectedArtist.equals("Unknown Artist", ignoreCase = true) ||
-                        firstArtist.contains(expectedArtist, ignoreCase = true) ||
-                        expectedArtist.contains(firstArtist, ignoreCase = true)
+                    val titleScore = if (expectedTitle.isBlank()) 75 else computeTitleMatchScore(expectedTitle, name)
+                    val artistOk = anyArtistMatches(artistsArr, expectedArtist)
 
-                    if (titleMatches && artistMatches) {
-                        Log.i(TAG, "Resolved exact Spotify track URI: $uri ('$name' by '$firstArtist')")
-                        return uri
+                    // STRICT SAFETY: Never return a wrong song by the same artist (e.g. wrong Mbosso hit)
+                    if (titleScore < 60) continue
+                    if (hasExpectedArtist && !artistOk) continue
+                    if (!hasExpectedArtist && titleScore < 80) continue
+
+                    if (titleScore > bestScore) {
+                        bestScore = titleScore
+                        bestHit = VerifiedSpotifyTrackHit(
+                            uri = normalizedUri,
+                            trackId = baseId,
+                            title = name.ifBlank { expectedTitle },
+                            artist = firstArtist.ifBlank { expectedArtist },
+                            album = albumName
+                        )
                     }
+                    if (titleScore >= 100 && artistOk) break
                 }
-                Log.i(TAG, "Resolved top Spotify track URI: $bestUri for query='$query'")
-                bestUri
+
+                if (bestHit != null) {
+                    Log.i(TAG, "✅ Verified Spotify match ($bestScore): '${bestHit.title}' by '${bestHit.artist}' -> ${bestHit.uri}")
+                } else {
+                    Log.w(TAG, "❌ Rejected unverified Spotify search results for '$expectedTitle' by '$expectedArtist' (query='$query')")
+                }
+                bestHit
             }
         } catch (e: Exception) {
             Log.d(TAG, "Spotify /v1/search notice: ${e.message}")
             null
+        }
+    }
+
+    private fun querySpotifyTrackSearch(
+        bearerToken: String,
+        query: String,
+        expectedTitle: String,
+        expectedArtist: String
+    ): String? = querySpotifyTrackSearchDetailed(bearerToken, query, expectedTitle, expectedArtist)?.uri
+
+    suspend fun verifyAndRepairForYouRecommendations(
+        context: Context,
+        recs: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>,
+        excludeTitlesLower: Set<String>
+    ): List<com.tunemind.app.domain.recommendation.AiRecommendationEntity> = withContext(Dispatchers.IO) {
+        if (recs.isEmpty()) return@withContext recs
+        val token = getSearchBearerToken(context) ?: return@withContext recs
+        val usedTrackIds = mutableSetOf<String>()
+        val usedNormTitles = excludeTitlesLower.toMutableSet()
+
+        recs.map { rec ->
+            val currentUri = TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
+            val normRecTitle = normalizeTitleForExactMatch(rec.title)
+            // First try strict verification for exact recommended title + artist
+            val strictQuery = if (rec.artist.isNotBlank() && !rec.artist.equals("Unknown Artist", ignoreCase = true)) {
+                "track:${rec.title} artist:${rec.artist}"
+            } else rec.title
+            val exactHit = querySpotifyTrackSearchDetailed(token, strictQuery, rec.title, rec.artist)
+                ?: querySpotifyTrackSearchDetailed(token, "${rec.title} ${rec.artist}".trim(), rec.title, rec.artist)
+
+            if (exactHit != null && usedTrackIds.add(exactHit.trackId)) {
+                usedNormTitles.add(normalizeTitleForExactMatch(exactHit.title))
+                rec.copy(
+                    id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(rec.title, rec.artist),
+                    spotifyUri = exactHit.uri,
+                    album = exactHit.album ?: rec.album
+                )
+            } else if (!currentUri.isNullOrBlank()) {
+                val baseId = TrackIdentityResolver.extractSpotifyBase62Id(currentUri) ?: rec.resolvedCanonicalTrackId()
+                usedTrackIds.add(baseId)
+                usedNormTitles.add(normRecTitle)
+                rec.copy(spotifyUri = currentUri)
+            } else if (rec.artist.isNotBlank() && !rec.artist.equals("Unknown Artist", ignoreCase = true)) {
+                // Title could not be verified on Spotify (e.g. AI-hallucinated song by real artist): pick verified unheard track by same artist
+                val artistHits = runCatching { searchTracksRaw(token, "artist:${rec.artist}", 10, 0) }.getOrDefault(emptyList())
+                val replacement = artistHits.firstOrNull { item ->
+                    val cid = TrackIdentityResolver.extractSpotifyBase62Id(item.spotifyUri) ?: item.trackId
+                    val itemNormTitle = normalizeTitleForExactMatch(item.trackTitle)
+                    item.spotifyUri.startsWith("spotify:track:") &&
+                        artistMatchesLoose(item.artistName, rec.artist) &&
+                        cid !in usedTrackIds &&
+                        itemNormTitle !in usedNormTitles &&
+                        item.trackTitle.lowercase().trim() !in usedNormTitles
+                }
+                if (replacement != null) {
+                    val cid = TrackIdentityResolver.extractSpotifyBase62Id(replacement.spotifyUri) ?: replacement.trackId
+                    usedTrackIds.add(cid)
+                    usedNormTitles.add(normalizeTitleForExactMatch(replacement.trackTitle))
+                    Log.i(TAG, "🔄 Replaced unverified For You pick '${rec.title}' with verified Spotify track '${replacement.trackTitle}' by '${replacement.artistName}'")
+                    rec.copy(
+                        id = com.tunemind.app.domain.recommendation.AiRecommendationEntity.createDeterministicId(
+                            replacement.trackTitle,
+                            replacement.artistName
+                        ),
+                        title = replacement.trackTitle,
+                        artist = replacement.artistName,
+                        album = replacement.albumName.takeIf { it.isNotBlank() } ?: rec.album,
+                        spotifyUri = replacement.spotifyUri
+                    )
+                } else {
+                    rec
+                }
+            } else {
+                rec
+            }
         }
     }
 
@@ -1228,7 +1352,7 @@ object SpotifyTrackUriResolver {
                         return preview
                     }
                 }
-                firstPreview
+                if (normTargetTitle.isBlank()) firstPreview else null
             }
         } catch (e: Exception) {
             Log.d(TAG, "Deezer preview lookup notice: ${e.message}")

@@ -79,7 +79,8 @@ data class DopamineSongItem(
     val albumArtUrl: String? = null,
     val freshCategory: RestingVaultEngine.FreshCategory = RestingVaultEngine.FreshCategory.PEAK_FRESH,
     val freshReason: String? = null,
-    val readinessScore: Int = freshnessPercent
+    val readinessScore: Int = freshnessPercent,
+    val isManualFresh: Boolean = false
 )
 
 @Composable
@@ -188,7 +189,7 @@ fun DopamineVaultScreen(
                 artist = artist
             )
             val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
-            if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
+            if (vaultStatus.isInVault || isFreshExcluded(title, artist, canonicalId)) continue
             val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
             val safeId = "mf_${canonicalId}".let { if (seenIds.add(it)) it else "mf_${list.size}" }
             list.add(
@@ -206,7 +207,8 @@ fun DopamineVaultScreen(
                     albumArtUrl = mf.albumArtUrl,
                     freshCategory = RestingVaultEngine.FreshCategory.UNPLAYED_GEM,
                     freshReason = "Pinned to Fresh · Ready now",
-                    readinessScore = 99
+                    readinessScore = 99,
+                    isManualFresh = true
                 )
             )
         }
@@ -485,7 +487,11 @@ fun DopamineVaultScreen(
             .filter { !it.isCoolingDown }
             .sortedWith(
                 compareByDescending<DopamineSongItem> {
-                    if (it.freshCategory == RestingVaultEngine.FreshCategory.COMEBACK) 1 else 0
+                    when {
+                        it.isManualFresh -> 2
+                        it.freshCategory == RestingVaultEngine.FreshCategory.COMEBACK -> 1
+                        else -> 0
+                    }
                 }
                     .thenByDescending { it.readinessScore }
                     .thenBy { it.playCount }

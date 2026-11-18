@@ -3507,11 +3507,12 @@ class TuneMindViewModel : ViewModel() {
                 ut.trackId == canonicalId
         }
         if (statsMatch != null) {
+            val effectiveCooling = if (isManualFresh) false else statsMatch.isCoolingDown
             val inFresh = isManualFresh || (!statsMatch.isCoolingDown && !isExcludedFresh)
             return TrackVaultUiStatus(
                 isInVault = false,
                 vaultId = null,
-                isCoolingDown = statsMatch.isCoolingDown,
+                isCoolingDown = effectiveCooling,
                 freshnessPercent = if (isManualFresh) maxOf(statsMatch.freshnessPercent, 96) else statsMatch.freshnessPercent,
                 recoveryPercent = 0,
                 cooldownRemainingLabel = null,
@@ -4438,8 +4439,30 @@ class TuneMindViewModel : ViewModel() {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
                 if (!forceRefresh) {
+                    fun repairUnverifiedAsync(pool: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>) {
+                        val unverified = pool.filter { it.spotifyUri.isNullOrBlank() }
+                        if (unverified.isEmpty()) return
+                        viewModelScope.launch(Dispatchers.IO) {
+                            val excludeLower = (_unifiedTracks.value.filter { it.verifiedPlayCount > 0 }.map { it.title.lowercase().trim() } +
+                                pool.map { it.title.lowercase().trim() }).toSet()
+                            val repaired = com.tunemind.app.provider.SpotifyTrackUriResolver.verifyAndRepairForYouRecommendations(
+                                context = ctx,
+                                recs = unverified,
+                                excludeTitlesLower = excludeLower
+                            )
+                            unverified.forEachIndexed { idx, old ->
+                                val next = repaired.getOrNull(idx)
+                                if (next != null && next.id != old.id) {
+                                    runCatching { aiRecDao?.deleteById(old.id) }
+                                }
+                            }
+                            runCatching { aiRecDao?.insertAll(repaired) }
+                        }
+                    }
+
                     if (existingInFlow.size >= 10) {
                         autoTriggeredNoonCycleKey = todayNoonKey
+                        repairUnverifiedAsync(existingInFlow)
                         return@launch
                     }
                     // Check Room synchronously before hitting backend (Flow may not have emitted on startup yet)
@@ -4448,6 +4471,7 @@ class TuneMindViewModel : ViewModel() {
                     }
                     if (existingInRoom.size >= 10) {
                         autoTriggeredNoonCycleKey = todayNoonKey
+                        repairUnverifiedAsync(existingInRoom)
                         return@launch
                     }
                 }
@@ -4537,9 +4561,17 @@ class TuneMindViewModel : ViewModel() {
                 )
 
                 if (newRecs.isNotEmpty()) {
+                    val excludeLower = allKnownTitles.map { it.lowercase().trim() }.toSet()
+                    val verifiedRecs = withContext(Dispatchers.IO) {
+                        com.tunemind.app.provider.SpotifyTrackUriResolver.verifyAndRepairForYouRecommendations(
+                            context = ctx,
+                            recs = newRecs,
+                            excludeTitlesLower = excludeLower
+                        )
+                    }
                     withContext(Dispatchers.IO) {
                         try {
-                            aiRecDao?.insertAll(newRecs)
+                            aiRecDao?.insertAll(verifiedRecs)
                         } catch (t: Throwable) {
                             android.util.Log.e("TuneMindVM", "aiRecDao insertAll error: ${t.message}", t)
                         }
