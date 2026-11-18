@@ -76,12 +76,12 @@ fun TuneMindLogoMark(
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF00F0FF).copy(alpha = 0.26f),
-                            Color(0xFF8A2BE2).copy(alpha = 0.20f),
+                            Color(0xFF22D3EE).copy(alpha = 0.14f),
+                            Color(0xFF6366F1).copy(alpha = 0.10f),
                             Color.Transparent
                         )
                     ),
-                    radius = this.size.minDimension * 0.68f
+                    radius = this.size.minDimension * 0.62f
                 )
             }
         }
@@ -90,13 +90,14 @@ fun TuneMindLogoMark(
             Modifier
                 .fillMaxSize()
                 .clip(shape)
-                .background(Color(0xFF0D0D0D))
+                .background(Color(0xFF07020F))
                 .border(
                     width = 1.dp,
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            Color(0xFF00F0FF).copy(alpha = 0.45f),
-                            Color(0xFF8A2BE2).copy(alpha = 0.42f)
+                            Color(0xFF22D3EE).copy(alpha = 0.36f),
+                            Color(0xFF6366F1).copy(alpha = 0.34f),
+                            Color(0xFF2DD4BF).copy(alpha = 0.30f)
                         )
                     ),
                     shape = shape

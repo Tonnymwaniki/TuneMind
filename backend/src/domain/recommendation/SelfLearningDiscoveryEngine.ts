@@ -1397,12 +1397,12 @@ export class SelfLearningDiscoveryEngine {
             ? body.data.map((m: any) => String(m?.id || '').trim()).filter((id: string) => id.startsWith('claude-'))
             : [];
           if (ids.length > 0) {
-            // Prioritize Claude Haiku 5.5 first (fastest, ultra-low cost), then other Haikus, then Sonnet fallback
-            const haiku55 = ids.filter((id: string) => id.includes('haiku') && id.includes('5-5'));
-            const otherHaikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('5-5'));
-            const sonnets = ids.filter((id: string) => id.includes('sonnet') && !id.includes('haiku'));
-            const rest = ids.filter((id: string) => !id.includes('haiku') && !id.includes('sonnet'));
-            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...haiku55, ...otherHaikus, ...sonnets, ...rest];
+            // Prioritize Claude Sonnet 5.5 first, then latest Sonnet models, with Haiku as fallback
+            const sonnet55 = ids.filter((id: string) => id.includes('sonnet') && id.includes('5-5'));
+            const otherSonnets = ids.filter((id: string) => id.includes('sonnet') && !id.includes('5-5'));
+            const haikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('sonnet'));
+            const rest = ids.filter((id: string) => !id.includes('sonnet') && !id.includes('haiku'));
+            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...sonnet55, ...otherSonnets, ...haikus, ...rest];
             SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs = now;
           }
         }
@@ -1419,12 +1419,12 @@ export class SelfLearningDiscoveryEngine {
     if (envModel && !candidates.includes(envModel)) candidates.push(envModel);
 
     for (const id of [
-      'claude-haiku-5-5',
-      'claude-haiku-4-5',
-      'claude-haiku-4-5-20251001',
-      'claude-3-5-haiku-20241022',
+      'claude-sonnet-5-5',
+      'claude-sonnet-4-6',
       'claude-sonnet-4-5',
-      'claude-sonnet-4-6'
+      'claude-sonnet-4-5-20250929',
+      'claude-haiku-5-5',
+      'claude-haiku-4-5'
     ]) {
       if (!candidates.includes(id)) candidates.push(id);
     }
@@ -1464,9 +1464,9 @@ export class SelfLearningDiscoveryEngine {
       if (unknownArtists.length > 0) {
         try {
           const models = await this.getCandidateClaudeModels();
-          const fastModel = models[0] || 'claude-haiku-5-5';
+          const primaryModel = models[0] || 'claude-sonnet-5-5';
           const clsResp = await this.anthropic.messages.create({
-            model: fastModel,
+            model: primaryModel,
             max_tokens: 260,
             messages: [
               {

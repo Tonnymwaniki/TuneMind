@@ -310,20 +310,68 @@ fun SpotifyLibrarySection(
                     }
                 }
 
-                // Magical Sliding Capsule Sub-Tabs: Liked | Playlists | Podcasts
-                MagicalSegmentedTabs(
-                    tabs = listOf(
-                        MagicalTabItem("Liked (${likedTracks.size})", spotifyGreen),
-                        MagicalTabItem("Playlists (${playlists.size})", spotifyGreen),
-                        MagicalTabItem("Podcasts (${podcastShows.size + podcastEpisodes.size})", theme.secondaryAccent)
-                    ),
-                    selectedIndex = subTab,
-                    onSelectTab = { idx ->
-                        subTab = idx
-                        if (idx != 1) selectedPlaylistId = null
-                    },
-                    height = 42.dp
+                // Unique 3-Tile Category Switcher (Replaces duplicate capsule tab bar)
+                val libraryCategories = listOf(
+                    Triple("Liked", likedTracks.size, spotifyGreen),
+                    Triple("Playlists", playlists.size, spotifyGreen),
+                    Triple("Podcasts", podcastShows.size + podcastEpisodes.size, theme.secondaryAccent)
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    libraryCategories.forEachIndexed { idx, (label, count, accent) ->
+                        val isSelected = subTab == idx
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isSelected) accent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) accent.copy(alpha = 0.70f) else Color.White.copy(alpha = 0.10f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    subTab = idx
+                                    if (idx != 1) selectedPlaylistId = null
+                                }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSelected) accent else Color.White.copy(alpha = 0.28f))
+                                    )
+                                    Text(
+                                        text = "$count",
+                                        color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.72f),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) accent else Color.White.copy(alpha = 0.56f),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 

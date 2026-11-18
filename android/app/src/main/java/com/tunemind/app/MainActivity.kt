@@ -2,6 +2,7 @@ package com.tunemind.app
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
@@ -17,6 +18,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,8 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import com.tunemind.app.domain.voice.AgentOrchestrator
-import com.tunemind.app.domain.voice.AgentVoiceManager
+import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.service.TuneMindListenerService
 import com.tunemind.app.ui.AppHolder
@@ -102,6 +103,7 @@ open class MainActivity : ComponentActivity() {
             setContent {
                 if (!isInitializationComplete) return@setContent
                 var interceptedError by remember { mutableStateOf(startupError) }
+                var showBrandSplash by rememberSaveable { mutableStateOf(true) }
 
                 if (interceptedError != null) {
                     CrashDiagnosticsScreen(
@@ -206,9 +208,9 @@ open class MainActivity : ComponentActivity() {
                     var showAgentGuideSheet by remember { mutableStateOf(false) }
                     var currentPagerPage by remember { mutableStateOf(1) }
 
-                    val autonomousDjEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.autonomousDjEnabled.collectAsState()
-                    val stayInTuneMindEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
-                    val strictNoAppSwitchEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
+                    val autonomousDjEnabled by AgentSettingsStore.autonomousDjEnabled.collectAsState()
+                    val stayInTuneMindEnabled by AgentSettingsStore.stayInTuneMindEnabled.collectAsState()
+                    val strictNoAppSwitchEnabled by AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
                     val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
                     val playbackLaunchFeedback by vm.playbackLaunchFeedback.collectAsState()
                     val spotifyAuthManager = remember { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
@@ -399,11 +401,11 @@ open class MainActivity : ComponentActivity() {
                                             }
                                             screen.contains("SPOTIFY") || screen.contains("LIBRARY") || screen.contains("PLAYLIST") -> {
                                                 requestedScreenPage = 2
-                                                requestedRhythmSubDeck = 2
+                                                requestedRhythmSubDeck = 1
                                             }
                                             screen.contains("HISTORY") -> {
                                                 requestedScreenPage = 2
-                                                requestedRhythmSubDeck = 3
+                                                requestedRhythmSubDeck = 2
                                             }
                                             screen.contains("RHYTHM") || screen.contains("DNA") -> {
                                                 requestedScreenPage = 2
@@ -419,14 +421,12 @@ open class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Voice Agent and Orchestrator with Full Telemetry + Multi-Tool Execution Bridge
-                    val agentVoiceManager = remember {
-                        AgentVoiceManager(
+                    // Foreground Voice Agent & Orchestrator Lifecycle
+                    val agentVoiceManager = remember(context) {
+                        com.tunemind.app.domain.voice.AgentVoiceManager(
                             context = context,
                             getNowPlaying = { vm.homeState.value.nowPlaying },
-                            getRecentTracks = {
-                                vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks }
-                            },
+                            getRecentTracks = { vm.historyState.value.tracks.ifEmpty { vm.homeState.value.recentTracks } },
                             getHearingInsights = { vm.getFreshHearingInsightsNow() },
                             getVaultTracks = { vm.vaultState.value },
                             getDopamineCapsule = { vm.compileDopamineCapsule() },
@@ -461,46 +461,43 @@ open class MainActivity : ComponentActivity() {
                                     put("theme_behavior", prefs.behavior.name)
                                     put("palette_id", vm.adaptiveThemeState.value.activePalette.id)
                                     put("custom_accent_hex", prefs.customAccentHex ?: "")
-                                    put("autonomous_dj_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isAutonomousDjEnabled(context))
-                                    put("stay_in_tunemind_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context))
-                                    put("strict_no_app_switch_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context))
-                                    put("prefer_in_app_player_enabled", com.tunemind.app.domain.voice.AgentSettingsStore.isPreferInAppPlayerEnabled(context))
-                                    put("has_overlay_permission", PermissionUtils.hasOverlayPermission(context))
+                                    put("autonomous_dj_enabled", AgentSettingsStore.isAutonomousDjEnabled(context))
+                                    put("stay_in_tunemind_enabled", AgentSettingsStore.isStayInTuneMindEnabled(context))
+                                    put("strict_no_app_switch_enabled", AgentSettingsStore.isStrictNoAppSwitchEnabled(context))
+                                    put("prefer_in_app_player_enabled", AgentSettingsStore.isPreferInAppPlayerEnabled(context))
                                     put("inapp_player_active", com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying())
                                     put("spotify_connected", spotifyAuthManager.isAuthenticated())
                                     put("app_remote_connected", com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected())
                                 }
                             },
-                            onTrackDispatched = { dispatchedTitle, dispatchedArtist, dispatchedPkg ->
-                                vm.setAgentActiveTrack(dispatchedTitle, dispatchedArtist, dispatchedPkg)
+                            onTrackDispatched = { title, artist, sourcePlayer ->
+                                vm.setAgentActiveTrack(title, artist, sourcePlayer)
                             },
-                            onToolActionExecuted = { tool ->
-                                executeSingleAppToolAction(tool)
-                                tool.extra_actions.forEach { extra ->
+                            onToolActionExecuted = { toolCall ->
+                                executeSingleAppToolAction(toolCall)
+                                toolCall.extra_actions.forEach { extra ->
                                     executeSingleAppToolAction(extra)
                                 }
                             },
-                            onPlaybackLaunchResult = { launchRes ->
-                                vm.reportPlaybackLaunchResult(launchRes)
+                            onPlaybackLaunchResult = { result ->
+                                vm.reportPlaybackLaunchResult(result)
                             }
+                        )
+                    }
+                    val orchestrator = remember(agentVoiceManager) {
+                        com.tunemind.app.domain.voice.AgentOrchestrator(
+                            context = context,
+                            agentVoiceManager = agentVoiceManager,
+                            getNowPlaying = { vm.homeState.value.nowPlaying }
                         )
                     }
                     val agentState by agentVoiceManager.agentState.collectAsState()
                     val flowAnalysis by agentVoiceManager.flowAnalysisFlow.collectAsState()
                     val agentSatiety by agentVoiceManager.agentSatietyFlow.collectAsState()
                     val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
-                    var liveTranscript by remember { mutableStateOf("") }
+                    val liveTranscript by agentVoiceManager.transcriptionFlow.collectAsState(initial = "Say \"Hi TuneMind\" or tap the orb")
                     var hasCompletedLaunchStartFlow by remember { mutableStateOf(authSession.hasCompletedStartFlow) }
                     val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding
-
-                    val orchestrator = remember(agentVoiceManager) {
-                        AgentOrchestrator(
-                            context = context,
-                            agentVoiceManager = agentVoiceManager,
-                            getNowPlaying = { vm.homeState.value.nowPlaying },
-                            scope = coroutineScope
-                        )
-                    }
 
                     val isMainAppActive = hasCompletedLaunchStartFlow &&
                         authSession.hasCompletedStartFlow &&
@@ -520,22 +517,28 @@ open class MainActivity : ComponentActivity() {
                             showNotificationsScreen = false
                             showSupportScreen = false
                             showAgentGuideSheet = false
+                            orchestrator.stop()
+                        } else {
+                            orchestrator.start()
                         }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
                         vm.setUiForegroundActive(isMainAppActive)
-                        if (isMainAppActive && spotifyAuthManager.isAuthenticated()) {
-                            com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
-                                context = context,
-                                showAuthView = false
-                            )
+                        if (isMainAppActive) {
+                            if (spotifyAuthManager.isAuthenticated()) {
+                                com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
+                                    context = context,
+                                    showAuthView = false
+                                )
+                            }
                         }
                     }
 
-                    DisposableEffect(lifecycleOwner, agentVoiceManager, isMainAppActive) {
+                    DisposableEffect(lifecycleOwner, agentVoiceManager, orchestrator, isMainAppActive) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             when (event) {
                                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                                     if (isMainAppActive) {
+                                        orchestrator.start()
                                         agentVoiceManager.setForegroundActive(true)
                                         vm.setUiForegroundActive(true)
                                     }
@@ -551,24 +554,8 @@ open class MainActivity : ComponentActivity() {
                         lifecycleOwner.lifecycle.addObserver(observer)
                         onDispose {
                             lifecycleOwner.lifecycle.removeObserver(observer)
-                            agentVoiceManager.setForegroundActive(false)
-                            vm.setUiForegroundActive(false)
-                        }
-                    }
-
-                    DisposableEffect(orchestrator, hasAllPermissions) {
-                        if (hasAllPermissions) {
-                            orchestrator.start()
-                        }
-                        onDispose {
                             orchestrator.stop()
                             agentVoiceManager.destroy()
-                        }
-                    }
-
-                    LaunchedEffect(agentVoiceManager) {
-                        agentVoiceManager.transcriptionFlow.collect { transcript ->
-                            liveTranscript = transcript
                         }
                     }
 
@@ -940,6 +927,7 @@ open class MainActivity : ComponentActivity() {
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },
+                                                onOpenStats = { showStatsScreen = true },
                                                 onOpenAccountAuth = {
                                                     showProfileScreen = true
                                                 },
@@ -1300,6 +1288,12 @@ open class MainActivity : ComponentActivity() {
                                 }
                             }
                             }
+                        }
+
+                        if (showBrandSplash) {
+                            com.tunemind.app.ui.components.TuneMindSplashOverlay(
+                                onFinished = { showBrandSplash = false }
+                            )
                         }
                     }
                 }

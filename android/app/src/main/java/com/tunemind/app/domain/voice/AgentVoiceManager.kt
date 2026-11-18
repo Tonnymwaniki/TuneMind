@@ -9,7 +9,9 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioRecordingConfiguration
 import android.media.MediaRecorder
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -55,7 +57,7 @@ class AgentVoiceManager(
     private val getRecentTracks: (() -> List<com.tunemind.app.domain.model.TrackMemoryEntry>)? = null,
     private val getHearingInsights: (() -> com.tunemind.app.ui.HearingInsightsState)? = null,
     private val getVaultTracks: (() -> List<com.tunemind.app.ui.VaultTrack>)? = null,
-    private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState)? = null,
+    private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState?)? = null,
     private val getForYouPicks: (() -> List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>)? = null,
     private val getSpotifyPlaylists: (() -> List<com.tunemind.app.data.ingestion.SpotifyPlaylistEntity>)? = null,
     private val getSpotifyLikedTracks: (() -> List<com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity>)? = null,
@@ -64,7 +66,8 @@ class AgentVoiceManager(
     private val getAppState: (() -> JSONObject)? = null,
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
-    private val onPlaybackLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
+    private val onPlaybackLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null,
+    private val onWakeOpenAppRequested: (() -> Unit)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -112,7 +115,7 @@ class AgentVoiceManager(
         .build()
     private val reasoningHttpClient = OkHttpClient.Builder()
         .connectTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .readTimeout(25000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        .readTimeout(30000, java.util.concurrent.TimeUnit.MILLISECONDS)
         .writeTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
     private var isRecording = false
@@ -128,9 +131,61 @@ class AgentVoiceManager(
     private var voskModel: Model? = null
     private var speechService: SpeechService? = null
     private var isVoskListening = false
+    private val _isWakeWordListeningFlow = MutableStateFlow(false)
+    val isWakeWordListeningFlow: StateFlow<Boolean> = _isWakeWordListeningFlow
 
     @Volatile
     private var isAppInForeground = false
+
+    @Volatile
+    private var pausedForExternalRecording = false
+
+    @Volatile
+    private var lastWakeWordTriggerAtMs = 0L
+
+    @Volatile
+    private var wasMediaPlayingBeforeWake = false
+
+    @Volatile
+    private var wasTurnTriggeredByWakeWord = false
+
+    @Volatile
+    private var hasReceivedSpeechThisTurn = false
+
+    @Volatile
+    private var hasSpokenMorningPromptThisTurn = false
+
+    @Volatile
+    private var wakeOpenAppOverride: (() -> Unit)? = onWakeOpenAppRequested
+
+    private var audioRecordingCallback: AudioManager.AudioRecordingCallback? = null
+    private var wakeRestartJob: Job? = null
+    private var noSpeechAfterWakeJob: Job? = null
+    private var chimeToneGenerator: ToneGenerator? = null
+
+    @Volatile
+    private var latestLocalVoskCommandText: String = ""
+
+    @Volatile
+    private var latestWsPartialText: String = ""
+
+    @Volatile
+    private var postAudioCooldownUntilMs: Long = 0L
+
+    @Volatile
+    private var consecutiveTuneMindPartialHits: Int = 0
+
+    @Volatile
+    private var hasCompletedCloudTurn: Boolean = false
+
+    @Volatile
+    private var cachedUnifiedTracks: List<com.tunemind.app.data.ingestion.SpotifyTrackAggregate> = emptyList()
+
+    private var wakeRecordJob: Job? = null
+    private var wakeAudioRecord: AudioRecord? = null
+    private var cloudResponseTimeoutJob: Job? = null
+    private var postGreetingListenTimeoutJob: Job? = null
+    private var wakeWatchdogJob: Job? = null
 
     private val powerManager by lazy {
         context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
@@ -174,9 +229,151 @@ class AgentVoiceManager(
 
     init {
         AgentSettingsStore.ensureLoaded(context)
+        registerAudioRecordingMonitor()
+        refreshUnifiedTracksCacheAsync()
         initWakeWordEngine()
         startCloudKeepAlivePing()
         startAutonomousEndOfSongMonitor()
+        startWakeWordSelfHealingWatchdog()
+    }
+
+    private fun startWakeWordSelfHealingWatchdog() {
+        wakeWatchdogJob?.cancel()
+        wakeWatchdogJob = scope.launch {
+            while (isActive) {
+                delay(12_000L)
+                if (shouldKeepWakeWordListening() &&
+                    _agentState.value == AgentState.IDLE &&
+                    !isVoskListening &&
+                    !pausedForExternalRecording &&
+                    voskModel != null &&
+                    !isExternalMicOrCallActive()
+                ) {
+                    Log.w(TAG, "Self-healing wake watchdog: restarting \"Hi TuneMind\" listener...")
+                    startWakeWordListener()
+                }
+            }
+        }
+    }
+
+    private fun markPostAudioCooldown(durationMs: Long = 3_200L) {
+        val target = System.currentTimeMillis() + durationMs
+        if (target > postAudioCooldownUntilMs) {
+            postAudioCooldownUntilMs = target
+        }
+    }
+
+    private fun refreshUnifiedTracksCacheAsync() {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val recents = getRecentTracks?.invoke() ?: emptyList()
+                cachedUnifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver
+                    .getUnifiedUserSpotifyTracksBlocking(context, recents)
+            }
+        }
+    }
+
+    private fun prewarmCloudConnectionAsync() {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
+                val req = Request.Builder().url("$baseUrl/health").get().build()
+                client.newCall(req).execute().close()
+            }
+        }
+    }
+
+    fun setWakeOpenAppHandler(handler: (() -> Unit)?) {
+        wakeOpenAppOverride = handler
+    }
+
+    fun shouldKeepWakeWordListening(): Boolean {
+        return isAppInForeground
+    }
+
+    fun syncAlwaysOnWakeWordState() {
+        if (shouldKeepWakeWordListening()) {
+            resumeWakeWordListening()
+        } else {
+            stopVoskWakeListener()
+        }
+    }
+
+    @Volatile
+    private var lastOwnMicActivityAtMs = 0L
+
+    private val voskLock = Any()
+
+    private fun stopVoskWakeListener() {
+        wakeRestartJob?.cancel()
+        val oldJob = wakeRecordJob
+        wakeRecordJob = null
+        val oldAudio = wakeAudioRecord
+        wakeAudioRecord = null
+        val oldService = speechService
+        speechService = null
+        val hadActive = isVoskListening || oldJob != null || oldAudio != null || oldService != null
+        isVoskListening = false
+        _isWakeWordListeningFlow.value = false
+        consecutiveTuneMindPartialHits = 0
+        oldJob?.cancel()
+        if (hadActive) {
+            lastOwnMicActivityAtMs = System.currentTimeMillis()
+            scope.launch(Dispatchers.IO) {
+                runCatching { oldAudio?.stop() }
+                runCatching { oldAudio?.release() }
+                if (oldService != null) {
+                    runCatching { oldService.stop() }
+                    runCatching { oldService.shutdown() }
+                }
+            }
+        }
+    }
+
+    private fun isExternalMicOrCallActive(configs: List<AudioRecordingConfiguration>? = null): Boolean {
+        val mode = runCatching { audioManager.mode }.getOrDefault(AudioManager.MODE_NORMAL)
+        if (mode == AudioManager.MODE_IN_CALL ||
+            mode == AudioManager.MODE_IN_COMMUNICATION ||
+            mode == AudioManager.MODE_RINGTONE
+        ) {
+            return true
+        }
+        val activeConfigs = configs ?: runCatching { audioManager.activeRecordingConfigurations }.getOrDefault(emptyList())
+        if (activeConfigs.isEmpty()) return false
+        val ownMicRecentlyActive = _agentState.value != AgentState.IDLE ||
+            isRecording ||
+            isVoskListening ||
+            (System.currentTimeMillis() - lastOwnMicActivityAtMs) < 1_800L
+        return if (ownMicRecentlyActive) activeConfigs.size >= 2 else activeConfigs.isNotEmpty()
+    }
+
+    private fun registerAudioRecordingMonitor() {
+        try {
+            val cb = object : AudioManager.AudioRecordingCallback() {
+                override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) {
+                    val externalBusy = isExternalMicOrCallActive(configs)
+                    if (externalBusy && !pausedForExternalRecording) {
+                        pausedForExternalRecording = true
+                        Log.i(TAG, "External call or mic session detected — pausing Vosk wake-word cleanly.")
+                        stopVoskWakeListener()
+                    } else if (!externalBusy && pausedForExternalRecording) {
+                        pausedForExternalRecording = false
+                        Log.i(TAG, "External mic/call cleared — resuming Vosk wake-word.")
+                        wakeRestartJob?.cancel()
+                        wakeRestartJob = scope.launch {
+                            delay(650L)
+                            if (shouldKeepWakeWordListening() && !pausedForExternalRecording) {
+                                resumeWakeWordListening()
+                            }
+                        }
+                    }
+                }
+            }
+            audioRecordingCallback = cb
+            audioManager.registerAudioRecordingCallback(cb, mainHandler)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecordingCallback registration notice: ${e.message}")
+        }
     }
 
     private fun isDeviceScreenInteractive(): Boolean {
@@ -212,15 +409,12 @@ class AgentVoiceManager(
     fun setForegroundActive(active: Boolean) {
         isAppInForeground = active
         if (!active) {
-            if (isVoskListening || speechService != null) {
-                try {
-                    speechService?.stop()
-                } catch (_: Exception) {}
-                isVoskListening = false
-            }
+            stopVoskWakeListener()
             // If an autonomous DJ handover or track launch is actively running (e.g. screen off or Spotify wake),
             // do NOT cancel TTS, mainHandler callbacks, or handover jobs!
             if (!isExecutingAutonomousHandover && _agentState.value != AgentState.SPEAKING && _agentState.value != AgentState.THINKING) {
+                noSpeechAfterWakeJob?.cancel()
+                postGreetingListenTimeoutJob?.cancel()
                 errorResetJob?.cancel()
                 stopMicrophoneStream()
                 stopNativeSpeechRecognizer()
@@ -229,6 +423,26 @@ class AgentVoiceManager(
             Log.d(TAG, "App left foreground (autonomousHandover=$isExecutingAutonomousHandover) — Vosk wake-word paused; End-of-Song DJ remains active.")
         } else {
             resumeWakeWordListening()
+        }
+    }
+
+    private fun extractRequestedGenreQuery(text: String): String? {
+        val clean = text.lowercase()
+        return when {
+            Regex("\\b(kikuyu|gikuyu|mugithi)\\b").containsMatchIn(clean) -> "Kikuyu Mugithi"
+            Regex("\\bbongo(\\s*flava)?\\b").containsMatchIn(clean) -> "Bongo Flava"
+            Regex("\\bgengetone\\b").containsMatchIn(clean) -> "Gengetone Kenyan"
+            Regex("\\bohangla\\b").containsMatchIn(clean) -> "Ohangla Kenyan"
+            Regex("\\blingala\\b").containsMatchIn(clean) -> "Lingala Rumba"
+            Regex("\\bbenga\\b").containsMatchIn(clean) -> "Kenyan Benga"
+            Regex("\\bgospel\\b").containsMatchIn(clean) -> "Kenyan Gospel"
+            Regex("\\bafrobeat(s)?\\b").containsMatchIn(clean) -> "Afrobeats"
+            Regex("\\bamapiano\\b").containsMatchIn(clean) -> "Amapiano"
+            Regex("\\breggae\\b").containsMatchIn(clean) -> "Reggae"
+            Regex("\\bjazz\\b").containsMatchIn(clean) -> "Jazz"
+            Regex("\\bhip\\s*hop\\b").containsMatchIn(clean) -> "Hip Hop"
+            Regex("\\br&b\\b").containsMatchIn(clean) -> "R&B"
+            else -> null
         }
     }
 
@@ -241,8 +455,13 @@ class AgentVoiceManager(
 
     private fun isNewOrRecommendSongRequest(text: String): Boolean {
         val clean = text.lowercase()
+        if (extractRequestedGenreQuery(clean) != null &&
+            Regex("\\b(play|spin|put on|give me|find me|recommend|suggest|song|track|music|tune)\\b").containsMatchIn(clean)
+        ) {
+            return true
+        }
         return Regex(
-            "\\b(new\\s+(song|track|music|tune|vibe)|fresh\\s+(song|track|music|tune)|something\\s+(new|fresh|different|good)|never\\s+heard|haven'?t\\s+heard|discover|recommend|recommendation|suggest|suggestion|pick\\s+(a|me)|choose\\s+(a|me)|find\\s+me\\s+a\\s+song|give\\s+me\\s+a\\s+(new\\s+)?(song|track)|play\\s+(for\\s+me\\s+|me\\s+)?(a\\s+|some\\s+|any\\s+|another\\s+)?(new\\s+|fresh\\s+|good\\s+|nice\\s+)?(song|track|music|tune|something))\\b"
+            "\\b(new\\s+(song|track|music|tune|vibe)|fresh\\s+(song|track|music|tune)|any\\s+(good\\s+|nice\\s+|random\\s+)?(song|track|music|tune)|random\\s+(song|track|music)|some\\s+(song|track|music|good|nice)|something\\s+(new|fresh|different|good|nice)|never\\s+heard|haven'?t\\s+heard|discover|recommend|recommendation|suggest|suggestion|surprise\\s+me|anything|whatever|pick\\s+(a|me|any|one)|choose\\s+(a|me|any|one)|find\\s+me\\s+(a|any)\\s+(song|track|music)|give\\s+me\\s+(a|any)\\s+(new\\s+)?(song|track|music)|play\\s+(for\\s+me\\s+|me\\s+)?(a\\s+|some\\s+|any\\s+|another\\s+|random\\s+)?(new\\s+|fresh\\s+|good\\s+|nice\\s+|cool\\s+)?(song|track|music|tune|something))\\b"
         ).containsMatchIn(clean)
     }
 
@@ -250,8 +469,11 @@ class AgentVoiceManager(
         val clean = candidate?.lowercase()?.replace(Regex("[^a-z0-9\\s']"), " ")?.replace(Regex("\\s+"), " ")?.trim() ?: return true
         if (clean.length < 2) return true
         if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
+        if (Regex("^(a|an|any|some|the|good|nice|cool|fresh|new|random|kikuyu|gikuyu|mugithi|bongo|gospel)?\\s*(song|songs|track|tracks|music|tune|tunes|one|something|anything|whatever)$").matches(clean)) {
+            return true
+        }
         return Regex(
-            "\\b(tunemind|tune mind|most|listened|played|heard|recommend|recommended|suggest|suggested|new song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history|how are you|how is it going|what is up|who are you|settings|theme|color|colour|autonomous dj|stay in tunemind)\\b"
+            "\\b(tunemind|tune mind|most|listened|played|heard|recommend|recommended|suggest|suggested|new song|any song|any music|some song|good song|nice song|random song|fresh song|a song|the song|my song|some music|for me|to me|something|anything|whatever|surprise me|another song|different song|favorite|favourite|that i|what i|which i|have listened|i listen|my top|my history|how are you|how is it going|what is up|who are you|settings|theme|color|colour|autonomous dj|stay in tunemind)\\b"
         ).containsMatchIn(clean)
     }
 
@@ -259,8 +481,9 @@ class AgentVoiceManager(
         val clean = text.lowercase().trim()
         if (clean.isEmpty()) return false
         if (isMostPlayedSongRequest(clean) || isNewOrRecommendSongRequest(clean)) return true
+        if (extractRequestedGenreQuery(clean) != null) return true
         return Regex(
-            "\\b(play|spin|put on|queue|recommend|suggest|find me a song|give me a song|play something|play music|another song|different song|next song|bongo|afrobeat|amapiano|r&b|hip hop|chill music|workout music|focus music|study music|capsule|dopamine capsule)\\b"
+            "\\b(play|spin|put on|queue|recommend|suggest|find me a song|give me a song|play something|play music|another song|different song|next song|bongo|kikuyu|gikuyu|mugithi|gengetone|ohangla|lingala|benga|gospel|afrobeat|amapiano|reggae|r&b|hip hop|chill music|workout music|focus music|study music|capsule|dopamine capsule)\\b"
         ).containsMatchIn(clean)
     }
 
@@ -291,81 +514,274 @@ class AgentVoiceManager(
     }
 
     private fun initWakeWordEngine() {
-        try {
-            StorageService.unpack(context, "model-en", "model",
-                { model ->
-                    this.voskModel = model
-                    Log.d(TAG, "Vosk Model loaded successfully.")
-                    if (isAppInForeground) {
-                        startWakeWordListener()
-                    }
-                },
-                { exception ->
-                    Log.e(TAG, "Failed to unpack the Vosk model: ${exception?.message}")
+        scope.launch {
+            try {
+                val modelDir = unpackVoskModelDirectory()
+                if (modelDir == null) {
+                    Log.e(TAG, "Vosk model assets missing under model-en.")
+                    return@launch
                 }
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize Vosk StorageService: ${e.message}")
+                val loaded = Model(modelDir.absolutePath)
+                voskModel = loaded
+                Log.i(TAG, "Vosk Model loaded cleanly from ${modelDir.absolutePath}.")
+                if (shouldKeepWakeWordListening() && _agentState.value == AgentState.IDLE) {
+                    mainHandler.post { startWakeWordListener() }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to unpack/load Vosk wake model: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun unpackVoskModelDirectory(): java.io.File? {
+        val targetRoot = java.io.File(context.filesDir, "vosk-model-en-us-0.15")
+        val readyMarker = java.io.File(targetRoot, ".tunemind_ready_v1")
+        if (readyMarker.exists() && java.io.File(targetRoot, "conf/mfcc.conf").exists()) {
+            return targetRoot
+        }
+        val am = context.assets
+        val nestedRoot = "model-en/vosk-model-small-en-us-0.15"
+        val directRoot = "model-en"
+        val assetSource = when {
+            (am.list(nestedRoot)?.isNotEmpty() == true) -> nestedRoot
+            (am.list(directRoot)?.contains("conf") == true) -> directRoot
+            else -> return null
+        }
+        if (targetRoot.exists()) {
+            targetRoot.deleteRecursively()
+        }
+        copyAssetTree(am, assetSource, targetRoot)
+        readyMarker.writeText("ok")
+        return targetRoot
+    }
+
+    private fun copyAssetTree(am: android.content.res.AssetManager, assetPath: String, dest: java.io.File) {
+        val children = am.list(assetPath).orEmpty()
+        if (children.isEmpty()) {
+            dest.parentFile?.mkdirs()
+            am.open(assetPath).use { input ->
+                java.io.FileOutputStream(dest).use { output ->
+                    input.copyTo(output)
+                }
+            }
+        } else {
+            dest.mkdirs()
+            for (child in children) {
+                copyAssetTree(am, "$assetPath/$child", java.io.File(dest, child))
+            }
         }
     }
 
     private fun startWakeWordListener() {
-        if (!isAppInForeground) return
+        if (!shouldKeepWakeWordListening()) return
         if (voskModel == null) return
+        if (_agentState.value != AgentState.IDLE) return
+        if (isVoskListening && wakeRecordJob?.isActive == true) return
+        if (pausedForExternalRecording || isExternalMicOrCallActive()) return
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "Cannot start Vosk SpeechService: RECORD_AUDIO permission not granted.")
+            Log.w(TAG, "Cannot start Vosk wake listener: RECORD_AUDIO permission not granted.")
             return
         }
-        try {
-            if (speechService != null) {
-                speechService?.stop()
-                speechService?.shutdown()
-                speechService = null
+        val previousJob = wakeRecordJob
+        wakeRecordJob = scope.launch(Dispatchers.IO) {
+            // Ensure any previous wake capture job finishes releasing the hardware mic cleanly
+            runCatching {
+                if (previousJob != null && previousJob.isActive) {
+                    isVoskListening = false
+                    wakeAudioRecord?.let { runCatching { it.stop() } }
+                    previousJob.cancelAndJoin()
+                }
             }
-            val rec = Recognizer(voskModel, 16000.0f)
-            speechService = SpeechService(rec, 16000.0f)
-            speechService?.startListening(this)
-            isVoskListening = true
-            Log.d(TAG, "Vosk is now listening for the wake word while app is in foreground...")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start Vosk SpeechService: ${e.message}")
+            var ownsWakeSession = false
+            var localRec: Recognizer? = null
+            var localAudio: AudioRecord? = null
+            try {
+                synchronized(voskLock) {
+                    if (!shouldKeepWakeWordListening() || _agentState.value != AgentState.IDLE || isVoskListening) {
+                        return@launch
+                    }
+                    val model = voskModel ?: return@launch
+                    val sampleRate = 16000
+                    val minBuf = AudioRecord.getMinBufferSize(
+                        sampleRate,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT
+                    )
+                    val bufferSize = maxOf(minBuf * 2, 6400)
+                    var ar = runCatching {
+                        AudioRecord(
+                            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                            sampleRate,
+                            AudioFormat.CHANNEL_IN_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            bufferSize
+                        )
+                    }.getOrNull()
+                    if (ar == null || ar.state != AudioRecord.STATE_INITIALIZED) {
+                        runCatching { ar?.release() }
+                        ar = AudioRecord(
+                            MediaRecorder.AudioSource.MIC,
+                            sampleRate,
+                            AudioFormat.CHANNEL_IN_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT,
+                            bufferSize
+                        )
+                    }
+                    if (ar.state != AudioRecord.STATE_INITIALIZED) {
+                        runCatching { ar.release() }
+                        Log.w(TAG, "Wake AudioRecord failed to initialize; retrying in 1.5s...")
+                        scheduleVoskRestart(1_500L)
+                        return@launch
+                    }
+                    val wakeGrammar = """["hi tune mind", "hey tune mind", "okay tune mind", "tune mind", "[unk]"]"""
+                    localRec = try {
+                        Recognizer(model, 16000.0f, wakeGrammar)
+                    } catch (_: Exception) {
+                        Recognizer(model, 16000.0f)
+                    }
+                    ar.startRecording()
+                    localAudio = ar
+                    wakeAudioRecord = ar
+                    consecutiveTuneMindPartialHits = 0
+                    isVoskListening = true
+                    ownsWakeSession = true
+                    _isWakeWordListeningFlow.value = true
+                    Log.d(TAG, "Vosk wake listener active for \"Hi TuneMind\" (foreground=$isAppInForeground)...")
+                }
+
+                val chunk = ByteArray(3200) // 100ms @ 16kHz mono PCM16
+                while (isActive && isVoskListening && _agentState.value == AgentState.IDLE && shouldKeepWakeWordListening()) {
+                    val ar = localAudio ?: break
+                    val read = ar.read(chunk, 0, chunk.size)
+                    if (read > 0) {
+                        val rec = localRec ?: break
+                        val isFinal = rec.acceptWaveForm(chunk, read)
+                        val jsonOut = if (isFinal) rec.result else rec.partialResult
+                        evaluateWakeHypothesis(jsonOut, isFinal)
+                    } else if (read < 0) {
+                        Log.w(TAG, "Wake AudioRecord read returned $read — restarting loop...")
+                        if (shouldKeepWakeWordListening() && _agentState.value == AgentState.IDLE) {
+                            scheduleVoskRestart(800L)
+                        }
+                        break
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Vosk wake loop error: ${e.message}")
+                if (shouldKeepWakeWordListening()) {
+                    scheduleVoskRestart(1_200L)
+                }
+            } finally {
+                synchronized(voskLock) {
+                    if (ownsWakeSession) {
+                        isVoskListening = false
+                        _isWakeWordListeningFlow.value = false
+                        lastOwnMicActivityAtMs = System.currentTimeMillis()
+                    }
+                    if (wakeAudioRecord === localAudio) wakeAudioRecord = null
+                    runCatching { localAudio?.stop() }
+                    runCatching { localAudio?.release() }
+                    runCatching { localRec?.close() }
+                }
+            }
+        }
+    }
+
+    private fun scheduleVoskRestart(delayMs: Long = 1_000L) {
+        wakeRestartJob?.cancel()
+        val cooldownWait = (postAudioCooldownUntilMs - System.currentTimeMillis()).coerceAtLeast(0L)
+        val effectiveDelay = maxOf(delayMs, cooldownWait)
+        wakeRestartJob = scope.launch {
+            delay(effectiveDelay)
+            if (shouldKeepWakeWordListening() && _agentState.value == AgentState.IDLE && !isVoskListening) {
+                mainHandler.post { startWakeWordListener() }
+            }
         }
     }
 
     // --- VOSK RECOGNITION LISTENER CALLBACKS ---
     override fun onPartialResult(hypothesis: String?) {
-        checkWakeWord(hypothesis)
+        evaluateWakeHypothesis(hypothesis, isFinalResult = false)
     }
 
     override fun onResult(hypothesis: String?) {
-        checkWakeWord(hypothesis)
+        evaluateWakeHypothesis(hypothesis, isFinalResult = true)
     }
 
     override fun onFinalResult(hypothesis: String?) {}
 
     override fun onError(e: Exception?) {
         Log.e(TAG, "Vosk Error: ${e?.message}")
+        stopVoskWakeListener()
+        if (shouldKeepWakeWordListening()) {
+            scheduleVoskRestart(1_200L)
+        }
     }
 
     override fun onTimeout() {
         Log.d(TAG, "Vosk Timeout")
+        stopVoskWakeListener()
+        if (shouldKeepWakeWordListening()) {
+            scheduleVoskRestart(400L)
+        }
     }
 
-    private fun checkWakeWord(jsonStr: String?) {
-        if (!isAppInForeground || jsonStr == null || _agentState.value != AgentState.IDLE) return
+    private fun evaluateWakeHypothesis(jsonStr: String?, isFinalResult: Boolean) {
+        if (!shouldKeepWakeWordListening() || jsonStr == null || _agentState.value != AgentState.IDLE) return
 
-        val text = jsonStr.lowercase()
-        if (text.contains("tune mind") || text.contains("hi tune") || text.contains("hey tune")) {
-            Log.d(TAG, "Wake Word Detected! Handoff to AssemblyAI...")
+        val now = System.currentTimeMillis()
+        if (now < postAudioCooldownUntilMs) return
+        if ((now - lastWakeWordTriggerAtMs) < 2_500L) return
 
-            try {
-                speechService?.stop()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping Vosk SpeechService", e)
+        val extracted = runCatching {
+            val obj = JSONObject(jsonStr)
+            (if (isFinalResult) obj.optString("text", "") else obj.optString("partial", "")).ifBlank {
+                obj.optString("text", "")
             }
-            isVoskListening = false
+        }.getOrDefault(jsonStr).lowercase().replace(Regex("\\s+"), " ").trim()
 
-            simulateWakeWordDetected()
+        if (extracted.isBlank() || extracted == "[unk]") {
+            if (!isFinalResult) consecutiveTuneMindPartialHits = 0
+            return
+        }
+
+        val hasDirectWakePhrase = extracted.contains("hi tune mind") ||
+            extracted.contains("hey tune mind") ||
+            extracted.contains("okay tune mind") ||
+            extracted.contains("hi tunemind") ||
+            extracted.contains("hey tunemind") ||
+            extracted.contains("tunemind") ||
+            extracted.contains("tune mind")
+
+        if (hasDirectWakePhrase) {
+            consecutiveTuneMindPartialHits++
+        } else if (!isFinalResult) {
+            consecutiveTuneMindPartialHits = 0
+        }
+
+        val musicPlayingNow = runCatching {
+            com.tunemind.app.service.TuneMindListenerService.instance?.isPlaying() == true ||
+                com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
+        }.getOrDefault(false)
+
+        // When music or recent TTS audio is present, require either a final hypothesis or 2+ partial hits (~200ms)
+        // so stray lyrics or speaker tail cannot false-trigger a pause/greeting loop right after playback starts.
+        val shouldWake = hasDirectWakePhrase &&
+            (!musicPlayingNow || isFinalResult || consecutiveTuneMindPartialHits >= 2)
+
+        if (shouldWake) {
+            lastWakeWordTriggerAtMs = now
+            consecutiveTuneMindPartialHits = 0
+            Log.d(TAG, "Wake Word Confirmed (\"$extracted\", final=$isFinalResult, music=$musicPlayingNow, fg=$isAppInForeground) -> activating!")
+            isVoskListening = false
+            _isWakeWordListeningFlow.value = false
+            wakeRecordJob?.cancel()
+            mainHandler.post {
+                stopVoskWakeListener()
+                handleHotwordDetected()
+            }
         }
     }
 
@@ -706,7 +1122,17 @@ class AgentVoiceManager(
 
     // Wake Word / Manual Orb tap handler
     fun simulateWakeWordDetected() {
-        isAppInForeground = true
+        activateVoiceTurn(fromHotword = false)
+    }
+
+    fun handleHotwordDetected() {
+        activateVoiceTurn(fromHotword = true)
+    }
+
+    private fun activateVoiceTurn(fromHotword: Boolean) {
+        if (!fromHotword) {
+            isAppInForeground = true
+        }
         if (_agentState.value == AgentState.LISTENING) return
 
         if (_agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
@@ -714,18 +1140,30 @@ class AgentVoiceManager(
             executionEngine.stopSpeaking()
         }
 
+        noSpeechAfterWakeJob?.cancel()
+        postGreetingListenTimeoutJob?.cancel()
+        cloudResponseTimeoutJob?.cancel()
         errorResetJob?.cancel()
-        Log.d(TAG, "Wake Word / Orb Activated! Starting TuneMind Voice Agent...")
+        wasTurnTriggeredByWakeWord = fromHotword
+        hasReceivedSpeechThisTurn = false
+        hasSpokenMorningPromptThisTurn = false
+        hasCompletedCloudTurn = false
+        latestWsPartialText = ""
+        prewarmCloudConnectionAsync()
+        refreshUnifiedTracksCacheAsync()
 
-        if (isVoskListening) {
-            try {
-                speechService?.stop()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping Vosk SpeechService", e)
-            }
-            isVoskListening = false
+        val listenerPlaying = runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.isPlaying() == true }.getOrDefault(false)
+        val inAppPlaying = runCatching { com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() }.getOrDefault(false)
+        val npPlaying = getNowPlaying?.invoke()?.isPlaying == true
+        wasMediaPlayingBeforeWake = listenerPlaying || inAppPlaying || npPlaying
+
+        Log.d(TAG, "Voice turn activated (fromHotword=$fromHotword, foreground=$isAppInForeground, wasMediaPlaying=$wasMediaPlayingBeforeWake)")
+
+        if (fromHotword) {
+            acquireTemporaryHandoverWakeLock(45_000L)
         }
 
+        stopVoskWakeListener()
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
 
@@ -738,7 +1176,113 @@ class AgentVoiceManager(
 
         _agentState.value = AgentState.LISTENING
         requestAudioDucking()
-        startMicrophoneStream()
+
+        val chimePlayed = if (fromHotword) {
+            playReadyChimeIfEnabled()
+        } else {
+            false
+        }
+
+        val startDelayMs = if (chimePlayed) 220L else if (fromHotword) 160L else 0L
+        if (startDelayMs > 0L) {
+            mainHandler.postDelayed({
+                if (_agentState.value == AgentState.LISTENING) {
+                    startMicrophoneStream()
+                    if (fromHotword) startNoSpeechAfterWakeWatchdog()
+                }
+            }, startDelayMs)
+        } else {
+            startMicrophoneStream()
+            if (fromHotword) startNoSpeechAfterWakeWatchdog()
+        }
+    }
+
+    private fun playReadyChimeIfEnabled(): Boolean {
+        return try {
+            val tg = chimeToneGenerator ?: ToneGenerator(AudioManager.STREAM_MUSIC, 72).also {
+                chimeToneGenerator = it
+            }
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP, 130)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Ready chime playback notice: ${e.message}")
+            false
+        }
+    }
+
+    private fun buildCircadianWakeGreeting(): String {
+        if (wasMediaPlayingBeforeWake) {
+            return "Yes? I paused the music. What would you like?"
+        }
+        val hr = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return when (hr) {
+            in 4..11 -> "Good morning. I'm listening, what would you like to hear?"
+            in 12..16 -> "Hey, I'm here. What would you like to play?"
+            else -> "I'm right here. Tell me what you feel like hearing."
+        }
+    }
+
+    private fun startNoSpeechAfterWakeWatchdog() {
+        noSpeechAfterWakeJob?.cancel()
+        if (!wasTurnTriggeredByWakeWord || hasSpokenMorningPromptThisTurn) return
+        noSpeechAfterWakeJob = scope.launch {
+            delay(1_250L)
+            if (_agentState.value == AgentState.LISTENING &&
+                isRecording &&
+                wasTurnTriggeredByWakeWord &&
+                !hasReceivedSpeechThisTurn &&
+                !hasSpokenMorningPromptThisTurn
+            ) {
+                hasSpokenMorningPromptThisTurn = true
+                Log.i(TAG, "User called \"Hi TuneMind\" and waited — speaking circadian greeting then reopening mic once.")
+                stopMicrophoneStream()
+                stopNativeSpeechRecognizer()
+                setSpeakingState()
+                val greeting = buildCircadianWakeGreeting()
+                scope.launch { _transcriptionFlow.emit(greeting) }
+                mainHandler.post {
+                    markPostAudioCooldown(3_200L)
+                    executionEngine.speakPromptOnly(greeting) {
+                        mainHandler.post {
+                            markPostAudioCooldown(2_600L)
+                            hasReceivedSpeechThisTurn = false
+                            _agentState.value = AgentState.LISTENING
+                            requestAudioDucking()
+                            startMicrophoneStream()
+                            postGreetingListenTimeoutJob?.cancel()
+                            postGreetingListenTimeoutJob = scope.launch {
+                                delay(6_000L)
+                                if (_agentState.value == AgentState.LISTENING && !hasReceivedSpeechThisTurn) {
+                                    Log.d(TAG, "No follow-up command after greeting — returning cleanly to IDLE.")
+                                    val shouldResume = wasMediaPlayingBeforeWake
+                                    wasMediaPlayingBeforeWake = false
+                                    wasTurnTriggeredByWakeWord = false
+                                    stopMicrophoneStream()
+                                    stopNativeSpeechRecognizer()
+                                    releaseAudioDucking()
+                                    if (shouldResume) {
+                                        executionEngine.resumeCurrentMedia()
+                                    }
+                                    resumeWakeWordListening()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun markUserSpeechDetectedThisTurn() {
+        hasReceivedSpeechThisTurn = true
+        noSpeechAfterWakeJob?.cancel()
+        postGreetingListenTimeoutJob?.cancel()
+    }
+
+    private fun stripLeadingWakePhrase(raw: String): String {
+        return raw
+            .replace(Regex("^\\s*(?:hi|hey|hello|ok|okay)?\\s*(?:tune\\s*mind|tune)\\b[,:.!?\\s]*", RegexOption.IGNORE_CASE), "")
+            .trim()
     }
 
     /**
@@ -779,6 +1323,7 @@ class AgentVoiceManager(
         monitoredTrackMaxPosMs = 0L
 
         recordAgentSuggestedTrack(cleanTitle)
+        markPostAudioCooldown(4_000L)
         _agentState.value = AgentState.SPEAKING
         _flowAnalysisFlow.value = "Direct studio launch: spinning $cleanTitle in peak dopamine state."
         _agentSatietyFlow.value = 18
@@ -810,12 +1355,14 @@ class AgentVoiceManager(
             response = responseObj,
             onBeforeLaunch = {
                 mainHandler.post {
+                    markPostAudioCooldown(4_000L)
                     abandonAssistantAudioFocusOnly()
                 }
             },
             onFinished = {
                 mainHandler.post {
                     isExecutingAutonomousHandover = false
+                    markPostAudioCooldown(3_200L)
                     releaseAudioDucking()
                     resumeWakeWordListening()
                 }
@@ -1508,7 +2055,10 @@ class AgentVoiceManager(
                 try {
                     val np = getNowPlaying?.invoke()
                     val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
-                    val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+                    val unifiedTracks = cachedUnifiedTracks.ifEmpty {
+                        refreshUnifiedTracksCacheAsync()
+                        emptyList()
+                    }
                     val hearing = getHearingInsights?.invoke()
                     val vaultList = getVaultTracks?.invoke() ?: emptyList()
                     val capsule = getDopamineCapsule?.invoke()
@@ -1626,6 +2176,8 @@ class AgentVoiceManager(
                     // Handle backend reasoning completion
                     if (json.optString("type") == "command" && json.optString("action") == "THINKING_COMPLETE") {
                         hasCompletedReasoning = true
+                        hasCompletedCloudTurn = true
+                        cloudResponseTimeoutJob?.cancel()
                         val payload = json.optString("payload", "")
                         Log.d(TAG, "🟢 Backend reasoning response received: $payload")
                         stopMicrophoneStream()
@@ -1638,6 +2190,8 @@ class AgentVoiceManager(
                     val isFinal = json.optBoolean("isFinal", false) || json.optString("message_type") == "FinalTranscript"
 
                     if (transcript.isNotBlank()) {
+                        markUserSpeechDetectedThisTurn()
+                        latestWsPartialText = transcript
                         lastUserTranscript = transcript
                         scope.launch {
                             _transcriptionFlow.emit(transcript)
@@ -1649,6 +2203,7 @@ class AgentVoiceManager(
                         lastUserTranscript = transcript
                         stopAudioRecordingOnly()
                         setThinkingState()
+                        scheduleCloudResponseWatchdog(transcript)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "JSON parse error: ${e.message}")
@@ -1665,6 +2220,9 @@ class AgentVoiceManager(
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "🔴 WebSocket CLOSED. Code: $code, Reason: $reason")
+                if (!hasCompletedReasoning && ws == this@AgentVoiceManager.webSocket && _agentState.value == AgentState.LISTENING) {
+                    fallbackToNativeSpeechRecognizer("WebSocket closed before reasoning")
+                }
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
@@ -1695,8 +2253,14 @@ class AgentVoiceManager(
     }
 
     private fun fallbackToNativeSpeechRecognizer(reason: String?) {
-        Log.d(TAG, "Activating on-device SpeechRecognizer fallback (reason: $reason)")
+        val capturedLocalVosk = latestLocalVoskCommandText.trim()
         stopMicrophoneStream()
+        if (!isAppInForeground && capturedLocalVosk.isNotBlank()) {
+            Log.i(TAG, "Background STT WebSocket fallback using on-device Vosk transcript: $capturedLocalVosk")
+            processFinalTranscriptWithFallback(capturedLocalVosk)
+            return
+        }
+        Log.d(TAG, "Activating on-device SpeechRecognizer fallback (reason: $reason)")
         _agentState.value = AgentState.LISTENING
         startNativeSpeechRecognizer()
     }
@@ -1798,8 +2362,13 @@ class AgentVoiceManager(
             userTranscriptLower.startsWith("suggest a different fresh song")
 
         val spokenPlayerPkg = detectSpokenPlayerSelection(userTranscriptLower)
-        val isRejectingPending = Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|skip|else|next)\\b")
-            .containsMatchIn(userTranscriptLower)
+        val sanitizedForRejectCheck = userTranscriptLower.replace(
+            Regex("\\b(?:don'?t|do\\s+not|never)\\s+(?:open|leave|switch(?:\\s+to)?|launch)\\s+(?:spotify|the\\s+app|another\\s+app|external(?:\\s+app)?)\\b"),
+            " "
+        )
+        val isRejectingPending = Regex(
+            "\\b(no|nope|nah|cancel|never\\s*mind|not\\s+(?:that|this|really|now)|don'?t|do\\s+not|won'?t|wouldn'?t|pass|skip|reject|decline|dislike|hate|stop|another|different|something\\s+else|someone\\s+else|change|else|next|forget\\s+it)\\b"
+        ).containsMatchIn(sanitizedForRejectCheck)
         val isApprovingPending = pendingBeforeTurn != null && !isSyntheticPrompt && !isRejectingPending && (
             rawAction == "PLAY_TRACK_NOW" ||
             spokenPlayerPkg != null ||
@@ -1967,7 +2536,26 @@ class AgentVoiceManager(
             resolvedIdentity?.spotifyUri ?: resolvedSpotifyUri
         }
 
-        if (isApprovingPending && pendingBeforeTurn != null) {
+        val userDeclinedPending = pendingBeforeTurn != null && !isSyntheticPrompt && isRejectingPending
+        val isRejectedSameTrack = userDeclinedPending && (
+            rawTrackTitle.isNullOrBlank() ||
+            com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackTitle!!) ==
+                com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(pendingBeforeTurn!!.title)
+        )
+
+        if (userDeclinedPending && isRejectedSameTrack) {
+            // User declined the proposed track: strictly clear pending state and NEVER launch playback!
+            updatePendingProposedTrack(null)
+            rawTrackTitle = null
+            rawTrackArtist = null
+            resolvedSpotifyUri = null
+            effectiveAction = "ADVISE_ONLY"
+            effectiveIntent = "NONE"
+            effectiveExpectFollowUp = true
+            if (spokenTts.isBlank() || Regex("^(awesome,?\\s*)?(playing|spinning|launching)\\b", RegexOption.IGNORE_CASE).containsMatchIn(spokenTts)) {
+                spokenTts = "Got it, I cancelled \"${pendingBeforeTurn?.title ?: "that track"}\". What song, artist, or vibe would you like instead?"
+            }
+        } else if (isApprovingPending && pendingBeforeTurn != null) {
             effectiveAction = "PLAY_TRACK_NOW"
             effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
             effectiveExpectFollowUp = false
@@ -2030,7 +2618,7 @@ class AgentVoiceManager(
             effectiveAction = rawAction
             effectiveIntent = rawIntent
             effectiveExpectFollowUp = toolObj?.optBoolean("expect_follow_up", true) ?: true
-            if (effectiveAction == "PAUSE_PLAYBACK") {
+            if (effectiveAction == "PAUSE_PLAYBACK" || effectiveAction == "ADVISE_ONLY") {
                 updatePendingProposedTrack(null)
             }
         }
@@ -2152,11 +2740,15 @@ class AgentVoiceManager(
         }
         _agentSatietyFlow.value = responseObj.calculated_satiety_percentage
 
+        cloudResponseTimeoutJob?.cancel()
+        hasCompletedCloudTurn = true
         errorResetJob?.cancel()
+        markPostAudioCooldown(4_500L)
         executionEngine.executeBackendCommand(
             response = responseObj,
             onBeforeLaunch = {
                 mainHandler.post {
+                    markPostAudioCooldown(4_500L)
                     abandonAssistantAudioFocusOnly()
                     if (responseObj.os_execution_command.intent == "OS_MEDIA_NEXT_AND_DEEP_LINK") {
                         val dispatchedTitle = rawTrackTitle ?: rawSearchQuery.ifBlank { "Fresh Selection" }
@@ -2177,16 +2769,45 @@ class AgentVoiceManager(
             onFinished = {
                 mainHandler.post {
                     isExecutingAutonomousHandover = false
-                    if (isAppInForeground && toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
-                        Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 650ms...")
+                    markPostAudioCooldown(4_500L)
+                    val allowFollowUp = isAppInForeground
+                    if (allowFollowUp && toolPayload.expect_follow_up && responseObj.os_execution_command.intent == "NONE") {
+                        Log.d(TAG, "Waiting for user follow-up/approval in dialogue; re-opening mic in 220ms...")
                         _agentState.value = AgentState.IDLE
                         mainHandler.postDelayed({
-                            if (isAppInForeground && _agentState.value == AgentState.IDLE) {
-                                simulateWakeWordDetected()
+                            if (_agentState.value == AgentState.IDLE && isAppInForeground) {
+                                hasReceivedSpeechThisTurn = false
+                                hasSpokenMorningPromptThisTurn = true
+                                wasTurnTriggeredByWakeWord = false
+                                stopVoskWakeListener()
+                                _agentState.value = AgentState.LISTENING
+                                requestAudioDucking()
+                                startMicrophoneStream()
+                                postGreetingListenTimeoutJob?.cancel()
+                                postGreetingListenTimeoutJob = scope.launch {
+                                    delay(8_000L)
+                                    if (_agentState.value == AgentState.LISTENING && !hasReceivedSpeechThisTurn) {
+                                        Log.d(TAG, "No follow-up speech after prompt — returning cleanly to wake listening.")
+                                        wasMediaPlayingBeforeWake = false
+                                        wasTurnTriggeredByWakeWord = false
+                                        stopMicrophoneStream()
+                                        stopNativeSpeechRecognizer()
+                                        releaseAudioDucking()
+                                        resumeWakeWordListening()
+                                    }
+                                }
                             }
-                        }, 650L)
+                        }, 220L)
                     } else {
+                        val shouldResumePreviousAudio = wasMediaPlayingBeforeWake &&
+                            responseObj.os_execution_command.intent == "NONE" &&
+                            effectiveAction != "PAUSE_PLAYBACK"
+                        wasMediaPlayingBeforeWake = false
+                        wasTurnTriggeredByWakeWord = false
                         releaseAudioDucking()
+                        if (shouldResumePreviousAudio) {
+                            executionEngine.resumeCurrentMedia()
+                        }
                         resumeWakeWordListening()
                     }
                 }
@@ -2214,8 +2835,16 @@ class AgentVoiceManager(
      * with full client telemetry, or falls back to autonomous LLM / local on-device reasoning if offline.
      */
     fun processFinalTranscriptWithFallback(transcript: String) {
+        noSpeechAfterWakeJob?.cancel()
         endOfSongAutoPlayTimeoutJob?.cancel()
-        val cleaned = transcript.trim()
+        val rawCleaned = transcript.trim()
+        val cleaned = if (wasTurnTriggeredByWakeWord) {
+            stripLeadingWakePhrase(rawCleaned).ifBlank {
+                if (rawCleaned.contains("tune", ignoreCase = true)) "" else rawCleaned
+            }
+        } else {
+            rawCleaned
+        }
         if (cleaned.isEmpty()) {
             if (isAwaitingEndOfSongUserChoice) {
                 isAwaitingEndOfSongUserChoice = false
@@ -2226,7 +2855,30 @@ class AgentVoiceManager(
                 )
                 return
             }
+            if (wasTurnTriggeredByWakeWord && !hasSpokenMorningPromptThisTurn && rawCleaned.isNotBlank()) {
+                hasSpokenMorningPromptThisTurn = true
+                setSpeakingState()
+                val greeting = buildCircadianWakeGreeting()
+                scope.launch { _transcriptionFlow.emit(greeting) }
+                mainHandler.post {
+                    executionEngine.speakPromptOnly(greeting) {
+                        mainHandler.post {
+                            hasReceivedSpeechThisTurn = false
+                            _agentState.value = AgentState.LISTENING
+                            requestAudioDucking()
+                            startMicrophoneStream()
+                        }
+                    }
+                }
+                return
+            }
+            val shouldResumeAfterEmptyWake = wasMediaPlayingBeforeWake
+            wasMediaPlayingBeforeWake = false
+            wasTurnTriggeredByWakeWord = false
             releaseAudioDucking()
+            if (shouldResumeAfterEmptyWake) {
+                executionEngine.resumeCurrentMedia()
+            }
             resumeWakeWordListening()
             return
         }
@@ -2414,9 +3066,17 @@ class AgentVoiceManager(
             }
         }
 
-        // 3. Approval of pending proposed track
-        if (pending != null && Regex("\\b(yes|yeah|yep|sure|okay|ok|play|play it|go ahead|do it|sounds good|ndio|sawa|spin it)\\b").containsMatchIn(lower) &&
-            !Regex("\\b(no|nope|nah|not that|don'?t|another|different|change|switch|skip|else|next)\\b").containsMatchIn(lower)
+        // 3. Approval of pending proposed track (only on clear affirmative and NEVER when negative words appear)
+        val sanitizedForReject = lower.replace(
+            Regex("\\b(?:don'?t|do\\s+not|never)\\s+(?:open|leave|switch(?:\\s+to)?|launch)\\s+(?:spotify|the\\s+app|another\\s+app|external(?:\\s+app)?)\\b"),
+            " "
+        )
+        val isRejectingPending = Regex(
+            "\\b(no|nope|nah|cancel|never\\s*mind|not\\s+(?:that|this|really|now)|don'?t|do\\s+not|won'?t|wouldn'?t|pass|skip|reject|decline|dislike|hate|stop|another|different|something\\s+else|someone\\s+else|change|switch|else|next|forget\\s+it)\\b"
+        ).containsMatchIn(sanitizedForReject)
+
+        if (pending != null && !isRejectingPending &&
+            Regex("\\b(yes|yeah|yep|sure|okay|ok|play|play it|go ahead|do it|sounds good|ndio|sawa|spin it)\\b").containsMatchIn(lower)
         ) {
             val artistPart = if (pending.artist.isNotBlank() && pending.artist != "Unknown Artist") " by ${pending.artist}" else ""
             val pendingId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
@@ -2449,6 +3109,26 @@ class AgentVoiceManager(
                     put("track_id", pendingId.trackId)
                     put("spotify_uri", pendingId.spotifyUri ?: "")
                     put("never_open_external_app", pending.neverOpenExternalApp)
+                })
+            }
+        }
+
+        // 3B. Rejection / Cancellation of pending proposed track
+        if (pending != null && isRejectingPending) {
+            updatePendingProposedTrack(null)
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 25)
+                put("reasoning_mode", "JOURNEY_ADVISOR")
+                put("flow_state_analysis", "Cancelled ${pending.title} per your preference.")
+                put("voice_agent_tts", "Got it, I won't play ${pending.title}. What song, artist, or vibe would you like instead?")
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "ADVISE_ONLY")
+                    put("expect_follow_up", true)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
                 })
             }
         }
@@ -2729,43 +3409,106 @@ class AgentVoiceManager(
             }
         }
 
-        // 10. New Song / Discovery / Recommendation Request ("play for me a new song", "recommend a song")
+        // 10. Genre / New Song / Discovery / Recommendation Request
         if (isNewOrRecommendSongRequest(lower)) {
-            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
-            val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                context = context,
-                fallbackMemoryTracks = recents,
-                excludedTitles = excluded
-            )
-            if (discovery != null) {
-                val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
-                val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(discovery.trackTitle, discovery.artistName)
+            val excludedLower = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title))
+                .map { it.lowercase().trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+
+            val genreQuery = extractRequestedGenreQuery(lower)
+            val genreMatchedLocal = if (genreQuery != null) {
+                val primaryKeyword = genreQuery.split(" ").first()
+                cachedUnifiedTracks.firstOrNull { u ->
+                    !excludedLower.contains(u.trackTitle.lowercase().trim()) && (
+                        u.trackTitle.contains(primaryKeyword, ignoreCase = true) ||
+                        u.artistName.contains(primaryKeyword, ignoreCase = true) ||
+                        (primaryKeyword.equals("Kikuyu", ignoreCase = true) && (
+                            u.artistName.contains("Samidoh", ignoreCase = true) ||
+                            u.artistName.contains("Salim", ignoreCase = true) ||
+                            u.artistName.contains("De'Mathew", ignoreCase = true) ||
+                            u.artistName.contains("Gatutura", ignoreCase = true) ||
+                            u.artistName.contains("Mamaa", ignoreCase = true) ||
+                            u.trackTitle.contains("Gikuyu", ignoreCase = true) ||
+                            u.trackTitle.contains("Mugithi", ignoreCase = true)
+                        ))
+                    )
+                }
+            } else null
+
+            val cachedForYou = if (genreQuery == null) getForYouPicks?.invoke().orEmpty().firstOrNull { pick ->
+                pick.title.isNotBlank() && !excludedLower.contains(pick.title.lowercase().trim())
+            } else null
+            val cachedCapsule = if (genreQuery == null) capsule?.tracks.orEmpty().firstOrNull { ct ->
+                ct.title.isNotBlank() && !excludedLower.contains(ct.title.lowercase().trim())
+            } else null
+            val cachedUnifiedPick = if (genreQuery == null) cachedUnifiedTracks.firstOrNull { u ->
+                u.trackTitle.isNotBlank() && !excludedLower.contains(u.trackTitle.lowercase().trim())
+            } else null
+
+            val fastMemoryTitle = genreMatchedLocal?.trackTitle ?: cachedForYou?.title ?: cachedCapsule?.title ?: cachedUnifiedPick?.trackTitle
+            val fastMemoryArtist = genreMatchedLocal?.artistName ?: cachedForYou?.artist ?: cachedCapsule?.artist ?: cachedUnifiedPick?.artistName ?: ""
+            val fastMemoryUri = genreMatchedLocal?.spotifyUri ?: cachedForYou?.spotifyUri ?: cachedCapsule?.spotifyUri ?: cachedUnifiedPick?.spotifyUri ?: ""
+
+            var genreFallbackTitle: String? = null
+            var genreFallbackArtist: String? = null
+            var genreFallbackUri: String? = null
+            val discovery = if (fastMemoryTitle == null && genreQuery != null) {
+                val resolvedGenreUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
+                    context = context,
+                    cleanTitle = genreQuery,
+                    cleanArtist = "",
+                    fullQuery = genreQuery
+                )
+                if (!resolvedGenreUri.isNullOrBlank()) {
+                    genreFallbackTitle = if (genreQuery.startsWith("Kikuyu")) "Kikuyu Mugithi" else genreQuery
+                    genreFallbackArtist = ""
+                    genreFallbackUri = resolvedGenreUri
+                }
+                null
+            } else if (fastMemoryTitle == null) {
+                com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                    context = context,
+                    fallbackMemoryTracks = recents,
+                    excludedTitles = excludedLower
+                )
+            } else {
+                null
+            }
+
+            val resolvedTitle = discovery?.trackTitle ?: genreFallbackTitle ?: fastMemoryTitle
+            val resolvedArtist = discovery?.artistName ?: genreFallbackArtist ?: fastMemoryArtist
+            val resolvedUri = discovery?.spotifyUri ?: genreFallbackUri ?: fastMemoryUri
+
+            if (!resolvedTitle.isNullOrBlank()) {
+                val artistPart = if (resolvedArtist.isNotBlank() && resolvedArtist != "Unknown Artist") " by $resolvedArtist" else ""
+                val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(resolvedTitle, resolvedArtist)
                 return JSONObject().apply {
                     put("calculated_satiety_percentage", 18)
                     put("reasoning_mode", "PLAYBACK_SUGGESTION")
-                    put("flow_state_analysis", "Spotify Discovery: \"${discovery.trackTitle}\"$artistPart • ${mood.label} Mood DNA.")
-                    put("voice_agent_tts", "I found a fresh track you haven't been repeating: ${discovery.trackTitle}$artistPart. Would you like me to play it right now?")
+                    put("flow_state_analysis", "Curated Pick: \"$resolvedTitle\"$artistPart • ${mood.label} Mood DNA.")
+                    put("voice_agent_tts", "I picked $resolvedTitle$artistPart for your vibe right now. Would you like me to play it?")
                     put("agent_tool_call", JSONObject().apply {
                         put("action", "PROPOSE_TRACK")
-                        put("track_title", discovery.trackTitle)
-                        put("track_artist", discovery.artistName)
-                        put("spotify_uri", discovery.spotifyUri)
+                        put("track_title", resolvedTitle)
+                        put("track_artist", resolvedArtist)
+                        put("spotify_uri", resolvedUri)
                         put("target_player", targetPlayer)
                         put("expect_follow_up", true)
                     })
                     put("os_execution_command", JSONObject().apply {
                         put("intent", "NONE")
                         put("target_player", targetPlayer)
-                        put("search_query", "${discovery.trackTitle} ${discovery.artistName}".trim())
-                        put("track_title", discovery.trackTitle)
-                        put("track_artist", discovery.artistName)
-                        put("spotify_uri", discovery.spotifyUri)
+                        put("search_query", "$resolvedTitle $resolvedArtist".trim())
+                        put("track_title", resolvedTitle)
+                        put("track_artist", resolvedArtist)
+                        put("spotify_uri", resolvedUri)
                     })
                 }
             }
         }
 
-        // 11. Explicit Song Title / Artist Request (Only if NOT a conversational phrase!)
+        // 11. Explicit Song Title / Artist Request (Only if NOT a generic/conversational phrase!)
         val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
         val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
         val rawNamedTarget = explicitMatch?.groupValues?.getOrNull(3)
@@ -2773,7 +3516,11 @@ class AgentVoiceManager(
             ?.replace(Regex("\\b(right now|now|for me|please|on spotify)\\b"), "")
             ?.trim()
 
-        if (!rawNamedTarget.isNullOrBlank() && rawNamedTarget.length >= 2 && !isConversationalNonTitlePhrase(rawNamedTarget)) {
+        if (!rawNamedTarget.isNullOrBlank() &&
+            rawNamedTarget.length >= 2 &&
+            !isNewOrRecommendSongRequest(lower) &&
+            !isConversationalNonTitlePhrase(rawNamedTarget)
+        ) {
             val normNamed = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawNamedTarget)
             val unified = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
             val matchedLocal = unified.firstOrNull { u ->
@@ -2875,26 +3622,47 @@ class AgentVoiceManager(
             }
         }
 
-        // 12. Explicit music request fallback: Pick freshest unplayed track from capsule or unified Spotify history, propose it, and wait for user approval
-        val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
-        val discoveryFallback = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-            context = context,
-            fallbackMemoryTracks = recents,
-            excludedTitles = excluded
-        )
+        // 12. Explicit music request fallback: Check local curated capsule / For-You / unified history in 0ms before HTTP discovery
         val recentSuggested = getRecentlyPlayedByAgent().map { it.lowercase() }.toSet()
+        val forYouPick = getForYouPicks?.invoke().orEmpty().firstOrNull { p ->
+            p.title.isNotBlank() && !recentSuggested.contains(p.title.lowercase().trim())
+        }
         val freshPick = capsule?.tracks?.firstOrNull { ct ->
             !recentSuggested.contains(ct.title.lowercase().trim())
         } ?: capsule?.tracks?.firstOrNull()
+        val unifiedFallback = cachedUnifiedTracks.firstOrNull { u ->
+            u.trackTitle.isNotBlank() && !recentSuggested.contains(u.trackTitle.lowercase().trim())
+        }
+        val hasFastPick = forYouPick != null || freshPick != null || unifiedFallback != null
+        val discoveryFallback = if (!hasFastPick) {
+            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
+            com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
+                context = context,
+                fallbackMemoryTracks = recents,
+                excludedTitles = excluded
+            )
+        } else {
+            null
+        }
 
         val chosenTitle = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeTrackTitleForPlay(
-            discoveryFallback?.trackTitle ?: freshPick?.title ?: "Midnight City"
+            discoveryFallback?.trackTitle
+                ?: forYouPick?.title
+                ?: freshPick?.title
+                ?: unifiedFallback?.trackTitle
+                ?: "Midnight City"
         )
         val chosenArtist = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeArtistForPlay(
-            discoveryFallback?.artistName ?: freshPick?.artist ?: "M83"
+            discoveryFallback?.artistName
+                ?: forYouPick?.artist
+                ?: freshPick?.artist
+                ?: unifiedFallback?.artistName
+                ?: "M83"
         )
         val chosenUri = discoveryFallback?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
+            ?: forYouPick?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
             ?: freshPick?.spotifyUri
+            ?: unifiedFallback?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
             ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(chosenTitle, chosenArtist)
         val artistPart = if (chosenArtist.isNotBlank()) " by $chosenArtist" else ""
@@ -2957,6 +3725,12 @@ class AgentVoiceManager(
                         override fun onError(error: Int) {
                             Log.w(TAG, "Native SpeechRecognizer finished with code: $error")
                             stopNativeSpeechRecognizer()
+                            val capturedLocalVosk = latestLocalVoskCommandText.trim()
+                            if (capturedLocalVosk.isNotBlank()) {
+                                Log.i(TAG, "Recovering SpeechRecognizer error($error) with on-device Vosk transcript: $capturedLocalVosk")
+                                processFinalTranscriptWithFallback(capturedLocalVosk)
+                                return
+                            }
                             if (isAwaitingEndOfSongUserChoice) {
                                 Log.i(TAG, "No user speech detected after end-of-song prompt (code=$error) — auto-curating next track with Claude!")
                                 isAwaitingEndOfSongUserChoice = false
@@ -2979,6 +3753,7 @@ class AgentVoiceManager(
                             val matches = results?.getStringArrayList(AndroidSpeechRecognizer.RESULTS_RECOGNITION)
                             val transcript = matches?.firstOrNull()?.trim()
                             if (!transcript.isNullOrBlank()) {
+                                markUserSpeechDetectedThisTurn()
                                 Log.d(TAG, "Native SpeechRecognizer transcript: $transcript")
                                 endOfSongAutoPlayTimeoutJob?.cancel()
                                 setThinkingState()
@@ -3004,6 +3779,7 @@ class AgentVoiceManager(
                             val matches = partialResults?.getStringArrayList(AndroidSpeechRecognizer.RESULTS_RECOGNITION)
                             val transcript = matches?.firstOrNull()?.trim()
                             if (!transcript.isNullOrBlank()) {
+                                markUserSpeechDetectedThisTurn()
                                 scope.launch {
                                     _transcriptionFlow.emit(transcript)
                                 }
@@ -3130,41 +3906,162 @@ class AgentVoiceManager(
             return
         }
 
-        scope.launch {
+        latestLocalVoskCommandText = ""
+        latestWsPartialText = ""
+        hasCompletedCloudTurn = false
+        scope.launch(Dispatchers.IO) {
+            val localCmdRec = runCatching {
+                voskModel?.let { Recognizer(it, 16000.0f) }
+            }.getOrNull()
             // Read exact 100ms frames (3200 bytes at 16kHz 16-bit mono) so AssemblyAI v3 never receives <20ms sub-frames
             val targetFrameBytes = 3200
             val frameBuffer = ByteArray(targetFrameBytes)
-            while (isRecording && _agentState.value == AgentState.LISTENING) {
-                var accumulated = 0
-                while (accumulated < targetFrameBytes && isRecording && _agentState.value == AgentState.LISTENING) {
-                    val read = audioRecord?.read(frameBuffer, accumulated, targetFrameBytes - accumulated) ?: -1
-                    if (read > 0) {
-                        accumulated += read
-                    } else {
-                        break
+            var speechStartedAtMs = 0L
+            var lastSpeechFrameAtMs = 0L
+            var hasSentFinalizeHint = false
+            try {
+                while (isRecording && _agentState.value == AgentState.LISTENING) {
+                    var accumulated = 0
+                    while (accumulated < targetFrameBytes && isRecording && _agentState.value == AgentState.LISTENING) {
+                        val read = audioRecord?.read(frameBuffer, accumulated, targetFrameBytes - accumulated) ?: -1
+                        if (read > 0) {
+                            accumulated += read
+                        } else {
+                            break
+                        }
+                    }
+                    // Only send frames of at least 1600 bytes (50ms, even byte count) to guarantee AssemblyAI v3 compliance
+                    val validLen = accumulated - (accumulated % 2)
+                    if (validLen >= 1600) {
+                        val now = System.currentTimeMillis()
+                        val frameRms = computePcm16Rms(frameBuffer, validLen)
+                        if (frameRms > 520.0) {
+                            markUserSpeechDetectedThisTurn()
+                            if (speechStartedAtMs == 0L) speechStartedAtMs = now
+                            lastSpeechFrameAtMs = now
+                        }
+                        if (localCmdRec != null) {
+                            runCatching {
+                                val finalized = localCmdRec.acceptWaveForm(frameBuffer, validLen)
+                                val rawJson = if (finalized) localCmdRec.result else localCmdRec.partialResult
+                                val parsed = JSONObject(rawJson).let { obj ->
+                                    if (finalized) obj.optString("text", "") else obj.optString("partial", "")
+                                }.trim()
+                                val stripped = if (wasTurnTriggeredByWakeWord) stripLeadingWakePhrase(parsed) else parsed
+                                if (stripped.isNotBlank()) {
+                                    latestLocalVoskCommandText = stripped
+                                    markUserSpeechDetectedThisTurn()
+                                    if (speechStartedAtMs == 0L) speechStartedAtMs = now
+                                    lastSpeechFrameAtMs = now
+                                }
+                            }
+                        }
+
+                        // Fast local endpointing once user stops speaking cleanly
+                        if (speechStartedAtMs > 0L && lastSpeechFrameAtMs > 0L) {
+                            val silenceElapsedMs = now - lastSpeechFrameAtMs
+                            val bestText = latestWsPartialText.ifBlank { latestLocalVoskCommandText }.trim()
+                            if (silenceElapsedMs >= 550L && bestText.isNotBlank() && isInstantLocalCommand(bestText)) {
+                                Log.i(TAG, "⚡ Fast-Path executing instant command in <100ms: \"$bestText\"")
+                                lastUserTranscript = bestText
+                                hasCompletedCloudTurn = true
+                                cloudResponseTimeoutJob?.cancel()
+                                stopMicrophoneStream()
+                                val instantJson = buildLocalOnDeviceFallbackJson(bestText)
+                                mainHandler.post {
+                                    dispatchReasoningResult(instantJson, instantJson.optString("voice_agent_tts", ""))
+                                }
+                                break
+                            }
+                            if (!hasSentFinalizeHint && silenceElapsedMs >= 750L && bestText.length >= 2) {
+                                hasSentFinalizeHint = true
+                                val activeWs = webSocket
+                                if (isWsOpenForAudio && activeWs != null) {
+                                    runCatching {
+                                        activeWs.send(
+                                            JSONObject().apply {
+                                                put("type", "finalize_utterance")
+                                                put("transcript", bestText)
+                                            }.toString()
+                                        )
+                                    }
+                                    scheduleCloudResponseWatchdog(bestText)
+                                }
+                            }
+                        }
+
+                        val boostedBytes = boostPcm16VoiceClarity(frameBuffer, validLen)
+                        val byteStr = boostedBytes.toByteString()
+                        val activeWs = webSocket
+                        if (isWsOpenForAudio && activeWs != null) {
+                            while (preConnectAudioBuffer.isNotEmpty()) {
+                                val buffered = preConnectAudioBuffer.poll() ?: break
+                                activeWs.send(buffered)
+                            }
+                            activeWs.send(byteStr)
+                        } else {
+                            // Keep up to 4 seconds (40 frames of 100ms) of pre-connection speech in memory while socket connects
+                            if (preConnectAudioBuffer.size < 40) {
+                                preConnectAudioBuffer.offer(byteStr)
+                            }
+                        }
                     }
                 }
-                // Only send frames of at least 1600 bytes (50ms, even byte count) to guarantee AssemblyAI v3 compliance
-                val validLen = accumulated - (accumulated % 2)
-                if (validLen >= 1600) {
-                    val boostedBytes = boostPcm16VoiceClarity(frameBuffer, validLen)
-                    val byteStr = boostedBytes.toByteString()
-                    val activeWs = webSocket
-                    if (isWsOpenForAudio && activeWs != null) {
-                        while (preConnectAudioBuffer.isNotEmpty()) {
-                            val buffered = preConnectAudioBuffer.poll() ?: break
-                            activeWs.send(buffered)
-                        }
-                        activeWs.send(byteStr)
-                    } else {
-                        // Keep up to 4 seconds (40 frames of 100ms) of pre-connection speech in memory while socket connects
-                        if (preConnectAudioBuffer.size < 40) {
-                            preConnectAudioBuffer.offer(byteStr)
+            } finally {
+                if (localCmdRec != null) {
+                    runCatching {
+                        val tailText = JSONObject(localCmdRec.finalResult).optString("text", "").trim()
+                        val strippedTail = if (wasTurnTriggeredByWakeWord) stripLeadingWakePhrase(tailText) else tailText
+                        if (strippedTail.isNotBlank()) {
+                            latestLocalVoskCommandText = strippedTail
                         }
                     }
+                    runCatching { localCmdRec.close() }
                 }
             }
         }
+    }
+
+    private fun isInstantLocalCommand(rawText: String): Boolean {
+        val lower = rawText.lowercase().trim()
+        if (lower.isEmpty() || lower.split(Regex("\\s+")).size > 3) return false
+        return Regex(
+            "^(?:pause|pause music|stop|stop music|resume|continue playing|keep playing|skip|next song|next track|previous song|go back|volume up|volume down)[.!?]*$"
+        ).matches(lower)
+    }
+
+    private fun scheduleCloudResponseWatchdog(fallbackTranscript: String) {
+        cloudResponseTimeoutJob?.cancel()
+        val clean = fallbackTranscript.trim()
+        if (clean.isBlank()) return
+        cloudResponseTimeoutJob = scope.launch {
+            delay(18_000L)
+            if (!hasCompletedCloudTurn && (_agentState.value == AgentState.LISTENING || _agentState.value == AgentState.THINKING)) {
+                Log.w(TAG, "⚡ Cloud response >18s — replying with offline fallback for: \"$clean\"")
+                hasCompletedCloudTurn = true
+                lastUserTranscript = clean
+                stopMicrophoneStream()
+                stopNativeSpeechRecognizer()
+                val localJson = buildLocalOnDeviceFallbackJson(clean)
+                dispatchReasoningResult(localJson, localJson.optString("voice_agent_tts", ""))
+            }
+        }
+    }
+
+    private fun computePcm16Rms(buffer: ByteArray, length: Int): Double {
+        if (length < 2) return 0.0
+        var sumSq = 0.0
+        var count = 0
+        var i = 0
+        while (i + 1 < length) {
+            val low = buffer[i].toInt() and 0xFF
+            val high = buffer[i + 1].toInt()
+            val sample = ((high shl 8) or low).toDouble()
+            sumSq += sample * sample
+            count++
+            i += 2
+        }
+        return if (count > 0) kotlin.math.sqrt(sumSq / count) else 0.0
     }
 
     /**
@@ -3188,6 +4085,7 @@ class AgentVoiceManager(
     }
 
     private fun stopAudioRecordingOnly() {
+        lastOwnMicActivityAtMs = System.currentTimeMillis()
         isRecording = false
         isWsOpenForAudio = false
         preConnectAudioBuffer.clear()
@@ -3225,7 +4123,11 @@ class AgentVoiceManager(
     }
 
     fun resumeWakeWordListening() {
-        if (isAppInForeground && !isVoskListening && _agentState.value == AgentState.IDLE) {
+        if (shouldKeepWakeWordListening() &&
+            !isVoskListening &&
+            !pausedForExternalRecording &&
+            _agentState.value == AgentState.IDLE
+        ) {
             startWakeWordListener()
         }
     }
@@ -3260,18 +4162,22 @@ class AgentVoiceManager(
         com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = null
         com.tunemind.app.provider.TuneMindInAppPlayer.setOnTrackCompletedListener(null)
         com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener(null)
+        wakeWatchdogJob?.cancel()
+        noSpeechAfterWakeJob?.cancel()
+        postGreetingListenTimeoutJob?.cancel()
+        cloudResponseTimeoutJob?.cancel()
+        wakeRestartJob?.cancel()
         errorResetJob?.cancel()
+        audioRecordingCallback?.let {
+            runCatching { audioManager.unregisterAudioRecordingCallback(it) }
+        }
+        audioRecordingCallback = null
+        runCatching { chimeToneGenerator?.release() }
+        chimeToneGenerator = null
         stopMicrophoneStream()
         stopNativeSpeechRecognizer()
         releaseAudioDucking()
-        try {
-            speechService?.stop()
-            speechService?.shutdown()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error shutting down Vosk SpeechService", e)
-        }
-        speechService = null
-        isVoskListening = false
+        stopVoskWakeListener()
         try {
             executionEngine.shutdown()
         } catch (e: Exception) {

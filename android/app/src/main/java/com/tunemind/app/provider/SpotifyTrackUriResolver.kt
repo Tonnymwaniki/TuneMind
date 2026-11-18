@@ -354,7 +354,7 @@ object SpotifyTrackUriResolver {
                             "indie electronic downtempo"
                         )
                         val q = discoveryQueries[discoveryRotationCursor.getAndIncrement() % discoveryQueries.size]
-                        val hits = searchTracksRaw(token, q, 15, 0)
+                        val hits = searchTracksRaw(token, q, 10, 0)
                         for (hit in hits) {
                             if (isUnheard(hit)) candidateTracks.add(hit)
                         }
@@ -705,10 +705,11 @@ object SpotifyTrackUriResolver {
     ): List<SpotifyTrackAggregate> {
         val list = mutableListOf<SpotifyTrackAggregate>()
         try {
+            val boundedLimit = limit.coerceIn(1, 10)
             val url = Uri.parse("https://api.spotify.com/v1/search").buildUpon()
                 .appendQueryParameter("q", query)
                 .appendQueryParameter("type", "track")
-                .appendQueryParameter("limit", limit.toString())
+                .appendQueryParameter("limit", boundedLimit.toString())
                 .appendQueryParameter("offset", offset.toString())
                 .build()
                 .toString()

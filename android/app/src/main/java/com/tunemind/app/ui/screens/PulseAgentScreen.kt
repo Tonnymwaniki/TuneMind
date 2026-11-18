@@ -5,6 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +31,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +46,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -327,7 +330,7 @@ fun PulseAgentScreen(
                         text = if (liveTranscript.isNotBlank()) {
                             liveTranscript
                         } else {
-                            "Tap orb or say \"Hey TuneMind\""
+                            "Tap orb or say \"Hi TuneMind\""
                         },
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -353,24 +356,29 @@ fun PulseAgentScreen(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { onOpenAgentGuide() }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
-                            contentDescription = null,
-                            tint = activeAccent.copy(alpha = 0.85f),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Text(
-                            text = "Voice commands",
-                            color = Color.White.copy(alpha = 0.72f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { onOpenAgentGuide() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
+                                contentDescription = null,
+                                tint = activeAccent.copy(alpha = 0.85f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Voice commands",
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }

@@ -13,7 +13,7 @@ import os from 'os';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import app from './app';
 import { EventStore } from './domain/events/EventStore';
-import type { TuneMindTelemetryContext } from './domain/reasoning/ClaudeMusicReasoningProvider';
+import { ClaudeMusicReasoningProvider, type TuneMindTelemetryContext } from './domain/reasoning/ClaudeMusicReasoningProvider';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -88,6 +88,8 @@ wss.on('connection', async (ws: WebSocket) => {
       .replace(/\b(clean|claim|blame|flame|let|leave|bleed|plane|plan)\s+me\s+a\s+song\b/gi, 'play me a song')
       .replace(/\b(please|playing|played|place)\s+(me\s+)?a\s+song\b/gi, 'play me a song')
       .replace(/\bplay\s+(mia|mere|near|mayor)\s+song\b/gi, 'play me a song')
+      .replace(/\b(kikuyo|kiku\s*you|keekoo|kikoo|gikuyo|geekuyo|kick\s*you(?=\s+(song|songs|music|track|tune|playlist|benga|mugithi))|key\s*cue(?=\s+(song|songs|music|track|tune|playlist)))\b/gi, 'Kikuyu')
+      .replace(/\b(mugiti|mugizi|mogithi|mugihti)\b/gi, 'Mugithi')
       .replace(/\b(bongo\s+flower|bongo\s+lover|congo\s+flava|bongo\s+flavor)\b/gi, 'Bongo Flava')
       .replace(/\b(change|switch)\s+(the|this)\s+(some|son|sun|phone)\b/gi, '$1 $2 song')
       .replace(/\bplay\s+(some|son|sun)\b/gi, 'play a song');
@@ -167,8 +169,7 @@ wss.on('connection', async (ws: WebSocket) => {
     }
 
     try {
-      console.log('[VoiceStream] ⚡ Triggering Autonomous Tool-Calling Claude Pipeline...');
-      const { ClaudeMusicReasoningProvider } = await import('./domain/reasoning/ClaudeMusicReasoningProvider');
+      console.log('[VoiceStream] ⚡ Triggering Fast-Path Autonomous Tool-Calling Claude Pipeline...');
       const provider = new ClaudeMusicReasoningProvider();
 
       if (clientContext?.pending_proposed_track && clientContext.pending_proposed_track.title) {
@@ -318,13 +319,13 @@ wss.on('connection', async (ws: WebSocket) => {
         if (isEndOfTurn && isFormatted) {
           await triggerReasoningForTranscript(text);
         } else if (isEndOfTurn) {
-          // Wait up to 220ms for AssemblyAI v3's context-formatted turn (turn_is_formatted: true) which fixes phonetic errors
+          // Brief 100ms window for AssemblyAI v3's context-formatted turn
           if (formatWaitTimer) clearTimeout(formatWaitTimer);
           formatWaitTimer = setTimeout(() => {
             if (!hasTriggeredReasoning) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 220);
+          }, 100);
         } else {
           process.stdout.write(`\r[STT] Partial: "${text}"`);
           if (ws.readyState === WebSocket.OPEN) {
@@ -336,13 +337,13 @@ wss.on('connection', async (ws: WebSocket) => {
             }));
           }
 
-          // Backup silence finalizer: only finalize if user has stopped speaking for 2000ms and end_of_turn hasn't arrived
+          // Fast silence finalizer: finalize 850ms after speech pauses instead of 2000ms
           if (silenceTimer) clearTimeout(silenceTimer);
           silenceTimer = setTimeout(() => {
             if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
               triggerReasoningForTranscript(latestPartialText);
             }
-          }, 2000);
+          }, 850);
         }
       } else if (msg.type === 'Error') {
         console.error('[STT] AssemblyAI Server Error:', msg);
@@ -362,6 +363,15 @@ wss.on('connection', async (ws: WebSocket) => {
       try {
         const textData = message.toString();
         const json = JSON.parse(textData);
+        if (json.type === 'finalize_utterance') {
+          const overrideText = typeof json.transcript === 'string' && json.transcript.trim().length > 0
+            ? json.transcript.trim()
+            : latestPartialText.trim();
+          if (!hasTriggeredReasoning && overrideText.length >= 2) {
+            void triggerReasoningForTranscript(overrideText);
+          }
+          return;
+        }
         if (json.type === 'client_context') {
           clientContext = json;
           const recentsList = Array.isArray(json.recent_tracks) ? json.recent_tracks : [];

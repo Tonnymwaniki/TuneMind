@@ -102,7 +102,8 @@ async function generateElevenLabsAudio(text: string): Promise<string | null> {
         text: text,
         model_id: 'eleven_turbo_v2_5', // Lowest latency model for conversational AI
         voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-      })
+      }),
+      signal: AbortSignal.timeout(1500)
     });
 
     if (!response.ok) {

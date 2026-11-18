@@ -237,7 +237,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private anthropic: Anthropic;
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
-  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+  private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
   private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
@@ -245,7 +245,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static discoveredAnthropicModels: string[] | null = null;
   private static lastModelDiscoveryAt: number = 0;
   private static lastStaticErrorDetails: { status?: number | string; message?: string; provider?: string } | null = null;
-  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+  private static lastActiveModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private static pendingProposedTracksByUser = new Map<
     string,
     { title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string; never_open_external_app?: boolean }
@@ -360,12 +360,12 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
           .filter(id => id.startsWith('claude-'));
 
         if (rawIds.length > 0) {
-          // Prioritize Claude Haiku 5.5 first across all reasoning & discovery paths for speed and cost efficiency
-          const haiku55 = rawIds.filter(id => id.includes('haiku') && id.includes('5-5'));
-          const otherHaikus = rawIds.filter(id => id.includes('haiku') && !id.includes('5-5'));
-          const sonnets = rawIds.filter(id => id.includes('sonnet') && !id.includes('haiku'));
-          const others = rawIds.filter(id => !id.includes('haiku') && !id.includes('sonnet'));
-          const ranked = [...haiku55, ...otherHaikus, ...sonnets, ...others];
+          // Prioritize Claude Sonnet 5.5 first, then latest Sonnet models, with Haiku as fallback
+          const sonnet55 = rawIds.filter(id => id.includes('sonnet') && id.includes('5-5'));
+          const otherSonnets = rawIds.filter(id => id.includes('sonnet') && !id.includes('5-5'));
+          const haikus = rawIds.filter(id => id.includes('haiku') && !id.includes('sonnet'));
+          const others = rawIds.filter(id => !id.includes('sonnet') && !id.includes('haiku'));
+          const ranked = [...sonnet55, ...otherSonnets, ...haikus, ...others];
 
           ClaudeMusicReasoningProvider.discoveredAnthropicModels = ranked;
           ClaudeMusicReasoningProvider.lastModelDiscoveryAt = now;
@@ -402,15 +402,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     }
 
     for (const m of [
-      'claude-haiku-5-5',
-      'claude-haiku-4-5',
-      'claude-haiku-4-5-20251001',
-      'claude-3-5-haiku-20241022',
       'claude-sonnet-5-5',
       'claude-sonnet-4-6',
       'claude-sonnet-4-5',
       'claude-sonnet-4-5-20250929',
-      'claude-sonnet-4-20250514'
+      'claude-sonnet-4-20250514',
+      'claude-haiku-5-5',
+      'claude-haiku-4-5',
+      'claude-haiku-4-5-20251001',
+      'claude-3-5-haiku-20241022'
     ]) {
       if (!candidateModels.includes(m)) {
         candidateModels.push(m);
@@ -422,47 +422,9 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private async callClaudeWithHaikuPriority(
     systemPrompt: string,
     userContent: string,
-    maxTokens: number = 700
+    maxTokens: number = 900
   ): Promise<any> {
-    const all = await this.getCandidateClaudeModels();
-    const haiku55 = all.filter((m) => m.includes('haiku') && m.includes('5-5'));
-    const otherHaikus = all.filter((m) => m.includes('haiku') && !m.includes('5-5'));
-    const rest = all.filter((m) => !m.includes('haiku'));
-    const ordered = [
-      ...haiku55,
-      'claude-haiku-5-5',
-      ...otherHaikus,
-      'claude-haiku-4-5',
-      'claude-3-5-haiku-20241022',
-      ...rest
-    ].filter((v, idx, arr) => arr.indexOf(v) === idx);
-
-    let lastErr: any = null;
-    for (const modelId of ordered) {
-      try {
-        const res = await this.anthropic.messages.create({
-          model: modelId,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userContent }]
-        });
-        this.activeModelUsed = modelId;
-        ClaudeMusicReasoningProvider.lastActiveModelUsed = modelId;
-        this.lastErrorDetails = null;
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
-        return res;
-      } catch (err: any) {
-        lastErr = err;
-        const msg = String(err?.message || err);
-        this.lastErrorDetails = { status: err?.status, message: msg };
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { status: err?.status, message: msg, provider: 'anthropic' };
-        if (msg.includes('authentication_error') || msg.includes('invalid x-api-key') || msg.includes('credit balance is too low')) {
-          throw err;
-        }
-        continue;
-      }
-    }
-    throw lastErr || new Error('All Claude Haiku/Sonnet models failed');
+    return this.callClaudeWithSonnetPriority(systemPrompt, userContent, maxTokens);
   }
 
   private async callClaudeWithSonnetPriority(
@@ -884,10 +846,14 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private getAutonomousSystemPrompt(): string {
     return `Your name is TuneMind. You are the autonomous, warm, deeply perceptive AI voice companion, music psychoacoustic intelligence, and full-app controller living inside the TuneMind Android app.
 
-CORE IDENTITY & CONVERSATIONAL FREEDOM:
+CORE IDENTITY, GROUNDING & CONVERSATIONAL FREEDOM:
 - You ALWAYS know your name is TuneMind! When the user greets you ("Hi TuneMind", "Hey TuneMind", "Hello", "How are you?", "What's your name?", "Who are you?"), respond warmly and naturally as TuneMind using action="ADVISE_ONLY", leaving track_title/track_artist EMPTY, with expect_follow_up=true!
-- NEVER force, pitch, or propose a song when the user is simply greeting you, asking how you are, chatting, asking about stats, or asking to change a setting/volume/navigation!
-- You can discuss anything naturally like ChatGPT Voice or Siri: their mood, stats, ear health, dopamine fatigue, artists, playlists, or anything on any TuneMind screen.
+- NEVER force, pitch, or propose a song when the user is simply greeting you, asking how you are, chatting, asking a question about TuneMind or music, asking about stats/vault, or asking to change a setting/volume/navigation!
+- ZERO HALLUCINATION & NO SCRIPTED REPLIES: Answer every user question with genuine reasoning grounded ONLY in live telemetry, tool outputs, and true TuneMind app behavior. NEVER invent song titles, artist names, play counts, playlists, or app features that do not appear in tools or telemetry. If a search or history query returns empty, say so honestly or try a better search query.
+- ACCURATE TUNEMIND APP ARCHITECTURE KNOWLEDGE (for when users ask about how the app works):
+  - Main 3-pager navigation: **Vault / Dopamine** (Fresh tracks, Resting Vault with 5-day dopamine receptor cooldown & recovery progress, and Daily For You Suggestions), **Agent** (center Pulse Agent orb where users tap the orb or say "Hi TuneMind" while the app is open, plus Stats & Taste Profile shortcuts), and **Flow / Rhythm DNA** (Overview, Spotify library/playlists, Clean Play History, plus Hearing Health decibel exposure & safe headroom, and Weekly Recap).
+  - Settings & Modes: **Hands-Free DJ** (asks/curates next track when a song finishes), **Stay-in-TuneMind** & **Strict Never-Leave Mode** (play via Spotify App Remote / TuneMind In-App player without pulling users away to Spotify UI), **Adaptive Circadian Theme** or custom accent colors, and **Preferred Music Player** (Spotify, Boomplay, YouTube Music, Audiomack, TuneMind In-App, Local Audio).
+  - Voice activation works actively while TuneMind is open ("Hi TuneMind" or tapping the orb, including pausing an active song when called). Do NOT claim the app listens when closed/in background.
 
 FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
 - FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful.
@@ -896,7 +862,11 @@ FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE
   Whenever the user asks "how are my listening stats", asks about listening time, top artists/tracks, skips, completion rate, fresh mix %, app share, OR ear/hearing safety -> ALWAYS call 'query_listening_stats'! That tool returns BOTH the complete Stats Screen windows (Today, 7 Days, 30 Days, All Time, top artists, top tracks, app breakdown, recent plays) AND the live Hearing Health Screen metrics (estimated_db, safe_headroom_db, daily_exposure_minutes, sound_dose_percent, safe_hours_remaining, risk_level, output_device). Combine key listening stats AND ear safety headroom naturally in your response, and navigate to "STATS" or "HEARING_HEALTH" if they ask to open the screen.
 - SPOTIFY LIBRARY PLAYLISTS & LIKED SONGS:
   Whenever the user asks about their playlists ("play a song in my playlists", "play from our playlist", "what's in my Spotify library?", "play from my liked songs") -> ALWAYS call 'query_spotify_library'! It inspects both cached TuneMind library playlists AND fetches live Spotify Web API playlists & tracks when connected. NEVER tell the user their playlists aren't synced or to restart TuneMind when 'spotify_playlists_count' > 0 or 'app_state.spotify_connected' is true! Pick a verified song from that playlist (or launch the playlist's canonical spotify:playlist:<id> URI directly if they ask for the whole playlist), fill track_title, track_artist, and spotify_uri, and propose it cleanly with PROPOSE_TRACK!
-- DIRECT SONG REQUEST FROM TUNEMIND TO SPOTIFY: When the user asks for any specific track or artist ("request Calm Down by Rema on Spotify", "play Blinding Lights by The Weeknd", or a new artist discovery) -> ALWAYS call 'search_spotify_catalog' (for specific artist/song) or 'discover_and_recommend_spotify_tracks' (for fresh unseen recommendations) so you get an exact verified title, artist, and canonical spotify:track:<id> URI with zero typos or hallucinations!
+- GENRE, LANGUAGE & DIRECT SONG REQUESTS:
+  - Understand both broad requests ("play any song", "play something good") AND cultural/regional/language genres cleanly: e.g., **Kikuyu / Gikuyu** music (Mugithi, Kikuyu Benga, Kikuyu Gospel by Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Shiru Wa GP, Phyllis Mbuthia, Muigai Wa Njoroge, Kamaru), Bongo Flava, Kenyan Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Reggae, Hip-Hop, R&B, Jazz, Rock, etc.
+  - NEVER search Spotify literally for generic phrases like 'Any Song', 'A Song', or 'Play Any Song'! When a user says 'play any song' or 'play any good song', recommend a fresh personalized song via 'discover_and_recommend_spotify_tracks' or their history/For You picks.
+  - When a user asks for 'a Kikuyu song' / 'Kikuyu music' / 'Gikuyu song' / any genre, ALWAYS call 'search_spotify_catalog' (e.g. query="Kikuyu Mugithi", or artist="Samidoh", etc.) or 'discover_and_recommend_spotify_tracks' with mood_or_genre_query="Kikuyu Mugithi Gikuyu" and pick a real verified track returned by the tool!
+  - For any specific song or artist ("Calm Down by Rema", "Blinding Lights"), ALWAYS call 'search_spotify_catalog' so you return exact verified metadata and spotify_uri.
 
 SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
 - Check 'player_preferences' in the telemetry! It tells you:
@@ -909,10 +879,13 @@ SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
   -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and spotify_uri, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players', and set 'remember_default_player'=true if they agreed/asked to save it as default (or when no explicit default was set yet and they confirmed a player!).
 - RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to Spotify" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
 
-TWO-STEP APPROVAL FLOW vs. AUTONOMOUS END-OF-SONG DJ:
+TWO-STEP APPROVAL vs. REJECTION vs. AUTONOMOUS END-OF-SONG DJ:
 - By default, NEVER jump straight to playing an unapproved track on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they want it played (and which player if no default is set).
-- When 'pending_proposed_track_awaiting_user_approval' is present and the user approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, spotify_uri, and target_player (honoring default player or explicitly chosen player).
-- If the user rejects a proposal ("no", "another one", "different vibe"), discover a fresh alternative and propose that instead.
+- APPROVAL ONLY ON CLEAR POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, spotify_uri, and target_player (honoring default player or explicitly chosen player).
+- STRICT REJECTION & CANCELLATION RULE: When 'pending_proposed_track_awaiting_user_approval' is present and the user declines or says anything negative ("no", "nope", "I don't want that song", "I do not want that", "don't play it", "not that one", "cancel", "pass", "skip", "never mind"):
+  -> NEVER output action="PLAY_TRACK_NOW"! NEVER play or keep the rejected song pending!
+  -> If they simply rejected/cancelled without naming a replacement, set action="ADVISE_ONLY", leave track_title/track_artist/spotify_uri EMPTY, expect_follow_up=true, and kindly ask what kind of song or vibe they'd prefer instead.
+  -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_spotify_tracks' or 'search_spotify_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_spotify_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
 STAY-IN-TUNEMIND ARCHITECTURE:
@@ -1000,10 +973,11 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       searchCandidates.push(cleanTitle);
     }
 
+    const boundedLimit = Math.min(10, Math.max(1, Number(limit) || 6));
     for (const q of searchCandidates) {
       try {
         const searchRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}`,
+          `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${boundedLimit}`,
           {
             headers: { Authorization: `Bearer ${token}` }
           }
@@ -2089,10 +2063,21 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       };
 
       const isAutoCurateNextTrack = /^AUTO_CURATE_NEXT_TRACK\b/i.test(userCommandRaw);
+      const commandWithoutAppSwitchNegations = userCommandRaw
+        .replace(/\b(?:don'?t|do\s+not|never)\s+(?:open|leave|switch(?:\s+to)?|launch)\s+(?:spotify|the\s+app|another\s+app|external(?:\s+app)?)\b/gi, ' ')
+        .trim();
+      const isRejectingPending = Boolean(
+        pending &&
+        !isAutoCurateNextTrack &&
+        /\b(no|nope|nah|cancel|never\s*mind|don'?t|do\s+not|won'?t|wouldn'?t|not\s+(?:that|this|really|now)|pass|skip|reject|decline|dislike|hate|stop|another|different|something\s+else|someone\s+else|change\s+it|leave\s+it|forget\s+it)\b/i.test(
+          commandWithoutAppSwitchNegations
+        )
+      );
 
       // Enforce two-step approval for normal turns, EXCEPT when AUTO_CURATE_NEXT_TRACK is triggered at end-of-song!
       const isApprovingPending = Boolean(
         pending &&
+        !isRejectingPending &&
         (action === 'PLAY_TRACK_NOW' ||
           (trackTitle && pending.title.toLowerCase() === trackTitle.toLowerCase() && /\b(yes|yeah|yep|sure|ok|okay|play|go ahead|do it|spin|approve|ndio|sawa)\b/i.test(userCommandRaw)))
       );
@@ -2101,7 +2086,33 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         ? (submittedTurnDecision.track_id || lastDiscoveredOrSearchedTrack?.trackId || undefined)
         : undefined;
 
-      if (isAutoCurateNextTrack) {
+      if (isRejectingPending && pending) {
+        // Pending song was explicitly declined: clear it and NEVER allow it to execute playback!
+        ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
+        const sameAsRejectedPending = Boolean(
+          trackTitle &&
+          ClaudeMusicReasoningProvider.normalizeForExclusion(trackTitle) ===
+            ClaudeMusicReasoningProvider.normalizeForExclusion(pending.title)
+        );
+        if (!trackTitle || sameAsRejectedPending || (action === 'PLAY_TRACK_NOW' && !sameAsRejectedPending)) {
+          if (!trackTitle || sameAsRejectedPending) {
+            action = 'ADVISE_ONLY';
+            trackTitle = '';
+            trackArtist = '';
+            spotifyUri = '';
+            candidateTrackId = undefined;
+            if (!ttsText || /\b(playing|spinning|launching)\b/i.test(ttsText)) {
+              ttsText = `Got it, I won't play "${pending.title}". What song, artist, or vibe would you like instead?`;
+            }
+          } else {
+            // Claude fetched a genuinely different alternative track — propose it for confirmation, never autoplay directly!
+            action = 'PROPOSE_TRACK';
+            if (ttsText && !ttsText.includes('?')) {
+              ttsText = `${ttsText.replace(/[.!]+$/, '')}. Would you like me to play this one instead?`;
+            }
+          }
+        }
+      } else if (isAutoCurateNextTrack) {
         if (!trackTitle && freshTracks[0]) {
           trackTitle = freshTracks[0].title;
           trackArtist = freshTracks[0].artist;
@@ -2482,8 +2493,49 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       return true;
     };
 
-    // 2. Resolve Spotify Artist IDs from user's seed artists if needed, then fetch Related Artists -> Top Tracks
-    if (token) {
+    // 2. If user asked for a specific mood/culture/genre (e.g. "Kikuyu", "Mugithi", "Bongo Flava", "Gospel"),
+    // run targeted genre catalog searches FIRST so generic seed-artist hits never drown out the requested genre!
+    const cleanMood = moodQuery.trim();
+    const isKikuyuQuery = /\b(kikuyu|gikuyu|mugithi)\b/i.test(cleanMood);
+    if (token && cleanMood) {
+      const moodQueries: Array<{ q: string; reason: string }> = isKikuyuQuery
+        ? [
+            { q: 'Kikuyu Mugithi Samidoh', reason: 'Authentic Kikuyu / Mugithi discovery matching your request' },
+            { q: 'Gikuyu Benga', reason: 'Fresh Kikuyu Benga track matching your request' },
+            { q: 'Kikuyu Gospel', reason: 'Kikuyu / Gikuyu catalog discovery matching your request' }
+          ]
+        : [{ q: cleanMood, reason: `Matches requested vibe: "${cleanMood}"` }];
+
+      for (const mq of moodQueries) {
+        try {
+          const res = await fetch(
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(mq.q)}&type=track&limit=10&offset=0`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (res.ok) {
+            const data = (await res.json()) as any;
+            for (const item of data?.tracks?.items || []) {
+              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist';
+              if (isUnheardCandidate(item.name || '', item.uri || '')) {
+                discovered.push({
+                  title: item.name,
+                  artist: artistLabel,
+                  album: item.album?.name || '',
+                  spotify_uri: item.uri,
+                  popularity: Number(item.popularity || 55),
+                  source_reason: mq.reason
+                });
+              }
+              if (discovered.length >= 8) break;
+            }
+          }
+        } catch {}
+        if (discovered.length >= 8) break;
+      }
+    }
+
+    // 3. Resolve Spotify Artist IDs from user's seed artists if still needing candidates
+    if (token && discovered.length < 6) {
       const mergedSeeds = Array.from(new Set([...seedArtists, ...seedArtistNamesFromApi])).slice(0, 3);
       for (const artistName of mergedSeeds) {
         if (seedArtistIds.length >= 4) break;
@@ -2569,7 +2621,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       for (const qItem of queriesToRun) {
         try {
           const res = await fetch(
-            `https://api.spotify.com/v1/search?q=${encodeURIComponent(qItem.q)}&type=track&limit=12&offset=${searchOffset}`,
+            `https://api.spotify.com/v1/search?q=${encodeURIComponent(qItem.q)}&type=track&limit=10&offset=${searchOffset}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
           if (res.ok) {
@@ -2624,7 +2676,8 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     let liveSpotifySearchHits: any[] = [];
 
     const wantsMostPlayed = /\b(most\s+(played|listened|heard)|listened\s+(to\s+)?(the\s+)?most|listen\s+(to\s+)?(the\s+)?most|played\s+(the\s+)?most|favorite\s+(song|track)|favourite\s+(song|track)|top\s+(song|track)|number\s+one\s+(song|track))\b/i.test(lowerMsg);
-    const wantsDiscoveryOrNew = /\b(new\s+(song|track|music|tune|vibe)|fresh\s+(song|track|music|tune)|something\s+(new|fresh|different|good)|recommend|recommendation|suggest|suggestion|discover|another\s+(song|one|track)|different\s+(song|track)|play\s+(for\s+me\s+|me\s+)?(a\s+|some\s+)?(new\s+|fresh\s+|good\s+)?(song|track|music|tune|bongo|gospel|afrobeats|gikuyu|mugithi|r&b|hip\s*hop|pop|chill|upbeat))\b/i.test(lowerMsg);
+    const requestedGenreMatch = lowerMsg.match(/\b(kikuyu|gikuyu|mugithi|bongo\s*flava?|bongo|gengetone|ohangla|lingala|benga|gospel|afrobeats?|amapiano|reggae|dancehall|r&b|rnb|hip\s*hop|rap|jazz|rock|chill|lofi|lo-fi|upbeat|workout|romantic)\b/i);
+    const wantsDiscoveryOrNew = Boolean(requestedGenreMatch) || /\b(new\s+(song|track|music|tune|vibe)|fresh\s+(song|track|music|tune)|any\s+(good\s+|nice\s+|random\s+)?(song|track|music|tune)|random\s+(song|track)|something\s+(new|fresh|different|good|nice)|recommend|recommendation|suggest|suggestion|discover|another\s+(song|one|track)|different\s+(song|track)|play\s+(for\s+me\s+|me\s+)?(a\s+|some\s+|any\s+|another\s+)?(new\s+|fresh\s+|good\s+|nice\s+)?(song|track|music|tune))\b/i.test(lowerMsg);
     const explicitPlayMatch = lowerMsg.match(/^\s*(?:please\s+|hey\s+|hi\s+)?(?:play|spin|put on)\s+(.+)$/i);
 
     if (wantsMostPlayed && mostPlayedTracks[0]) {
@@ -2642,12 +2695,15 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       });
       fallbackTrack = { title: top.title, artist: top.artist, uri: topIdentity.spotifyUri || uri, trackId: topIdentity.trackId };
     } else if (wantsDiscoveryOrNew) {
+      const extractedGenre = requestedGenreMatch
+        ? (/kikuyu|gikuyu|mugithi/i.test(requestedGenreMatch[1]) ? 'Kikuyu Mugithi Gikuyu' : requestedGenreMatch[1])
+        : '';
       liveSpotifyDiscovery = await this.discoverSpotifyTracksForContext(
         context,
         allUserTracks,
         excludedSet,
         topUserArtists.slice(0, 3),
-        '',
+        extractedGenre,
         true
       );
       if (liveSpotifyDiscovery[0]) {
@@ -2668,7 +2724,8 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         .replace(/^(?:for\s+me\s+|me\s+)/i, '')
         .replace(/\b(?:right\s+now|now|please|on\s+spotify)\b/gi, '')
         .trim();
-      if (queryTarget.length >= 2) {
+      const isGenericNonTitle = /^(?:a|an|any|some|random|good|nice|fresh|new)?\s*(?:song|songs|track|tracks|music|tune|anything|whatever)$/i.test(queryTarget);
+      if (queryTarget.length >= 2 && !isGenericNonTitle) {
         liveSpotifySearchHits = await this.searchSpotifyCatalogTracks(queryTarget, undefined, 5, context.spotify_access_token);
         if (liveSpotifySearchHits[0]) {
           const hitIdentity = resolveCanonicalTrackIdentity({
@@ -2695,8 +2752,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     const jsonSystemPrompt = `Your name is TuneMind. You are an intelligent, warm, conversational, self-reasoning AI music companion and full-app controller on Android powered by Anthropic Claude.
 Reason naturally about what the user actually said before choosing an action:
 1. IDENTITY & CONVERSATION FIRST: You know your name is TuneMind! When the user greets you ("hi tunemind", "hello", "hey", "how are you", "who are you"), talks about their day/feelings, asks a general question, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly and naturally! NEVER pitch a song when the user is just greeting you or chatting!
-2. NEW-SONG DISCOVERY vs. 2-STEP APPROVAL: Only when the user asks to play music, wants a song recommendation, or asks for their most-played song, pick a real matching track from pre_fetched_spotify_discovery_candidates (unheard songs!), search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want you to play it.
-3. APPROVAL OF PENDING TRACK: Only if pending_proposed_track_awaiting_user_approval is present AND the user approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that exact pending track.
+2. NEW-SONG DISCOVERY vs. 2-STEP APPROVAL: Only when the user asks to play music, requests a genre (e.g. Kikuyu/Gikuyu/Mugithi, Bongo Flava, Afrobeats), or asks for a recommendation/most-played song, pick a real matching track from pre_fetched_spotify_discovery_candidates, search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want you to play it. Never pick a track literally named "Any Song" unless the user explicitly asked for Zico.
+3. APPROVAL vs. REJECTION OF PENDING TRACK:
+   - ONLY if pending_proposed_track_awaiting_user_approval is present AND the user clearly approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that exact pending track.
+   - If pending_proposed_track_awaiting_user_approval is present AND the user declines ("no", "I don't want that song", "don't play it", "cancel", "pass", "not that one"), NEVER return PLAY_TRACK_NOW! Use "action": "ADVISE_ONLY" with empty track fields (or propose a different alternative with "PROPOSE_TRACK" if they asked for another song).
 4. FULL APP CONTROLS (inspect app_state):
    - Accent color change -> "SET_THEME_COLOR" ("custom_accent_hex": "#00FFA3" | "#FF2A85" | "#A855F7" | "#00E5FF" | "#FF9400" | "#3B82F6" | "AUTO")
    - Mood palette -> "SHIFT_ATMOSPHERE" ("morning" | "afternoon" | "evening" | "night" | "auto")
@@ -2734,7 +2793,7 @@ Respond ONLY with a single valid JSON object:
     const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, app_state, conversation history, and Spotify data, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
 
     try {
-      const claudeRes = await this.callClaudeWithSonnetPriority(jsonSystemPrompt, userPromptContent, 900);
+      const claudeRes = await this.callClaudeWithSonnetPriority(jsonSystemPrompt, userPromptContent, 750);
       const rawText = this.extractRawText(claudeRes?.content);
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -2895,8 +2954,31 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    // 0B. Approval of pending proposed track
-    const isRejectingPending = /\b(no|nope|nah|not\s+that|don'?t|another|different|change|switch|else)\b/i.test(userCommandLower);
+    // 0B. Approval OR Rejection of pending proposed track
+    const sanitizedForRejection = userCommandLower.replace(
+      /\b(?:don'?t|do\s+not|never)\s+(?:open|leave|switch(?:\s+to)?|launch)\s+(?:spotify|the\s+app|another\s+app|external(?:\s+app)?)\b/gi,
+      ' '
+    );
+    const isRejectingPending = /\b(no|nope|nah|cancel|never\s*mind|not\s+(?:that|this|really|now)|don'?t|do\s+not|won'?t|pass|skip|reject|decline|dislike|another|different|change|switch|else|forget\s+it)\b/i.test(
+      sanitizedForRejection
+    );
+    if (pending && isRejectingPending) {
+      ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
+      const wantsReplacement = /\b(another|different|something\s+else|kikuyu|gikuyu|mugithi|bongo|afrobeat|amapiano|gospel|instead|next)\b/i.test(userCommandLower);
+      if (!wantsReplacement) {
+        return {
+          calculated_satiety_percentage: context.current_satiety_percentage || 25,
+          reasoning_mode: 'JOURNEY_ADVISOR',
+          flow_state_analysis: `Declined "${pending.title}" — cleared pending queue.`,
+          voice_agent_tts: `No problem, I cancelled "${pending.title}". Tell me what song, artist, or vibe you want instead.`,
+          agent_tool_call: { action: 'ADVISE_ONLY', expect_follow_up: true },
+          os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+          database_tags: ['rejected-pending-track', 'advise-only']
+        };
+      }
+      // Otherwise let step 6/7 discover a fresh replacement while ensuring pending track is excluded
+      strictDiscoveryExclusionSet?.add(pending.title.toLowerCase().trim());
+    }
     if (
       pending &&
       !isRejectingPending &&
@@ -3238,10 +3320,12 @@ Respond ONLY with a single valid JSON object:
       }
     }
 
-    // 6. Explicit Play / Recommend / Suggest / New Song Request
+    // 6. Explicit Play / Recommend / Suggest / New Song / Genre Request
+    const genreMatch = userCommandLower.match(/\b(kikuyu|gikuyu|mugithi|bongo\s*flava?|bongo|gengetone|ohangla|lingala|benga|gospel|afrobeats?|amapiano|reggae|dancehall|r&b|rnb|hip\s*hop|jazz|rock)\b/i);
     const isExplicitMusicRequest =
       Boolean(explicitlyNamedQuery) ||
-      /\b(play|spin|put\s+on|recommend|recommendation|suggest|suggestion|new\s+song|fresh\s+song|another\s+song|different\s+song|give\s+me\s+a\s+song|find\s+me\s+a\s+song|capsule)\b/i.test(userCommandLower);
+      Boolean(genreMatch) ||
+      /\b(play|spin|put\s+on|recommend|recommendation|suggest|suggestion|new\s+song|fresh\s+song|any\s+song|another\s+song|different\s+song|give\s+me\s+a\s+song|find\s+me\s+a\s+song|capsule)\b/i.test(userCommandLower);
 
     if (!isExplicitMusicRequest) {
       // OPEN CONVERSATIONAL TURN -> Respond naturally with ADVISE_ONLY (NEVER force a song proposal!)
@@ -3329,12 +3413,15 @@ Respond ONLY with a single valid JSON object:
     }
 
     if (!chosen) {
+      const requestedMoodQuery = genreMatch
+        ? (/kikuyu|gikuyu|mugithi/i.test(genreMatch[1]) ? 'Kikuyu Mugithi Gikuyu' : genreMatch[1])
+        : '';
       const discovered = await this.discoverSpotifyTracksForContext(
         context,
         allUserTracks,
         excludedTitlesSet,
         topArtistsForFallback,
-        '',
+        requestedMoodQuery,
         true
       );
       if (discovered[0]) {
@@ -3463,7 +3550,7 @@ ${anchors ? `- Auditory Anchors: Groove/Rhythm: ${(anchors.grooveRhythm * 100).t
 ${fatigue.length > 0 ? `- Track Fatigue Signals:\n${fatigue.map(f => `  * ${f.trackKey}: ${(f.estimatedFatigue * 100).toFixed(0)}% fatigue (Plays: ${f.basedOnPlayCount}, Trend: ${f.completionTrend})`).join('\n')}` : ''}
 ${rawEventsSummary ? `- Raw Event Summary:\n${rawEventsSummary}` : ''}
 
-You are TuneMind's Chief Neuro-Acoustic Reasoning AI powered by Claude 3.5 Haiku.
+You are TuneMind's Chief Neuro-Acoustic Reasoning AI powered by Claude Sonnet 5.5.
 Produce a comprehensive Cognitive Reasoning Report evaluating auditory receptor receptivity, flow state, and acoustic shift recommendations.
 
 Respond ONLY with a valid JSON object matching this schema:
@@ -3491,10 +3578,10 @@ Respond ONLY with a valid JSON object matching this schema:
 }`;
 
     try {
-      const response = await this.callClaudeWithHaikuPriority(
+      const response = await this.callClaudeWithSonnetPriority(
         'You are TuneMind Neuro-Acoustic Analyst. Respond ONLY with compact valid JSON matching the requested schema.',
         prompt,
-        650
+        750
       );
 
       const rawText = this.extractRawText(response?.content);
@@ -3704,10 +3791,10 @@ Respond ONLY with a JSON object:
   "probabilisticInferences": [{"inference": "High structural tolerance in current session", "confidence": 0.91, "basis": "Completion rates remain above 80%"}]
 }`;
 
-        const res = await this.callClaudeWithHaikuPriority(
+        const res = await this.callClaudeWithSonnetPriority(
           'You are TuneMind Neuro-Acoustic Analyst. Respond ONLY with compact valid JSON matching the requested schema.',
           prompt,
-          500
+          650
         );
 
         const raw = this.extractRawText(res?.content);
@@ -3760,7 +3847,7 @@ Respond ONLY with a JSON object:
   }
 
   /**
-   * Generates chronobiological music recommendations using Claude 3.5 Haiku.
+   * Generates chronobiological music recommendations using Claude Sonnet 5.5.
    */
   async generateChronoDiscovery(payload: {
     timeSlot?: string;
@@ -3785,10 +3872,10 @@ Generate 10 real, genre-congruent song recommendations (4 CORE_DOPAMINE, 3 DEEP_
 Respond ONLY with a JSON array:
 [{"title": "Song Title", "artist": "Artist", "album": "Album", "category": "DOPAMINE_FLOW", "subTier": "CORE_DOPAMINE", "reason": "Reason", "confidence": 0.95}]`;
 
-        const res = await this.callClaudeWithHaikuPriority(
+        const res = await this.callClaudeWithSonnetPriority(
           'You are TuneMind Music Discovery Engine. Respond ONLY with a compact JSON array.',
           prompt,
-          900
+          1000
         );
 
         const raw = this.extractRawText(res?.content);

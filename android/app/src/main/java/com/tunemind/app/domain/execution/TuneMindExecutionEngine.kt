@@ -72,7 +72,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
-            tts?.setSpeechRate(1.06f)
+            tts?.setSpeechRate(1.12f)
             tts?.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
                     .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
@@ -187,6 +187,19 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         } else {
             onSpeechFinished()
         }
+    }
+
+    /**
+     * Speaks a short prompt (for example a circadian wake greeting when the user calls
+     * "Hi TuneMind" and waits) and invokes [onFinished] immediately on completion.
+     */
+    fun speakPromptOnly(text: String, onFinished: () -> Unit) {
+        if (text.isBlank()) {
+            onFinished()
+            return
+        }
+        pauseCurrentMedia()
+        speakWithListener(text, onCompletion = onFinished)
     }
 
     private fun speakWithListener(text: String, onCompletion: () -> Unit) {

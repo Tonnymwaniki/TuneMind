@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,7 +42,6 @@ import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
 import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
-import com.tunemind.app.domain.memory.StatsTimeWindow
 import com.tunemind.app.domain.memory.UnifiedPlayEvent
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.ui.HearingInsightsState
@@ -101,6 +102,7 @@ fun RhythmDnaScreen(
     onOpenWeeklyReport: () -> Unit = {},
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
     onOpenAccountAuth: () -> Unit = {},
     tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
     onRefreshStats: () -> Unit = {},
@@ -221,13 +223,12 @@ fun RhythmDnaScreen(
     }
     val authSession by authSessionManager.sessionFlow.collectAsState()
 
-    // 0 = Overview, 1 = Stats, 2 = Spotify Library, 3 = History
+    // 0 = Overview, 1 = Spotify Library, 2 = History
     var activeRhythmSubDeck by rememberSaveable { mutableStateOf(0) }
-    var selectedStatsWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
     var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Spotify, 2 = Most Played
 
     LaunchedEffect(requestedSubDeck) {
-        if (requestedSubDeck != null && requestedSubDeck in 0..3) {
+        if (requestedSubDeck != null && requestedSubDeck in 0..2) {
             activeRhythmSubDeck = requestedSubDeck
             onConsumeRequestedSubDeck()
         }
@@ -236,11 +237,11 @@ fun RhythmDnaScreen(
     val effectiveSpotifyConnected = isSpotifyConnected || authSession.isSpotifyConnected
 
     LaunchedEffect(effectiveSpotifyConnected, activeRhythmSubDeck) {
-        if (activeRhythmSubDeck == 0 || activeRhythmSubDeck == 1) {
+        if (activeRhythmSubDeck == 0) {
             onRefreshStats()
         }
         if (effectiveSpotifyConnected &&
-            activeRhythmSubDeck == 2 &&
+            activeRhythmSubDeck == 1 &&
             likedTracks.isEmpty() && playlists.isEmpty() && podcasts.isEmpty() && !isLibrarySyncing
         ) {
             onRefreshSpotifyLibrary()
@@ -248,16 +249,14 @@ fun RhythmDnaScreen(
     }
 
     val screenTitle = when (activeRhythmSubDeck) {
-        1 -> "Stats"
-        2 -> "Spotify"
-        3 -> "History"
+        1 -> "Spotify"
+        2 -> "History"
         else -> "Flow"
     }
 
     val activeSubDeckAccent = when (activeRhythmSubDeck) {
-        1 -> theme.secondaryAccent
-        2 -> Color(0xFF1DB954)
-        3 -> Color(0xFF00E5FF)
+        1 -> Color(0xFF1DB954)
+        2 -> Color(0xFF00E5FF)
         else -> theme.primaryAccent
     }
 
@@ -292,22 +291,21 @@ fun RhythmDnaScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Spring-sliding capsule tabs (Overview | Stats | Spotify | History)
+            // Spring-sliding capsule tabs (Overview | Spotify | History)
             MagicalSegmentedTabs(
                 tabs = listOf(
                     MagicalTabItem("Overview", theme.primaryAccent),
-                    MagicalTabItem("Stats", theme.secondaryAccent),
                     MagicalTabItem("Spotify", Color(0xFF1DB954)),
                     MagicalTabItem("History", Color(0xFF00E5FF))
                 ),
-                selectedIndex = activeRhythmSubDeck,
+                selectedIndex = activeRhythmSubDeck.coerceIn(0, 2),
                 onSelectTab = { activeRhythmSubDeck = it }
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
             AnimatedContent(
-                targetState = activeRhythmSubDeck,
+                targetState = activeRhythmSubDeck.coerceIn(0, 2),
                 transitionSpec = {
                     fadeIn(tween(220)) togetherWith fadeOut(tween(160))
                 },
@@ -316,28 +314,6 @@ fun RhythmDnaScreen(
             ) { subDeck ->
                 when (subDeck) {
                     1 -> {
-                        StatsDashboardContent(
-                            stats = listeningStats,
-                            cleanPlayHistory = cleanPlayHistory,
-                            selectedWindow = selectedStatsWindow,
-                            onSelectWindow = { selectedStatsWindow = it },
-                            onRefreshStats = onRefreshStats,
-                            tasteShiftSummary = tasteShiftSummary,
-                            resolvePlayCount = resolvePlayCount,
-                            isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
-                            onPlayTrack = onPlayTrack,
-                            onOpenWeeklyReport = onOpenWeeklyReport,
-                            onOpenHearingHealth = onOpenHearingHealth,
-                            onOpenMusicProfile = onOpenMusicProfile,
-                            resolveTrackVaultStatus = resolveTrackVaultStatus,
-                            onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
-                            onToggleTrackFresh = onToggleTrackFresh,
-                            onAskAgentAboutTrack = onAskAgentAboutTrack,
-                            onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
-                        )
-                    }
-
-                    2 -> {
                         SpotifyLibrarySection(
                             isSpotifyConnected = effectiveSpotifyConnected,
                             needsScopeUpgrade = needsLibraryScopeUpgrade,
@@ -363,7 +339,7 @@ fun RhythmDnaScreen(
                         )
                     }
 
-                    3 -> {
+                    2 -> {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(top = 4.dp, bottom = 110.dp)
@@ -396,16 +372,58 @@ fun RhythmDnaScreen(
                                         )
                                     }
 
-                                    MagicalSegmentedTabs(
-                                        tabs = listOf(
-                                            MagicalTabItem("All Apps", Color(0xFF00E5FF)),
-                                            MagicalTabItem("Spotify", Color(0xFF1DB954)),
-                                            MagicalTabItem("Most Played", theme.secondaryAccent)
-                                        ),
-                                        selectedIndex = historyFilterMode,
-                                        onSelectTab = { historyFilterMode = it },
-                                        height = 42.dp
+                                    val historyChips = listOf(
+                                        0 to ("All Apps" to Color(0xFF00E5FF)),
+                                        1 to ("Spotify" to Color(0xFF1DB954)),
+                                        2 to ("Most Played" to theme.secondaryAccent)
                                     )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        historyChips.forEach { (idx, pair) ->
+                                            val (label, accent) = pair
+                                            val isSelected = historyFilterMode == idx
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (isSelected) accent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
+                                                border = BorderStroke(
+                                                    width = 1.dp,
+                                                    color = if (isSelected) accent.copy(alpha = 0.68f) else Color.White.copy(alpha = 0.10f)
+                                                ),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable { historyFilterMode = idx }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 8.dp, horizontal = 8.dp),
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    if (isSelected) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(5.dp)
+                                                                .clip(CircleShape)
+                                                                .background(accent)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(5.dp))
+                                                    }
+                                                    Text(
+                                                        text = label,
+                                                        color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.65f),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -729,7 +747,7 @@ fun RhythmDnaScreen(
                                             value = "${listeningStats.totalVerifiedPlays} plays",
                                             icon = Icons.Rounded.BarChart,
                                             accent = Color(0xFF38BDF8),
-                                            onClick = { activeRhythmSubDeck = 1 },
+                                            onClick = onOpenStats,
                                             modifier = Modifier.weight(1f)
                                         )
                                     }

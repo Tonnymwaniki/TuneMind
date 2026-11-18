@@ -71,6 +71,8 @@ class TuneMindListenerService : NotificationListenerService() {
                 SyncScheduler.schedule(this@TuneMindListenerService)
                 Log.i(TAG, "Sync work scheduled")
             }
+
+
         } catch (t: Throwable) {
             Log.e(TAG, "Error in onListenerConnected: ${t.message}", t)
         }

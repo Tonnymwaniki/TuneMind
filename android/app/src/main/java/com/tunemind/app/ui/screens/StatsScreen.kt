@@ -220,7 +220,8 @@ fun StatsDashboardContent(
     onSyncAtmosphereToTrack: ((title: String, artist: String) -> Unit)? = null
 ) {
     var internalWindow by rememberSaveable { mutableStateOf(selectedWindow) }
-    val activeWindow = if (onSelectWindow != null) selectedWindow else internalWindow
+    val rawWindow = if (onSelectWindow != null) selectedWindow else internalWindow
+    val activeWindow = if (rawWindow == StatsTimeWindow.ALL_TIME) StatsTimeWindow.THIRTY_DAYS else rawWindow
     val handleWindowSelect: (StatsTimeWindow) -> Unit = onSelectWindow ?: { internalWindow = it }
     var inspectedTrack by remember { mutableStateOf<UnifiedTrackStats?>(null) }
 
@@ -301,83 +302,128 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onInspectTrack: ((UnifiedTrackStats) -> Unit)? = null
 ) {
-    // 1. Open-Canvas Hero Listening Summary (No outer card box)
+    // 1. Unified Listening Hero Card (Time horizons live neatly inside the card — no stacked top bar)
     item(key = "stats_hero_card") {
         val theme = LocalAdaptiveTheme.current
         val activeDurationText = formatListeningDuration(windowStats.totalListeningMs)
-
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            MagicalSegmentedTabs(
-                tabs = StatsTimeWindow.entries.map { MagicalTabItem(it.label, theme.primaryAccent) },
-                selectedIndex = StatsTimeWindow.entries.indexOf(selectedWindow),
-                onSelectTab = { idx -> onSelectWindow(StatsTimeWindow.entries[idx]) },
-                height = 42.dp
+        val horizonOptions = remember {
+            listOf(
+                StatsTimeWindow.TODAY to "Today",
+                StatsTimeWindow.SEVEN_DAYS to "7 Days",
+                StatsTimeWindow.THIRTY_DAYS to "30 Days"
             )
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+        SoftGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            accentTint = theme.primaryAccent
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = windowStats.windowRangeLabel.ifBlank { "Listening Time (${selectedWindow.label})" },
-                        color = Color.White.copy(alpha = 0.56f),
-                        fontSize = 12.sp
+                        color = Color.White.copy(alpha = 0.62f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = activeDurationText,
-                        color = Color(0xFFFAFAFA),
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = (if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White)
+                            .copy(alpha = 0.12f)
+                    ) {
+                        Text(
+                            text = if (windowStats.totalVerifiedPlays > 0) "Peak · ${windowStats.peakWindowLabel}" else windowStats.peakWindowLabel,
+                            color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.60f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
 
                 Text(
-                    text = if (windowStats.totalVerifiedPlays > 0) "Peak · ${windowStats.peakWindowLabel}" else windowStats.peakWindowLabel,
-                    color = if (windowStats.totalVerifiedPlays > 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.50f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    text = activeDurationText,
+                    color = Color(0xFFFAFAFA),
+                    fontSize = 36.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.6).sp
                 )
-            }
 
-            if (selectedWindow == StatsTimeWindow.ALL_TIME &&
-                windowStats.allTimeMatchesThirtyDays &&
-                windowStats.totalVerifiedPlays > 0
-            ) {
-                Text(
-                    text = "Matches 30 Days because all tracked listening began ${windowStats.trackedSpanDays} ${if (windowStats.trackedSpanDays == 1) "day" else "days"} ago.",
-                    color = Color.White.copy(alpha = 0.52f),
-                    fontSize = 11.5.sp
-                )
-            }
+                // 3-Option Interactive Time Horizon Strip placed inside the hero card
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    horizonOptions.forEach { (win, label) ->
+                        val isSelected = selectedWindow == win
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) theme.primaryAccent.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isSelected) theme.primaryAccent.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.10f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onSelectWindow(win) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 9.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(theme.primaryAccent)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.66f),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
 
-            StudioHairlineDivider()
+                StudioHairlineDivider()
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                MetricMiniColumn(
-                    label = "Verified Plays",
-                    value = "${windowStats.totalVerifiedPlays}",
-                    accent = theme.primaryAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricMiniColumn(
-                    label = "Songs",
-                    value = "${windowStats.uniqueTrackCount}",
-                    accent = theme.secondaryAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricMiniColumn(
-                    label = "Artists",
-                    value = "${windowStats.uniqueArtistCount}",
-                    accent = Color(0xFF10B981),
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    MetricMiniColumn(
+                        label = "Verified Plays",
+                        value = "${windowStats.totalVerifiedPlays}",
+                        accent = theme.primaryAccent,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricMiniColumn(
+                        label = "Songs",
+                        value = "${windowStats.uniqueTrackCount}",
+                        accent = theme.secondaryAccent,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MetricMiniColumn(
+                        label = "Artists",
+                        value = "${windowStats.uniqueArtistCount}",
+                        accent = Color(0xFF10B981),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
