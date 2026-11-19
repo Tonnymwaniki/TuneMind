@@ -148,7 +148,7 @@ class TuneMindListenerService : NotificationListenerService() {
 
     fun observerOrNull(): MediaSessionObserver? = if (::observer.isInitialized) observer else null
 
-    fun isPlaying(): Boolean = observerOrNull()?.isPlaying() ?: false
+    fun isPlaying(targetPackage: String? = null): Boolean = observerOrNull()?.isPlaying(targetPackage) ?: false
 
     fun hasActiveSession(targetPackage: String? = null): Boolean =
         observerOrNull()?.hasActiveSession(targetPackage) ?: false

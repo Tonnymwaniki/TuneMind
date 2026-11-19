@@ -225,6 +225,8 @@ export interface TuneMindTelemetryContext {
     default_player_id?: string;
     default_player_package?: string;
     default_player_name?: string;
+    youtube_music_installed?: boolean;
+    default_player_supports_inapp_full_stream?: boolean;
     available_players: Array<{
       id: string;
       name: string;
@@ -246,6 +248,7 @@ export interface TuneMindTelemetryContext {
     spotify_connected?: boolean;
     app_remote_connected?: boolean;
     inapp_player_active?: boolean;
+    inapp_youtube_active?: boolean;
   };
 }
 
@@ -312,6 +315,46 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private static getPendingProposedTrack(userId: string) {
     const cleanUid = SupabaseIntelligenceStore.normalizeUserId(userId);
     return ClaudeMusicReasoningProvider.pendingProposedTracksByUser.get(cleanUid) || null;
+  }
+
+  public static resolveRequestedNeverOpenExternal(params: {
+    userCommandRaw: string;
+    decisionNeverOpenExternal?: boolean;
+    pendingNeverOpenExternal?: boolean;
+    strictNoAppSwitchEnabled?: boolean;
+  }): boolean {
+    const raw = params.userCommandRaw || '';
+    const explicitOpenExternalNow =
+      params.decisionNeverOpenExternal === false ||
+      (!/(?:don'?t|do\s+not|never|not|without)\s+(?:open|launch|leave|switch)/i.test(raw) &&
+        /\b(?:open\s+(?:spotify|boomplay|audiomack|youtube\s*music|deezer|soundcloud|the\s+app|it\s+externally|external(?:ly)?)|launch\s+(?:spotify|boomplay|audiomack|youtube\s*music))\b/i.test(
+          raw
+        ));
+    if (explicitOpenExternalNow) return false;
+    return Boolean(
+      params.decisionNeverOpenExternal === true ||
+      params.pendingNeverOpenExternal === true ||
+      params.strictNoAppSwitchEnabled === true ||
+      /(?:without\s+(?:opening|leaving|switching|launching|going\s+to)|don'?t\s+(?:open|leave|switch\s+to|launch)\s+(?:spotify|boomplay|audiomack|youtube\s*music|the\s+app|another\s+app|other\s+apps?|external(?:\s+app)?)|stay\s+(?:inside|in)\s+tunemind|(?:with|use)\s+youtube\s+(?:in|inside)\s+tunemind|never\s+(?:open|leave|switch)|in\s*-?\s*app\s*only|keep\s+me\s+(?:inside|in)\s+tunemind)/i.test(
+        raw
+      )
+    );
+  }
+
+  public static shouldKeepExistingDefaultPlayer(params: {
+    hasExplicitDefaultPlayer?: boolean;
+    defaultPlayerPackage?: string;
+    targetPlayerPackage?: string;
+    userCommandRaw: string;
+  }): boolean {
+    const defaultPkgNow = params.defaultPlayerPackage || '';
+    return Boolean(
+      params.hasExplicitDefaultPlayer &&
+      defaultPkgNow &&
+      defaultPkgNow !== 'com.google.android.apps.youtube.music' &&
+      params.targetPlayerPackage === 'com.google.android.apps.youtube.music' &&
+      !/\b(default|remember|always\s+use|save\s+as\s+default)\b/i.test(params.userCommandRaw || '')
+    );
   }
 
   constructor() {
@@ -1040,7 +1083,7 @@ SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
 - RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet (for example they only said "suggest a song for me" or "play a fresh song"):
   -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, track_id, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to play it on (naming 2-4 actual choices from 'player_preferences.available_players', e.g., YouTube Music, Boomplay, Spotify, Audiomack, or TuneMind In-App), and whether they want to make it their default!
 - RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use YouTube Music", "Boomplay please, make it default", "Audiomack", "Spotify", "TuneMind"):
-  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and track_id, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players', and set 'remember_default_player'=true if they agreed/asked to save it as default (or when no explicit default was set yet and they confirmed a player!).
+  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and track_id, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players'. Set 'remember_default_player'=true ONLY if they had no explicit default yet OR asked to save/switch their default; if they already have a default (like Spotify or Boomplay) and only allow YouTube in-app temporarily ("use YouTube inside TuneMind" / "allow YouTube Music for this"), set 'remember_default_player'=false!
 - RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to YouTube Music" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
 
 TWO-STEP APPROVAL vs. REJECTION vs. AUTONOMOUS END-OF-SONG DJ:
@@ -1052,10 +1095,20 @@ TWO-STEP APPROVAL vs. REJECTION vs. AUTONOMOUS END-OF-SONG DJ:
   -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_tracks' or 'search_music_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
-HYBRID IN-APP & STAY-IN-TUNEMIND ARCHITECTURE:
-- Respect app_state flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled').
-- WHENEVER the user says "without opening another app", "don't open an external app", "play inside TuneMind", "stay in TuneMind", or 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true and explain accurately that TuneMind will play local phone audio, a full open-catalog stream (Audius), active background player session, or a 30s preview inside TuneMind without leaving the app!
-- Note honestly when an external app has to open for a full cold commercial stream: you'll start it and show a 1-tap return notification.
+HYBRID IN-APP & AUDIENCE-GATED STAY-IN-TUNEMIND ARCHITECTURE:
+- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
+- AUDIENCE GATING FOR IN-APP FULL PLAYBACK (OPTION A):
+  - Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') get our built-in **visible official YouTube player right inside TuneMind** whenever staying in-app — full tracks play seamlessly on screen without switching apps!
+  - Users whose default player is **Spotify, Boomplay, Audiomack, Deezer, or SoundCloud**:
+    - Never hijack their preference silently into YouTube!
+    - Whenever the user asks to play "without leaving TuneMind", "without opening Spotify/Boomplay", "inside TuneMind", OR 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true.
+    - Explain warmly and honestly: local device songs, open-catalog Audius songs, and already-active background player sessions play full-length without switching apps; however, closed DRM players (like Spotify, Boomplay, or Audiomack) block third-party apps from streaming full audio or cold-starting silently in the background, so staying inside TuneMind falls back to a **30s preview**.
+    - Whenever 'player_preferences.youtube_music_installed' is true and their default player is Spotify/Boomplay/Audiomack (and no full Audius stream exists while they asked to stay inside TuneMind): **proactively offer the choice**:
+      *"Allow me to use our built-in YouTube player (via your installed YouTube Music) to play the full track right inside TuneMind while keeping your default intact, or say 'open Spotify/Boomplay' to launch it with a quick-return banner!"*
+    - If they reply allowing YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
+    - If they instead say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
+- QUICK RETURN POLICY FOR EXTERNAL PLAYERS (SPOTIFY, BOOMPLAY, AUDIOMACK, DEEZER, SOUNDCLOUD):
+  - When TuneMind launches an external app from cold state, TuneMind immediately shows an unmistakable Heads-Up **"Back to TuneMind"** banner at the top as soon as playback starts so one tap returns straight to TuneMind while the song keeps playing. Android OS blocks apps from forcing themselves back over another app automatically without special overlay permissions. Whenever the external app is already warm/running in the background, TuneMind tries silent MediaSession switching with zero screen switch first.
 
 FULL APP-WIDE CONTROL ACTIONS:
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
@@ -2063,7 +2116,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           );
           if (matched) return matched.package_name || matched.id;
           if (lower.includes('boomplay')) return 'com.afmobi.boomplayer';
-          if (lower.includes('youtube music') || lower.includes('yt music') || lower.includes('youtube_music')) {
+          if (
+            lower.includes('youtube music') ||
+            lower.includes('yt music') ||
+            lower.includes('youtube_music') ||
+            /\byoutube\b/.test(lower)
+          ) {
             return 'com.google.android.apps.youtube.music';
           }
           if (lower.includes('audiomack')) return 'com.audiomack';
@@ -2078,7 +2136,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
 
       const isAutoCurateNextTrack = /^AUTO_CURATE_NEXT_TRACK\b/i.test(userCommandRaw);
       const commandWithoutAppSwitchNegations = userCommandRaw
-        .replace(/\b(?:don'?t|do\s+not|never)\s+(?:open|leave|switch(?:\s+to)?|launch)\s+(?:spotify|the\s+app|another\s+app|external(?:\s+app)?)\b/gi, ' ')
+        .replace(
+          /\b(?:don'?t|do\s+not|never)\s+(?:open|leave|switch(?:\s+to)?|launch)\s+(?:spotify|boomplay|audiomack|youtube\s*music|deezer|soundcloud|tunemind|the\s+app|another\s+app|other\s+apps?|external(?:\s+app)?)\b/gi,
+          ' '
+        )
         .trim();
       const isRejectingPending = Boolean(
         pending &&
@@ -2190,12 +2251,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         spotifyUri = trackIdentity.spotifyUri;
       }
 
-      const requestedNeverOpenExternal = Boolean(
-        submittedTurnDecision.never_open_external_app === true ||
-        pending?.never_open_external_app === true ||
-        context.app_state?.strict_no_app_switch_enabled === true ||
-        /(?:without\s+(?:opening|leaving|switching|launching|going\s+to)|don'?t\s+(?:open|leave|switch\s+to|launch)\s+(?:spotify|the\s+app|another\s+app)|stay\s+(?:inside|in)\s+tunemind|never\s+(?:open|leave|switch)|in\s*-?\s*app\s*only|keep\s+me\s+(?:inside|in)\s+tunemind)/i.test(userCommandRaw)
-      );
+      const requestedNeverOpenExternal = ClaudeMusicReasoningProvider.resolveRequestedNeverOpenExternal({
+        userCommandRaw,
+        decisionNeverOpenExternal: submittedTurnDecision.never_open_external_app,
+        pendingNeverOpenExternal: pending?.never_open_external_app,
+        strictNoAppSwitchEnabled: context.app_state?.strict_no_app_switch_enabled
+      });
 
       let resolvedIntent: TuneMindReasoningResponse['os_execution_command']['intent'] = 'NONE';
       switch (action) {
@@ -2370,6 +2431,18 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       }
       const queueTracksResolved = await normalizeTrackArray(submittedTurnDecision.queue_tracks);
 
+      const isTemporaryYtmInAppSwitch = ClaudeMusicReasoningProvider.shouldKeepExistingDefaultPlayer({
+        hasExplicitDefaultPlayer: context.player_preferences?.has_explicit_default_player,
+        defaultPlayerPackage: context.player_preferences?.default_player_package,
+        targetPlayerPackage: targetPlayer,
+        userCommandRaw
+      });
+      const resolvedRememberDefault = isTemporaryYtmInAppSwitch
+        ? false
+        : typeof submittedTurnDecision.remember_default_player === 'boolean'
+        ? submittedTurnDecision.remember_default_player
+        : undefined;
+
       const finalToolCall: AgentToolCall = {
         action,
         track_id: resolvedTrackId,
@@ -2381,10 +2454,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         audius_stream_url: audiusStreamUrl || undefined,
         deezer_url: deezerUrl || undefined,
         target_player: targetPlayer,
-        remember_default_player:
-          typeof submittedTurnDecision.remember_default_player === 'boolean'
-            ? submittedTurnDecision.remember_default_player
-            : undefined,
+        remember_default_player: resolvedRememberDefault,
         volume_percent: typeof submittedTurnDecision.volume_percent === 'number' ? submittedTurnDecision.volume_percent : undefined,
         palette_id: submittedTurnDecision.palette_id || undefined,
         custom_accent_hex: submittedTurnDecision.custom_accent_hex || undefined,

@@ -103,6 +103,7 @@ fun PulseAgentScreen(
     autonomousDjEnabled: Boolean = false,
     tuneMindPlaylistCount: Int = 0,
     kidsModeEnabled: Boolean = false,
+    hasExternalMiniVideoDock: Boolean = false,
     onOpenPlaylists: () -> Unit = {}
 ) {
     val colors = LocalAdaptiveTheme.current
@@ -131,7 +132,7 @@ fun PulseAgentScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(top = 12.dp, bottom = 118.dp),
+                .padding(top = 12.dp, bottom = if (hasExternalMiniVideoDock) 204.dp else 118.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 1. Clean Top Header with Interactive Theme Cycle + Stats & Profile
@@ -434,16 +435,18 @@ fun PulseAgentScreen(
                 }
             }
 
-            // 6. Anchored Now-Playing Strip (Open-Canvas Hairline Bar)
-            NowPlayingCard(
-                trackTitle = currentTrackName,
-                artistName = artistName,
-                spotifyUri = currentTrackSpotifyUri,
-                isMusicPlaying = isMusicPlaying,
-                playCount = currentTrackPlayCount,
-                accentColor = activeAccent,
-                onClick = onOpenNowPlaying
-            )
+            // 6. Anchored Now-Playing Strip (Open-Canvas Hairline Bar — hidden when Mini Video Dock is shown)
+            if (!hasExternalMiniVideoDock) {
+                NowPlayingCard(
+                    trackTitle = currentTrackName,
+                    artistName = artistName,
+                    spotifyUri = currentTrackSpotifyUri,
+                    isMusicPlaying = isMusicPlaying,
+                    playCount = currentTrackPlayCount,
+                    accentColor = activeAccent,
+                    onClick = onOpenNowPlaying
+                )
+            }
         }
     }
 }

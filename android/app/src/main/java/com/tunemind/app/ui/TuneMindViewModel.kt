@@ -344,8 +344,10 @@ class TuneMindViewModel : ViewModel() {
     private fun isInAppPlayerCurrent(): Boolean {
         val ctxPkg = AppHolder.context?.packageName
         val nowPkg = _homeState.value.nowPlaying?.sourcePackage
-        return com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
-            (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack() &&
+        return com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying() ||
+            com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+            ((com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() ||
+                com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) &&
                 (nowPkg == null || nowPkg == ctxPkg))
     }
 
@@ -355,9 +357,34 @@ class TuneMindViewModel : ViewModel() {
         val nowMs = System.currentTimeMillis()
         val appPkg = AppHolder.context?.packageName ?: "com.tunemind.app"
 
+        val ytActive = com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo()
+        val ytTitle = com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentTitleFlow.value?.takeIf { it.isNotBlank() }
+        val ytObs = if (ytActive && ytTitle != null) {
+            val playing = com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
+            val ytArtist = com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentArtistFlow.value
+            val ytId = com.tunemind.app.provider.TuneMindYouTubeEmbedController.activeVideoIdFlow.value
+            NowPlayingObservation(
+                title = ytTitle,
+                artist = ytArtist,
+                album = null,
+                sourcePackage = appPkg,
+                isPlaying = playing,
+                playbackStateCode = if (playing) 3 else 2,
+                positionMs = com.tunemind.app.provider.TuneMindYouTubeEmbedController.positionMsFlow.value,
+                durationMs = com.tunemind.app.provider.TuneMindYouTubeEmbedController.durationMsFlow.value,
+                speed = 1.0f,
+                updatedAtMs = com.tunemind.app.provider.TuneMindYouTubeEmbedController.lastStateUpdatedMs.takeIf { it > 0L } ?: nowMs,
+                trackId = TrackIdentityResolver.resolveCanonicalTrackId(
+                    title = ytTitle,
+                    artist = ytArtist
+                ),
+                spotifyUri = ytId?.let { "https://music.youtube.com/watch?v=$it" }
+            )
+        } else null
+
         val inAppActive = com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()
         val inAppTitle = com.tunemind.app.provider.TuneMindInAppPlayer.currentTitleFlow.value?.takeIf { it.isNotBlank() }
-        val inAppObs = if (inAppActive && inAppTitle != null) {
+        val inAppObs = ytObs ?: if (inAppActive && inAppTitle != null) {
             val playing = com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
             val inAppArtist = com.tunemind.app.provider.TuneMindInAppPlayer.currentArtistFlow.value
             NowPlayingObservation(
@@ -495,6 +522,7 @@ class TuneMindViewModel : ViewModel() {
             if (incomingSnap.title.isNotBlank() && incomingSnap.packageName != appPkg) {
                 if (incomingSnap.isPlaying) {
                     com.tunemind.app.provider.TuneMindInAppPlayer.clearIfNotPlaying()
+                    com.tunemind.app.provider.TuneMindYouTubeEmbedController.clearIfNotPlaying()
                 }
                 val pendingTitle = manualLaunchPendingTitle
                 val matchesPending = !pendingTitle.isNullOrBlank() &&
@@ -2240,7 +2268,8 @@ class TuneMindViewModel : ViewModel() {
             while (true) {
                 kotlinx.coroutines.delay(12_000L)
                 val playingAny = _homeState.value.nowPlaying?.isPlaying == true ||
-                    com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
+                    com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+                    com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
                 if (playingAny && uiForegroundActive) {
                     refreshLiveListeningStatsNow()
                 }
@@ -2619,6 +2648,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun pauseExternalAndLocalMediaQuietly(context: android.content.Context, targetPkg: String?) {
         runCatching { com.tunemind.app.provider.TuneMindInAppPlayer.pause() }
+        runCatching { com.tunemind.app.provider.TuneMindYouTubeEmbedController.pause() }
         runCatching {
             com.tunemind.app.service.TuneMindListenerService.instance?.pause(targetPkg) ?: false
         }
@@ -2638,6 +2668,12 @@ class TuneMindViewModel : ViewModel() {
 
     fun pausePlayback() {
         val ctx = AppHolder.context
+        if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() && isInAppPlayerCurrent()) {
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.pause()
+            setAgentPlaybackPaused()
+            postNowPlayingStatus("Paused TuneMind YouTube Player")
+            return
+        }
         if (isInAppPlayerCurrent()) {
             com.tunemind.app.provider.TuneMindInAppPlayer.pause()
             setAgentPlaybackPaused()
@@ -2663,6 +2699,14 @@ class TuneMindViewModel : ViewModel() {
 
     fun resumePlayback() {
         val ctx = AppHolder.context
+        if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() && isInAppPlayerCurrent()) {
+            val ok = com.tunemind.app.provider.TuneMindYouTubeEmbedController.resume()
+            if (ok) {
+                setAgentPlaybackResumed()
+                postNowPlayingStatus("Resumed TuneMind YouTube Player")
+                return
+            }
+        }
         if (isInAppPlayerCurrent()) {
             val ok = com.tunemind.app.provider.TuneMindInAppPlayer.resume()
             if (ok) {
@@ -2689,7 +2733,9 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun togglePlayback() {
-        val currentlyPlaying = if (isInAppPlayerCurrent()) {
+        val currentlyPlaying = if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() && isInAppPlayerCurrent()) {
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
+        } else if (isInAppPlayerCurrent()) {
             com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
         } else {
             val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
@@ -2731,6 +2777,15 @@ class TuneMindViewModel : ViewModel() {
 
     fun skipPrev() {
         val ctx = AppHolder.context
+        if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() && isInAppPlayerCurrent()) {
+            val pos = com.tunemind.app.provider.TuneMindYouTubeEmbedController.positionMsFlow.value
+            if (pos > 3_000L) {
+                com.tunemind.app.provider.TuneMindYouTubeEmbedController.seekTo(0L)
+                publishAuthoritativeNowPlayingNow()
+                postNowPlayingStatus("Restarted track")
+                return
+            }
+        }
         if (isInAppPlayerCurrent()) {
             val pos = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value
             if (pos > 3_000L) {
@@ -2758,6 +2813,11 @@ class TuneMindViewModel : ViewModel() {
 
     fun seekTo(positionMs: Long) {
         val clamped = positionMs.coerceAtLeast(0L)
+        if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() && isInAppPlayerCurrent()) {
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.seekTo(clamped)
+            publishAuthoritativeNowPlayingNow()
+            return
+        }
         if (isInAppPlayerCurrent()) {
             com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(clamped)
             publishAuthoritativeNowPlayingNow()

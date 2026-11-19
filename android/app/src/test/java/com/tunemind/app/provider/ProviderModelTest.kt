@@ -51,4 +51,75 @@ class ProviderModelTest {
         assertFalse(failed.isSuccess)
         assertEquals("App not installed and browser unavailable", failed.message)
     }
+
+    @Test
+    fun testBuiltInYouTubeTierIsAudienceGatedToYouTubeMusicOnly() {
+        // Option A activates when target/default is YouTube Music and in-app playback is preferred/strict
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                providerId = YouTubeMusicProvider.PROVIDER_ID,
+                ytmVideoId = "dQw4w9WgXcQ",
+                preferInAppPlayer = true,
+                strictNoSwitch = false
+            )
+        )
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                providerId = "youtube_music",
+                ytmVideoId = "abc123",
+                preferInAppPlayer = false,
+                strictNoSwitch = true
+            )
+        )
+
+        // Never silently hijacks Spotify, Boomplay, or Audiomack users into YouTube without permission
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = "com.spotify.music",
+                providerId = "spotify",
+                ytmVideoId = "abc123",
+                preferInAppPlayer = true,
+                strictNoSwitch = true
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = "com.afmobi.boomplaymusic",
+                providerId = "boomplay",
+                ytmVideoId = "abc123",
+                preferInAppPlayer = true,
+                strictNoSwitch = true
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = "com.audiomack",
+                providerId = "audiomack",
+                ytmVideoId = "abc123",
+                preferInAppPlayer = true,
+                strictNoSwitch = false
+            )
+        )
+        // Missing videoId or disabled both in-app & strict mode -> do not activate
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                providerId = "youtube_music",
+                ytmVideoId = null,
+                preferInAppPlayer = true,
+                strictNoSwitch = true
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldActivateBuiltInYouTubeTier(
+                targetPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                providerId = "youtube_music",
+                ytmVideoId = "abc123",
+                preferInAppPlayer = false,
+                strictNoSwitch = false
+            )
+        )
+    }
 }

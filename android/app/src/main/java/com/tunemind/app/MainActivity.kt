@@ -565,7 +565,12 @@ open class MainActivity : ComponentActivity() {
                                     put("prefer_in_app_player_enabled", AgentSettingsStore.isPreferInAppPlayerEnabled(context))
                                     put("kids_mode_enabled", AgentSettingsStore.isKidsModeEnabled(context))
                                     put("tunemind_playlists_count", vm.tuneMindPlaylists.value.size)
-                                    put("inapp_player_active", com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying())
+                                    put(
+                                        "inapp_player_active",
+                                        com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+                                            com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
+                                    )
+                                    put("inapp_youtube_active", com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying())
                                     put("detected_players_count", vm.detectedPlayerTabs.value.size)
                                 }
                             },
@@ -707,6 +712,12 @@ open class MainActivity : ComponentActivity() {
                                 }
                             } else {
                                 // 3-Screen Horizontal Pager: 0 = DOPAMINE, 1 = TUNEMIND (Center), 2 = RHYTHM
+                                val sharedYouTubeWebView = com.tunemind.app.ui.components.rememberSharedYouTubeWebView(context)
+                                val ytHasActiveVideo by com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideoFlow.collectAsState()
+                                val ytPlaying by com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlayingFlow.collectAsState()
+                                val ytTitle by com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentTitleFlow.collectAsState()
+                                val ytArtist by com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentArtistFlow.collectAsState()
+
                                 val pagerState = rememberPagerState(
                                     initialPage = 1,
                                     pageCount = { 3 }
@@ -951,6 +962,7 @@ open class MainActivity : ComponentActivity() {
                                                 autonomousDjEnabled = autonomousDjEnabled,
                                                 tuneMindPlaylistCount = tuneMindPlaylists.size,
                                                 kidsModeEnabled = kidsModeEnabled,
+                                                hasExternalMiniVideoDock = ytHasActiveVideo && !showNowPlayingScreen,
                                                 onOpenPlaylists = {
                                                     selectedPlaylistNavName = null
                                                     showPlaylistsScreen = true
@@ -1088,6 +1100,36 @@ open class MainActivity : ComponentActivity() {
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
                                                 if (isFailure) {
+                                                    val ytmAvailable = remember(context) {
+                                                        com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)
+                                                    }
+                                                    val npTrack = homeState.nowPlaying
+                                                    if (ytmAvailable &&
+                                                        npTrack?.title?.isNotBlank() == true &&
+                                                        !selectedTargetPlayer.contains("youtube.music", ignoreCase = true)
+                                                    ) {
+                                                        Button(
+                                                            onClick = {
+                                                                vm.clearPlaybackLaunchFeedback()
+                                                                agentVoiceManager.playTrackImmediatelyWithVoice(
+                                                                    title = npTrack.title.orEmpty(),
+                                                                    artist = npTrack.artist.orEmpty(),
+                                                                    targetPlayer = com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE,
+                                                                    neverOpenExternalApp = true
+                                                                )
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                "Use YouTube In-App",
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.Black
+                                                            )
+                                                        }
+                                                    }
                                                     Button(
                                                         onClick = {
                                                             vm.clearPlaybackLaunchFeedback()
@@ -1215,6 +1257,15 @@ open class MainActivity : ComponentActivity() {
                                                     trackId = nowPlaying?.trackId?.takeIf { it.isNotBlank() }
                                                 )
                                             }
+                                        },
+                                        youTubeWebView = sharedYouTubeWebView,
+                                        onPlayInAppYouTube = { ytPlayTitle, ytPlayArtist ->
+                                            agentVoiceManager.playTrackImmediatelyWithVoice(
+                                                title = ytPlayTitle,
+                                                artist = ytPlayArtist,
+                                                targetPlayer = com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE,
+                                                neverOpenExternalApp = true
+                                            )
                                         }
                                     )
                                 }
@@ -1372,6 +1423,26 @@ open class MainActivity : ComponentActivity() {
                                     )
                                 }
 
+                                // Visible In-App YouTube Mini Dock (keeps YouTube WebView visible whenever minimized)
+                                if (ytHasActiveVideo && !showNowPlayingScreen) {
+                                    com.tunemind.app.ui.components.TuneMindYouTubeMiniDock(
+                                        webView = sharedYouTubeWebView,
+                                        title = ytTitle.orEmpty(),
+                                        artist = ytArtist.orEmpty(),
+                                        isPlaying = ytPlaying,
+                                        accentColor = adaptiveState.primaryAccent,
+                                        onTogglePlay = { vm.togglePlayback() },
+                                        onExpand = { showNowPlayingScreen = true },
+                                        onClose = {
+                                            com.tunemind.app.provider.TuneMindYouTubeEmbedController.stop(clearMetadata = true)
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .navigationBarsPadding()
+                                            .padding(bottom = if (hasOverlayOpen) 16.dp else 86.dp)
+                                    )
+                                }
+
                                 // Interactive Voice Commands & Capability Guide Sheet
                                 if (showAgentGuideSheet) {
                                     com.tunemind.app.ui.components.AgentGuideSheet(
@@ -1419,6 +1490,7 @@ open class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.tunemind.app.provider.MusicPlayerAutoLauncher.cancelReturnNotification(this)
         forceRebindListener(this)
     }
 

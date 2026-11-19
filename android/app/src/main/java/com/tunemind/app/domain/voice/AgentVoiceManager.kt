@@ -584,7 +584,17 @@ class AgentVoiceManager(
     private fun isNeverLeaveAppPlayRequest(text: String): Boolean {
         val clean = text.lowercase()
         return Regex(
-            "\\b(without\\s+(opening|leaving|launching|switching(\\s+to)?)|don'?t\\s+(open|leave|switch\\s+to)|do\\s+not\\s+(open|leave|switch\\s+to)|not\\s+open\\s+spotify|stay\\s+(in|inside)\\s+tunemind|inside\\s+tunemind|play\\s+(it\\s+)?in\\s+tunemind|in\\s*-?app\\s+only|never\\s+open\\s+spotify|no\\s+app\\s+switch)\\b"
+            "\\b(without\\s+(opening|leaving|launching|switching(\\s+to)?)|don'?t\\s+(open|leave|switch\\s+to)|do\\s+not\\s+(open|leave|switch\\s+to)|not\\s+open\\s+(spotify|boomplay|audiomack|external)|stay\\s+(in|inside)\\s+tunemind|inside\\s+tunemind|play\\s+(it\\s+|that\\s+)?in\\s+tunemind|with\\s+youtube\\s+(in|inside)\\s+tunemind|use\\s+youtube\\s+(in|inside)\\s+tunemind|in\\s*-?app\\s+only|never\\s+open\\s+(spotify|boomplay|audiomack)|no\\s+app\\s+switch)\\b"
+        ).containsMatchIn(clean)
+    }
+
+    private fun isExplicitOpenExternalRequest(text: String): Boolean {
+        val clean = text.lowercase()
+        if (Regex("\\b(don'?t|do\\s+not|never|not|without)\\s+(?:open|launch|leave|switch)\\b").containsMatchIn(clean)) {
+            return false
+        }
+        return Regex(
+            "\\b(open\\s+(spotify|boomplay|audiomack|youtube\\s*music|deezer|soundcloud|the\\s+app|it\\s+externally|external(?:ly)?)|launch\\s+(spotify|boomplay|audiomack|youtube\\s*music)|switch\\s+to\\s+(spotify|boomplay|audiomack))\\b"
         ).containsMatchIn(clean)
     }
 
@@ -882,7 +892,8 @@ class AgentVoiceManager(
 
         val musicPlayingNow = runCatching {
             com.tunemind.app.service.TuneMindListenerService.instance?.isPlaying() == true ||
-                com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying()
+                com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+                com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
         }.getOrDefault(false)
 
         // When music or recent TTS audio is present, require either a final hypothesis or 2+ partial hits (~200ms)
@@ -1021,10 +1032,18 @@ class AgentVoiceManager(
         val preferredId = registry.getPreferredProviderId()
         val preferredProvider = registry.getProvider(preferredId)
         put("player_preferences", JSONObject().apply {
+            val ytmInstalled = installedPlayers.any {
+                it.packageName.equals("com.google.android.apps.youtube.music", ignoreCase = true)
+            } || com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)
+            val supportsFullInApp = preferredId == "tunemind_inapp" ||
+                preferredId == "local_files" ||
+                preferredProvider.packageName.equals("com.google.android.apps.youtube.music", ignoreCase = true)
             put("has_explicit_default_player", hasExplicitPlayer)
             put("default_player_id", preferredId)
             put("default_player_package", preferredProvider.packageName.ifBlank { preferredId })
             put("default_player_name", com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(preferredProvider))
+            put("youtube_music_installed", ytmInstalled)
+            put("default_player_supports_inapp_full_stream", supportsFullInApp)
             put("available_players", org.json.JSONArray().apply {
                 installedPlayers.take(8).forEach { p ->
                     put(JSONObject().apply {
@@ -1315,7 +1334,10 @@ class AgentVoiceManager(
         refreshUnifiedTracksCacheAsync()
 
         val listenerPlaying = runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.isPlaying() == true }.getOrDefault(false)
-        val inAppPlaying = runCatching { com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() }.getOrDefault(false)
+        val inAppPlaying = runCatching {
+            com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
+                com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
+        }.getOrDefault(false)
         val npPlaying = getNowPlaying?.invoke()?.isPlaying == true
         wasMediaPlayingBeforeWake = listenerPlaying || inAppPlaying || npPlaying
 
@@ -2475,7 +2497,9 @@ class AgentVoiceManager(
         }
         return when {
             transcriptLower.contains("boomplay") -> "com.afmobi.boomplaymusic"
-            transcriptLower.contains("youtube music") || transcriptLower.contains("yt music") -> "com.google.android.apps.youtube.music"
+            transcriptLower.contains("youtube music") ||
+                transcriptLower.contains("yt music") ||
+                Regex("\\b(use|with|via|on|allow|try)\\s+youtube\\b").containsMatchIn(transcriptLower) -> "com.google.android.apps.youtube.music"
             transcriptLower.contains("audiomack") -> "com.audiomack"
             transcriptLower.contains("deezer") -> "deezer.android.app"
             transcriptLower.contains("soundcloud") -> "com.soundcloud.android"
@@ -2541,7 +2565,7 @@ class AgentVoiceManager(
 
         val spokenPlayerPkg = detectSpokenPlayerSelection(userTranscriptLower)
         val sanitizedForRejectCheck = userTranscriptLower.replace(
-            Regex("\\b(?:don'?t|do\\s+not|never)\\s+(?:open|leave|switch(?:\\s+to)?|launch)\\s+(?:spotify|the\\s+app|another\\s+app|external(?:\\s+app)?)\\b"),
+            Regex("\\b(?:don'?t|do\\s+not|never)\\s+(?:open|leave|switch(?:\\s+to)?|launch)\\s+(?:spotify|boomplay|audiomack|youtube\\s*music|deezer|soundcloud|tunemind|the\\s+app|another\\s+app|other\\s+apps?|external(?:\\s+app)?)\\b"),
             " "
         )
         val isRejectingPending = Regex(
@@ -2673,8 +2697,18 @@ class AgentVoiceManager(
                 ?: cmdObj?.optString("target_player", "")?.takeIf { it.isNotBlank() },
             fallbackPkg = pendingBeforeTurn?.source
         )
-        val hasExplicitDefaultPlayer = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).hasExplicitDefault()
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        val hasExplicitDefaultPlayer = registry.hasExplicitDefault()
+        val currentDefaultPkg = if (hasExplicitDefaultPlayer) {
+            val pref = registry.getProvider(registry.getPreferredProviderId())
+            pref.packageName.ifBlank { pref.providerId }
+        } else null
+        val isTemporaryInAppYouTubeOverride = !currentDefaultPkg.isNullOrBlank() &&
+            !currentDefaultPkg.equals("com.google.android.apps.youtube.music", ignoreCase = true) &&
+            targetPlayerPkg.equals("com.google.android.apps.youtube.music", ignoreCase = true) &&
+            !Regex("\\b(default|remember|always use|save as default)\\b").containsMatchIn(userTranscriptLower)
         val rememberDefaultPlayer: Boolean? = when {
+            isTemporaryInAppYouTubeOverride -> false
             toolObj != null && toolObj.has("remember_default_player") -> toolObj.optBoolean("remember_default_player")
             Regex("\\b(default|remember|always use|save as default)\\b").containsMatchIn(userTranscriptLower) &&
                 (spokenPlayerPkg != null || rawAction == "SELECT_MUSIC_PLAYER") -> true
@@ -2698,10 +2732,16 @@ class AgentVoiceManager(
         var spokenTts = customProposalSpeechOverride
             ?: explicitTtsPayload.ifBlank { dataObj?.optString("voice_agent_tts", "") ?: "" }.trim()
 
-        val resolvedNeverOpenExternalApp = isNeverLeaveAppPlayRequest(lastUserTranscript) ||
-            (pendingBeforeTurn?.neverOpenExternalApp == true) ||
-            (toolObj?.optBoolean("never_open_external_app", false) == true) ||
-            (cmdObj?.optBoolean("never_open_external_app", false) == true)
+        val explicitExternalNow = isExplicitOpenExternalRequest(userTranscriptLower) ||
+            (toolObj != null && toolObj.has("never_open_external_app") && !toolObj.optBoolean("never_open_external_app", false))
+        val resolvedNeverOpenExternalApp = if (explicitExternalNow) {
+            false
+        } else {
+            isNeverLeaveAppPlayRequest(lastUserTranscript) ||
+                (pendingBeforeTurn?.neverOpenExternalApp == true) ||
+                (toolObj?.optBoolean("never_open_external_app", false) == true) ||
+                (cmdObj?.optBoolean("never_open_external_app", false) == true)
+        }
 
         val resolvedIdentity = if (!rawTrackTitle.isNullOrBlank()) {
             com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(

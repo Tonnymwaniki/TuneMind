@@ -113,9 +113,12 @@ class MediaSessionObserver(
         }
     }
 
-    fun isPlaying(): Boolean {
-        return controllers.values.any {
-            it.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+    fun isPlaying(targetPackage: String? = null): Boolean {
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        return controllers.values.any { entry ->
+            val pkgOk = cleanPkg == null ||
+                sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
+            pkgOk && entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         }
     }
 
@@ -338,9 +341,14 @@ class MediaSessionObserver(
     fun playFromSearch(targetPackage: String?, query: String, extras: android.os.Bundle? = null): Boolean {
         return try {
             refreshSessions()
-            val entry = controllers.values.firstOrNull { entry ->
-                targetPackage == null || entry.controller.packageName == targetPackage
-            } ?: controllers.values.firstOrNull() ?: return false
+            val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+            val entry = if (cleanPkg != null) {
+                controllers.values.firstOrNull { candidate ->
+                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                } ?: return false
+            } else {
+                controllers.values.firstOrNull() ?: return false
+            }
 
             val tc = entry.controller.transportControls ?: return false
             tc.playFromSearch(query, extras)

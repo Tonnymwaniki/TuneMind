@@ -309,6 +309,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     fun pauseCurrentMedia() {
         try {
             com.tunemind.app.provider.TuneMindInAppPlayer.pause()
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.pause()
         } catch (_: Throwable) {}
         try {
             com.tunemind.app.service.TuneMindListenerService.instance?.pause()
@@ -327,6 +328,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     fun resumeCurrentMedia() {
+        val ytResumed = runCatching {
+            if (com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo()) {
+                com.tunemind.app.provider.TuneMindYouTubeEmbedController.resume()
+            } else false
+        }.getOrDefault(false)
+        if (ytResumed) {
+            Log.d(TAG, "Resumed TuneMind In-App YouTube Player")
+            return
+        }
         val inAppResumed = runCatching {
             if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
                 com.tunemind.app.provider.TuneMindInAppPlayer.resume()

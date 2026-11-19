@@ -215,4 +215,50 @@ describe('PlayCount & Canonical TrackId Hardening', () => {
       }
     }
   });
+
+  it('preserves default player on temporary YouTube in-app playback and allows breaking out of pending never-leave lock on explicit external open', () => {
+    // User with Spotify default temporarily allows YouTube inside TuneMind -> keep Spotify as default
+    expect(
+      ClaudeMusicReasoningProvider.shouldKeepExistingDefaultPlayer({
+        hasExplicitDefaultPlayer: true,
+        defaultPlayerPackage: 'com.spotify.music',
+        targetPlayerPackage: 'com.google.android.apps.youtube.music',
+        userCommandRaw: 'use youtube inside tunemind for this song'
+      })
+    ).toBe(true);
+
+    // User explicitly asks to make YouTube Music their permanent default -> allow update
+    expect(
+      ClaudeMusicReasoningProvider.shouldKeepExistingDefaultPlayer({
+        hasExplicitDefaultPlayer: true,
+        defaultPlayerPackage: 'com.spotify.music',
+        targetPlayerPackage: 'com.google.android.apps.youtube.music',
+        userCommandRaw: 'make youtube music my default player'
+      })
+    ).toBe(false);
+
+    // Follow-up turn breaking out of strict never-open lock when user says "open Spotify" or "open Boomplay"
+    expect(
+      ClaudeMusicReasoningProvider.resolveRequestedNeverOpenExternal({
+        userCommandRaw: 'actually open spotify',
+        pendingNeverOpenExternal: true
+      })
+    ).toBe(false);
+
+    expect(
+      ClaudeMusicReasoningProvider.resolveRequestedNeverOpenExternal({
+        userCommandRaw: 'open boomplay',
+        decisionNeverOpenExternal: false,
+        pendingNeverOpenExternal: true
+      })
+    ).toBe(false);
+
+    // Saying "yes use YouTube" keeps the in-app never-open flag active cleanly
+    expect(
+      ClaudeMusicReasoningProvider.resolveRequestedNeverOpenExternal({
+        userCommandRaw: 'yes use youtube inside tunemind',
+        pendingNeverOpenExternal: true
+      })
+    ).toBe(true);
+  });
 });

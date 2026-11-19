@@ -56,7 +56,9 @@ fun NowPlayingSheet(
     onApproveProposedTrack: () -> Unit,
     onRejectProposedTrack: () -> Unit,
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePkg: String) -> Unit,
-    onAskAgentAboutCurrent: (title: String, artist: String) -> Unit
+    onAskAgentAboutCurrent: (title: String, artist: String) -> Unit,
+    youTubeWebView: android.webkit.WebView? = null,
+    onPlayInAppYouTube: ((title: String, artist: String) -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
@@ -78,6 +80,17 @@ fun NowPlayingSheet(
     val inAppFallbackPkg by TuneMindInAppPlayer.externalPlayerPackageFlow.collectAsState()
     val inAppFallbackName by TuneMindInAppPlayer.externalPlayerNameFlow.collectAsState()
 
+    val ytHasVideo by com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideoFlow.collectAsState()
+    val ytPlaying by com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlayingFlow.collectAsState()
+    val ytTitle by com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentTitleFlow.collectAsState()
+    val ytArtist by com.tunemind.app.provider.TuneMindYouTubeEmbedController.currentArtistFlow.collectAsState()
+    val ytPosMs by com.tunemind.app.provider.TuneMindYouTubeEmbedController.positionMsFlow.collectAsState()
+    val ytDurMs by com.tunemind.app.provider.TuneMindYouTubeEmbedController.durationMsFlow.collectAsState()
+    val ytVideoId by com.tunemind.app.provider.TuneMindYouTubeEmbedController.activeVideoIdFlow.collectAsState()
+    val ytFallbackPkg by com.tunemind.app.provider.TuneMindYouTubeEmbedController.fallbackExternalPkgFlow.collectAsState()
+    val ytFallbackName by com.tunemind.app.provider.TuneMindYouTubeEmbedController.fallbackExternalNameFlow.collectAsState()
+    val ytNotice by com.tunemind.app.provider.TuneMindYouTubeEmbedController.statusNoticeFlow.collectAsState()
+
     val effectiveUpNext = remember(upNextQueueState, dopamineCapsule) {
         if (upNextQueueState.tracks.isNotEmpty()) upNextQueueState else dopamineCapsule
     }
@@ -87,39 +100,59 @@ fun NowPlayingSheet(
     }
 
     val nowPlaying = homeState.nowPlaying
-    val isInAppCurrent = remember(inAppHasTrack, inAppPlaying, nowPlaying?.sourcePackage, context.packageName) {
-        inAppPlaying || (inAppHasTrack && (nowPlaying?.sourcePackage == null || nowPlaying.sourcePackage == context.packageName))
+    val isYtCurrent = remember(ytHasVideo, ytPlaying, nowPlaying?.sourcePackage, context.packageName) {
+        ytPlaying || (ytHasVideo && (nowPlaying?.sourcePackage == null || nowPlaying.sourcePackage == context.packageName))
     }
-    val effectiveTitle = (if (isInAppCurrent) inAppTitle else nowPlaying?.title)
-        ?.takeIf { it.isNotBlank() } ?: "Nothing Playing"
-    val effectiveArtist = (if (isInAppCurrent) inAppArtist else nowPlaying?.artist)
-        ?.takeIf { it.isNotBlank() } ?: "Start a song or ask TuneMind"
-    val effectivePlaying = if (isInAppCurrent) inAppPlaying else (nowPlaying?.isPlaying == true)
-    val effectiveDurationMs = if (isInAppCurrent && inAppDurMs > 0L) inAppDurMs else (nowPlaying?.durationMs ?: 0L)
+    val isInAppCurrent = remember(inAppHasTrack, inAppPlaying, isYtCurrent, nowPlaying?.sourcePackage, context.packageName) {
+        !isYtCurrent && (inAppPlaying || (inAppHasTrack && (nowPlaying?.sourcePackage == null || nowPlaying.sourcePackage == context.packageName)))
+    }
+    val effectiveTitle = (when {
+        isYtCurrent -> ytTitle
+        isInAppCurrent -> inAppTitle
+        else -> nowPlaying?.title
+    })?.takeIf { it.isNotBlank() } ?: "Nothing Playing"
+    val effectiveArtist = (when {
+        isYtCurrent -> ytArtist
+        isInAppCurrent -> inAppArtist
+        else -> nowPlaying?.artist
+    })?.takeIf { it.isNotBlank() } ?: "Start a song or ask TuneMind"
+    val effectivePlaying = when {
+        isYtCurrent -> ytPlaying
+        isInAppCurrent -> inAppPlaying
+        else -> nowPlaying?.isPlaying == true
+    }
+    val effectiveDurationMs = when {
+        isYtCurrent && ytDurMs > 0L -> ytDurMs
+        isInAppCurrent && inAppDurMs > 0L -> inAppDurMs
+        else -> nowPlaying?.durationMs ?: 0L
+    }
 
     var externalTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(isInAppCurrent, effectivePlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
+    LaunchedEffect(isYtCurrent, isInAppCurrent, effectivePlaying, nowPlaying?.positionMs, nowPlaying?.updatedAtMs) {
         externalTickMs = System.currentTimeMillis()
-        while (!isInAppCurrent && effectivePlaying) {
+        while (!isYtCurrent && !isInAppCurrent && effectivePlaying) {
             kotlinx.coroutines.delay(1000L)
             externalTickMs = System.currentTimeMillis()
         }
     }
-    val effectivePosMs = if (isInAppCurrent) {
-        inAppPosMs
-    } else {
-        val base = nowPlaying?.positionMs ?: 0L
-        val updatedAt = nowPlaying?.updatedAtMs ?: 0L
-        if (effectivePlaying && updatedAt > 0L) {
-            val delta = (externalTickMs - updatedAt).coerceIn(0L, 12 * 60 * 1000L)
-            val extrapolated = base + delta
-            if (effectiveDurationMs > 0L) extrapolated.coerceIn(0L, effectiveDurationMs) else extrapolated
-        } else {
-            base
+    val effectivePosMs = when {
+        isYtCurrent -> ytPosMs
+        isInAppCurrent -> inAppPosMs
+        else -> {
+            val base = nowPlaying?.positionMs ?: 0L
+            val updatedAt = nowPlaying?.updatedAtMs ?: 0L
+            if (effectivePlaying && updatedAt > 0L) {
+                val delta = (externalTickMs - updatedAt).coerceIn(0L, 12 * 60 * 1000L)
+                val extrapolated = base + delta
+                if (effectiveDurationMs > 0L) extrapolated.coerceIn(0L, effectiveDurationMs) else extrapolated
+            } else {
+                base
+            }
         }
     }
 
     val sourceLabel = when {
+        isYtCurrent -> "TuneMind YouTube Player"
         isInAppCurrent -> if (inAppIsPreview) "TuneMind 30s Preview" else "TuneMind Built-In Player"
         nowPlaying?.sourcePackage?.isNotBlank() == true ->
             com.tunemind.app.data.local.CrossAppPlayRecorder.resolveFriendlyPlayerName(nowPlaying.sourcePackage)
@@ -128,7 +161,7 @@ fun NowPlayingSheet(
 
     var sliderOverride by remember { mutableStateOf<Float?>(null) }
     var actionStatus by remember { mutableStateOf<String?>(null) }
-    val displayActionStatus = vmActionStatus ?: actionStatus
+    val displayActionStatus = vmActionStatus ?: actionStatus ?: ytNotice
 
     val neonCyan = theme.primaryAccent
     val electricPurple = theme.secondaryAccent
@@ -218,79 +251,88 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Studio Artwork Frame (Rounded-square cover + Artist badge)
-            Box(
-                modifier = Modifier
-                    .size(228.dp)
-                    .graphicsLayer {
-                        scaleX = if (effectivePlaying) 1.0f else 0.98f
-                        scaleY = if (effectivePlaying) 1.0f else 0.98f
-                    },
-                contentAlignment = Alignment.Center
-            ) {
+            // Visible Official YouTube Player OR Studio Artwork Frame
+            if (isYtCurrent && youTubeWebView != null) {
+                com.tunemind.app.ui.components.TuneMindYouTubeExpandedViewport(
+                    webView = youTubeWebView,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(224.dp)
+                )
+            } else {
                 Box(
                     modifier = Modifier
-                        .size(220.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    theme.elevatedSurface,
-                                    theme.cardSurface
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(24.dp)
-                        ),
+                        .size(228.dp)
+                        .graphicsLayer {
+                            scaleX = if (effectivePlaying) 1.0f else 0.98f
+                            scaleY = if (effectivePlaying) 1.0f else 0.98f
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    val artUrl = activeMedia?.albumArtUrl?.takeIf { it.startsWith("http") }
-                    if (artUrl != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(artUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "$effectiveTitle album art",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = if (effectivePlaying) 0.18f else 0.08f))
-                        )
-                    }
-                    if (effectivePlaying && artUrl == null) {
-                        AnimatedEqualizerBars(
-                            color = neonCyan,
-                            modifier = Modifier.size(56.dp, 46.dp)
-                        )
-                    } else if (artUrl == null) {
-                        Icon(
-                            imageVector = Icons.Rounded.MusicNote,
-                            contentDescription = null,
-                            tint = neonCyan.copy(alpha = 0.85f),
-                            modifier = Modifier.size(56.dp)
-                        )
-                    }
-                }
-
-                if (hasTrack) {
-                    SpotifyAvatarCircle(
-                        imageUrl = activeMedia?.artistImageUrl,
-                        fallbackInitial = effectiveArtist,
-                        size = 46.dp,
-                        accentColor = neonCyan,
-                        borderWidth = 2.dp,
-                        borderColor = theme.primaryBackground,
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(x = (-2).dp, y = (-2).dp)
-                    )
+                            .size(220.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        theme.elevatedSurface,
+                                        theme.cardSurface
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(24.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val artUrl = activeMedia?.albumArtUrl?.takeIf { it.startsWith("http") }
+                        if (artUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(artUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "$effectiveTitle album art",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = if (effectivePlaying) 0.18f else 0.08f))
+                            )
+                        }
+                        if (effectivePlaying && artUrl == null) {
+                            AnimatedEqualizerBars(
+                                color = neonCyan,
+                                modifier = Modifier.size(56.dp, 46.dp)
+                            )
+                        } else if (artUrl == null) {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = neonCyan.copy(alpha = 0.85f),
+                                modifier = Modifier.size(56.dp)
+                            )
+                        }
+                    }
+
+                    if (hasTrack) {
+                        SpotifyAvatarCircle(
+                            imageUrl = activeMedia?.artistImageUrl,
+                            fallbackInitial = effectiveArtist,
+                            size = 46.dp,
+                            accentColor = neonCyan,
+                            borderWidth = 2.dp,
+                            borderColor = theme.primaryBackground,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .offset(x = (-2).dp, y = (-2).dp)
+                        )
+                    }
                 }
             }
 
@@ -467,10 +509,11 @@ fun NowPlayingSheet(
                 }
             }
 
-            if (isInAppCurrent && inAppIsPreview && hasTrack) {
+            if (isYtCurrent && hasTrack) {
                 Spacer(modifier = Modifier.height(10.dp))
-                val targetAppName = inAppFallbackName?.takeIf { it.isNotBlank() } ?: "External Player"
-                val targetAppPkg = inAppFallbackPkg ?: selectedTargetPlayer.takeIf { it.isNotBlank() }
+                val targetAppName = ytFallbackName?.takeIf { it.isNotBlank() } ?: "YouTube Music"
+                val targetAppPkg = ytFallbackPkg ?: com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE
+                val watchUrl = ytVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
                 OutlinedButton(
                     onClick = {
                         MusicPlayerAutoLauncher.openFullTrackExternally(
@@ -478,18 +521,66 @@ fun NowPlayingSheet(
                             title = effectiveTitle,
                             artist = effectiveArtist,
                             packageName = targetAppPkg,
-                            displayName = targetAppName
+                            displayName = targetAppName,
+                            explicitUrlOrDeepLink = watchUrl
                         )
                     },
                     shape = RoundedCornerShape(24.dp),
                     border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.55f))
                 ) {
                     Text(
-                        text = "Open full track in $targetAppName",
+                        text = "Open in $targetAppName app",
                         color = neonCyan,
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            } else if (isInAppCurrent && inAppIsPreview && hasTrack) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val targetAppName = inAppFallbackName?.takeIf { it.isNotBlank() } ?: "External Player"
+                val targetAppPkg = inAppFallbackPkg ?: selectedTargetPlayer.takeIf { it.isNotBlank() }
+                val ytmInstalled = remember(context) {
+                    com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)
+                }
+                val isYtmTarget = targetAppPkg?.contains("youtube.music", ignoreCase = true) == true
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (ytmInstalled && !isYtmTarget && onPlayInAppYouTube != null) {
+                        OutlinedButton(
+                            onClick = { onPlayInAppYouTube(effectiveTitle, effectiveArtist) },
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.65f))
+                        ) {
+                            Text(
+                                text = "Full Song via YouTube",
+                                color = safeGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            MusicPlayerAutoLauncher.openFullTrackExternally(
+                                context = context,
+                                title = effectiveTitle,
+                                artist = effectiveArtist,
+                                packageName = targetAppPkg,
+                                displayName = targetAppName
+                            )
+                        },
+                        shape = RoundedCornerShape(24.dp),
+                        border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.55f))
+                    ) {
+                        Text(
+                            text = "Open in $targetAppName",
+                            color = neonCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 

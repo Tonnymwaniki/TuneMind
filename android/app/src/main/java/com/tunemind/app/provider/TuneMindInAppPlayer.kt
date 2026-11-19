@@ -391,6 +391,7 @@ object TuneMindInAppPlayer {
         configureSource: (MediaPlayer) -> Unit
     ) {
         cachedAppContext = appContext
+        runCatching { TuneMindYouTubeEmbedController.stop(clearMetadata = true) }
         stopInternal(resetTrackMeta = false)
 
         _currentTitleFlow.value = title.trim()
@@ -619,7 +620,10 @@ object TuneMindInAppPlayer {
         loopEnabled = enabled
     }
 
-    fun stop() {
+    fun stop(clearYouTube: Boolean = false) {
+        if (clearYouTube) {
+            runCatching { TuneMindYouTubeEmbedController.stop(clearMetadata = true) }
+        }
         loopEnabled = false
         val posSnapshot = runCatching { mediaPlayer?.currentPosition?.toLong()?.coerceAtLeast(0L) }
             .getOrNull() ?: _positionMsFlow.value
@@ -664,6 +668,72 @@ object TuneMindInAppPlayer {
             currentDurationMs = 0L
             _positionMsFlow.value = 0L
             _durationMsFlow.value = 0L
+        }
+    }
+
+    internal fun requestExternalEmbeddedAudioFocus(context: Context) {
+        appPackageName = context.applicationContext.packageName
+        cachedAppContext = context.applicationContext
+        requestMediaAudioFocus(context.applicationContext)
+    }
+
+    internal fun recordExternalEmbeddedObservation(
+        context: Context,
+        eventType: ObservationEventType,
+        title: String,
+        artist: String,
+        album: String?,
+        trackUri: String?,
+        durationMs: Long,
+        positionMs: Long,
+        playbackStateCode: Int
+    ) {
+        appPackageName = context.applicationContext.packageName
+        persistInAppObservation(
+            context = context,
+            eventType = eventType,
+            title = title,
+            artist = artist,
+            album = album,
+            trackUri = trackUri,
+            durationMs = durationMs,
+            positionMs = positionMs,
+            playbackStateCode = playbackStateCode
+        )
+    }
+
+    internal fun publishExternalEmbeddedSnapshot(
+        context: Context,
+        title: String,
+        artist: String,
+        isPlaying: Boolean,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        val cleanTitle = title.trim().takeIf { it.isNotBlank() } ?: return
+        appPackageName = context.applicationContext.packageName
+        val snap = ActivePlaybackSnapshot(
+            packageName = appPackageName,
+            title = cleanTitle,
+            artist = artist.trim(),
+            isPlaying = isPlaying,
+            positionMs = positionMs.coerceAtLeast(0L),
+            durationMs = durationMs.coerceAtLeast(0L),
+            updatedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
+        )
+        mainHandler.post {
+            TuneMindListenerService.dispatchPlaybackSnapshot(snap)
+        }
+    }
+
+    internal fun dispatchExternalTrackCompleted(
+        title: String,
+        artist: String,
+        packageName: String
+    ) {
+        onTrackCompletedListener?.invoke(title, artist, packageName)
+        trackCompletedListeners.forEach { listener ->
+            runCatching { listener.invoke(title, artist, packageName) }
         }
     }
 

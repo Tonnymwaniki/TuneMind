@@ -8,6 +8,7 @@ import android.app.SearchManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -23,6 +24,7 @@ import com.tunemind.app.R
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.service.TuneMindListenerService
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Cross-App Hybrid Playback Engine across all Android music players
@@ -30,22 +32,24 @@ import com.tunemind.app.service.TuneMindListenerService
  * local device audio, and TuneMind's built-in audio engine).
  *
  * Hybrid Tiered Strategy (zero Spotify Developer keys / OAuth / App Remote SDK / BAL overlay hacks):
- * 1. Local Audio (`MediaStore.Audio.Media`) -> Full track inside [TuneMindInAppPlayer] (zero switch).
- * 2. Open-Catalog Full Stream (Audius API) -> Full track inside [TuneMindInAppPlayer] (zero switch).
- * 3. Active Warm MediaSession -> `playFromSearch(query, extras)` + transition check (zero switch).
- * 4. Strict Never-Leave-TuneMind Mode -> 30s iTunes/Deezer preview inside [TuneMindInAppPlayer]
- *    plus metadata for "Open full track in [Player]".
- * 5. Hybrid Cold Handoff (when strict mode is OFF) -> Exact YouTube Music watch URL / Boomplay /
- *    Audiomack / Spotify passive `MEDIA_PLAY_FROM_SEARCH` intent + a Play-compliant notification
- *    ("Playing in [Player] · Tap to return to TuneMind").
+ * 1A. Local Audio (`MediaStore.Audio.Media`) -> Full track inside [TuneMindInAppPlayer] (zero switch).
+ * 1B. Open-Catalog Full Stream (Audius API) -> Full track inside [TuneMindInAppPlayer] (zero switch).
+ * 1C. Audience-Gated Visible YouTube Embed -> Full track inside [TuneMindYouTubeEmbedController]
+ *     ONLY when target/default is YouTube Music (or explicitly allowed in-app by the user).
+ * 2. Active Warm MediaSession -> `playFromSearch(query, extras)` + title-only retry (zero switch).
+ * 3. Strict Never-Leave-TuneMind Mode -> 30s iTunes/Deezer preview inside [TuneMindInAppPlayer]
+ *    plus metadata for "Open full track in [Player]" (or YouTube in-app prompt).
+ * 4. Hybrid Cold Handoff (when strict mode is OFF) -> Exact YouTube Music watch URL / Boomplay /
+ *    Audiomack / Spotify passive `MEDIA_PLAY_FROM_SEARCH` intent + a Play-safe Heads-Up
+ *    "[Back to TuneMind]" banner that peeks cleanly and updates once playback starts.
  */
 object MusicPlayerAutoLauncher {
     private const val TAG = "MusicPlayerAutoLauncher"
     private const val GOOGLE_ASSISTANT_REFERRER =
         "android-app://com.google.android.googlequicksearchbox/https/www.google.com"
-    private const val RETURN_CHANNEL_ID = "tunemind_playback_return"
+    private const val RETURN_CHANNEL_ID = "tunemind_quick_return_banner_v2"
     private const val RETURN_NOTIFICATION_ID = 4409
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
 
     @Volatile
     var lastDispatchedTrackTitle: String = ""
@@ -106,6 +110,7 @@ object MusicPlayerAutoLauncher {
         explicitUrlOrDeepLink: String? = null
     ): PlaybackLaunchResult {
         TuneMindInAppPlayer.pause()
+        TuneMindYouTubeEmbedController.pause()
         val rec = RecommendedTrack(
             id = title,
             title = title,
@@ -162,6 +167,7 @@ object MusicPlayerAutoLauncher {
         // 0. Silence any currently playing song before switching
         try {
             TuneMindInAppPlayer.pause()
+            TuneMindYouTubeEmbedController.pause()
             listener?.pause()
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
             audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE))
@@ -182,6 +188,7 @@ object MusicPlayerAutoLauncher {
 
         val outcome = launchHybridPlayback(
             context = context,
+            providerId = providerId,
             targetPkg = targetPkg,
             displayName = displayName,
             track = track,
@@ -216,8 +223,26 @@ object MusicPlayerAutoLauncher {
         val detailMessage: String? = null
     )
 
+    internal fun isYouTubeMusicTarget(targetPkg: String?, providerId: String?): Boolean {
+        return targetPkg?.contains("youtube.music", ignoreCase = true) == true ||
+            providerId.equals(YouTubeMusicProvider.PROVIDER_ID, ignoreCase = true)
+    }
+
+    internal fun shouldActivateBuiltInYouTubeTier(
+        targetPkg: String?,
+        providerId: String?,
+        ytmVideoId: String?,
+        preferInAppPlayer: Boolean,
+        strictNoSwitch: Boolean
+    ): Boolean {
+        return (preferInAppPlayer || strictNoSwitch) &&
+            isYouTubeMusicTarget(targetPkg, providerId) &&
+            !ytmVideoId.isNullOrBlank()
+    }
+
     private fun launchHybridPlayback(
         context: Context,
+        providerId: String,
         targetPkg: String?,
         displayName: String,
         track: RecommendedTrack,
@@ -232,6 +257,7 @@ object MusicPlayerAutoLauncher {
         val preferInAppPlayer = AgentSettingsStore.isPreferInAppPlayerEnabled(context)
         val strictNoSwitch = neverOpenExternalApp ||
             AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
+        val isYtmTarget = isYouTubeMusicTarget(targetPkg, providerId)
 
         // TIER 1A: Local Audio Match inside TuneMind (full length, zero app switch)
         if ((preferInAppPlayer || strictNoSwitch) && TuneMindInAppPlayer.playLocalMatch(context, cleanTitle, cleanArtist)) {
@@ -276,58 +302,46 @@ object MusicPlayerAutoLauncher {
             }
         }
 
-        val sessionExtras = buildAutoPlayExtras(cleanTitle, cleanArtist, fullSearchQuery)
-
-        // TIER 2: Warm Active MediaSession (boomplay / youtube music / audiomack / spotify passive / OEM)
-        if (stayInTuneMind || strictNoSwitch) {
-            try {
-                val listener = TuneMindListenerService.instance
-                if (listener != null && fullSearchQuery.isNotBlank() && listener.hasActiveSession(targetPkg)) {
-                    val sent = listener.playFromSearch(targetPkg, fullSearchQuery, sessionExtras)
-                    if (sent) {
-                        val normExpected = UniversalTrackResolver.normalizeTitleForExactMatch(cleanTitle)
-                        var verifiedPlaying = false
-                        var nudgedPlay = false
-                        for (waitMs in listOf(350L, 450L, 500L)) {
-                            try {
-                                Thread.sleep(waitMs)
-                            } catch (_: InterruptedException) {}
-                            val activeTitle = listener.getActiveTitle(targetPkg)?.trim().orEmpty()
-                            val normActive = UniversalTrackResolver.normalizeTitleForExactMatch(activeTitle)
-                            val switched = normActive.isNotBlank() && (
-                                normActive == normExpected ||
-                                    normActive.contains(normExpected) ||
-                                    normExpected.contains(normActive) ||
-                                    (!previousTitle.isNullOrBlank() && !activeTitle.equals(previousTitle, ignoreCase = true))
-                                )
-                            if (switched) {
-                                if (listener.isPlaying()) {
-                                    verifiedPlaying = true
-                                    break
-                                } else if (!nudgedPlay) {
-                                    nudgedPlay = true
-                                    listener.play(targetPkg)
-                                }
-                            }
-                        }
-                        if (verifiedPlaying) {
-                            Log.i(TAG, "✅ Tier-2 Warm MediaSession switched silently for '$cleanTitle' in $displayName")
-                            return LaunchOutcome(
-                                launched = true,
-                                usedInAppPlayer = false,
-                                destinationUri = "mediasession:${targetPkg ?: "active"}",
-                                detailMessage = "Playing '$cleanTitle' via active $displayName session without leaving TuneMind."
-                            )
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Warm MediaSession playFromSearch notice: ${e.message}")
+        // TIER 1C (Option A — Audience-Gated): Visible Official YouTube IFrame Player inside TuneMind
+        // Activates specifically for YouTube Music users (or when user explicitly opted to allow YouTube in-app).
+        val ytmVideoId = resolvedLinks?.ytmVideoId?.takeIf { it.isNotBlank() }
+        if (shouldActivateBuiltInYouTubeTier(targetPkg, providerId, ytmVideoId, preferInAppPlayer, strictNoSwitch)) {
+            val started = TuneMindYouTubeEmbedController.startVideo(
+                context = context,
+                videoId = ytmVideoId!!,
+                title = cleanTitle.ifBlank { track.title },
+                artist = cleanArtist.ifBlank { track.artist },
+                album = resolvedLinks.albumName,
+                previewFallback = resolvedLinks.previewUrl,
+                fallbackExternalPkg = targetPkg ?: YouTubeMusicProvider.YTM_PACKAGE,
+                fallbackExternalName = displayName
+            )
+            if (started) {
+                Log.i(TAG, "✅ Tier-1C Built-In Visible YouTube Player started for '$cleanTitle' ($ytmVideoId)")
+                return LaunchOutcome(
+                    launched = true,
+                    usedInAppPlayer = true,
+                    destinationUri = "https://music.youtube.com/watch?v=$ytmVideoId",
+                    detailMessage = "Playing '$cleanTitle' inside TuneMind's built-in YouTube player."
+                )
             }
         }
 
-        // TIER 3 (Strict Never-Leave Mode): 30s Preview inside TuneMind (with external player metadata for "Open full track")
+        // TIER 2: Warm Active MediaSession (boomplay / youtube music / audiomack / spotify passive / OEM)
+        if ((stayInTuneMind || strictNoSwitch) &&
+            tryWarmMediaSessionSwitch(targetPkg, displayName, cleanTitle, cleanArtist, fullSearchQuery, previousTitle)
+        ) {
+            return LaunchOutcome(
+                launched = true,
+                usedInAppPlayer = false,
+                destinationUri = "mediasession:${targetPkg ?: "active"}",
+                detailMessage = "Playing '$cleanTitle' via active $displayName session without leaving TuneMind."
+            )
+        }
+
+        // TIER 3 (Strict Never-Leave Mode): 30s Preview inside TuneMind (with external player metadata + YouTube hint)
         if (strictNoSwitch) {
+            val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
             val previewUrl = resolvedLinks?.previewUrl?.takeIf { it.startsWith("http") }
             if (previewUrl != null && TuneMindInAppPlayer.playStreamUrl(
                     context = context,
@@ -341,21 +355,31 @@ object MusicPlayerAutoLauncher {
                     fallbackExternalName = displayName
                 )
             ) {
+                val extraHint = if (ytmInstalled) {
+                    "Say 'use YouTube inside TuneMind' for the full song, or tap 'Open full track in $displayName'."
+                } else {
+                    "Tap 'Open full track in $displayName' for the full song."
+                }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = true,
                     destinationUri = previewUrl,
-                    detailMessage = "Playing '$cleanTitle' (30s preview) inside TuneMind · Tap 'Open in $displayName' for full track."
+                    detailMessage = "Playing '$cleanTitle' (30s preview) inside TuneMind · $extraHint"
                 )
+            }
+            val failHint = if (ytmInstalled) {
+                "Kept $displayName closed (Never-Leave Mode). Say 'use YouTube inside TuneMind' for the full song here, start a track in $displayName once to warm its session, or open $displayName."
+            } else {
+                "Kept $displayName closed (Never-Leave Mode). Start a track in $displayName once to warm its background session, or disable Strict Mode for quick handoff."
             }
             return LaunchOutcome(
                 launched = false,
                 usedInAppPlayer = false,
-                detailMessage = "Kept $displayName closed (Never-Leave Mode). Start a track in $displayName once to warm its background session, or disable Strict Mode for one-tap handoff."
+                detailMessage = failHint
             )
         }
 
-        // TIER 4 (Hybrid Cold Handoff): Precision deep-link / MEDIA_PLAY_FROM_SEARCH + Return-to-TuneMind Notification
+        // TIER 4 (Hybrid Cold Handoff): Precision deep-link / MEDIA_PLAY_FROM_SEARCH + Heads-Up Return Banner
         return launchExternalColdHandoff(
             context = context,
             targetPkg = targetPkg,
@@ -368,6 +392,66 @@ object MusicPlayerAutoLauncher {
             previousTitle = previousTitle,
             resolvedLinks = resolvedLinks
         )
+    }
+
+    private fun tryWarmMediaSessionSwitch(
+        targetPkg: String?,
+        displayName: String,
+        cleanTitle: String,
+        cleanArtist: String,
+        fullSearchQuery: String,
+        previousTitle: String?
+    ): Boolean {
+        return try {
+            val listener = TuneMindListenerService.instance ?: return false
+            if (fullSearchQuery.isBlank() || !listener.hasActiveSession(targetPkg)) return false
+            val sessionExtras = buildAutoPlayExtras(cleanTitle, cleanArtist, fullSearchQuery)
+            val sent = listener.playFromSearch(targetPkg, fullSearchQuery, sessionExtras)
+            if (!sent) return false
+
+            val normExpected = UniversalTrackResolver.normalizeTitleForExactMatch(cleanTitle)
+            var nudgedPlay = false
+            var retriedTitleOnly = false
+
+            for (attempt in 0 until 3) {
+                val waitMs = when (attempt) {
+                    0 -> 450L
+                    1 -> 500L
+                    else -> 550L
+                }
+                try {
+                    Thread.sleep(waitMs)
+                } catch (_: InterruptedException) {}
+
+                val activeTitle = listener.getActiveTitle(targetPkg)?.trim().orEmpty()
+                val normActive = UniversalTrackResolver.normalizeTitleForExactMatch(activeTitle)
+                val switched = normActive.isNotBlank() && (
+                    normActive == normExpected ||
+                        (normExpected.length >= 4 && (normActive.contains(normExpected) || normExpected.contains(normActive))) ||
+                        (!previousTitle.isNullOrBlank() && !activeTitle.equals(previousTitle, ignoreCase = true))
+                    )
+                if (switched) {
+                    if (listener.isPlaying(targetPkg)) {
+                        Log.i(TAG, "✅ Tier-2 Warm MediaSession switched silently for '$cleanTitle' in $displayName")
+                        return true
+                    } else if (!nudgedPlay) {
+                        nudgedPlay = true
+                        listener.play(targetPkg)
+                    }
+                } else if (!retriedTitleOnly && cleanTitle.isNotBlank() && cleanArtist.isNotBlank()) {
+                    retriedTitleOnly = true
+                    listener.playFromSearch(
+                        targetPkg,
+                        cleanTitle,
+                        buildAutoPlayExtras(cleanTitle, "", cleanTitle)
+                    )
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.d(TAG, "Warm MediaSession playFromSearch notice: ${e.message}")
+            false
+        }
     }
 
     private fun launchExternalColdHandoff(
@@ -399,7 +483,7 @@ object MusicPlayerAutoLauncher {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 context.startActivity(ytmIntent)
-                scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
+                scheduleAutoPlayKicker(context, targetPkg, displayName, track, fullSearchQuery, previousTitle)
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 return LaunchOutcome(
                     launched = true,
@@ -429,7 +513,7 @@ object MusicPlayerAutoLauncher {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 context.startActivity(mediaPlayIntent)
-                scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
+                scheduleAutoPlayKicker(context, targetPkg, displayName, track, fullSearchQuery, previousTitle)
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 return LaunchOutcome(
                     launched = true,
@@ -457,7 +541,7 @@ object MusicPlayerAutoLauncher {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 context.startActivity(uriIntent)
-                scheduleAutoPlayKicker(context, targetPkg, track, fullSearchQuery, previousTitle)
+                scheduleAutoPlayKicker(context, targetPkg, displayName, track, fullSearchQuery, previousTitle)
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 return LaunchOutcome(
                     launched = true,
@@ -476,14 +560,24 @@ object MusicPlayerAutoLauncher {
         )
     }
 
+    fun cancelReturnNotification(context: Context) {
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            nm?.cancel(RETURN_NOTIFICATION_ID)
+        }
+    }
+
     /**
-     * Play-safe high-priority notification shown after launching an external player so the
-     * user has a one-tap pill to jump straight back to TuneMind (zero BAL background pop-overs).
+     * Play-safe high-priority Heads-Up banner shown after launching an external player so users
+     * of Spotify, Boomplay, Audiomack, Deezer, or any Android player get a prominent floating peek
+     * banner with a 1-tap "Back to TuneMind" action right at the top of the screen (zero BAL/overlay risks).
      */
     private fun postReturnToTuneMindNotification(
         context: Context,
         trackTitle: String,
-        playerDisplayName: String
+        playerDisplayName: String,
+        confirmedPlaying: Boolean = false,
+        silentUpdate: Boolean = false
     ) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -498,11 +592,18 @@ object MusicPlayerAutoLauncher {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = NotificationChannel(
                     RETURN_CHANNEL_ID,
-                    "External Player Handoff",
+                    "Quick Return to TuneMind",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "One-tap return pill when TuneMind launches a track in an external player."
-                    setSound(null, null)
+                    description = "Floating Heads-Up return pill when TuneMind starts a song in Spotify, Boomplay, Audiomack, or other players."
+                    val attrs = AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .build()
+                    setSound(null, attrs)
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0L, 18L)
+                    lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
                 }
                 nm.createNotificationChannel(channel)
             }
@@ -517,17 +618,39 @@ object MusicPlayerAutoLauncher {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val notification = NotificationCompat.Builder(context, RETURN_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("Playing '$trackTitle' in $playerDisplayName")
-                .setContentText("Tap to return to TuneMind")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .setTimeoutAfter(25_000L)
-                .setContentIntent(pi)
-                .build()
+            val titleText = if (confirmedPlaying) {
+                "Now playing '$trackTitle' in $playerDisplayName"
+            } else {
+                "Starting '$trackTitle' in $playerDisplayName"
+            }
+            val bodyText = if (confirmedPlaying) {
+                "Tap Back to TuneMind — $playerDisplayName stays playing"
+            } else {
+                "Tap to return to TuneMind anytime"
+            }
 
-            nm.notify(RETURN_NOTIFICATION_ID, notification)
+            val builder = NotificationCompat.Builder(context, RETURN_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(titleText)
+                .setContentText(bodyText)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOnlyAlertOnce(silentUpdate)
+                .setAutoCancel(true)
+                .setTimeoutAfter(28_000L)
+                .setContentIntent(pi)
+                .addAction(
+                    R.drawable.ic_launcher_foreground,
+                    "Back to TuneMind",
+                    pi
+                )
+
+            if (!silentUpdate) {
+                builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
+            }
+
+            nm.notify(RETURN_NOTIFICATION_ID, builder.build())
         } catch (e: Exception) {
             Log.d(TAG, "Return notification skipped: ${e.message}")
         }
@@ -551,12 +674,13 @@ object MusicPlayerAutoLauncher {
 
     /**
      * Gentle post-launch verification kicker: sends `playFromSearch` once the target player
-     * registers its MediaSession after cold boot, then calls `play()` ONLY once the active title
-     * matches the newly requested song (never resuming the old paused track).
+     * registers its MediaSession after cold boot, calls `play()` once the active title matches
+     * the newly requested song, and refreshes the Quick-Return banner once playback starts cleanly.
      */
     fun scheduleAutoPlayKicker(
         context: Context,
         targetPackage: String?,
+        displayName: String,
         track: RecommendedTrack,
         overrideQuery: String? = null,
         previousTitle: String? = null
@@ -569,6 +693,7 @@ object MusicPlayerAutoLauncher {
         val extras = buildAutoPlayExtras(cleanTitle, cleanArtist, query)
         val normExpected = UniversalTrackResolver.normalizeTitleForExactMatch(cleanTitle)
         val normPrev = UniversalTrackResolver.normalizeTitleForExactMatch(previousTitle.orEmpty())
+        val confirmedReturnNotified = AtomicBoolean(false)
 
         for (delay in listOf(450L, 1100L)) {
             mainHandler.postDelayed({
@@ -599,10 +724,21 @@ object MusicPlayerAutoLauncher {
                         (normExpected.isNotBlank() && (normCur == normExpected || normCur.contains(normExpected) || normExpected.contains(normCur))) ||
                             (normPrev.isNotBlank() && normCur != normPrev && delay >= 1450L)
                         )
-                    if (titleMatchesNewSong && listener?.isPlaying() != true) {
-                        listener?.play(targetPackage)
-                        audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-                        audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+                    if (titleMatchesNewSong) {
+                        val playingTarget = listener?.isPlaying(targetPackage) == true
+                        if (!playingTarget) {
+                            listener?.play(targetPackage)
+                            audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
+                            audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+                        } else if (confirmedReturnNotified.compareAndSet(false, true)) {
+                            postReturnToTuneMindNotification(
+                                context = context,
+                                trackTitle = cleanTitle.ifBlank { track.title },
+                                playerDisplayName = displayName,
+                                confirmedPlaying = true,
+                                silentUpdate = true
+                            )
+                        }
                     }
                 } catch (e: Exception) {
                     Log.d(TAG, "Auto-play verification kicker notice: ${e.message}")
