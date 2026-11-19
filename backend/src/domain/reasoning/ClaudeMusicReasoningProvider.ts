@@ -51,13 +51,21 @@ export interface AgentToolCall {
     | 'TOGGLE_STAY_IN_TUNEMIND'
     | 'TOGGLE_STRICT_NO_APP_SWITCH'
     | 'SELECT_MUSIC_PLAYER'
+    | 'OPEN_MUSIC_PLAYER_APP'
     | 'OPEN_SETTINGS'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
     | 'CREATE_TUNEMIND_PLAYLIST'
     | 'ADD_TO_TUNEMIND_PLAYLIST'
+    | 'REMOVE_FROM_TUNEMIND_PLAYLIST'
+    | 'RENAME_TUNEMIND_PLAYLIST'
+    | 'DELETE_TUNEMIND_PLAYLIST'
     | 'PLAY_TUNEMIND_PLAYLIST'
     | 'QUEUE_TRACKS'
+    | 'PLAY_NEXT_IN_QUEUE'
+    | 'CLEAR_UP_NEXT_QUEUE'
+    | 'LIKE_TRACK'
+    | 'REFRESH_FOR_YOU_PICKS'
     | 'SET_SLEEP_TIMER'
     | 'TOGGLE_KIDS_MODE'
     | 'ADVISE_ONLY';
@@ -82,6 +90,7 @@ export interface AgentToolCall {
   target_screen?: string;
   expect_follow_up?: boolean;
   playlist_name?: string;
+  new_playlist_name?: string;
   playlist_description?: string;
   mood_or_audience?: string;
   playlist_tracks?: PlaylistTrackItem[];
@@ -355,6 +364,117 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       params.targetPlayerPackage === 'com.google.android.apps.youtube.music' &&
       !/\b(default|remember|always\s+use|save\s+as\s+default)\b/i.test(params.userCommandRaw || '')
     );
+  }
+
+  /**
+   * Determines whether the current turn is approving an existing pending proposed track.
+   * Crucially guards against hijacking a brand-new song request (e.g. "Play Calm Down by Rema")
+   * when an unrelated track was previously pending.
+   */
+  public static isApprovingPendingTrack(params: {
+    pendingTitle?: string | null;
+    claudeAction?: string | null;
+    claudeTrackTitle?: string | null;
+    userCommandRaw: string;
+    isRejectingPending: boolean;
+    isAutoCurateNextTrack?: boolean;
+  }): boolean {
+    const pendingTitle = (params.pendingTitle || '').trim();
+    if (!pendingTitle || params.isRejectingPending || params.isAutoCurateNextTrack) {
+      return false;
+    }
+    const pendingNorm = ClaudeMusicReasoningProvider.normalizeForExclusion(pendingTitle);
+    const claudeNorm = ClaudeMusicReasoningProvider.normalizeForExclusion(params.claudeTrackTitle || '');
+
+    // If Claude resolved a non-empty track title that does NOT match the pending track,
+    // the user asked for a different song — never hijack it with the old pending track!
+    const claudePickedDifferentTrack = Boolean(
+      claudeNorm &&
+      pendingNorm &&
+      claudeNorm !== pendingNorm &&
+      !claudeNorm.includes(pendingNorm) &&
+      !pendingNorm.includes(claudeNorm)
+    );
+    if (claudePickedDifferentTrack) {
+      return false;
+    }
+
+    const raw = (params.userCommandRaw || '').trim();
+    // Also check if the user explicitly asked to play a specific named song that isn't the pending title
+    const explicitDifferentRequestMatch = raw.match(
+      /^\s*(?:please\s+|hey\s+|hi\s+|tunemind\s+)?(?:play|spin|put\s+on)\s+(?:for\s+me\s+|me\s+)?(.+)$/i
+    );
+    if (explicitDifferentRequestMatch && explicitDifferentRequestMatch[1]) {
+      const rest = explicitDifferentRequestMatch[1]
+        .replace(/\b(?:on|with|in|using|via)\s+(?:spotify|boomplay|audiomack|youtube\s*music|yt\s*music|deezer|soundcloud|tunemind|my\s+player)\b/gi, '')
+        .replace(/\b(?:right\s+now|now|please|for\s+me)\b/gi, '')
+        .trim();
+      const isPronounOrEmpty = /^(?:it|that|this|the\s+song|the\s+track|that\s+one|this\s+one)?$/i.test(rest);
+      if (!isPronounOrEmpty) {
+        const restNorm = ClaudeMusicReasoningProvider.normalizeForExclusion(rest);
+        if (
+          restNorm.length >= 3 &&
+          restNorm !== pendingNorm &&
+          !restNorm.includes(pendingNorm) &&
+          !pendingNorm.includes(restNorm)
+        ) {
+          return false;
+        }
+      }
+    }
+
+    if (params.claudeAction === 'PLAY_TRACK_NOW') {
+      return true;
+    }
+
+    return /\b(yes|yeah|yep|yup|sure|ok|okay|alright|go\s+ahead|do\s+it|spin\s+it|play\s+it|play\s+that|play\s+this|sounds\s+good|approve|confirm|ndio|sawa|haya)\b/i.test(
+      raw
+    ) || /^\s*(?:please\s+)?(?:play|spin|start)(?:\s+(?:on|with|via|in)\s+\w+(?:\s+music)?)?\s*[.!?]*\s*$/i.test(raw);
+  }
+
+  /**
+   * Determines whether a track request should execute immediately (PLAY_TRACK_NOW)
+   * versus proposing first (PROPOSE_TRACK).
+   * - Direct commands for a specific song/artist ("play Calm Down by Rema", "play Essence on Spotify")
+   *   when the target player is known (default player set or named in the utterance) -> allow PLAY_TRACK_NOW.
+   * - Open recommendations/questions ("suggest a song", "what is my most played song?") or when no default
+   *   music player is chosen yet -> propose first (PROPOSE_TRACK).
+   */
+  public static isDirectPlaySongCommand(params: {
+    userCommandRaw: string;
+    hasExplicitDefaultPlayer?: boolean;
+    hasSpokenTargetPlayer?: boolean;
+    isApprovingPending?: boolean;
+    isAutoCurateNextTrack?: boolean;
+  }): boolean {
+    if (params.isAutoCurateNextTrack || params.isApprovingPending) {
+      return true;
+    }
+    const playerKnown = Boolean(params.hasExplicitDefaultPlayer || params.hasSpokenTargetPlayer);
+    if (!playerKnown) {
+      return false;
+    }
+    const raw = (params.userCommandRaw || '').trim();
+    if (!raw) return false;
+
+    // Questions or open recommendation/suggestion requests should always propose first
+    if (
+      /^\s*(?:what|which|who|how|why|where|when|can\s+you\s+suggest|can\s+you\s+recommend|do\s+you\s+have|tell\s+me|show\s+me)\b/i.test(raw) ||
+      /\b(?:recommend|recommendation|suggest|suggestion|what\s+is\s+my|what'?s\s+my|what\s+do\s+you\s+have)\b/i.test(raw)
+    ) {
+      return false;
+    }
+
+    // Must contain a direct play verb and not just "play a song / any song / something new"
+    const hasPlayVerb = /\b(?:play|spin|put\s+on|start\s+playing|open\s+and\s+play)\b/i.test(raw);
+    if (!hasPlayVerb) return false;
+
+    const isGenericOpenEndedPlay =
+      /\b(?:play|spin|put\s+on)\s+(?:for\s+me\s+|me\s+)?(?:(?:a|an|any|some|another|different|random|fresh|new|good|nice|cool|great|chill)\s+)*(?:song|songs|track|tracks|music|tune|vibe|something|anything)\b/i.test(
+        raw
+      ) && !/\b(?:by|from)\s+[a-z0-9]/i.test(raw) && !/\bmost\s+(?:played|listened)\b/i.test(raw);
+
+    return !isGenericOpenEndedPlay;
   }
 
   constructor() {
@@ -864,22 +984,30 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'TOGGLE_STAY_IN_TUNEMIND',
                 'TOGGLE_STRICT_NO_APP_SWITCH',
                 'SELECT_MUSIC_PLAYER',
+                'OPEN_MUSIC_PLAYER_APP',
                 'OPEN_SETTINGS',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE',
                 'CREATE_TUNEMIND_PLAYLIST',
                 'ADD_TO_TUNEMIND_PLAYLIST',
+                'REMOVE_FROM_TUNEMIND_PLAYLIST',
+                'RENAME_TUNEMIND_PLAYLIST',
+                'DELETE_TUNEMIND_PLAYLIST',
                 'PLAY_TUNEMIND_PLAYLIST',
                 'QUEUE_TRACKS',
+                'PLAY_NEXT_IN_QUEUE',
+                'CLEAR_UP_NEXT_QUEUE',
+                'LIKE_TRACK',
+                'REFRESH_FOR_YOU_PICKS',
                 'SET_SLEEP_TIMER',
                 'TOGGLE_KIDS_MODE'
               ],
               description:
-                'Use ADVISE_ONLY for conversation, answering questions, or negotiating a playlist name before creating it. Use PROPOSE_TRACK when recommending or finding a song for approval. Use PLAY_TRACK_NOW when approving pending_proposed_track, AUTO_CURATE_NEXT_TRACK, or player selection on a proposed song. Use CREATE_TUNEMIND_PLAYLIST / ADD_TO_TUNEMIND_PLAYLIST to create or add tracks (including current_track) to a TuneMind-owned playlist stored inside TuneMind (never on Spotify). Use PLAY_TUNEMIND_PLAYLIST to start playing a TuneMind playlist on the user\'s chosen player. Use QUEUE_TRACKS to queue multiple upcoming songs. Use SET_SLEEP_TIMER for sleep countdowns, TOGGLE_KIDS_MODE for kids safe mode, SELECT_MUSIC_PLAYER, RESTORE_FROM_VAULT, or NAVIGATE_SCREEN.'
+                'Use ADVISE_ONLY for conversation, answering questions, or negotiating a playlist name before creating it. Use PROPOSE_TRACK when recommending/suggesting a song or when no default player is chosen yet. Use PLAY_TRACK_NOW when the user approves pending_proposed_track, during AUTO_CURATE_NEXT_TRACK, or when the user already has a default/named player and gives a direct command to play a specific song/artist right now. Use LIKE_TRACK to like/bookmark the current or specified song into Cross-App Library Liked Songs & Fresh rotation. Use CREATE_TUNEMIND_PLAYLIST / ADD_TO_TUNEMIND_PLAYLIST / REMOVE_FROM_TUNEMIND_PLAYLIST / RENAME_TUNEMIND_PLAYLIST / DELETE_TUNEMIND_PLAYLIST / PLAY_TUNEMIND_PLAYLIST to manage TuneMind-owned playlists stored inside TuneMind. Use QUEUE_TRACKS / PLAY_NEXT_IN_QUEUE / CLEAR_UP_NEXT_QUEUE to control TuneMind Up Next queue. Use REFRESH_FOR_YOU_PICKS to generate fresh For You daily recommendations, OPEN_MUSIC_PLAYER_APP to launch an installed music player app directly, SET_SLEEP_TIMER, TOGGLE_KIDS_MODE, SELECT_MUSIC_PLAYER, RESTORE_FROM_VAULT, or NAVIGATE_SCREEN.'
             },
             track_title: {
               type: 'string',
-              description: 'Exact song or playlist title (ONLY when action is PROPOSE_TRACK, PLAY_TRACK_NOW, LAUNCH_DOPAMINE_CAPSULE, QUARANTINE_TO_VAULT, or RESTORE_FROM_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
+              description: 'Exact song or playlist title (when action involves a track such as PROPOSE_TRACK, PLAY_TRACK_NOW, LIKE_TRACK, REMOVE_FROM_TUNEMIND_PLAYLIST, LAUNCH_DOPAMINE_CAPSULE, QUARANTINE_TO_VAULT, or RESTORE_FROM_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
             },
             track_artist: {
               type: 'string',
@@ -891,11 +1019,11 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             spotify_uri: {
               type: 'string',
-              description: 'Leave empty unless user specifically passes a legacy URI; playback runs natively across TuneMind In-App and installed Android music players.'
+              description: 'Optional resolved spotify:track:<id> URI returned by tools when targeting Spotify.'
             },
             target_player: {
               type: 'string',
-              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.google.android.apps.youtube.music", "com.afmobi.boomplayer", "com.spotify.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
+              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.google.android.apps.youtube.music", "com.afmobi.boomplaymusic", "com.spotify.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
             },
             remember_default_player: {
               type: 'boolean',
@@ -936,7 +1064,11 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             playlist_name: {
               type: 'string',
-              description: 'Name of the TuneMind-owned playlist for CREATE_TUNEMIND_PLAYLIST, ADD_TO_TUNEMIND_PLAYLIST, or PLAY_TUNEMIND_PLAYLIST.'
+              description: 'Name of the TuneMind-owned playlist for CREATE_TUNEMIND_PLAYLIST, ADD_TO_TUNEMIND_PLAYLIST, REMOVE_FROM_TUNEMIND_PLAYLIST, RENAME_TUNEMIND_PLAYLIST, DELETE_TUNEMIND_PLAYLIST, or PLAY_TUNEMIND_PLAYLIST.'
+            },
+            new_playlist_name: {
+              type: 'string',
+              description: 'New name for the playlist when action is RENAME_TUNEMIND_PLAYLIST.'
             },
             playlist_description: {
               type: 'string',
@@ -991,7 +1123,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             extra_actions: {
               type: 'array',
-              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color, setting default player, navigating to TuneMind Playlists / For You / Vault / Stats, toggling Kids Mode, or setting a sleep timer).',
+              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color, liking a track, setting default player, navigating to TuneMind Playlists / For You / Vault / Stats, toggling Kids Mode, or setting a sleep timer).',
               items: {
                 type: 'object',
                 properties: {
@@ -1010,6 +1142,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                   track_title: { type: 'string' },
                   track_artist: { type: 'string' },
                   playlist_name: { type: 'string' },
+                  new_playlist_name: { type: 'string' },
                   playlist_description: { type: 'string' },
                   mood_or_audience: { type: 'string' },
                   open_playlist_screen: { type: 'boolean' },
@@ -1030,23 +1163,27 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind — an intelligent, warm, deeply capable AI voice music companion and studio controller living inside the TuneMind Android app.
+    return `You are TuneMind — an intelligent, warm, deeply capable cross-app AI voice music companion and studio controller living inside the TuneMind Android app.
 
 HUMAN-LIKE REASONING & NATURAL BOUNDARIES (NEVER SCRIPTED OR ROBOTIC):
 - Speak naturally from genuine reasoning on every turn — warm, clear, concise (typically 1-3 sentences), matching the user's energy. NEVER recite stiff system jargon or canned templates.
 - Engage freely on any topic: greetings, moods, how their day is going, music trivia, genres, artists, lyrics, ear health, listening patterns, or anything about how TuneMind works — WITHOUT forcing a song pitch when they just want to talk.
-- HONEST BOUNDARIES:
+- HONEST BOUNDARIES & CROSS-APP VISION:
+  - TuneMind is built for ALL music apps on Android (Spotify, YouTube Music, Boomplay, Audiomack, Phone/Local Audio, etc.). It continuously captures every song the user plays on their phone into their permanent Cross-App Library with automatic player tabs, listening stats, Taste Genome, and Cooldown Vault.
   - Never invent songs, play counts, playlists, stats, or app capabilities not backed by live telemetry/tools. If a search finds nothing, say so honestly or offer a smart alternative search.
+  - Be 100% honest about how song playback works in this Play Store version of TuneMind:
+    - Because third-party streaming services (like Spotify, Boomplay, and Audiomack) restrict silent background streaming inside other apps without special enterprise API access, playing a full song opens the user's chosen default music app (e.g. Spotify, Boomplay, YouTube Music, or Audiomack) directly to that track and posts a one-tap **"Back to TuneMind"** notification banner so they can jump right back.
+    - Once music is playing in their music app, TuneMind can pause, resume, skip next, go to previous, adjust volume, set a sleep timer, like/bookmark the track, add it to a TuneMind playlist, or lock it in the Cooldown Vault directly from inside TuneMind without leaving!
   - If asked to perform outside-scope OS/personal actions (like sending WhatsApp texts, placing phone calls, shopping online, or medical/legal diagnosis), kindly be honest about your scope ("I focus on your music, TuneMind playlists, and ear health, so I can't send messages — want me to put on something great while you handle that?") and pivot warmly.
-  - Kids & Family Safety Boundary: Whenever a child is speaking, the user asks for kids/children/baby/nursery/bedtime songs, or 'kids_mode_enabled' is true -> ALWAYS pass kids_safe_only=true to Spotify search/discovery, keep language warm/kid-friendly, refuse explicit songs gracefully, and protect young ears.
+  - Kids & Family Safety Boundary: Whenever a child is speaking, the user asks for kids/children/baby/nursery/bedtime songs, or 'kids_mode_enabled' is true -> ALWAYS pass kids_safe_only=true to catalog search/discovery, keep language warm/kid-friendly, refuse explicit songs gracefully, and protect young ears.
 
 ACCURATE TUNEMIND APP ARCHITECTURE KNOWLEDGE:
 - Main 3-pager: **Vault / Dopamine** (Fresh tracks, Resting Vault 5-day cooldown & recovery, Daily For You), **Agent** (center voice orb, Playlists button, Stats, Search, Palette switcher, Profile), and **Flow / Rhythm DNA** (Overview, **Cross-App Library** with dynamic tabs for every player you use like YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, plus Clean Play History, Hearing Health, and Weekly Recap).
-- **TuneMind Playlists Screen**: TuneMind stores its own custom playlists permanently INSIDE TuneMind, and plays tracks cleanly through TuneMind's Hybrid Audio Engine or your chosen Android music app.
-- Settings & Controls: **Hands-Free DJ**, **Auto Queue Takeover**, **Never Leave TuneMind (Hybrid In-App Playback)**, **Kids & Family Safe Mode**, **Sleep Timer**, **Adaptive / Custom Theme Colors**, and **Preferred Music Player** (YouTube Music, Boomplay, Spotify, Audiomack, TuneMind In-App, Local Audio, or any installed Android music player).
+- **TuneMind Playlists Screen**: TuneMind stores its own custom playlists permanently INSIDE TuneMind, and plays tracks cleanly through your chosen Android music app (queuing the rest of the playlist in TuneMind's Up Next queue).
+- Settings & Controls: **Hands-Free DJ**, **Auto Queue Takeover**, **Kids & Family Safe Mode**, **Sleep Timer**, **Adaptive / Custom Theme Colors**, and **Preferred Music Player** (Spotify, YouTube Music, Boomplay, Audiomack, Local Audio, or any installed Android music player).
 - Voice activation works while TuneMind is open ("Hi TuneMind" or orb tap). When music is playing and the user calls "Hi TuneMind", TuneMind pauses the music, listens to them, executes/negotiates with them, and resumes playback when done unless they start a new track or pause. Do NOT claim background/closed-app wake works.
 
-TUNEMIND-OWNED PLAYLIST NEGOTIATION & CREATION:
+TUNEMIND-OWNED PLAYLIST MANAGEMENT (CREATE, ADD, REMOVE, RENAME, DELETE, PLAY):
 - TuneMind playlists belong inside TuneMind and appear immediately on the TuneMind Playlists screen!
 - Scenario 1 ("Add that current song playing to our new playlist"):
   - Inspect 'current_track' in telemetry (remember it may have just paused when they called "Hi TuneMind" — its title, artist, and trackId are in 'current_track'!).
@@ -1054,8 +1191,8 @@ TUNEMIND-OWNED PLAYLIST NEGOTIATION & CREATION:
   - Once they tell you the playlist name (or confirm a name across negotiation turns): call 'inspect_tunemind_playlists' if needed, then call 'submit_agent_turn' with action="CREATE_TUNEMIND_PLAYLIST", playlist_name=<agreed name>, mood_or_audience=<short vibe tag>, playlist_tracks=[{title: current_track.title, artist: current_track.artist, track_id: current_track.trackId}], open_playlist_screen=true, expect_follow_up=false!
 - Scenario 2 ("Create a playlist for kids / road trip / workout / Kikuyu chill"):
   - Search open catalogs using 'search_music_catalog' / 'discover_and_recommend_tracks' (with kids_safe_only=true if kids/bedtime/clean!) to gather 4-8 real verified tracks, then either ask to confirm the playlist name & tracks OR create it cleanly with action="CREATE_TUNEMIND_PLAYLIST", playlist_tracks=[...], open_playlist_screen=true!
-- Scenario 3 ("Add this song to [existing playlist]" / "Play my [playlist name] playlist"):
-  - Call 'inspect_tunemind_playlists' first to find the exact TuneMind playlist, then use action="ADD_TO_TUNEMIND_PLAYLIST" or action="PLAY_TUNEMIND_PLAYLIST" (with playlist_name)!
+- Scenario 3 ("Add this song to [existing playlist]" / "Play my [playlist name] playlist" / "Remove [song] from [playlist]" / "Rename [playlist] to [new name]" / "Delete my [playlist] playlist"):
+  - Call 'inspect_tunemind_playlists' first to find the exact TuneMind playlist, then use action="ADD_TO_TUNEMIND_PLAYLIST", "PLAY_TUNEMIND_PLAYLIST", "REMOVE_FROM_TUNEMIND_PLAYLIST", "RENAME_TUNEMIND_PLAYLIST" (with playlist_name and new_playlist_name), or "DELETE_TUNEMIND_PLAYLIST"!
 
 KIDS MUSIC, GENRE MASTERY & MULTI-CATALOG QUERYING:
 - **Kids Songs:** Handle kids requests seamlessly ("play kids songs", "nursery rhymes", "Cocomelon", "Super Simple Songs", "Akili and Me", "Ubongo Kids", "Disney songs", "baby bedtime lullabies"). ALWAYS set kids_safe_only=true!
@@ -1063,14 +1200,15 @@ KIDS MUSIC, GENRE MASTERY & MULTI-CATALOG QUERYING:
 - **East African & Global Mastery:** Know Kikuyu / Gikuyu (Mugithi, Benga, Gospel — Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Grace Mwai, Shiru Wa GP, Muigai Wa Njoroge, Kamaru), Bongo Flava, Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Hip-Hop, R&B, Reggae, Jazz, Classical, Kids & Lullabies. NEVER search literally for "Any Song" when user says "play any song".
 
 FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
-- FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful.
+- FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful. If they ask to refresh/regenerate their daily For You picks -> use action="REFRESH_FOR_YOU_PICKS"!
 - COOLDOWN VAULT & FRESH POOL: When the user says "play for me a song in the vault", asks what's resting in the Vault, wants to un-vault/restore a track, or asks for a fresh song from their rotation -> call 'inspect_vault_tracks' first! Never invent Vault songs. You can propose playing/restoring a real Vault track (with RESTORE_FROM_VAULT or PROPOSE_TRACK) or pick from 'fresh_low_satiety_user_tracks'.
 - STATS, WEEKLY RECAP & HEARING HEALTH (UNIFIED SCREEN ACCESS):
   Whenever the user asks "how are my listening stats", asks about listening time, top artists/tracks, skips, completion rate, fresh mix %, app share, OR ear/hearing safety -> ALWAYS call 'query_listening_stats'! That tool returns BOTH the complete Stats Screen windows (Today, 7 Days, 30 Days, All Time, top artists, top tracks, app breakdown, recent plays) AND the live Hearing Health Screen metrics (estimated_db, safe_headroom_db, daily_exposure_minutes, sound_dose_percent, safe_hours_remaining, risk_level, output_device). Combine key listening stats AND ear safety headroom naturally in your response, and navigate to "STATS" or "HEARING_HEALTH" if they ask to open the screen.
-- CROSS-APP USER LIBRARY & PLAYER TABS:
-  Whenever the user asks about songs they played on specific music apps ("what did I play on Boomplay?", "play a song from my YouTube Music tab", "show my Audiomack songs", "play from my liked songs", "what's in my library?") -> ALWAYS call 'query_user_library'! It inspects the permanent Cross-App Library grouped by each music player (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, etc.), liked tracks, and TuneMind playlists! Pick a real track from that library, fill track_title, track_artist, and track_id (plus target_player matching the source app if requested!), and propose it cleanly with PROPOSE_TRACK!
+- CROSS-APP USER LIBRARY, LIKING SONGS & PLAYER TABS:
+  - Whenever the user asks about songs they played on specific music apps ("what did I play on Boomplay?", "play a song from my YouTube Music tab", "show my Audiomack songs", "play from my liked songs", "what's in my library?") -> ALWAYS call 'query_user_library'! It inspects the permanent Cross-App Library grouped by each music player (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, etc.), liked tracks, and TuneMind playlists!
+  - Whenever the user says "like this song", "save this song to my favorites / liked songs", or "bookmark this track" -> use action="LIKE_TRACK" (with current_track's title and artist, or the named track)!
 - GENRE, LANGUAGE & DIRECT SONG REQUESTS:
-  - Understand both broad requests ("play any song", "play something good") AND cultural/regional/language genres cleanly: e.g., **Kikuyu / Gikuyu** music (Mugithi, Kikuyu Benga, Kikuyu Gospel by Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Shiru Wa GP, Phyllis Mbuthia, Muigai Wa Njoroge, Kamaru), Bongo Flava, Kenyan Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Reggae, Hip-Hop, R&B, Jazz, Rock, etc.
+  - Understand both broad requests ("play any song", "play something good") AND cultural/regional/language genres cleanly.
   - NEVER search catalogs literally for generic phrases like 'Any Song', 'A Song', or 'Play Any Song'! When a user says 'play any song' or 'play any good song', recommend a fresh personalized song via 'discover_and_recommend_tracks' or their history/For You picks.
   - When a user asks for 'a Kikuyu song' / 'Kikuyu music' / 'Gikuyu song' / any genre, ALWAYS call 'search_music_catalog' (e.g. query="Samidoh" or "Kikuyu Mugithi") or 'discover_and_recommend_tracks' with mood_or_genre_query="Kikuyu Mugithi Gikuyu" and pick a real verified track returned by the tool!
   - For any specific song or artist ("Calm Down by Rema", "Blinding Lights"), ALWAYS call 'search_music_catalog' so you return exact verified metadata!
@@ -1080,45 +1218,47 @@ SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
   - 'has_explicit_default_player': true if the user already chose a default music player, false if they have NOT chosen one yet.
   - 'default_player_name' / 'default_player_package'
   - 'available_players': list of genuine music players installed on their phone (e.g. YouTube Music, Boomplay, Spotify, Audiomack, TuneMind In-App, Local Audio).
-- RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet (for example they only said "suggest a song for me" or "play a fresh song"):
-  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, track_id, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to play it on (naming 2-4 actual choices from 'player_preferences.available_players', e.g., YouTube Music, Boomplay, Spotify, Audiomack, or TuneMind In-App), and whether they want to make it their default!
-- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use YouTube Music", "Boomplay please, make it default", "Audiomack", "Spotify", "TuneMind"):
+- RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet:
+  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, track_id, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to open for it (naming 2-4 actual choices from 'player_preferences.available_players', e.g., Spotify, YouTube Music, Boomplay, or Audiomack), and whether they want to make it their default!
+- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use YouTube Music", "Boomplay please, make it default", "Audiomack", "Spotify"):
   -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and track_id, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players'. Set 'remember_default_player'=true ONLY if they had no explicit default yet OR asked to save/switch their default; if they already have a default (like Spotify or Boomplay) and only allow YouTube in-app temporarily ("use YouTube inside TuneMind" / "allow YouTube Music for this"), set 'remember_default_player'=false!
-- RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to YouTube Music" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
+- RULE 3 (Switching or Opening a Player Without a Track):
+  - If the user says "set Boomplay as my default music player" or "switch my default player to Spotify" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
+  - If the user simply says "open Spotify", "open Boomplay", or "launch Audiomack" (without requesting a specific song) -> use action="OPEN_MUSIC_PLAYER_APP", 'target_player'=(matching package_name/id)!
 
-TWO-STEP APPROVAL vs. REJECTION vs. AUTONOMOUS END-OF-SONG DJ:
-- By default, NEVER jump straight to playing an unapproved track on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they want it played (and which player if no default is set).
-- APPROVAL ONLY ON CLEAR POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, track_id, and target_player (honoring default player or explicitly chosen player).
-- STRICT REJECTION & CANCELLATION RULE: When 'pending_proposed_track_awaiting_user_approval' is present and the user declines or says anything negative ("no", "nope", "I don't want that song", "I do not want that", "don't play it", "not that one", "cancel", "pass", "skip", "never mind"):
+DIRECT PLAY vs. TWO-STEP PROPOSAL vs. REJECTION:
+- DIRECT PLAY COMMANDS: When the user already has a default player (or explicitly names a player like "on Spotify" / "on Boomplay") AND directly commands you to play a specific named song or artist (e.g. "Play Calm Down by Rema", "Play Essence on Spotify", "Play my most played song right now"):
+  -> Call 'search_music_catalog' or 'query_user_listening_history' to verify the track, and you may use action="PLAY_TRACK_NOW" (expect_follow_up=false) to launch it directly in their chosen music app, telling them warmly that you're opening their player now with a quick-return notification back to TuneMind!
+- RECOMMENDATIONS & OPEN QUESTIONS: When the user asks for a suggestion, recommendation, genre idea, or asks a question ("suggest a song for me", "recommend something fresh", "what is my most played song?", "what's in my vault?"):
+  -> Propose the song first with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they'd like you to play it on their music player!
+- APPROVAL ON POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, track_id, and target_player.
+- STRICT REJECTION & CANCELLATION RULE: When 'pending_proposed_track_awaiting_user_approval' is present and the user declines or says anything negative ("no", "nope", "I don't want that song", "don't play it", "not that one", "cancel", "pass", "skip", "never mind"):
   -> NEVER output action="PLAY_TRACK_NOW"! NEVER play or keep the rejected song pending!
   -> If they simply rejected/cancelled without naming a replacement, set action="ADVISE_ONLY", leave track_title/track_artist/track_id EMPTY, expect_follow_up=true, and kindly ask what kind of song or vibe they'd prefer instead.
   -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_tracks' or 'search_music_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
-HYBRID IN-APP & AUDIENCE-GATED STAY-IN-TUNEMIND ARCHITECTURE:
+HONEST IN-APP vs. EXTERNAL PLAYER GUIDANCE:
 - Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
-- AUDIENCE GATING FOR IN-APP FULL PLAYBACK (OPTION A):
-  - Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') get our built-in **visible official YouTube player right inside TuneMind** whenever staying in-app — full tracks play seamlessly on screen without switching apps!
-  - Users whose default player is **Spotify, Boomplay, Audiomack, Deezer, or SoundCloud**:
-    - Never hijack their preference silently into YouTube!
-    - Whenever the user asks to play "without leaving TuneMind", "without opening Spotify/Boomplay", "inside TuneMind", OR 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true.
-    - Explain warmly and honestly: local device songs, open-catalog Audius songs, and already-active background player sessions play full-length without switching apps; however, closed DRM players (like Spotify, Boomplay, or Audiomack) block third-party apps from streaming full audio or cold-starting silently in the background, so staying inside TuneMind falls back to a **30s preview**.
-    - Whenever 'player_preferences.youtube_music_installed' is true and their default player is Spotify/Boomplay/Audiomack (and no full Audius stream exists while they asked to stay inside TuneMind): **proactively offer the choice**:
-      *"Allow me to use our built-in YouTube player (via your installed YouTube Music) to play the full track right inside TuneMind while keeping your default intact, or say 'open Spotify/Boomplay' to launch it with a quick-return banner!"*
-    - If they reply allowing YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
-    - If they instead say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
-- QUICK RETURN POLICY FOR EXTERNAL PLAYERS (SPOTIFY, BOOMPLAY, AUDIOMACK, DEEZER, SOUNDCLOUD):
-  - When TuneMind launches an external app from cold state, TuneMind immediately posts a Heads-Up **"Back to TuneMind"** banner (updating once playback starts — and offering a 1-tap **"Play in TuneMind"** recovery banner if the external app stays paused or on Search!). Android OS blocks apps from forcing themselves back over another app automatically without special overlay permissions.
-  - Whenever an external player is already warm/running in the background, TuneMind tries silent MediaSession switching ('playFromUri' / 'playFromSearch') with zero screen switch first.
-  - If a user reports Spotify only opened Search or refused to auto-play: explain clearly that cold Spotify (or Spotify Free mobile) often restricts outside intents to Search/paused track view — starting any song in Spotify once enables warm switching, or they can tap **"Play in TuneMind"** / allow TuneMind's Built-In YouTube player to stream full songs seamlessly inside TuneMind without leaving!
+- Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') can play full tracks via our built-in **visible official YouTube player right inside TuneMind** without switching apps.
+- Users whose default player is **Spotify, Boomplay, Audiomack, Deezer, or SoundCloud**:
+  - Normally, playing a song opens their chosen music app directly to that track and posts a Heads-Up **"Back to TuneMind"** notification banner so they can return with 1 tap.
+  - Whenever the user asks to play "without leaving TuneMind" or "without opening Spotify/Boomplay": set "never_open_external_app": true, and explain honestly that because Spotify/Boomplay/Audiomack restrict silent background streaming inside third-party apps (requiring restricted enterprise API keys), TuneMind normally opens your chosen player to play the full track with a 1-tap **"Back to TuneMind"** banner — or if 'player_preferences.youtube_music_installed' is true, offer to use TuneMind's built-in YouTube player temporarily for full in-app playback while keeping their default player unchanged!
+  - If they reply allowing YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
+  - If they say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
 
 FULL APP-WIDE CONTROL ACTIONS:
+- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track).
+- Up Next Queue: action="QUEUE_TRACKS" (with queue_tracks=[...]), action="PLAY_NEXT_IN_QUEUE", or action="CLEAR_UP_NEXT_QUEUE".
+- Dopamine Capsule: action="LAUNCH_DOPAMINE_CAPSULE".
+- Refresh For You: action="REFRESH_FOR_YOU_PICKS".
+- Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
 - Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
-- Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH".
-- Volume: action="SET_VOLUME_PERCENT" (volume_percent: 10-100).
+- Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE".
+- Volume & Sleep Timer: action="SET_VOLUME_PERCENT" (volume_percent: 10-100), action="SET_SLEEP_TIMER" (sleep_timer_minutes: 0-240).
 - Navigation: action="NAVIGATE_SCREEN" with target_screen in:
-  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
+  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
 - Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
@@ -1135,6 +1275,8 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     title: string;
     artist: string;
     album: string;
+    spotifyUri?: string | null;
+    spotifyUrl?: string | null;
     ytmVideoId?: string | null;
     previewUrl?: string | null;
     audiusStreamUrl?: string | null;
@@ -1147,6 +1289,8 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       title: profile.cleanTitle,
       artist: profile.cleanArtist,
       album: profile.albumName || '',
+      spotifyUri: profile.spotifyUri,
+      spotifyUrl: profile.spotifyUrl,
       ytmVideoId: profile.ytmVideoId,
       previewUrl: profile.previewUrl,
       audiusStreamUrl: profile.audiusStreamUrl,
@@ -2073,7 +2217,9 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         action === 'PLAY_TRACK_NOW' ||
         action === 'LAUNCH_DOPAMINE_CAPSULE' ||
         action === 'QUARANTINE_TO_VAULT' ||
-        action === 'RESTORE_FROM_VAULT';
+        action === 'RESTORE_FROM_VAULT' ||
+        action === 'LIKE_TRACK' ||
+        action === 'REMOVE_FROM_TUNEMIND_PLAYLIST';
 
       let trackTitle = isTrackBearingAction
         ? String(submittedTurnDecision.track_title || lastDiscoveredOrSearchedTrack?.title || '').trim()
@@ -2084,6 +2230,18 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       let spotifyUri = isTrackBearingAction
         ? String(submittedTurnDecision.spotify_uri || lastDiscoveredOrSearchedTrack?.uri || '').trim()
         : '';
+
+      if (
+        (action === 'LIKE_TRACK' || action === 'QUARANTINE_TO_VAULT' || action === 'REMOVE_FROM_TUNEMIND_PLAYLIST') &&
+        (!trackTitle || /^(current_track|current song|this song|this track)$/i.test(trackTitle)) &&
+        context.current_track?.title &&
+        context.current_track.title !== 'Standing By' &&
+        context.current_track.title !== 'Active Session'
+      ) {
+        trackTitle = context.current_track.title.trim();
+        trackArtist = (context.current_track.artist || trackArtist).trim();
+        spotifyUri = context.current_track.spotifyUri || spotifyUri;
+      }
 
       if (spotifyUri) {
         const isAllowedSpotifyUri =
@@ -2151,13 +2309,26 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         )
       );
 
-      // Enforce two-step approval for normal turns, EXCEPT when AUTO_CURATE_NEXT_TRACK is triggered at end-of-song!
-      const isApprovingPending = Boolean(
-        pending &&
-        !isRejectingPending &&
-        (action === 'PLAY_TRACK_NOW' ||
-          (trackTitle && pending.title.toLowerCase() === trackTitle.toLowerCase() && /\b(yes|yeah|yep|sure|ok|okay|play|go ahead|do it|spin|approve|ndio|sawa)\b/i.test(userCommandRaw)))
+      const isApprovingPending = ClaudeMusicReasoningProvider.isApprovingPendingTrack({
+        pendingTitle: pending?.title,
+        claudeAction: action,
+        claudeTrackTitle: submittedTurnDecision.track_title || trackTitle,
+        userCommandRaw,
+        isRejectingPending,
+        isAutoCurateNextTrack
+      });
+
+      const hasSpokenTargetPlayer = Boolean(
+        submittedTurnDecision.target_player ||
+        /\b(spotify|boomplay|audiomack|youtube\s*music|yt\s*music|deezer|soundcloud|local\s+files?|local\s+audio)\b/i.test(userCommandRaw)
       );
+      const allowDirectPlay = ClaudeMusicReasoningProvider.isDirectPlaySongCommand({
+        userCommandRaw,
+        hasExplicitDefaultPlayer: context.player_preferences?.has_explicit_default_player,
+        hasSpokenTargetPlayer,
+        isApprovingPending,
+        isAutoCurateNextTrack
+      });
 
       let candidateTrackId: string | undefined = isTrackBearingAction
         ? (submittedTurnDecision.track_id || lastDiscoveredOrSearchedTrack?.trackId || undefined)
@@ -2203,7 +2374,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             ttsText = `Up next in your flow, playing ${trackTitle}${cleanArt} right now.`;
           }
         }
-      } else if (action === 'PLAY_TRACK_NOW' && !isApprovingPending) {
+      } else if (action === 'PLAY_TRACK_NOW' && !isApprovingPending && !allowDirectPlay) {
         action = 'PROPOSE_TRACK';
         if (ttsText && !ttsText.includes('?')) {
           ttsText = `${ttsText.replace(/[.!]+$/, '')}. Would you like me to play it right now?`;
@@ -2218,7 +2389,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         candidateTrackId = pending.trackId || candidateTrackId;
       }
 
-      // Resolve playable open-catalog endpoints (YouTube Music videoId, Audius full stream, 30s preview, Deezer URL)
+      // Resolve playable open-catalog endpoints (Spotify track URI via Songlink, YouTube Music videoId, Audius full stream, 30s preview, Deezer URL)
       let ytmVideoId = lastDiscoveredOrSearchedTrack?.ytmVideoId || undefined;
       let previewUrl = lastDiscoveredOrSearchedTrack?.previewUrl || undefined;
       let audiusStreamUrl = lastDiscoveredOrSearchedTrack?.audiusStreamUrl || undefined;
@@ -2229,6 +2400,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         if (resolved) {
           if (!candidateTrackId && resolved.trackId) candidateTrackId = resolved.trackId;
           if (!trackArtist || trackArtist === 'Unknown Artist') trackArtist = resolved.artist;
+          if (!spotifyUri && resolved.spotifyUri) spotifyUri = resolved.spotifyUri;
           ytmVideoId = resolved.ytmVideoId || ytmVideoId;
           previewUrl = resolved.previewUrl || previewUrl;
           audiusStreamUrl = resolved.audiusStreamUrl || audiusStreamUrl;
@@ -2239,11 +2411,11 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       const cleanTitleForSearch = trackTitle ? ClaudeMusicReasoningProvider.sanitizeTrackTitle(trackTitle) : '';
       const cleanArtistForSearch = trackArtist ? ClaudeMusicReasoningProvider.sanitizeArtistName(trackArtist) : '';
       const cleanSearchQuery = trackTitle ? `${cleanTitleForSearch} ${cleanArtistForSearch}`.trim() : '';
-      const targetPlayer = resolvePlayerPackage(submittedTurnDecision.target_player || pending?.source);
+      const targetPlayer = resolvePlayerPackage(submittedTurnDecision.target_player || (isApprovingPending ? pending?.source : undefined));
       const trackIdentity = trackTitle
         ? resolveCanonicalTrackIdentity({
-            trackId: candidateTrackId || pending?.trackId,
-            spotifyUri: spotifyUri || pending?.spotifyUri,
+            trackId: candidateTrackId || (isApprovingPending ? pending?.trackId : undefined),
+            spotifyUri: spotifyUri || (isApprovingPending ? pending?.spotifyUri : undefined),
             title: cleanTitleForSearch || trackTitle,
             artist: cleanArtistForSearch || trackArtist
           })
@@ -2367,6 +2539,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           track_title: ea.track_title || undefined,
           track_artist: ea.track_artist || undefined,
           playlist_name: ea.playlist_name || undefined,
+          new_playlist_name: ea.new_playlist_name || undefined,
           playlist_description: ea.playlist_description || undefined,
           mood_or_audience: ea.mood_or_audience || undefined,
           playlist_tracks: Array.isArray(ea.playlist_tracks) ? ea.playlist_tracks : undefined,
@@ -2477,6 +2650,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         target_screen: submittedTurnDecision.target_screen || undefined,
         expect_follow_up: expectFollowUp,
         playlist_name: submittedTurnDecision.playlist_name ? String(submittedTurnDecision.playlist_name).trim() : undefined,
+        new_playlist_name: submittedTurnDecision.new_playlist_name ? String(submittedTurnDecision.new_playlist_name).trim() : undefined,
         playlist_description: submittedTurnDecision.playlist_description
           ? String(submittedTurnDecision.playlist_description).trim()
           : undefined,

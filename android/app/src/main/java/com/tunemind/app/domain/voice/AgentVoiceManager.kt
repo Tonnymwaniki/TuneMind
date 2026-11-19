@@ -2571,13 +2571,6 @@ class AgentVoiceManager(
         val isRejectingPending = Regex(
             "\\b(no|nope|nah|cancel|never\\s*mind|not\\s+(?:that|this|really|now)|don'?t|do\\s+not|won'?t|wouldn'?t|pass|skip|reject|decline|dislike|hate|stop|another|different|something\\s+else|someone\\s+else|change|else|next|forget\\s+it)\\b"
         ).containsMatchIn(sanitizedForRejectCheck)
-        val isApprovingPending = pendingBeforeTurn != null && !isSyntheticPrompt && !isRejectingPending && (
-            rawAction == "PLAY_TRACK_NOW" ||
-            spokenPlayerPkg != null ||
-            Regex("\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play|play it|play that|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|please|approve|confirm|start|spin it|guess|yet|yea|yah)\\b")
-                .containsMatchIn(userTranscriptLower) ||
-            (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
-        )
 
         var rawTrackTitle = cmdObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
             ?: toolObj?.optString("track_title", "")?.takeIf { it.isNotBlank() }
@@ -2592,6 +2585,56 @@ class AgentVoiceManager(
             cmdObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
                 ?: toolObj?.optString("spotify_uri", "")?.takeIf { it.isNotBlank() }
         )
+        var rawYtmVideoId = cmdObj?.optString("ytm_video_id", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("ytm_video_id", "")?.takeIf { it.isNotBlank() }
+        var rawPreviewUrl = cmdObj?.optString("preview_url", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("preview_url", "")?.takeIf { it.isNotBlank() }
+        var rawAudiusStreamUrl = cmdObj?.optString("audius_stream_url", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("audius_stream_url", "")?.takeIf { it.isNotBlank() }
+        var rawDeezerUrl = cmdObj?.optString("deezer_url", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("deezer_url", "")?.takeIf { it.isNotBlank() }
+
+        val pendingNorm = pendingBeforeTurn?.let {
+            com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(it.title)
+        }.orEmpty()
+        val backendTrackNorm = rawTrackTitle?.let {
+            com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(it)
+        }.orEmpty()
+        val backendPickedDifferentTrack = backendTrackNorm.isNotBlank() &&
+            pendingNorm.isNotBlank() &&
+            backendTrackNorm != pendingNorm &&
+            !backendTrackNorm.contains(pendingNorm) &&
+            !pendingNorm.contains(backendTrackNorm)
+
+        val explicitNamedSongAfterPlay = Regex(
+            "^\\s*(?:please\\s+|hey\\s+|hi\\s+|tunemind\\s+)?(?:play|spin|put\\s+on)\\s+(?:for\\s+me\\s+|me\\s+)?(.+)$"
+        ).find(userTranscriptLower)?.groupValues?.getOrNull(1)?.let { tail ->
+            val stripped = tail
+                .replace(Regex("\\b(?:on|with|in|using|via)\\s+(?:spotify|boomplay|audiomack|youtube\\s*music|yt\\s*music|deezer|soundcloud|tunemind|my\\s+player)\\b"), "")
+                .replace(Regex("\\b(?:right\\s+now|now|please|for\\s+me)\\b"), "")
+                .trim()
+            val isPronoun = Regex("^(?:it|that|this|the\\s+song|the\\s+track|that\\s+one|this\\s+one)?$").matches(stripped)
+            if (isPronoun) null else com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(stripped)
+        }
+        val userAskedForDifferentNamedSong = !explicitNamedSongAfterPlay.isNullOrBlank() &&
+            pendingNorm.isNotBlank() &&
+            explicitNamedSongAfterPlay != pendingNorm &&
+            !explicitNamedSongAfterPlay.contains(pendingNorm) &&
+            !pendingNorm.contains(explicitNamedSongAfterPlay)
+
+        val isApprovingPending = pendingBeforeTurn != null &&
+            !isSyntheticPrompt &&
+            !isRejectingPending &&
+            !backendPickedDifferentTrack &&
+            !userAskedForDifferentNamedSong && (
+                rawAction == "PLAY_TRACK_NOW" ||
+                (spokenPlayerPkg != null && explicitNamedSongAfterPlay.isNullOrBlank()) ||
+                Regex("\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play it|play that|play this|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|approve|confirm|spin it|yea|yah)\\b")
+                    .containsMatchIn(userTranscriptLower) ||
+                Regex("^\\s*(?:please\\s+)?(?:play|spin|start)(?:\\s+(?:on|with|via|in)\\s+\\w+(?:\\s+music)?)?\\s*[.!?]*\\s*$")
+                    .matches(userTranscriptLower) ||
+                (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
+            )
 
         if (isApprovingPending && pendingBeforeTurn != null) {
             rawTrackTitle = pendingBeforeTurn.title
@@ -2611,8 +2654,16 @@ class AgentVoiceManager(
         // Only run local track matching fallback if backend gave no advice or offline fallback ran.
         val isPlaylistOrMetaAction = rawAction == "CREATE_TUNEMIND_PLAYLIST" ||
             rawAction == "ADD_TO_TUNEMIND_PLAYLIST" ||
+            rawAction == "REMOVE_FROM_TUNEMIND_PLAYLIST" ||
+            rawAction == "RENAME_TUNEMIND_PLAYLIST" ||
+            rawAction == "DELETE_TUNEMIND_PLAYLIST" ||
             rawAction == "PLAY_TUNEMIND_PLAYLIST" ||
             rawAction == "QUEUE_TRACKS" ||
+            rawAction == "PLAY_NEXT_IN_QUEUE" ||
+            rawAction == "CLEAR_UP_NEXT_QUEUE" ||
+            rawAction == "LIKE_TRACK" ||
+            rawAction == "REFRESH_FOR_YOU_PICKS" ||
+            rawAction == "OPEN_MUSIC_PLAYER_APP" ||
             rawAction == "SET_SLEEP_TIMER" ||
             rawAction == "TOGGLE_KIDS_MODE"
 
@@ -2641,9 +2692,8 @@ class AgentVoiceManager(
             if (!topTitle.isNullOrBlank()) {
                 rawTrackTitle = topTitle
                 rawTrackArtist = topArtist
-                resolvedSpotifyUri = libTop?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
-                    ?: libTop?.deezerUrl?.takeIf { it.isNotBlank() }
-                    ?: resolveOpenCatalogLinkBlocking(topTitle, topArtist)
+                rawYtmVideoId = libTop?.ytmVideoId?.takeIf { it.isNotBlank() } ?: rawYtmVideoId
+                rawDeezerUrl = libTop?.deezerUrl?.takeIf { it.isNotBlank() } ?: rawDeezerUrl
                 rawSearchQuery = "$topTitle $topArtist".trim()
                 val artistPart = if (topArtist.isNotBlank() && topArtist != "Unknown Artist") " by $topArtist" else ""
                 val countNote = if (topPlays > 1) " with $topPlays plays in your listening history" else " from the top of your rotation"
@@ -2668,7 +2718,7 @@ class AgentVoiceManager(
             recordAgentSuggestedTrack(rawTrackTitle)
         }
 
-        if (resolvedSpotifyUri.isNullOrBlank() && !rawTrackTitle.isNullOrBlank()) {
+        if (!rawTrackTitle.isNullOrBlank() && (rawYtmVideoId.isNullOrBlank() || rawDeezerUrl.isNullOrBlank())) {
             val normTargetTitle = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawTrackTitle!!)
             val normExpectedArtist = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawTrackArtist ?: "")
             val libHit = getCrossAppLibrarySnapshot().firstOrNull { lib ->
@@ -2682,20 +2732,27 @@ class AgentVoiceManager(
                     normExpectedArtist.contains(normLibArtist)
                 titleMatchesExactly && artistMatches
             }
-            resolvedSpotifyUri = libHit?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
-                ?: libHit?.deezerUrl?.takeIf { it.isNotBlank() }
-                ?: resolveOpenCatalogLinkBlocking(
-                    title = rawTrackTitle!!,
-                    artist = rawTrackArtist ?: "",
-                    fullQuery = rawSearchQuery.ifBlank { "${rawTrackTitle} ${rawTrackArtist ?: ""}".trim() }
-                )
+            if (libHit != null) {
+                if (rawYtmVideoId.isNullOrBlank() && !libHit.ytmVideoId.isNullOrBlank()) {
+                    rawYtmVideoId = libHit.ytmVideoId
+                }
+                if (rawDeezerUrl.isNullOrBlank() && !libHit.deezerUrl.isNullOrBlank()) {
+                    rawDeezerUrl = libHit.deezerUrl
+                }
+                if (rawPreviewUrl.isNullOrBlank() && !libHit.previewUrl.isNullOrBlank()) {
+                    rawPreviewUrl = libHit.previewUrl
+                }
+                if (rawAudiusStreamUrl.isNullOrBlank() && !libHit.audiusStreamUrl.isNullOrBlank()) {
+                    rawAudiusStreamUrl = libHit.audiusStreamUrl
+                }
+            }
         }
 
         val targetPlayerPkg = resolveTargetPlayerPackage(
             rawPlayer = spokenPlayerPkg
                 ?: toolObj?.optString("target_player", "")?.takeIf { it.isNotBlank() }
                 ?: cmdObj?.optString("target_player", "")?.takeIf { it.isNotBlank() },
-            fallbackPkg = pendingBeforeTurn?.source
+            fallbackPkg = if (isApprovingPending) pendingBeforeTurn?.source else null
         )
         val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
         val hasExplicitDefaultPlayer = registry.hasExplicitDefault()
@@ -2716,7 +2773,7 @@ class AgentVoiceManager(
             else -> null
         }
 
-        // Determine whether this turn is proposing a song (must wait for user approval) vs executing an approved song
+        // Determine whether this turn is proposing a song (must wait for user approval) vs executing an approved/direct song
         val isTrackProposalOrPlayAttempt = !rawTrackTitle.isNullOrBlank() && (
             wantsMostPlayed ||
             wantsNewOrRecommend ||
@@ -2725,6 +2782,16 @@ class AgentVoiceManager(
             rawAction == "PLAY_TRACK_NOW" ||
             rawIntent == "OS_MEDIA_NEXT_AND_DEEP_LINK"
         )
+        val isDirectPlayCommand = (hasExplicitDefaultPlayer || spokenPlayerPkg != null) &&
+            !isSyntheticPrompt &&
+            !Regex("^\\s*(?:what|which|who|how|why|where|when|can\\s+you\\s+suggest|can\\s+you\\s+recommend|do\\s+you\\s+have|tell\\s+me|show\\s+me)\\b").containsMatchIn(userTranscriptLower) &&
+            !Regex("\\b(?:recommend|recommendation|suggest|suggestion|what\\s+is\\s+my|what'?s\\s+my|what\\s+do\\s+you\\s+have)\\b").containsMatchIn(userTranscriptLower) &&
+            Regex("\\b(?:play|spin|put\\s+on|start\\s+playing)\\b").containsMatchIn(userTranscriptLower) &&
+            !(
+                Regex("\\b(?:play|spin|put\\s+on)\\s+(?:for\\s+me\\s+|me\\s+)?(?:(?:a|an|any|some|another|different|random|fresh|new|good|nice|cool|great|chill)\\s+)*(?:song|songs|track|tracks|music|tune|vibe|something|anything)\\b").containsMatchIn(userTranscriptLower) &&
+                    !Regex("\\b(?:by|from)\\s+[a-z0-9]").containsMatchIn(userTranscriptLower) &&
+                    !Regex("\\bmost\\s+(?:played|listened)\\b").containsMatchIn(userTranscriptLower)
+            )
 
         val effectiveAction: String
         val effectiveIntent: String
@@ -2785,17 +2852,17 @@ class AgentVoiceManager(
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
             spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
                 ?: "Awesome, playing ${rawTrackTitle}$artistPart right now."
-        } else if (wasAwaitingEndOfSongChoice && isTrackProposalOrPlayAttempt && !rawTrackTitle.isNullOrBlank()) {
-            // When the user responds to the End-of-Song prompt ("Tell me what song you want next"),
-            // immediately play their requested song without requiring a second confirmation!
+        } else if ((wasAwaitingEndOfSongChoice || (rawAction == "PLAY_TRACK_NOW" && isDirectPlayCommand)) && isTrackProposalOrPlayAttempt && !rawTrackTitle.isNullOrBlank()) {
+            // Execute direct play commands (when target/default player is known) or End-of-Song choice immediately!
             effectiveAction = "PLAY_TRACK_NOW"
             effectiveIntent = "OS_MEDIA_NEXT_AND_DEEP_LINK"
             effectiveExpectFollowUp = false
             updatePendingProposedTrack(null)
             val artistPart = if (!rawTrackArtist.isNullOrBlank() && rawTrackArtist != "Unknown Artist") " by $rawTrackArtist" else ""
-            spokenTts = "Spinning ${rawTrackTitle}$artistPart for you right now."
+            spokenTts = spokenTts.takeIf { it.isNotBlank() && !it.contains("?") }
+                ?: "Spinning ${rawTrackTitle}$artistPart for you right now."
         } else if (isTrackProposalOrPlayAttempt) {
-            // Always propose the song first and wait for the user's approval before executing!
+            // Propose the song first and wait for the user's approval before executing!
             effectiveAction = if (rawAction == "LAUNCH_DOPAMINE_CAPSULE") "LAUNCH_DOPAMINE_CAPSULE" else "PROPOSE_TRACK"
             effectiveIntent = "NONE"
             effectiveExpectFollowUp = true
@@ -2895,6 +2962,7 @@ class AgentVoiceManager(
                             never_open_external_app = if (item.has("never_open_external_app")) item.optBoolean("never_open_external_app") else null,
                             target_screen = item.optString("target_screen", "").takeIf { it.isNotBlank() },
                             playlist_name = item.optString("playlist_name", "").takeIf { it.isNotBlank() },
+                            new_playlist_name = item.optString("new_playlist_name", "").takeIf { it.isNotBlank() },
                             playlist_description = item.optString("playlist_description", "").takeIf { it.isNotBlank() },
                             mood_or_audience = item.optString("mood_or_audience", "").takeIf { it.isNotBlank() },
                             playlist_tracks = parseTrackInputArray(item.optJSONArray("playlist_tracks")),
@@ -2914,6 +2982,10 @@ class AgentVoiceManager(
             track_artist = rawTrackArtist,
             track_id = finalCanonicalTrackId,
             spotify_uri = resolvedSpotifyUri,
+            ytm_video_id = rawYtmVideoId,
+            preview_url = rawPreviewUrl,
+            audius_stream_url = rawAudiusStreamUrl,
+            deezer_url = rawDeezerUrl,
             target_player = targetPlayerPkg,
             remember_default_player = rememberDefaultPlayer,
             volume_percent = if (toolObj != null && toolObj.has("volume_percent")) toolObj.optInt("volume_percent", 60) else null,
@@ -2927,6 +2999,7 @@ class AgentVoiceManager(
             target_screen = toolObj?.optString("target_screen", "")?.takeIf { it.isNotBlank() },
             expect_follow_up = effectiveExpectFollowUp,
             playlist_name = toolObj?.optString("playlist_name", "")?.takeIf { it.isNotBlank() },
+            new_playlist_name = toolObj?.optString("new_playlist_name", "")?.takeIf { it.isNotBlank() },
             playlist_description = toolObj?.optString("playlist_description", "")?.takeIf { it.isNotBlank() },
             mood_or_audience = toolObj?.optString("mood_or_audience", "")?.takeIf { it.isNotBlank() },
             playlist_tracks = parsedPlaylistTracks,
@@ -2959,6 +3032,10 @@ class AgentVoiceManager(
                 track_artist = rawTrackArtist,
                 track_id = finalCanonicalTrackId,
                 spotify_uri = resolvedSpotifyUri,
+                ytm_video_id = rawYtmVideoId,
+                preview_url = rawPreviewUrl,
+                audius_stream_url = rawAudiusStreamUrl,
+                deezer_url = rawDeezerUrl,
                 never_open_external_app = resolvedNeverOpenExternalApp
             ),
             voice_agent_audio_base64 = if (effectiveAction == "PROPOSE_TRACK" && rawAction == "PLAY_TRACK_NOW") {

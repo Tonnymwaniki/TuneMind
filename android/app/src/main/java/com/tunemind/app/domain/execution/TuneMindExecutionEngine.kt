@@ -26,6 +26,10 @@ data class AgentToolCallPayload(
     val track_artist: String? = null,
     val track_id: String? = null,
     val spotify_uri: String? = null,
+    val ytm_video_id: String? = null,
+    val preview_url: String? = null,
+    val audius_stream_url: String? = null,
+    val deezer_url: String? = null,
     val target_player: String? = null,
     val remember_default_player: Boolean? = null,
     val volume_percent: Int? = null,
@@ -39,6 +43,7 @@ data class AgentToolCallPayload(
     val target_screen: String? = null,
     val expect_follow_up: Boolean = false,
     val playlist_name: String? = null,
+    val new_playlist_name: String? = null,
     val playlist_description: String? = null,
     val mood_or_audience: String? = null,
     val playlist_tracks: List<PlaylistTrackInput> = emptyList(),
@@ -58,6 +63,10 @@ data class OsExecutionCommand(
     val track_artist: String? = null,
     val track_id: String? = null,
     val spotify_uri: String? = null,
+    val ytm_video_id: String? = null,
+    val preview_url: String? = null,
+    val audius_stream_url: String? = null,
+    val deezer_url: String? = null,
     val never_open_external_app: Boolean = false
 )
 
@@ -164,7 +173,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                             trackTitle = response.os_execution_command.track_title,
                             trackArtist = response.os_execution_command.track_artist,
                             trackId = response.os_execution_command.track_id ?: response.agent_tool_call?.track_id,
-                            spotifyUri = response.os_execution_command.spotify_uri,
+                            spotifyUri = response.os_execution_command.spotify_uri ?: response.agent_tool_call?.spotify_uri,
+                            ytmVideoId = response.os_execution_command.ytm_video_id ?: response.agent_tool_call?.ytm_video_id,
+                            deezerUrl = response.os_execution_command.deezer_url ?: response.agent_tool_call?.deezer_url,
                             neverOpenExternalApp = response.os_execution_command.never_open_external_app,
                             onLaunchResult = onLaunchResult
                         )
@@ -417,12 +428,14 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         trackArtist: String? = null,
         trackId: String? = null,
         spotifyUri: String? = null,
+        ytmVideoId: String? = null,
+        deezerUrl: String? = null,
         neverOpenExternalApp: Boolean = false,
         onLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
     ) {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
-                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' id: '$trackId' uri: '$spotifyUri' neverOpenExternalApp=$neverOpenExternalApp")
+                Log.d(TAG, "Auto-playing synced track in $targetPackage with query: '$searchQuery' title: '$trackTitle' artist: '$trackArtist' id: '$trackId' uri: '$spotifyUri' ytm: '$ytmVideoId' neverOpenExternalApp=$neverOpenExternalApp")
 
                 val cleanQuery = searchQuery.trim()
                 val byParts = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE).split(cleanQuery, 2)
@@ -470,29 +483,44 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     else -> "Target Player"
                 }
 
-                // Resolve clean cross-app playable metadata (no Spotify Developer API needed)
-                val openResolved = com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
-                    context = context,
-                    cleanTitle = resolvedTitle,
-                    cleanArtist = resolvedArtist,
-                    fullQuery = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() }
-                )
+                val isSpotifyTarget = finalPackageName.contains("spotify", ignoreCase = true)
+                val isYouTubeTarget = finalPackageName.contains("youtube", ignoreCase = true)
+                val isAudiomackTarget = finalPackageName.contains("audiomack", ignoreCase = true)
+                val directBackendSpotifyUri = com.tunemind.app.provider.MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
 
+                // Resolve clean cross-app playable metadata (no Spotify Developer API needed)
+                val openResolved = if (
+                    (isSpotifyTarget && !directBackendSpotifyUri.isNullOrBlank()) ||
+                    (isYouTubeTarget && !ytmVideoId.isNullOrBlank())
+                ) {
+                    null
+                } else {
+                    com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
+                        context = context,
+                        cleanTitle = resolvedTitle,
+                        cleanArtist = resolvedArtist,
+                        fullQuery = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() }
+                    )
+                }
+
+                val effectiveYtmId = ytmVideoId?.takeIf { it.isNotBlank() } ?: openResolved?.ytmVideoId
                 val canonicalIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
                     trackId = trackId ?: openResolved?.trackId,
                     spotifyUri = null,
                     title = resolvedTitle,
                     artist = resolvedArtist
                 )
-                val isSpotifyTarget = finalPackageName.contains("spotify", ignoreCase = true)
                 val explicitDeepLink = when {
-                    !openResolved?.ytmVideoId.isNullOrBlank() && finalPackageName.contains("youtube", ignoreCase = true) ->
-                        "https://music.youtube.com/watch?v=${openResolved!!.ytmVideoId}"
+                    isYouTubeTarget && !effectiveYtmId.isNullOrBlank() ->
+                        "https://music.youtube.com/watch?v=$effectiveYtmId"
+                    isSpotifyTarget && !directBackendSpotifyUri.isNullOrBlank() -> directBackendSpotifyUri
                     isSpotifyTarget && !openResolved?.spotifyUri.isNullOrBlank() -> openResolved!!.spotifyUri
                     isSpotifyTarget && !spotifyUri.isNullOrBlank() && spotifyUri.contains("spotify", ignoreCase = true) ->
                         spotifyUri.trim()
                     isSpotifyTarget && !openResolved?.spotifyUrl.isNullOrBlank() -> openResolved!!.spotifyUrl
-                    !isSpotifyTarget && !openResolved?.deezerUrl.isNullOrBlank() -> openResolved!!.deezerUrl
+                    isAudiomackTarget && !openResolved?.audiomackUrl.isNullOrBlank() -> openResolved!!.audiomackUrl
+                    !isSpotifyTarget && !(deezerUrl ?: openResolved?.deezerUrl).isNullOrBlank() ->
+                        (deezerUrl ?: openResolved?.deezerUrl)!!.trim()
                     !spotifyUri.isNullOrBlank() && spotifyUri.startsWith("http", ignoreCase = true) -> spotifyUri.trim()
                     else -> null
                 }
@@ -504,7 +532,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     reason = "Autonomous neuro-acoustic flow match",
                     confidence = 0.98f,
                     trackId = canonicalIdentity.trackId,
-                    providerTrackId = openResolved?.ytmVideoId
+                    providerTrackId = effectiveYtmId
                 )
 
                 val useInAppNow = finalProviderId == "tunemind_inapp" ||

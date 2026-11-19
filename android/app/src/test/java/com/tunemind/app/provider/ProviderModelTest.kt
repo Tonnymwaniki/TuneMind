@@ -178,4 +178,39 @@ class ProviderModelTest {
             )
         )
     }
+
+    @Test
+    fun testAgentToolCallAndOsCommandPreserveCrossAppPlayableFields() {
+        val toolCall = com.tunemind.app.domain.execution.AgentToolCallPayload(
+            action = "LIKE_TRACK",
+            track_title = "Calm Down",
+            track_artist = "Rema",
+            track_id = "4iV5W9uYEdYUVa79Axb7Rh",
+            spotify_uri = "spotify:track:4iV5W9uYEdYUVa79Axb7Rh",
+            ytm_video_id = "WcIcVapfqXw",
+            deezer_url = "https://www.deezer.com/track/12345",
+            target_player = "com.spotify.music",
+            playlist_name = "Late Night",
+            new_playlist_name = "Midnight Vibes"
+        )
+        assertEquals("LIKE_TRACK", toolCall.action)
+        assertEquals("spotify:track:4iV5W9uYEdYUVa79Axb7Rh", toolCall.spotify_uri)
+        assertEquals("WcIcVapfqXw", toolCall.ytm_video_id)
+        assertEquals("Midnight Vibes", toolCall.new_playlist_name)
+
+        val osCmd = com.tunemind.app.domain.execution.OsExecutionCommand(
+            intent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
+            target_player = "com.spotify.music",
+            search_query = "Calm Down Rema",
+            track_title = "Calm Down",
+            track_artist = "Rema",
+            track_id = "4iV5W9uYEdYUVa79Axb7Rh",
+            spotify_uri = "spotify:track:4iV5W9uYEdYUVa79Axb7Rh",
+            ytm_video_id = "WcIcVapfqXw",
+            deezer_url = "https://www.deezer.com/track/12345"
+        )
+        assertEquals("OS_MEDIA_NEXT_AND_DEEP_LINK", osCmd.intent)
+        assertEquals("spotify:track:4iV5W9uYEdYUVa79Axb7Rh", osCmd.spotify_uri)
+        assertEquals("WcIcVapfqXw", osCmd.ytm_video_id)
+    }
 }

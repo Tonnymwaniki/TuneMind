@@ -1896,6 +1896,32 @@ class TuneMindViewModel : ViewModel() {
                 val displayName = matchedProvider?.displayName
                     ?: ListeningPlayDeduplicator.resolveAppDisplayName(resolvedPkg)
 
+                val isSpotifyTarget = resolvedPkg.contains("spotify", ignoreCase = true)
+                val isYouTubeTarget = resolvedPkg.contains("youtube", ignoreCase = true)
+                val isAudiomackTarget = resolvedPkg.contains("audiomack", ignoreCase = true)
+                val directSpotifyUri = com.tunemind.app.provider.MusicPlayerAutoLauncher.extractSpotifyTrackUri(track.spotifyUri)
+                val openResolved = if (isSpotifyTarget && !directSpotifyUri.isNullOrBlank()) {
+                    null
+                } else {
+                    com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
+                        context = ctx,
+                        cleanTitle = track.title,
+                        cleanArtist = track.artist,
+                        fullQuery = "${track.title} ${track.artist}".trim()
+                    )
+                }
+                val resolvedDeepLink = when {
+                    isYouTubeTarget && !openResolved?.ytmVideoId.isNullOrBlank() ->
+                        "https://music.youtube.com/watch?v=${openResolved!!.ytmVideoId}"
+                    isSpotifyTarget && !directSpotifyUri.isNullOrBlank() -> directSpotifyUri
+                    isSpotifyTarget && !openResolved?.spotifyUri.isNullOrBlank() -> openResolved!!.spotifyUri
+                    isSpotifyTarget && !openResolved?.spotifyUrl.isNullOrBlank() -> openResolved!!.spotifyUrl
+                    isAudiomackTarget && !openResolved?.audiomackUrl.isNullOrBlank() -> openResolved!!.audiomackUrl
+                    !isSpotifyTarget && !openResolved?.deezerUrl.isNullOrBlank() -> openResolved!!.deezerUrl
+                    !track.spotifyUri.isNullOrBlank() -> track.spotifyUri
+                    else -> null
+                }
+
                 val recTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
                     id = resolvedIdentity.trackId,
                     title = track.title,
@@ -1904,10 +1930,10 @@ class TuneMindViewModel : ViewModel() {
                     confidence = (track.freshnessPercent / 100f).coerceIn(0.5f, 0.99f),
                     category = com.tunemind.app.domain.recommendation.RecommendationCategory.FAMILIAR_RECEPTIVE,
                     suggestedProviderId = providerId,
-                    providerTrackId = resolvedIdentity.spotifyUri,
+                    providerTrackId = openResolved?.ytmVideoId ?: resolvedIdentity.spotifyUri,
                     observationCountBasis = resolvePlayCount(track.title, track.artist, resolvedIdentity.spotifyUri, resolvedIdentity.trackId),
                     trackId = resolvedIdentity.trackId,
-                    spotifyUri = resolvedIdentity.spotifyUri
+                    spotifyUri = openResolved?.spotifyUri ?: resolvedIdentity.spotifyUri
                 )
                 val result = com.tunemind.app.provider.MusicPlayerAutoLauncher.launchWithAutoPlay(
                     context = ctx,
@@ -1916,7 +1942,7 @@ class TuneMindViewModel : ViewModel() {
                     packageName = resolvedPkg,
                     track = recTrack,
                     query = "${track.title} ${track.artist}".trim(),
-                    deepLinkUri = track.spotifyUri
+                    deepLinkUri = resolvedDeepLink
                 )
                 _playbackLaunchFeedback.value = result
                 ok = result is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched

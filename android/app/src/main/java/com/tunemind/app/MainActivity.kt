@@ -242,7 +242,10 @@ open class MainActivity : ComponentActivity() {
 
                     var playAnyTrackCallback: ((String, String, String?, String) -> Unit)? = null
 
-                    fun executeSingleAppToolAction(tool: com.tunemind.app.domain.execution.AgentToolCallPayload) {
+                    fun executeSingleAppToolAction(
+                        tool: com.tunemind.app.domain.execution.AgentToolCallPayload,
+                        isPrimaryTurnAction: Boolean = false
+                    ) {
                         if (tool.remember_default_player == true && !tool.target_player.isNullOrBlank() && tool.action != "SELECT_MUSIC_PLAYER") {
                             applyPlayerPreferenceUpdate(tool.target_player, rememberDefault = true)
                         }
@@ -253,17 +256,70 @@ open class MainActivity : ComponentActivity() {
                                     rememberDefault = tool.remember_default_player != false
                                 )
                             }
+                            "OPEN_MUSIC_PLAYER_APP" -> {
+                                val targetPkg = tool.target_player?.takeIf { it.isNotBlank() }
+                                    ?: selectedTargetPlayer.ifBlank { playerPrefs.getString("target_player_pkg", "") ?: "" }
+                                if (targetPkg.isNotBlank()) {
+                                    runCatching {
+                                        val launchIntent = context.packageManager.getLaunchIntentForPackage(targetPkg)
+                                            ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                        if (launchIntent != null) {
+                                            context.startActivity(launchIntent)
+                                        }
+                                    }
+                                }
+                            }
                             "PAUSE_PLAYBACK" -> {
-                                vm.pausePlayback()
+                                vm.setAgentPlaybackPaused()
+                                if (!isPrimaryTurnAction) {
+                                    vm.pausePlayback()
+                                }
                             }
                             "RESUME_PLAYBACK" -> {
-                                vm.resumePlayback()
+                                vm.setAgentPlaybackResumed()
+                                if (!isPrimaryTurnAction) {
+                                    vm.resumePlayback()
+                                }
                             }
                             "SKIP_NEXT" -> {
-                                vm.skipNext()
+                                if (!isPrimaryTurnAction) {
+                                    vm.skipNext()
+                                }
                             }
                             "SKIP_PREVIOUS" -> {
-                                vm.skipPrev()
+                                if (!isPrimaryTurnAction) {
+                                    vm.skipPrev()
+                                }
+                            }
+                            "LIKE_TRACK" -> {
+                                val np = vm.homeState.value.nowPlaying
+                                val lTitle = tool.track_title?.takeIf { it.isNotBlank() } ?: np?.title
+                                val lArtist = tool.track_artist?.takeIf { it.isNotBlank() } ?: np?.artist ?: ""
+                                if (!lTitle.isNullOrBlank() && lTitle != "Standing By") {
+                                    vm.saveTrackToCrossAppLiked(
+                                        title = lTitle,
+                                        artist = lArtist,
+                                        sourcePkg = tool.target_player ?: np?.sourcePackage,
+                                        trackId = tool.track_id ?: np?.trackId
+                                    )
+                                    vm.addToFresh(
+                                        title = lTitle,
+                                        artist = lArtist,
+                                        sourcePackage = tool.target_player ?: np?.sourcePackage,
+                                        spotifyUri = tool.spotify_uri ?: np?.spotifyUri,
+                                        trackId = tool.track_id ?: np?.trackId
+                                    )
+                                }
+                            }
+                            "LAUNCH_DOPAMINE_CAPSULE" -> {
+                                vm.compileDopamineCapsule()
+                                requestedScreenPage = 0
+                                requestedDopamineSubTab = 0
+                            }
+                            "REFRESH_FOR_YOU_PICKS" -> {
+                                vm.triggerChronoDiscovery(forceRefresh = true)
+                                requestedScreenPage = 0
+                                requestedDopamineSubTab = 2
                             }
                             "QUARANTINE_TO_VAULT" -> {
                                 val np = vm.homeState.value.nowPlaying
@@ -361,6 +417,45 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            "REMOVE_FROM_TUNEMIND_PLAYLIST" -> {
+                                val query = tool.playlist_name?.trim().orEmpty()
+                                val match = vm.tuneMindPlaylists.value.firstOrNull {
+                                    it.playlist.name.equals(query, ignoreCase = true) ||
+                                        (query.isNotBlank() && it.playlist.name.contains(query, ignoreCase = true))
+                                } ?: vm.tuneMindPlaylists.value.firstOrNull()
+                                val targetTrackTitle = tool.track_title?.takeIf { it.isNotBlank() }
+                                    ?: vm.homeState.value.nowPlaying?.title.orEmpty()
+                                if (match != null && targetTrackTitle.isNotBlank()) {
+                                    val entry = match.tracks.firstOrNull {
+                                        it.title.equals(targetTrackTitle, ignoreCase = true) ||
+                                            it.title.contains(targetTrackTitle, ignoreCase = true)
+                                    }
+                                    if (entry != null) {
+                                        vm.removeTrackFromTuneMindPlaylist(match.playlist.playlistId, entry.entryId)
+                                    }
+                                }
+                            }
+                            "RENAME_TUNEMIND_PLAYLIST" -> {
+                                val query = tool.playlist_name?.trim().orEmpty()
+                                val newName = tool.new_playlist_name?.trim().orEmpty()
+                                val match = vm.tuneMindPlaylists.value.firstOrNull {
+                                    it.playlist.name.equals(query, ignoreCase = true) ||
+                                        (query.isNotBlank() && it.playlist.name.contains(query, ignoreCase = true))
+                                }
+                                if (match != null && newName.isNotBlank()) {
+                                    vm.renameTuneMindPlaylist(match.playlist.playlistId, newName)
+                                }
+                            }
+                            "DELETE_TUNEMIND_PLAYLIST" -> {
+                                val query = tool.playlist_name?.trim().orEmpty()
+                                val match = vm.tuneMindPlaylists.value.firstOrNull {
+                                    it.playlist.name.equals(query, ignoreCase = true) ||
+                                        (query.isNotBlank() && it.playlist.name.contains(query, ignoreCase = true))
+                                }
+                                if (match != null) {
+                                    vm.deleteTuneMindPlaylist(match.playlist.playlistId)
+                                }
+                            }
                             "PLAY_TUNEMIND_PLAYLIST" -> {
                                 val query = tool.playlist_name?.trim().orEmpty()
                                 val match = vm.tuneMindPlaylists.value.firstOrNull {
@@ -372,7 +467,13 @@ open class MainActivity : ComponentActivity() {
                                         ?: playerPrefs.getString("target_player_pkg", "tunemind_inapp")
                                         ?: "tunemind_inapp"
                                     vm.playTuneMindPlaylist(match, chosenPkg) { title, artist, uri, pkg ->
-                                        playAnyTrackCallback?.invoke(title, artist, uri, pkg)
+                                        coroutineScope.launch {
+                                            // Wait briefly if primary voice turn is speaking so we don't cut off the agent's playlist announcement
+                                            if (isPrimaryTurnAction) {
+                                                kotlinx.coroutines.delay(2200L)
+                                            }
+                                            playAnyTrackCallback?.invoke(title, artist, uri, pkg)
+                                        }
                                     }
                                 }
                             }
@@ -397,6 +498,17 @@ open class MainActivity : ComponentActivity() {
                                         freshnessPercent = 96,
                                         playNext = true
                                     )
+                                }
+                            }
+                            "PLAY_NEXT_IN_QUEUE" -> {
+                                val chosenPkg = tool.target_player?.takeIf { it.isNotBlank() }
+                                    ?: selectedTargetPlayer.ifBlank { null }
+                                vm.playNextFromQueue(chosenPkg)
+                            }
+                            "CLEAR_UP_NEXT_QUEUE" -> {
+                                val snapshot = vm.compileDopamineCapsule().tracks
+                                snapshot.forEach { t ->
+                                    vm.removeFromUpNextQueue(t)
                                 }
                             }
                             "SET_SLEEP_TIMER" -> {
@@ -589,9 +701,9 @@ open class MainActivity : ComponentActivity() {
                                 vm.setAgentActiveTrack(title, artist, sourcePlayer)
                             },
                             onToolActionExecuted = { toolCall ->
-                                executeSingleAppToolAction(toolCall)
+                                executeSingleAppToolAction(toolCall, isPrimaryTurnAction = true)
                                 toolCall.extra_actions.forEach { extra ->
-                                    executeSingleAppToolAction(extra)
+                                    executeSingleAppToolAction(extra, isPrimaryTurnAction = false)
                                 }
                             },
                             onPlaybackLaunchResult = { result ->

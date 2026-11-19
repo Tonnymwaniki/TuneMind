@@ -261,4 +261,73 @@ describe('PlayCount & Canonical TrackId Hardening', () => {
       })
     ).toBe(true);
   });
+
+  it('prevents pending-track hijacking on new song requests and distinguishes direct play commands from open recommendations', () => {
+    // 1. Pending track exists ("Old Pending Song"), but user asks for a different named song ("Play Calm Down by Rema on Spotify")
+    expect(
+      ClaudeMusicReasoningProvider.isApprovingPendingTrack({
+        pendingTitle: 'Old Pending Song',
+        claudeAction: 'PLAY_TRACK_NOW',
+        claudeTrackTitle: 'Calm Down',
+        userCommandRaw: 'play Calm Down by Rema on Spotify',
+        isRejectingPending: false
+      })
+    ).toBe(false);
+
+    // Even if claudeTrackTitle was blank, asking for a different named song after "play" must not approve the old pending song
+    expect(
+      ClaudeMusicReasoningProvider.isApprovingPendingTrack({
+        pendingTitle: 'Old Pending Song',
+        claudeAction: 'PROPOSE_TRACK',
+        claudeTrackTitle: '',
+        userCommandRaw: 'play Essence by Wizkid on Boomplay',
+        isRejectingPending: false
+      })
+    ).toBe(false);
+
+    // Pure approval or player selection for the pending song ("Yes, play it on Spotify") -> approves pending song
+    expect(
+      ClaudeMusicReasoningProvider.isApprovingPendingTrack({
+        pendingTitle: 'Calm Down',
+        claudeAction: 'PLAY_TRACK_NOW',
+        claudeTrackTitle: 'Calm Down',
+        userCommandRaw: 'yes play it on Spotify',
+        isRejectingPending: false
+      })
+    ).toBe(true);
+
+    // 2. Direct play command with known default player ("play Calm Down by Rema") -> allowed to play immediately
+    expect(
+      ClaudeMusicReasoningProvider.isDirectPlaySongCommand({
+        userCommandRaw: 'play Calm Down by Rema',
+        hasExplicitDefaultPlayer: true,
+        hasSpokenTargetPlayer: false
+      })
+    ).toBe(true);
+
+    // Open recommendation request ("suggest a song for me" or "play a good song") -> propose first
+    expect(
+      ClaudeMusicReasoningProvider.isDirectPlaySongCommand({
+        userCommandRaw: 'suggest a fresh song for me',
+        hasExplicitDefaultPlayer: true,
+        hasSpokenTargetPlayer: false
+      })
+    ).toBe(false);
+    expect(
+      ClaudeMusicReasoningProvider.isDirectPlaySongCommand({
+        userCommandRaw: 'play a good song',
+        hasExplicitDefaultPlayer: true,
+        hasSpokenTargetPlayer: false
+      })
+    ).toBe(false);
+
+    // No default player chosen yet and no player named -> propose first so agent asks which player to use
+    expect(
+      ClaudeMusicReasoningProvider.isDirectPlaySongCommand({
+        userCommandRaw: 'play Calm Down by Rema',
+        hasExplicitDefaultPlayer: false,
+        hasSpokenTargetPlayer: false
+      })
+    ).toBe(false);
+  });
 });
