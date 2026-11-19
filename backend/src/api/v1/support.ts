@@ -18,7 +18,7 @@ export interface SupportFeedbackRecord {
 
 const ALLOWED_CATEGORIES = new Set([
   'Bug Report',
-  'Spotify Sync',
+  'Player Detection',
   'Voice & Agent',
   'Feature Idea',
   'Account & Privacy',
@@ -36,7 +36,7 @@ function sanitizeShortString(value: unknown, maxLen: number, fallback = ''): str
 
 /**
  * POST /api/v1/support/feedback
- * Accepts structured user bug reports, Spotify sync feedback, and diagnostics
+ * Accepts structured user bug reports, player detection feedback, and diagnostics
  * from the Android SupportFeedbackScreen. Verified Bearer token overrides spoofed IDs.
  */
 router.post('/feedback', async (req: Request, res: Response) => {

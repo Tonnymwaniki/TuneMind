@@ -2,13 +2,16 @@ package com.tunemind.app.provider
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.MediaStore
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 
 /**
- * Concrete provider integration for Spotify on Android.
- * Leverages documented Spotify URIs and web fallbacks.
+ * Passive OS-controlled provider integration for Spotify on Android.
+ *
+ * Uses zero Spotify Developer credentials, OAuth tokens, or App Remote SDKs.
+ * Dispatches playback strictly via standard Android MediaSession (`playFromSearch`)
+ * or Android's `MEDIA_PLAY_FROM_SEARCH` intent into the installed Spotify app.
  */
 class SpotifyMusicProvider : MusicProvider {
     override val providerId: String = PROVIDER_ID
@@ -18,7 +21,6 @@ class SpotifyMusicProvider : MusicProvider {
     override val supportedCapabilities: Set<ProviderCapability> = setOf(
         ProviderCapability.CAN_SEARCH,
         ProviderCapability.CAN_OPEN_TRACK,
-        ProviderCapability.CAN_DEEP_LINK,
         ProviderCapability.CAN_CONTROL_ACTIVE_SESSION,
         ProviderCapability.CAN_REPORT_PLAYBACK
     )
@@ -35,18 +37,7 @@ class SpotifyMusicProvider : MusicProvider {
     override fun resolveTrack(track: RecommendedTrack): TrackMatch {
         val query = "${track.artist} ${track.title}".trim()
         val encodedQuery = Uri.encode(query)
-
-        val deepLink = if (!track.providerTrackId.isNullOrBlank()) {
-            "spotify:track:${track.providerTrackId}"
-        } else {
-            "spotify:search:$encodedQuery"
-        }
-
-        val webUrl = if (!track.providerTrackId.isNullOrBlank()) {
-            "https://open.spotify.com/track/${track.providerTrackId}"
-        } else {
-            "https://open.spotify.com/search/$encodedQuery"
-        }
+        val searchWebUrl = "https://open.spotify.com/search/$encodedQuery"
 
         return TrackMatch(
             providerId = providerId,
@@ -54,8 +45,8 @@ class SpotifyMusicProvider : MusicProvider {
             title = track.title,
             artist = track.artist,
             providerTrackId = track.providerTrackId,
-            deepLinkUri = deepLink,
-            webFallbackUrl = webUrl,
+            deepLinkUri = null,
+            webFallbackUrl = searchWebUrl,
             searchQuery = query,
             confidence = track.confidence
         )
@@ -75,7 +66,7 @@ class SpotifyMusicProvider : MusicProvider {
             id = match.providerTrackId ?: match.title,
             title = match.title,
             artist = match.artist,
-            reason = "Acoustically selected for instant Spotify playback",
+            reason = "Selected for passive Spotify OS playback",
             confidence = match.confidence
         )
 

@@ -34,11 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
-import com.tunemind.app.data.ingestion.SpotifyLiveTrackState
-import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
-import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
-import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
+import com.tunemind.app.data.local.CrossAppTasteShiftSummary
+import com.tunemind.app.data.local.CrossAppTrackEntity
+import com.tunemind.app.data.local.DetectedPlayerTab
+import com.tunemind.app.data.local.TuneMindPlaylistWithTracks
 import com.tunemind.app.domain.audio.AudioDeviceObserver
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
@@ -86,25 +85,18 @@ fun RhythmDnaScreen(
     onQuarantineTrack: (title: String, artist: String) -> Unit,
     listeningStats: OverallListeningStats = OverallListeningStats(),
     cleanPlayHistory: List<UnifiedPlayEvent> = emptyList(),
-    spotifyLiveState: SpotifyLiveTrackState? = null,
-    likedTracks: List<SpotifyLikedTrackEntity> = emptyList(),
-    playlists: List<SpotifyPlaylistEntity> = emptyList(),
-    podcasts: List<SpotifyPodcastEntity> = emptyList(),
-    isLibrarySyncing: Boolean = false,
-    needsLibraryScopeUpgrade: Boolean = false,
-    loadingPlaylistIds: Set<String> = emptySet(),
-    loadedPlaylistIds: Set<String> = emptySet(),
-    playlistTrackErrors: Map<String, String> = emptyMap(),
+    crossAppLibraryTracks: List<CrossAppTrackEntity> = emptyList(),
+    detectedPlayerTabs: List<DetectedPlayerTab> = emptyList(),
+    tuneMindPlaylists: List<TuneMindPlaylistWithTracks> = emptyList(),
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { _, _, _ -> false },
-    onRefreshSpotifyLibrary: () -> Unit = {},
-    onLoadPlaylistTracks: (playlistId: String) -> Unit = {},
+    onToggleLibraryLike: (canonicalTrackKey: String, liked: Boolean) -> Unit = { _, _ -> },
+    onOpenPlaylistsManager: () -> Unit = {},
     onOpenWeeklyReport: () -> Unit = {},
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
     onOpenStats: () -> Unit = {},
-    onOpenAccountAuth: () -> Unit = {},
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    tasteShiftSummary: CrossAppTasteShiftSummary = CrossAppTasteShiftSummary(),
     onRefreshStats: () -> Unit = {},
     requestedSubDeck: Int? = null,
     onConsumeRequestedSubDeck: () -> Unit = {},
@@ -211,21 +203,9 @@ fun RhythmDnaScreen(
         transducerCategory = hearingInsights.activeSnapshot?.transducerCategory
     )
 
-    val spotifyRepo = remember {
-        com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context)
-    }
-    val isSpotifyConnected by spotifyRepo.isConnectedFlow.collectAsState()
-    val spotifyAuthManager = remember {
-        com.tunemind.app.data.ingestion.SpotifyAuthManager(context)
-    }
-    val authSessionManager = remember {
-        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
-    }
-    val authSession by authSessionManager.sessionFlow.collectAsState()
-
-    // 0 = Overview, 1 = Spotify Library, 2 = History
+    // 0 = Overview, 1 = Cross-App Library, 2 = History
     var activeRhythmSubDeck by rememberSaveable { mutableStateOf(0) }
-    var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Spotify, 2 = Most Played
+    var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Recent 24h, 2 = Most Played
 
     LaunchedEffect(requestedSubDeck) {
         if (requestedSubDeck != null && requestedSubDeck in 0..2) {
@@ -234,28 +214,20 @@ fun RhythmDnaScreen(
         }
     }
 
-    val effectiveSpotifyConnected = isSpotifyConnected || authSession.isSpotifyConnected
-
-    LaunchedEffect(effectiveSpotifyConnected, activeRhythmSubDeck) {
-        if (activeRhythmSubDeck == 0) {
+    LaunchedEffect(activeRhythmSubDeck) {
+        if (activeRhythmSubDeck == 0 || activeRhythmSubDeck == 2) {
             onRefreshStats()
-        }
-        if (effectiveSpotifyConnected &&
-            activeRhythmSubDeck == 1 &&
-            likedTracks.isEmpty() && playlists.isEmpty() && podcasts.isEmpty() && !isLibrarySyncing
-        ) {
-            onRefreshSpotifyLibrary()
         }
     }
 
     val screenTitle = when (activeRhythmSubDeck) {
-        1 -> "Spotify"
+        1 -> "Library"
         2 -> "History"
         else -> "Flow"
     }
 
     val activeSubDeckAccent = when (activeRhythmSubDeck) {
-        1 -> Color(0xFF1DB954)
+        1 -> Color(0xFF38BDF8)
         2 -> Color(0xFF00E5FF)
         else -> theme.primaryAccent
     }
@@ -291,11 +263,11 @@ fun RhythmDnaScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Spring-sliding capsule tabs (Overview | Spotify | History)
+            // Spring-sliding capsule tabs (Overview | Library | History)
             MagicalSegmentedTabs(
                 tabs = listOf(
                     MagicalTabItem("Overview", theme.primaryAccent),
-                    MagicalTabItem("Spotify", Color(0xFF1DB954)),
+                    MagicalTabItem("Library", Color(0xFF38BDF8)),
                     MagicalTabItem("History", Color(0xFF00E5FF))
                 ),
                 selectedIndex = activeRhythmSubDeck.coerceIn(0, 2),
@@ -314,28 +286,30 @@ fun RhythmDnaScreen(
             ) { subDeck ->
                 when (subDeck) {
                     1 -> {
-                        SpotifyLibrarySection(
-                            isSpotifyConnected = effectiveSpotifyConnected,
-                            needsScopeUpgrade = needsLibraryScopeUpgrade,
-                            isSyncing = isLibrarySyncing,
-                            liveState = spotifyLiveState,
-                            likedTracks = likedTracks,
-                            playlists = playlists,
-                            podcasts = podcasts,
-                            loadingPlaylistIds = loadingPlaylistIds,
-                            loadedPlaylistIds = loadedPlaylistIds,
-                            playlistTrackErrors = playlistTrackErrors,
-                            resolvePlayCount = resolvePlayCount,
-                            isTrackCurrentlyPlaying = isTrackCurrentlyPlaying,
-                            onRefreshLibrary = onRefreshSpotifyLibrary,
-                            onRequestSpotifyAuth = { spotifyAuthManager.launchSpotifyAuth(context) },
-                            onLoadPlaylistTracks = onLoadPlaylistTracks,
-                            onPlayTrack = onPlayTrack,
-                            resolveTrackVaultStatus = resolveTrackVaultStatus,
-                            onToggleTrackVault = onToggleTrackVault ?: { t, a, _, _, _ -> onQuarantineTrack(t, a) },
-                            onToggleTrackFresh = onToggleTrackFresh,
-                            onAskAgentAboutTrack = onAskAgentAboutTrack,
-                            onSyncAtmosphereToTrack = onSyncAtmosphereToTrack
+                        CrossAppLibrarySection(
+                            libraryTracks = crossAppLibraryTracks,
+                            detectedPlayerTabs = detectedPlayerTabs,
+                            playlists = tuneMindPlaylists,
+                            isTrackCurrentlyPlaying = { t, a -> isTrackCurrentlyPlaying(t, a, null) },
+                            resolveTrackVaultStatus = { t, a ->
+                                val st = resolveTrackVaultStatus(t, a, null, null)
+                                (st.isInVault || st.isCoolingDown) to st.freshnessPercent
+                            },
+                            onPlayTrack = { title, artist, preferredPkg ->
+                                onPlayTrack(title, artist, null, preferredPkg ?: selectedTargetPlayer.ifBlank { "unknown_player" })
+                            },
+                            onToggleLike = onToggleLibraryLike,
+                            onToggleTrackVault = { title, artist, sourcePkg ->
+                                if (onToggleTrackVault != null) {
+                                    onToggleTrackVault(title, artist, sourcePkg, null, null)
+                                } else {
+                                    onQuarantineTrack(title, artist)
+                                }
+                            },
+                            onAskAgentAboutTrack = { title, artist ->
+                                onAskAgentAboutTrack(title, artist, 100, null)
+                            },
+                            onOpenPlaylistsManager = onOpenPlaylistsManager
                         )
                     }
 
@@ -361,20 +335,20 @@ fun RhythmDnaScreen(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            text = if (isLibrarySyncing) "Syncing…" else "Sync",
+                                            text = "Refresh",
                                             color = Color(0xFF00E5FF),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .clickable { onRefreshSpotifyLibrary() }
+                                                .clickable { onRefreshStats() }
                                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                                         )
                                     }
 
                                     val historyChips = listOf(
                                         0 to ("All Apps" to Color(0xFF00E5FF)),
-                                        1 to ("Spotify" to Color(0xFF1DB954)),
+                                        1 to ("Today" to Color(0xFF10B981)),
                                         2 to ("Most Played" to theme.secondaryAccent)
                                     )
                                     Row(
@@ -501,8 +475,9 @@ fun RhythmDnaScreen(
                                     }
                                 }
                             } else {
+                                val cutoff24h = System.currentTimeMillis() - 86_400_000L
                                 val timeline = if (historyFilterMode == 1) {
-                                    cleanPlayHistory.filter { it.sourcePackage.contains("spotify", ignoreCase = true) }
+                                    cleanPlayHistory.filter { it.playedAtMs >= cutoff24h }
                                 } else {
                                     cleanPlayHistory
                                 }
@@ -515,11 +490,7 @@ fun RhythmDnaScreen(
                                                 .padding(top = 14.dp)
                                         ) {
                                             Text(
-                                                text = if (effectiveSpotifyConnected) {
-                                                    "No plays recorded yet. Tap Sync above or start a song."
-                                                } else {
-                                                    "Connect Spotify or play a song to build your timeline."
-                                                },
+                                                text = "No plays recorded yet. Start a song in Boomplay, YouTube Music, Spotify, Audiomack, or phone audio to build your permanent timeline.",
                                                 color = Color.White.copy(alpha = 0.66f),
                                                 fontSize = 14.sp,
                                                 lineHeight = 20.sp
@@ -769,7 +740,7 @@ fun RhythmDnaScreen(
                                     val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(track.providerTrackId)
                                     val canonicalId = track.canonicalTrackId()
                                     val pkg = selectedTargetPlayer.ifBlank {
-                                        track.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
+                                        track.sourcePackage?.ifBlank { "unknown_player" } ?: "unknown_player"
                                     }
                                     val strictPlays = resolvePlayCount(title, artist, uri)
                                         .takeIf { it > 0 } ?: track.distinctAppearanceCount.coerceAtLeast(0)
@@ -858,7 +829,7 @@ fun RhythmDnaScreen(
         val vStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
         val freshness = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else (100 - minOf(94, plays * 19)).coerceIn(15, 98)
         val pkg = selectedTargetPlayer.ifBlank {
-            selected.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music"
+            selected.sourcePackage?.ifBlank { "unknown_player" } ?: "unknown_player"
         }
 
         NeuralTrackActionDialog(

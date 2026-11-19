@@ -15,16 +15,6 @@ import com.tunemind.app.domain.experiment.ExperimentEventEntity
 import com.tunemind.app.domain.provider.MusicProviderDao
 import com.tunemind.app.domain.provider.MusicProviderEntity
 import com.tunemind.app.domain.study.StudyDao
-import com.tunemind.app.data.ingestion.ArtistProfileCacheEntity
-import com.tunemind.app.data.ingestion.SpotifyLibraryDao
-import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
-import com.tunemind.app.data.ingestion.SpotifyListeningHistoryDao
-import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
-import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
-import com.tunemind.app.data.ingestion.SpotifyPodcastEntity
-import com.tunemind.app.data.ingestion.SpotifyVisualDao
-import com.tunemind.app.data.ingestion.TrackHistoryTelemetryItem
-import com.tunemind.app.data.ingestion.TrackVisualCacheEntity
 import com.tunemind.app.domain.study.StudyEntity
 
 /**
@@ -39,11 +29,10 @@ import com.tunemind.app.domain.study.StudyEntity
  *   6 — Persistent AI Recommendation Crate (chrono-receptive auto-evolving music discovery).
  *   7 — Index and column constraint alignment for AI Recommendation Crate.
  *   8 — Unique title-artist index, subTier, and reinforcement learning telemetry tracking fields.
- *   9 — Local-first Spotify Web API listening history table (spotify_listening_history).
- *   10 — Spotify TrackHistoryTelemetryItem table (track_history_telemetry).
- *   11 — Spotify Library tables (spotify_liked_tracks, spotify_playlists, spotify_podcasts).
- *   13 — Spotify Visual Metadata caches (spotify_track_visual_cache, spotify_artist_profile_cache).
- *   14 — Canonical trackId column on ai_recommendation_crate.
+ *   9–17 — Legacy Spotify tables & TuneMind playlists.
+ *   18 — Clean cross-app architecture: drop legacy spotify_* tables, purge synthetic
+ *        spotify_web_api_ingestion queue noise, migrate tunemind_playlist_tracks.external_uri,
+ *        and create permanent cross_app_track_library, cross_app_play_log, and universal visual caches.
  */
 @Database(
     entities = [
@@ -55,17 +44,14 @@ import com.tunemind.app.domain.study.StudyEntity
         VolumeObservationEntity::class,
         MusicProviderEntity::class,
         com.tunemind.app.domain.recommendation.AiRecommendationEntity::class,
-        SpotifyListeningHistoryEntity::class,
-        TrackHistoryTelemetryItem::class,
-        SpotifyLikedTrackEntity::class,
-        SpotifyPlaylistEntity::class,
-        SpotifyPodcastEntity::class,
+        CrossAppTrackEntity::class,
+        CrossAppPlayLogEntity::class,
         TrackVisualCacheEntity::class,
         ArtistProfileCacheEntity::class,
         TuneMindPlaylistEntity::class,
         TuneMindPlaylistTrackEntity::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class TuneMindDatabase : RoomDatabase() {
@@ -76,9 +62,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun audioDeviceDao(): AudioDeviceDao
     abstract fun musicProviderDao(): MusicProviderDao
     abstract fun aiRecommendationDao(): com.tunemind.app.domain.recommendation.AiRecommendationDao
-    abstract fun spotifyListeningHistoryDao(): SpotifyListeningHistoryDao
-    abstract fun spotifyLibraryDao(): SpotifyLibraryDao
-    abstract fun spotifyVisualDao(): SpotifyVisualDao
+    abstract fun crossAppLibraryDao(): CrossAppLibraryDao
     abstract fun tuneMindPlaylistDao(): TuneMindPlaylistDao
 
     companion object {
@@ -112,7 +96,8 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_14_15,
                         MIGRATION_15_16,
                         MIGRATION_16_17,
-                        MIGRATION_15_17
+                        MIGRATION_15_17,
+                        MIGRATION_17_18
                     )
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
@@ -540,6 +525,160 @@ abstract class TuneMindDatabase : RoomDatabase() {
         val MIGRATION_15_17 = object : Migration(15, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 MIGRATION_15_16.migrate(db)
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Drop legacy Spotify OAuth / SDK / library tables for a clean data baseline
+                db.execSQL("DROP TABLE IF EXISTS `spotify_listening_history`")
+                db.execSQL("DROP TABLE IF EXISTS `track_history_telemetry`")
+                db.execSQL("DROP TABLE IF EXISTS `spotify_liked_tracks`")
+                db.execSQL("DROP TABLE IF EXISTS `spotify_playlists`")
+                db.execSQL("DROP TABLE IF EXISTS `spotify_podcasts`")
+                db.execSQL("DROP TABLE IF EXISTS `spotify_track_visual_cache`")
+                db.execSQL("DROP TABLE IF EXISTS `spotify_artist_profile_cache`")
+
+                // 2. Purge synthetic Spotify Web API ingestion rows from event_queue while preserving real OS observations
+                runCatching {
+                    db.execSQL("DELETE FROM `event_queue` WHERE `payload_json` LIKE '%spotify_web_api_ingestion%'")
+                }
+
+                // 3. Migrate tunemind_playlist_tracks column `spotify_uri` -> `external_uri` without losing user playlists
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `_new_tunemind_playlist_tracks` (
+                        `entry_id` TEXT NOT NULL,
+                        `playlist_id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `external_uri` TEXT NOT NULL,
+                        `track_id` TEXT NOT NULL,
+                        `source_player` TEXT NOT NULL,
+                        `position_index` INTEGER NOT NULL,
+                        `added_at_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`entry_id`)
+                    )
+                    """.trimIndent()
+                )
+                runCatching {
+                    db.execSQL(
+                        """
+                        INSERT OR IGNORE INTO `_new_tunemind_playlist_tracks`
+                            (`entry_id`, `playlist_id`, `title`, `artist`, `external_uri`, `track_id`, `source_player`, `position_index`, `added_at_ms`)
+                        SELECT `entry_id`, `playlist_id`, `title`, `artist`, `spotify_uri`, `track_id`,
+                            CASE WHEN `source_player` = 'com.spotify.music' THEN 'unknown_player' ELSE `source_player` END,
+                            `position_index`, `added_at_ms`
+                        FROM `tunemind_playlist_tracks`
+                        """.trimIndent()
+                    )
+                }
+                db.execSQL("DROP TABLE IF EXISTS `tunemind_playlist_tracks`")
+                db.execSQL("ALTER TABLE `_new_tunemind_playlist_tracks` RENAME TO `tunemind_playlist_tracks`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_playlist_id` ON `tunemind_playlist_tracks` (`playlist_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tunemind_playlist_tracks_added_at_ms` ON `tunemind_playlist_tracks` (`added_at_ms`)")
+
+                // 4. Create permanent Cross-App Library & Play Log tables
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cross_app_track_library` (
+                        `canonical_track_key` TEXT NOT NULL,
+                        `track_id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `album` TEXT NOT NULL,
+                        `genre` TEXT NOT NULL,
+                        `duration_ms` INTEGER NOT NULL,
+                        `primary_source_package` TEXT NOT NULL,
+                        `source_packages_csv` TEXT NOT NULL,
+                        `play_count` INTEGER NOT NULL,
+                        `total_listened_ms` INTEGER NOT NULL,
+                        `first_played_at_ms` INTEGER NOT NULL,
+                        `last_played_at_ms` INTEGER NOT NULL,
+                        `is_liked` INTEGER NOT NULL,
+                        `is_in_vault` INTEGER NOT NULL,
+                        `album_art_url` TEXT,
+                        `preview_url` TEXT,
+                        `audius_stream_url` TEXT,
+                        `ytm_video_id` TEXT,
+                        `deezer_url` TEXT,
+                        `updated_at_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`canonical_track_key`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_track_library_last_played_at_ms` ON `cross_app_track_library` (`last_played_at_ms` DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_track_library_play_count` ON `cross_app_track_library` (`play_count` DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_track_library_primary_source_package` ON `cross_app_track_library` (`primary_source_package`)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cross_app_play_log` (
+                        `play_log_id` TEXT NOT NULL,
+                        `canonical_track_key` TEXT NOT NULL,
+                        `track_id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `album` TEXT NOT NULL,
+                        `source_package` TEXT NOT NULL,
+                        `source_app_name` TEXT NOT NULL,
+                        `played_at_ms` INTEGER NOT NULL,
+                        `listened_ms` INTEGER NOT NULL,
+                        `track_duration_ms` INTEGER NOT NULL,
+                        `completion_ratio` REAL NOT NULL,
+                        `was_skipped` INTEGER NOT NULL,
+                        `synced_to_cloud` INTEGER NOT NULL,
+                        PRIMARY KEY(`play_log_id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_play_log_played_at_ms` ON `cross_app_play_log` (`played_at_ms` DESC)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_play_log_source_package` ON `cross_app_play_log` (`source_package`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cross_app_play_log_canonical_track_key` ON `cross_app_play_log` (`canonical_track_key`)")
+
+                // 5. Create Universal Open-Catalog Visual & Artist caches
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `universal_track_visual_cache` (
+                        `track_key` TEXT NOT NULL,
+                        `track_id` TEXT,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `artist_id` TEXT,
+                        `album_name` TEXT,
+                        `album_art_url` TEXT,
+                        `artist_image_url` TEXT,
+                        `genres_csv` TEXT NOT NULL,
+                        `popularity` INTEGER NOT NULL,
+                        `preview_url` TEXT,
+                        `audius_stream_url` TEXT,
+                        `ytm_video_id` TEXT,
+                        `deezer_url` TEXT,
+                        `updated_at_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`track_key`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_universal_track_visual_cache_track_id` ON `universal_track_visual_cache` (`track_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_universal_track_visual_cache_updated_at_ms` ON `universal_track_visual_cache` (`updated_at_ms`)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `universal_artist_profile_cache` (
+                        `artist_key` TEXT NOT NULL,
+                        `artist_id` TEXT,
+                        `artist_name` TEXT NOT NULL,
+                        `image_url` TEXT,
+                        `genres_csv` TEXT NOT NULL,
+                        `popularity` INTEGER NOT NULL,
+                        `followers_total` INTEGER NOT NULL,
+                        `updated_at_ms` INTEGER NOT NULL,
+                        PRIMARY KEY(`artist_key`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_universal_artist_profile_cache_artist_id` ON `universal_artist_profile_cache` (`artist_id`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_universal_artist_profile_cache_updated_at_ms` ON `universal_artist_profile_cache` (`updated_at_ms`)")
             }
         }
     }

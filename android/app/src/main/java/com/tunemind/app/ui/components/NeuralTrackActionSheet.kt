@@ -74,7 +74,7 @@ fun NeuralSonicActionButton(
 }
 
 /**
- * Full-width native Material 3 ModalBottomSheet for track actions (Play, Ask, Theme, Spotify Queue/Like, Rest).
+ * Full-width native Material 3 ModalBottomSheet for track actions (Play, Ask, Theme, Queue/Like, Rest).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,8 +97,8 @@ fun NeuralTrackActionDialog(
     vaultReason: String? = null,
     isInFresh: Boolean = !isCoolingDown,
     onToggleFreshList: (() -> Unit)? = null,
-    onAddToSpotifyQueue: (() -> Unit)? = null,
-    onSaveToSpotifyLiked: (() -> Unit)? = null
+    onAddToQueue: (() -> Unit)? = null,
+    onSaveToLiked: (() -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -215,28 +215,28 @@ fun NeuralTrackActionDialog(
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
 
-            if (onAddToSpotifyQueue != null) {
+            if (onAddToQueue != null) {
                 TrackActionRow(
                     icon = Icons.Rounded.PlaylistAdd,
-                    title = "Add to Spotify queue",
-                    subtitle = "Play next in your active Spotify session",
-                    accent = Color(0xFF1DB954),
+                    title = "Add to TuneMind Queue",
+                    subtitle = "Queue next across your active music playback",
+                    accent = theme.primaryAccent,
                     onClick = {
-                        onAddToSpotifyQueue()
+                        onAddToQueue()
                         onDismiss()
                     }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
             }
 
-            if (onSaveToSpotifyLiked != null) {
+            if (onSaveToLiked != null) {
                 TrackActionRow(
                     icon = Icons.Rounded.FavoriteBorder,
-                    title = "Save to Spotify Liked Songs",
-                    subtitle = "Add straight to your Spotify library",
-                    accent = Color(0xFF1DB954),
+                    title = "Save to Favorites",
+                    subtitle = "Save permanently in your TuneMind cross-app library",
+                    accent = Color(0xFFFB7185),
                     onClick = {
-                        onSaveToSpotifyLiked()
+                        onSaveToLiked()
                         onDismiss()
                     }
                 )

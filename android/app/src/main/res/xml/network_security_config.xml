@@ -1,16 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Development-only network security configuration.
-
-    Allows cleartext HTTP to:
-      - 10.0.2.2 (Android emulator host loopback)
-      - localhost / 127.0.0.1 / ::1 (adb reverse tunnel)
-      - 10.x.x.x, 172.16-31.x.x, 192.168.x.x (LAN private IPs)
-
-    Production builds should remove this file or restrict to HTTPS-only.
+    Release-safe network security configuration.
+    Forces HTTPS/WSS in production; cleartext overrides live in src/debug/res/xml/.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

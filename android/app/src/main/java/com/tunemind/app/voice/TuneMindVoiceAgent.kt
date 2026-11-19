@@ -64,8 +64,8 @@ data class VoiceAgentState(
     val agentSpeech: String = "",
     val userSpeech: String = "",
     val resolvedTrack: RecommendedTrack? = null,
-    val targetProviderId: String = "spotify",
-    val targetProviderName: String = "Spotify",
+    val targetProviderId: String = "tunemind_inapp",
+    val targetProviderName: String = "TuneMind Player",
     val rmsLevel: Float = 0f,
     val statusMessage: String = "Tap Mic to activate TuneMind Voice Agent",
     val dialogueHistory: List<AgentChatMessage> = emptyList(),
@@ -79,7 +79,7 @@ data class VoiceAgentState(
  * - Real reasoning across user's 90+ timeline tracks (Gikuyu, Bongo, Gospel, Afrobeats)
  * - Empathetic negation & cancellation understanding (stops when user says "no")
  * - Proactive morning/afternoon/evening welcome greetings on app open
- * - Hands-free auto-play across Spotify, YouTube Music, Boomplay, Apple Music, and Phone Files.
+ * - Hands-free auto-play across Boomplay, YouTube Music, Spotify (passive), Audiomack, Deezer, and Phone Files.
  */
 class TuneMindVoiceAgent(
     private val context: Context,
@@ -431,8 +431,12 @@ class TuneMindVoiceAgent(
             text.contains("spotify") -> { setTargetPlayer("spotify", "Spotify"); matched = true }
             text.contains("youtube") || text.contains("yt music") -> { setTargetPlayer("yt_music", "YouTube Music"); matched = true }
             text.contains("boomplay") -> { setTargetPlayer("boomplay", "Boomplay"); matched = true }
-            text.contains("apple") -> { setTargetPlayer("apple_music", "Apple Music"); matched = true }
             text.contains("audiomack") -> { setTargetPlayer("audiomack", "Audiomack"); matched = true }
+            text.contains("deezer") -> { setTargetPlayer("deezer", "Deezer"); matched = true }
+            text.contains("soundcloud") -> { setTargetPlayer("soundcloud", "SoundCloud"); matched = true }
+            text.contains("built-in") || text.contains("in-app") || text.contains("tunemind player") -> {
+                setTargetPlayer("tunemind_inapp", "TuneMind Player"); matched = true
+            }
             text.contains("phone") || text.contains("file") || text.contains("local") -> { setTargetPlayer("local_files", "Phone Files"); matched = true }
             else -> {
                 installed.firstOrNull { text.contains(it.displayName.lowercase(Locale.getDefault())) }?.let {
@@ -501,11 +505,13 @@ class TuneMindVoiceAgent(
 
     private fun getProviderName(providerId: String): String {
         return when (providerId) {
+            "tunemind_inapp" -> "TuneMind Player"
             "spotify" -> "Spotify"
             "yt_music" -> "YouTube Music"
             "boomplay" -> "Boomplay"
-            "apple_music" -> "Apple Music"
             "audiomack" -> "Audiomack"
+            "deezer" -> "Deezer"
+            "soundcloud" -> "SoundCloud"
             "local_files" -> "Phone Files"
             else -> {
                 if (providerId.startsWith("pkg_")) {

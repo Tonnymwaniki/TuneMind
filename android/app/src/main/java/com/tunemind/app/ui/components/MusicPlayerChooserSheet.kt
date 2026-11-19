@@ -119,7 +119,6 @@ fun MusicPlayerChooserSheet(
                         provider.providerId == "boomplay" -> Color(0xFFFF6B00)
                         provider.providerId == "youtube_music" -> Color(0xFFFF0033)
                         provider.providerId == "spotify" -> Color(0xFF1DB954)
-                        provider.providerId == "apple_music" -> Color(0xFFFA243C)
                         provider.providerId == "audiomack" -> Color(0xFFFFA200)
                         provider.providerId == "local_files" -> theme.primaryAccent
                         provider.providerId.startsWith("pkg_") -> theme.secondaryAccent
@@ -129,8 +128,7 @@ fun MusicPlayerChooserSheet(
                     val playerSubtitle = when {
                         provider.providerId == "boomplay" -> "Afrobeats, Bongo Flava & Amapiano"
                         provider.providerId == "youtube_music" -> "YouTube Music"
-                        provider.providerId == "spotify" -> "Spotify Streaming"
-                        provider.providerId == "apple_music" -> "Apple Music"
+                        provider.providerId == "spotify" -> "Spotify (OS Playback Control)"
                         provider.providerId == "audiomack" -> "Audiomack"
                         provider.providerId == "local_files" -> "Local audio library & offline songs"
                         provider.providerId.startsWith("pkg_") -> "Installed audio player"

@@ -12,7 +12,7 @@ data class TrackItem(
     val satietyScore: Int, // 0 - 100
     val fatigueCategory: String, // "Critical Loop", "Vocal Fatigue", "Preemptive", "Healthy Staple"
     val recentSkips: Int = 0,
-    val sourceApp: String = "Spotify",
+    val sourceApp: String = "Music App",
     val cooldownActive: Boolean = false,
     val recoveryProgress: Float = 0f, // 0.0 - 1.0
     val cooldownDaysRemaining: Float = 0f
@@ -64,7 +64,7 @@ object TuneMindDemoData {
         satietyScore = 58,
         fatigueCategory = "Vocal Fatigue",
         recentSkips = 3,
-        sourceApp = "Spotify"
+        sourceApp = "Boomplay"
     )
 
     val highSatietyTracks = listOf(
@@ -131,7 +131,7 @@ object TuneMindDemoData {
             satietyScore = 78,
             fatigueCategory = "Critical Loop",
             recentSkips = 3,
-            sourceApp = "Spotify"
+            sourceApp = "Boomplay"
         ),
         TrackItem(
             id = "cand-2",
@@ -159,7 +159,7 @@ object TuneMindDemoData {
             satietyScore = 45,
             fatigueCategory = "Healthy Staple",
             recentSkips = 0,
-            sourceApp = "Spotify"
+            sourceApp = "Boomplay"
         )
     )
 
@@ -175,7 +175,7 @@ object TuneMindDemoData {
             playCount = 11,
             satietyScore = 18,
             fatigueCategory = "Matches groove + novelty",
-            sourceApp = "Spotify"
+            sourceApp = "Boomplay"
         ),
         TrackItem(
             id = "pc-2",
@@ -188,7 +188,7 @@ object TuneMindDemoData {
             playCount = 5,
             satietyScore = 22,
             fatigueCategory = "Matches vocal anchor",
-            sourceApp = "Spotify"
+            sourceApp = "Boomplay"
         ),
         TrackItem(
             id = "pc-3",
@@ -201,7 +201,7 @@ object TuneMindDemoData {
             playCount = 3,
             satietyScore = 15,
             fatigueCategory = "Matches structure anchor",
-            sourceApp = "Spotify"
+            sourceApp = "Boomplay"
         )
     )
 

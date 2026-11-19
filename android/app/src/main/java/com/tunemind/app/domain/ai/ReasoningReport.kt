@@ -12,7 +12,7 @@ data class ReasoningReport(
     val id: String = UUID.randomUUID().toString(),
     val generatedAtMs: Long = System.currentTimeMillis(),
     val analyzedEventCount: Int = 0,
-    val topSourceApp: String = "Spotify",
+    val topSourceApp: String = "Music App",
     val receptorPotencyScore: Int = 85, // 0 - 100%
     val fatigueRiskLevel: String = "OPTIMAL_FLOW", // OPTIMAL_FLOW, SENSITIZED, ELEVATED_BURNOUT
     val fatigueRiskLabel: String = "Optimal Cognitive Flow",
@@ -48,7 +48,7 @@ data class ReasoningReport(
                     id = obj.optString("id", UUID.randomUUID().toString()),
                     generatedAtMs = obj.optLong("generatedAtMs", System.currentTimeMillis()),
                     analyzedEventCount = obj.optInt("analyzedEventCount", 0),
-                    topSourceApp = obj.optString("topSourceApp", "Spotify"),
+                    topSourceApp = obj.optString("topSourceApp", "Music App"),
                     receptorPotencyScore = obj.optInt("receptorPotencyScore", 85),
                     fatigueRiskLevel = obj.optString("fatigueRiskLevel", "OPTIMAL_FLOW"),
                     fatigueRiskLabel = obj.optString("fatigueRiskLabel", "Optimal Cognitive Flow"),

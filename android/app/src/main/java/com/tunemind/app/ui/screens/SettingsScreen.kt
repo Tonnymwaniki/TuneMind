@@ -73,25 +73,9 @@ fun SettingsScreen(
     val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
     val kidsModeEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.kidsModeEnabled.collectAsState()
-    val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
-    val isConnectingRemote by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectingFlow.collectAsState()
-    val appRemoteError by com.tunemind.app.provider.SpotifyAppRemoteManager.lastConnectionErrorFlow.collectAsState()
-    val appRemoteSuccessMsg by com.tunemind.app.provider.SpotifyAppRemoteManager.connectionSuccessMessageFlow.collectAsState()
-    var awaitingSpotifyWakeReturn by remember { mutableStateOf(false) }
 
-    val spotifyAuthManager = remember(context) { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
-    val spotifyOAuthRepo = remember(context) { com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(context) }
-    val needsLibraryScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
-    var isSpotifyAuthorized by remember {
-        mutableStateOf(spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated())
-    }
-    var hasExtendedLibraryScopes by remember {
-        mutableStateOf(spotifyOAuthRepo.hasExtendedLibraryScopes())
-    }
-    var hasOverlayPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)) }
     var hasNotificationAccess by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)) }
     var hasAudioPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)) }
-    var isSpotifyInstalled by remember { mutableStateOf(com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context)) }
 
     val fatigueSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
     val chronoReceptivity by com.tunemind.app.domain.voice.AgentSettingsStore.lateNightComfortEnabled.collectAsState()
@@ -108,13 +92,8 @@ fun SettingsScreen(
         {
             com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
             vm.checkBatteryOptimization(context)
-            isSpotifyAuthorized = spotifyAuthManager.isAuthenticated() || spotifyOAuthRepo.tokenManager.isAuthenticated()
-            hasExtendedLibraryScopes = spotifyOAuthRepo.hasExtendedLibraryScopes()
-            hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
             hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
             hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
-            isSpotifyInstalled = com.tunemind.app.provider.SpotifyAppRemoteManager.isSpotifyInstalled(context)
-            com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected()
             selectedProviderId = registry.getPreferredProviderId()
             alwaysAsk = registry.isAlwaysAskEnabled()
         }
@@ -135,15 +114,6 @@ fun SettingsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshAllSystemStates()
-                if (awaitingSpotifyWakeReturn) {
-                    awaitingSpotifyWakeReturn = false
-                    com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
-                        context = context,
-                        showAuthView = true
-                    ) { _, _ ->
-                        refreshAllSystemStates()
-                    }
-                }
                 coroutineScope.launch {
                     delay(350L)
                     refreshAllSystemStates()
@@ -211,9 +181,9 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 title = "Auto Queue Takeover",
                 description = if (upNextAutoOverrideEnabled) {
-                    "Stops Spotify and external autoplay at song end and spins TuneMind's Up Next track."
+                    "Stops external autoplay at song end and spins TuneMind's Up Next track."
                 } else {
-                    "Off: Lets Spotify or your player advance unless you tap Next."
+                    "Off: Lets your music app advance unless you tap Next."
                 },
                 checked = upNextAutoOverrideEnabled,
                 onCheckedChange = {
@@ -225,9 +195,9 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 title = "Never Leave TuneMind",
                 description = if (strictNoAppSwitchEnabled) {
-                    "Keeps playback inside TuneMind and blocks switching to other apps."
+                    "Strictly keeps playback in TuneMind (Local, Audius, warm MediaSession, or 30s previews)."
                 } else {
-                    "Off: Plays in the background and returns when supported."
+                    "Hybrid Mode: Plays inside TuneMind first, then opens exact links when external apps are cold."
                 },
                 checked = strictNoAppSwitchEnabled,
                 onCheckedChange = {
@@ -239,7 +209,7 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 title = "Kids & Family Safe Mode",
                 description = if (kidsModeEnabled) {
-                    "Active: Filters explicit songs and favors kid-safe music on Spotify."
+                    "Active: Filters explicit songs and favors kid-safe music."
                 } else {
                     "Off: Ask TuneMind for kids songs anytime or toggle safe mode here."
                 },
@@ -253,9 +223,9 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 title = "Stay in TuneMind",
                 description = if (stayInTuneMindEnabled) {
-                    "Controls Spotify quietly in the background."
+                    "Controls active Boomplay, YouTube Music, Spotify, and Audiomack sessions quietly without app-switching."
                 } else {
-                    "Off: Opens your music app directly when starting a track."
+                    "Off: Opens your selected music app directly when starting a track."
                 },
                 checked = stayInTuneMindEnabled,
                 onCheckedChange = {
@@ -267,7 +237,7 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 title = "Built-In Audio Player",
                 description = if (preferInAppPlayerEnabled) {
-                    "Plays local files and previews directly in TuneMind."
+                    "Plays local files, Audius streams, and previews directly in TuneMind."
                 } else {
                     "Off: Routes playback to your selected music app."
                 },
@@ -292,12 +262,12 @@ fun SettingsScreen(
             )
             StudioHairlineDivider()
 
-            // Spotify Remote & Account inline block
+            // Hybrid Cross-App Detection inline status
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -305,131 +275,30 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Spotify Remote & Music Sync",
+                        text = "Cross-App Hybrid Engine",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color(0xFFF8FAFC)
                     )
                     Text(
-                        text = when {
-                            isConnectingRemote -> "Connecting…"
-                            appRemoteConnected -> "Connected"
-                            else -> "Standby"
-                        },
+                        text = if (hasNotificationAccess) "Ready" else "Grant Access",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (appRemoteConnected) safeGreen else Color.White.copy(alpha = 0.56f)
+                        color = if (hasNotificationAccess) safeGreen else warnAmber
                     )
                 }
 
                 Text(
-                    text = when {
-                        isConnectingRemote -> "Connecting to Spotify Remote — approve the prompt if asked."
-                        appRemoteConnected && isSpotifyAuthorized && hasExtendedLibraryScopes && !needsLibraryScopeUpgrade ->
-                            appRemoteSuccessMsg ?: "Silent playback control and full Spotify library sync are active."
-                        appRemoteConnected -> "Silent Spotify playback control is active."
-                        !isSpotifyInstalled -> "Spotify app not found on this device."
-                        !appRemoteError.isNullOrBlank() -> appRemoteError!!
-                        isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) ->
-                            "Spotify linked — update permissions to sync Liked Songs, Playlists & Podcasts."
-                        isSpotifyAuthorized ->
-                            "Spotify library linked — connect Remote for in-app playback control."
-                        else -> "Link Spotify or connect Remote to control music without switching apps."
+                    text = if (hasNotificationAccess) {
+                        "Detected ${providers.size} installed music player(s). Songs played across any app are saved permanently into dynamic Library tabs."
+                    } else {
+                        "Grant Music Detection access below so TuneMind detects songs from Boomplay, YouTube Music, Spotify, Audiomack, and phone audio automatically."
                     },
                     fontSize = 12.sp,
-                    color = if (!appRemoteError.isNullOrBlank() && !appRemoteConnected) warnAmber else Color.White.copy(alpha = 0.60f),
+                    color = if (hasNotificationAccess) Color.White.copy(alpha = 0.60f) else warnAmber,
                     lineHeight = 17.sp
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (isSpotifyInstalled) {
-                        Button(
-                            enabled = !isConnectingRemote,
-                            onClick = {
-                                com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
-                                    context = context,
-                                    showAuthView = true
-                                ) { _, _ ->
-                                    refreshAllSystemStates()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (appRemoteConnected) safeGreen else Color(0xFFF8FAFC),
-                                contentColor = Color(0xFF0D0D0D)
-                            ),
-                            shape = RoundedCornerShape(28.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
-                            Text(
-                                text = when {
-                                    isConnectingRemote -> "Connecting…"
-                                    appRemoteConnected -> "Remote Active"
-                                    else -> "Connect Remote"
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = { spotifyAuthManager.launchSpotifyAuth(context) },
-                        shape = RoundedCornerShape(28.dp),
-                        border = BorderStroke(
-                            1.dp,
-                            when {
-                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
-                                isSpotifyAuthorized -> safeGreen.copy(alpha = 0.65f)
-                                else -> Color.White.copy(alpha = 0.22f)
-                            }
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp)
-                    ) {
-                        Text(
-                            text = when {
-                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> "Update Access"
-                                isSpotifyAuthorized -> "Spotify Linked"
-                                else -> "Link Spotify"
-                            },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = when {
-                                isSpotifyAuthorized && (needsLibraryScopeUpgrade || !hasExtendedLibraryScopes) -> warnAmber
-                                isSpotifyAuthorized -> safeGreen
-                                else -> Color(0xFFF8FAFC)
-                            }
-                        )
-                    }
-                }
-
-                if (!appRemoteConnected && !appRemoteError.isNullOrBlank() && isSpotifyInstalled) {
-                    Text(
-                        text = "Open Spotify to wake it up →",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = warnAmber,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                awaitingSpotifyWakeReturn = true
-                                runCatching {
-                                    context.packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { wakeIntent ->
-                                        wakeIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        context.startActivity(wakeIntent)
-                                    }
-                                }
-                            }
-                            .padding(vertical = 4.dp)
-                    )
-                }
-                }
+            }
             }
 
             Spacer(modifier = Modifier.height(22.dp))
@@ -439,23 +308,6 @@ fun SettingsScreen(
                 StudioSectionHeader(title = "Permissions")
                 Spacer(modifier = Modifier.height(6.dp))
                 StudioHairlineDivider()
-
-            SettingsPermissionRow(
-                title = "Return to TuneMind",
-                description = if (hasOverlayPermission) {
-                    "Can return automatically when another music app opens."
-                } else {
-                    "Lets TuneMind bring you back after starting playback."
-                },
-                isEnabled = hasOverlayPermission,
-                colors = colors,
-                onClick = {
-                    runCatching {
-                        context.startActivity(com.tunemind.app.util.PermissionUtils.getOverlayPermissionIntent(context))
-                    }
-                }
-            )
-            StudioHairlineDivider()
 
             SettingsPermissionRow(
                 title = "Music Detection",
@@ -708,7 +560,7 @@ fun SettingsScreen(
 
             SettingsSwitchRow(
                 title = "Merge Duplicate Plays",
-                description = "Combines identical songs played across Spotify and other players.",
+                description = "Combines identical songs played across music apps and local players.",
                 checked = deduplicateLogs,
                 onCheckedChange = {
                     com.tunemind.app.domain.voice.AgentSettingsStore.setMergeDuplicatePlaysEnabled(context, it)

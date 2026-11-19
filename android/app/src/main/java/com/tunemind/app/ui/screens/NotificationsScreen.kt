@@ -61,7 +61,6 @@ fun NotificationsScreen(
     val hearingInsights by vm.hearingInsightsState.collectAsState()
     val listeningStats by vm.listeningStats.collectAsState()
     val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
-    val needsScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
     val weeklyTrackCount = remember(cleanPlayHistory, listeningStats) {
         ListeningPlayDeduplicator.buildWindowedStats(
             cleanPlayHistory = cleanPlayHistory,
@@ -90,8 +89,6 @@ fun NotificationsScreen(
         vaultTracks,
         hearingInsights,
         weeklyTrackCount,
-        needsScopeUpgrade,
-        authSession.isSpotifyConnected,
         vaultAlertsEnabled,
         weeklyRecapEnabled,
         hearingAlertsEnabled,
@@ -116,23 +113,6 @@ fun NotificationsScreen(
                                     }
                                 )
                             }
-                        }
-                    )
-                )
-            }
-
-            if (syncAlertsEnabled && needsScopeUpgrade) {
-                add(
-                    TuneMindAlertItem(
-                        id = "spotify_scope_upgrade",
-                        title = "Spotify library access update needed",
-                        body = "Re-link Spotify in Settings to include Liked Songs, Playlists & Podcasts.",
-                        icon = Icons.Rounded.LibraryMusic,
-                        accent = Color(0xFF1DB954),
-                        actionLabel = "Open Settings",
-                        onAction = {
-                            onBack()
-                            onOpenSettings()
                         }
                     )
                 )
@@ -378,7 +358,7 @@ fun NotificationsScreen(
 
                     AlertPrefSwitchRow(
                         title = "Sync & Permission Health",
-                        description = "Alert if Spotify access or music detection needs attention.",
+                        description = "Alert if music detection or background sync needs attention.",
                         checked = syncAlertsEnabled,
                         accent = neonCyan,
                         onCheckedChange = { AgentSettingsStore.setSyncStatusAlertsEnabled(context, it) }

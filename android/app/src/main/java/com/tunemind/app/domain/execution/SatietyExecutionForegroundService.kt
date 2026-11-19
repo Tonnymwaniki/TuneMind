@@ -90,13 +90,13 @@ class SatietyExecutionForegroundService : Service() {
      */
     suspend fun evaluateLocalRoomHistoryAndExecute(): SatietyDecisionPayload? {
         val db = TuneMindDatabase.getInstance(applicationContext)
-        val spotifyDao = db.spotifyListeningHistoryDao()
+        val crossAppDao = db.crossAppLibraryDao()
         val eventQueueDao = db.eventQueueDao()
 
-        // 1. Read up to 50 tracks from the Local-First Spotify Room table
-        val spotifyRows = runCatching { spotifyDao.getRecentHistorySnapshot(50) }.getOrDefault(emptyList())
+        // 1. Read up to 50 permanent play logs across all music apps
+        val crossAppLogs = runCatching { crossAppDao.getPlayLogsOnce(50) }.getOrDefault(emptyList())
 
-        // 2. Also read recent event observations to compute accurate skip durations
+        // 2. Also read recent event observations as fallback
         val rawEvents = runCatching { eventQueueDao.getRecentEvents(100) }.getOrDefault(emptyList())
         val decodedObs = rawEvents.mapNotNull { row ->
             runCatching {
@@ -106,39 +106,31 @@ class SatietyExecutionForegroundService : Service() {
 
         val tracksJsonArray = JSONArray()
 
-        if (spotifyRows.isNotEmpty()) {
-            for (index in spotifyRows.indices) {
-                val item = spotifyRows[index]
-                val nextPlayedAt = spotifyRows.getOrNull(index - 1)?.playedAtEpochMs
-                val inferredListenMs = if (nextPlayedAt != null && nextPlayedAt > item.playedAtEpochMs) {
-                    (nextPlayedAt - item.playedAtEpochMs).coerceAtMost(item.durationMs.takeIf { it > 0 } ?: 210_000L)
-                } else {
-                    item.durationMs.takeIf { it > 0 } ?: 180_000L
-                }
-                val duration = item.durationMs.takeIf { it > 0 } ?: 180_000L
-                val wasSkipped = inferredListenMs < (duration * 0.25).toLong().coerceAtMost(35_000L)
-
+        if (crossAppLogs.isNotEmpty()) {
+            for (item in crossAppLogs) {
+                val duration = item.trackDurationMs.takeIf { it > 0L } ?: 180_000L
+                val listened = item.listenedMs.takeIf { it > 0L } ?: duration
                 tracksJsonArray.put(
                     JSONObject().apply {
                         put("track_id", item.trackId)
-                        put("spotify_uri", item.spotifyUri)
-                        put("track_title", item.trackTitle)
-                        put("artist_name", item.artistName)
-                        put("album_name", item.albumName)
+                        put("track_title", item.title)
+                        put("artist_name", item.artist)
+                        put("album_name", item.album)
+                        put("source_player", item.sourcePackage)
                         put("duration_ms", duration)
-                        put("played_at_epoch_ms", item.playedAtEpochMs)
-                        put("listened_duration_ms", inferredListenMs)
-                        if (wasSkipped) {
-                            put("skip_duration_ms", inferredListenMs)
+                        put("played_at_epoch_ms", item.playedAtMs)
+                        put("listened_duration_ms", listened)
+                        if (item.wasSkipped) {
+                            put("skip_duration_ms", listened)
                         }
-                        put("was_skipped", wasSkipped)
+                        put("was_skipped", item.wasSkipped)
                     }
                 )
             }
         } else {
-            // Fallback to decoded local MediaSession observations if Spotify Web API table is empty
+            // Fallback to decoded local MediaSession observations if play log is still warming up
             decodedObs
-                .filter { !it.trackTitle.isNullOrBlank() }
+                .filter { !it.trackTitle.isNullOrBlank() && it.observerSessionId != "spotify_web_api_ingestion" }
                 .take(50)
                 .forEach { obs ->
                     val duration = obs.durationMs ?: 180_000L
@@ -147,9 +139,9 @@ class SatietyExecutionForegroundService : Service() {
                     tracksJsonArray.put(
                         JSONObject().apply {
                             put("track_id", obs.trackId ?: obs.eventId)
-                            put("spotify_uri", obs.trackId ?: "")
                             put("track_title", obs.trackTitle ?: "Unknown Track")
                             put("artist_name", obs.trackArtist ?: "Unknown Artist")
+                            put("source_player", obs.sourcePackage ?: "unknown_player")
                             put("duration_ms", duration)
                             put("played_at_epoch_ms", obs.eventTimeMs)
                             put("listened_duration_ms", pos)

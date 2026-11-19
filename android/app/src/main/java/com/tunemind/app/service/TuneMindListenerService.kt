@@ -39,6 +39,8 @@ class TuneMindListenerService : NotificationListenerService() {
                     return@MediaSessionObserver
                 }
                 repository.record(observation)
+                com.tunemind.app.data.local.CrossAppPlayRecorder.getInstance(this@TuneMindListenerService)
+                    .onObservation(observation)
                 serviceScope.launch {
                     SyncScheduler.schedule(this@TuneMindListenerService)
                 }

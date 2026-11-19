@@ -83,6 +83,15 @@ object TuneMindInAppPlayer {
     private val _durationMsFlow = MutableStateFlow(0L)
     val durationMsFlow: StateFlow<Long> = _durationMsFlow.asStateFlow()
 
+    private val _isPreviewFlow = MutableStateFlow(false)
+    val isPreviewFlow: StateFlow<Boolean> = _isPreviewFlow.asStateFlow()
+
+    private val _externalPlayerPackageFlow = MutableStateFlow<String?>(null)
+    val externalPlayerPackageFlow: StateFlow<String?> = _externalPlayerPackageFlow.asStateFlow()
+
+    private val _externalPlayerNameFlow = MutableStateFlow<String?>(null)
+    val externalPlayerNameFlow: StateFlow<String?> = _externalPlayerNameFlow.asStateFlow()
+
     private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile
     private var cachedAppContext: Context? = null
@@ -160,8 +169,8 @@ object TuneMindInAppPlayer {
         if (cleanTitle.isBlank()) return null
         if (!PermissionUtils.hasAudioStoragePermission(context)) return null
 
-        val normTargetTitle = SpotifyTrackUriResolver.normalizeTitleForExactMatch(cleanTitle)
-        val normTargetArtist = SpotifyTrackUriResolver.normalizeTitleForExactMatch(artist)
+        val normTargetTitle = UniversalTrackResolver.normalizeTitleForExactMatch(cleanTitle)
+        val normTargetArtist = UniversalTrackResolver.normalizeTitleForExactMatch(artist)
         if (normTargetTitle.isBlank()) return null
 
         return try {
@@ -199,8 +208,8 @@ object TuneMindInAppPlayer {
                     val fileAlbum = if (albumIdx != -1) c.getString(albumIdx)?.trim().orEmpty() else ""
                     val durMs = if (durIdx != -1) c.getLong(durIdx).coerceAtLeast(0L) else 0L
 
-                    val normFileTitle = SpotifyTrackUriResolver.normalizeTitleForExactMatch(fileTitle)
-                    val normFileArtist = SpotifyTrackUriResolver.normalizeTitleForExactMatch(fileArtist)
+                    val normFileTitle = UniversalTrackResolver.normalizeTitleForExactMatch(fileTitle)
+                    val normFileArtist = UniversalTrackResolver.normalizeTitleForExactMatch(fileArtist)
 
                     val artistOk = normTargetArtist.isBlank() ||
                         normTargetArtist == "unknown artist" ||
@@ -313,6 +322,9 @@ object TuneMindInAppPlayer {
     ): Boolean {
         val appContext = context.applicationContext
         appPackageName = appContext.packageName
+        _isPreviewFlow.value = false
+        _externalPlayerPackageFlow.value = null
+        _externalPlayerNameFlow.value = null
         return try {
             prepareAndStartPlayer(
                 appContext = appContext,
@@ -337,11 +349,18 @@ object TuneMindInAppPlayer {
         streamUrl: String,
         title: String,
         artist: String = "",
-        album: String? = null
+        album: String? = null,
+        expectedDurationMs: Long = 30_000L,
+        isPreview: Boolean = true,
+        fallbackExternalPkg: String? = null,
+        fallbackExternalName: String? = null
     ): Boolean {
         if (!streamUrl.startsWith("http")) return false
         val appContext = context.applicationContext
         appPackageName = appContext.packageName
+        _isPreviewFlow.value = isPreview
+        _externalPlayerPackageFlow.value = fallbackExternalPkg
+        _externalPlayerNameFlow.value = fallbackExternalName
         return try {
             prepareAndStartPlayer(
                 appContext = appContext,
@@ -349,7 +368,7 @@ object TuneMindInAppPlayer {
                 artist = artist,
                 album = album,
                 sourceTag = streamUrl,
-                expectedDurationMs = 30_000L,
+                expectedDurationMs = expectedDurationMs,
                 isAsyncRemote = true
             ) { mp ->
                 mp.setDataSource(streamUrl)
@@ -681,6 +700,7 @@ object TuneMindInAppPlayer {
         persistenceScope.launch {
             runCatching {
                 EventBufferRepository(TuneMindDatabase.getInstance(appCtx).eventQueueDao()).record(obs)
+                com.tunemind.app.data.local.CrossAppPlayRecorder.getInstance(appCtx).onObservation(obs)
             }
         }
     }

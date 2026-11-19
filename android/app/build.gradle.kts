@@ -6,6 +6,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+}
+
 val localProps = Properties()
 val localPropsFile = rootProject.file("local.properties")
 if (localPropsFile.exists()) {
@@ -53,13 +58,7 @@ fun resolveBuildProp(vararg keys: String, default: String = ""): String {
     return default
 }
 
-val backendBaseUrl: String = resolveBuildProp("TUNEMIND_BASE_URL", default = "https://tunemind-backend-iudp.onrender.com")
-
-val spotifyClientId: String = resolveBuildProp("SPOTIFY_CLIENT_ID", default = "dcfad6acbd594477b0705ecc1e6ace3a")
-
-val spotifyClientSecret: String = resolveBuildProp("SPOTIFY_CLIENT_SECRET", default = "134028eff64c4e2cafa4b1f617463650")
-
-val spotifyRedirectUri: String = resolveBuildProp("SPOTIFY_REDIRECT_URI", default = "tunemind://spotify-auth-callback")
+val backendBaseUrl: String = resolveBuildProp("TUNEMIND_BASE_URL", default = "https://tunemind.co")
 
 val supabaseUrl: String = resolveBuildProp("SUPABASE_URL", "VITE_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
 
@@ -101,9 +100,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
-        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
-        buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifyClientSecret\"")
-        buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"$spotifyRedirectUri\"")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
@@ -124,7 +120,8 @@ android {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -187,7 +184,11 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
-    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+
+    // Firebase Crashlytics & Analytics (auto-activates when google-services.json is present)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.analytics)
 
     // Testing
     testImplementation(libs.junit)

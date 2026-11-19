@@ -133,8 +133,12 @@ wss.on('connection', async (ws: WebSocket) => {
     for (const pl of (ctx?.tunemind_playlists || []).slice(0, 15)) {
       pushTerm(pl?.name);
     }
-    for (const pl of (ctx?.spotify_playlists || []).slice(0, 12)) {
+    for (const pl of ((ctx?.tunemind_playlists || []) as any[]).slice(0, 12)) {
       pushTerm((pl as any)?.name);
+    }
+    for (const tr of ((ctx?.cross_app_library || []) as any[]).slice(0, 15)) {
+      pushTerm((tr as any)?.artist);
+      pushTerm((tr as any)?.title);
     }
     for (const r of (ctx?.recent_tracks || []).slice(0, 20)) {
       pushTerm(r?.artist);
@@ -152,6 +156,8 @@ wss.on('connection', async (ws: WebSocket) => {
     local_hour?: number;
     local_minute?: number;
     timezone?: string;
+    cross_app_library?: TuneMindTelemetryContext['cross_app_library'];
+    detected_player_tabs?: TuneMindTelemetryContext['detected_player_tabs'];
     tunemind_playlists?: TuneMindTelemetryContext['tunemind_playlists'];
     kids_mode_enabled?: boolean;
     active_sleep_timer_minutes?: number;
@@ -248,13 +254,13 @@ wss.on('connection', async (ws: WebSocket) => {
             artist: liveCurrent.artist || '',
             trackId: liveCurrent.trackId,
             spotifyUri: liveCurrent.spotifyUri,
-            source_player: liveCurrent.source_player || 'com.spotify.music',
+            source_player: liveCurrent.source_player || 'unknown_player',
             is_playing: liveCurrent.is_playing
           }
         : (storedTracks[0] || {
             title: 'Active Session',
             artist: 'TuneMind Observer',
-            source_player: 'com.spotify.music'
+            source_player: 'unknown_player'
           });
 
       const effectiveHistory = liveRecents.length > 0
@@ -264,7 +270,7 @@ wss.on('connection', async (ws: WebSocket) => {
             trackId: t.trackId,
             spotifyUri: t.spotifyUri,
             playCount: t.playCount,
-            source_player: t.source || 'com.spotify.music'
+            source_player: t.source || 'unknown_player'
           }))
         : storedTracks.slice(0, 50).map(t => ({
             title: t.title,
@@ -289,7 +295,7 @@ wss.on('connection', async (ws: WebSocket) => {
           artist: effectiveCurrentTrack.artist,
           trackId: (effectiveCurrentTrack as any).trackId,
           spotifyUri: (effectiveCurrentTrack as any).spotifyUri,
-          source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'com.spotify.music',
+          source_player: (effectiveCurrentTrack as any).source_player || (effectiveCurrentTrack as any).source || 'unknown_player',
           is_playing: (effectiveCurrentTrack as any).is_playing
         },
         user_command: finalText,
@@ -300,15 +306,14 @@ wss.on('connection', async (ws: WebSocket) => {
         vault_tracks: clientContext?.vault_tracks,
         dopamine_capsule: clientContext?.dopamine_capsule,
         pending_proposed_track: clientContext?.pending_proposed_track,
-        spotify_access_token: clientContext?.spotify_access_token,
         dialogue_history: clientContext?.dialogue_history,
         user_id: clientContext?.user_id,
         user_email: clientContext?.user_email,
         supabase_url: clientContext?.supabase_url,
         supabase_anon_key: clientContext?.supabase_anon_key,
         for_you_picks: clientContext?.for_you_picks,
-        spotify_playlists: clientContext?.spotify_playlists,
-        spotify_liked_tracks: clientContext?.spotify_liked_tracks,
+        cross_app_library: clientContext?.cross_app_library,
+        detected_player_tabs: clientContext?.detected_player_tabs,
         tunemind_playlists: clientContext?.tunemind_playlists,
         kids_mode_enabled: clientContext?.kids_mode_enabled,
         active_sleep_timer_minutes: clientContext?.active_sleep_timer_minutes,

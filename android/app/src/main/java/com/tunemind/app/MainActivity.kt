@@ -90,14 +90,6 @@ open class MainActivity : ComponentActivity() {
         // Safe rebind attempt without touching component enabled settings
         forceRebindListener(this)
 
-        // Handle Spotify OAuth 2.0 Authorization Code + PKCE callback if launched via tunemind://spotify-callback
-        intent?.let { incoming ->
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(applicationContext)
-                    .handleAuthRedirectIntent(incoming)
-            }
-        }
-
         enableEdgeToEdge()
         try {
             setContent {
@@ -130,23 +122,14 @@ open class MainActivity : ComponentActivity() {
 
                     val listeningStats by vm.listeningStats.collectAsState()
                     val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
-                    val spotifyLiveState by vm.spotifyLiveState.collectAsState()
-                    val spotifyLikedTracks by vm.spotifyLikedTracks.collectAsState()
-                    val spotifyPlaylists by vm.spotifyPlaylists.collectAsState()
-                    val spotifyPodcasts by vm.spotifyPodcasts.collectAsState()
-                    val isLibrarySyncing by vm.isLibrarySyncing.collectAsState()
-                    val needsLibraryScopeUpgrade by vm.needsLibraryScopeUpgrade.collectAsState()
-                    val loadingPlaylistIds by vm.loadingPlaylistIds.collectAsState()
-                    val loadedPlaylistIds by vm.loadedPlaylistIds.collectAsState()
-                    val playlistTrackErrors by vm.playlistTrackErrors.collectAsState()
+                    val crossAppLibraryTracks by vm.crossAppLibraryTracks.collectAsState()
+                    val detectedPlayerTabs by vm.detectedPlayerTabs.collectAsState()
                     val aiDiscoveryCrate by vm.aiDiscoveryCrate.collectAsState()
                     val savedAiRecommendations by vm.savedAiRecommendations.collectAsState()
                     val forYouLearningState by vm.forYouLearningState.collectAsState()
                     val isDiscovering by vm.isDiscovering.collectAsState()
-                    val spotifyUserProfile by vm.spotifyUserProfile.collectAsState()
                     val tasteShiftSummary by vm.tasteShiftSummary.collectAsState()
-                    val spotifyNewReleases by vm.spotifyNewReleases.collectAsState()
-                    val spotifyActionFeedback by vm.spotifyActionFeedback.collectAsState()
+                    val libraryActionFeedback by vm.libraryActionFeedback.collectAsState()
                     val manualFreshTracks by vm.manualFreshTracks.collectAsState()
                     val freshExcludedKeys by vm.freshExcludedKeys.collectAsState()
 
@@ -155,7 +138,7 @@ open class MainActivity : ComponentActivity() {
                     }
                     var selectedTargetPlayer by remember {
                         mutableStateOf(
-                            playerPrefs.getString("target_player_pkg", "com.spotify.music") ?: "com.spotify.music"
+                            playerPrefs.getString("target_player_pkg", "") ?: ""
                         )
                     }
 
@@ -215,9 +198,7 @@ open class MainActivity : ComponentActivity() {
                     val strictNoAppSwitchEnabled by AgentSettingsStore.strictNoAppSwitchEnabled.collectAsState()
                     val kidsModeEnabled by AgentSettingsStore.kidsModeEnabled.collectAsState()
                     val tuneMindPlaylists by vm.tuneMindPlaylists.collectAsState()
-                    val appRemoteConnected by com.tunemind.app.provider.SpotifyAppRemoteManager.isConnectedFlow.collectAsState()
                     val playbackLaunchFeedback by vm.playbackLaunchFeedback.collectAsState()
-                    val spotifyAuthManager = remember { com.tunemind.app.data.ingestion.SpotifyAuthManager(context) }
 
                     LaunchedEffect(Unit) {
                         com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
@@ -237,9 +218,9 @@ open class MainActivity : ComponentActivity() {
                             resolvedPkg.contains("boomplay", ignoreCase = true) -> "boomplay"
                             resolvedPkg.contains("youtube", ignoreCase = true) -> "youtube_music"
                             resolvedPkg.contains("audiomack", ignoreCase = true) -> "audiomack"
-                            resolvedPkg.contains("tunemind", ignoreCase = true) -> "tunemind_inapp"
+                            resolvedPkg.contains("spotify", ignoreCase = true) -> "spotify"
                             resolvedPkg.contains("local", ignoreCase = true) -> "local_files"
-                            else -> "spotify"
+                            else -> "tunemind_inapp"
                         }
                         selectedTargetPlayer = resolvedPkg
                         if (rememberDefault) {
@@ -377,8 +358,8 @@ open class MainActivity : ComponentActivity() {
                                 } ?: vm.tuneMindPlaylists.value.firstOrNull()
                                 if (match != null) {
                                     val chosenPkg = tool.target_player?.takeIf { it.isNotBlank() }
-                                        ?: playerPrefs.getString("target_player_pkg", "com.spotify.music")
-                                        ?: "com.spotify.music"
+                                        ?: playerPrefs.getString("target_player_pkg", "tunemind_inapp")
+                                        ?: "tunemind_inapp"
                                     vm.playTuneMindPlaylist(match, chosenPkg) { title, artist, uri, pkg ->
                                         playAnyTrackCallback?.invoke(title, artist, uri, pkg)
                                     }
@@ -405,9 +386,6 @@ open class MainActivity : ComponentActivity() {
                                         freshnessPercent = 96,
                                         playNext = true
                                     )
-                                }
-                                tracksToQueue.forEach { qt ->
-                                    vm.addTrackToSpotifyQueue(qt.title, qt.artist, qt.spotify_uri)
                                 }
                             }
                             "SET_SLEEP_TIMER" -> {
@@ -544,8 +522,8 @@ open class MainActivity : ComponentActivity() {
                             getVaultTracks = { vm.vaultState.value },
                             getDopamineCapsule = { vm.compileDopamineCapsule() },
                             getForYouPicks = { vm.aiDiscoveryCrate.value },
-                            getSpotifyPlaylists = { vm.spotifyPlaylists.value },
-                            getSpotifyLikedTracks = { vm.spotifyLikedTracks.value },
+                            getCrossAppLibraryTracks = { vm.crossAppLibraryTracks.value },
+                            getDetectedPlayerTabs = { vm.detectedPlayerTabs.value },
                             getListeningStats = {
                                 vm.refreshLiveListeningStatsNow()
                                 vm.listeningStats.value
@@ -588,8 +566,7 @@ open class MainActivity : ComponentActivity() {
                                     put("kids_mode_enabled", AgentSettingsStore.isKidsModeEnabled(context))
                                     put("tunemind_playlists_count", vm.tuneMindPlaylists.value.size)
                                     put("inapp_player_active", com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying())
-                                    put("spotify_connected", spotifyAuthManager.isAuthenticated())
-                                    put("app_remote_connected", com.tunemind.app.provider.SpotifyAppRemoteManager.isConnected())
+                                    put("detected_players_count", vm.detectedPlayerTabs.value.size)
                                 }
                             },
                             onTrackDispatched = { title, artist, sourcePlayer ->
@@ -646,14 +623,6 @@ open class MainActivity : ComponentActivity() {
                         }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
                         vm.setUiForegroundActive(isMainAppActive)
-                        if (isMainAppActive) {
-                            if (spotifyAuthManager.isAuthenticated()) {
-                                com.tunemind.app.provider.SpotifyAppRemoteManager.connectAsync(
-                                    context = context,
-                                    showAuthView = false
-                                )
-                            }
-                        }
                     }
 
                     DisposableEffect(lifecycleOwner, agentVoiceManager, orchestrator, isMainAppActive) {
@@ -682,7 +651,7 @@ open class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Live Spotify / Audio Telemetry
+                    // Live Cross-App / Audio Telemetry
                     val nowPlaying = homeState.nowPlaying
                     val trackTitle = nowPlaying?.title?.takeIf { it.isNotBlank() }
                     val artistName = nowPlaying?.artist?.takeIf { it.isNotBlank() }
@@ -885,12 +854,11 @@ open class MainActivity : ComponentActivity() {
                                                         playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
                                                     }
                                                 },
-                                                spotifyNewReleases = spotifyNewReleases,
                                                 onAddToQueue = { title, artist, uri ->
-                                                    vm.addTrackToSpotifyQueue(title, artist, uri)
+                                                    vm.enqueueUpNextTrack(title, artist, uri, reason = "Added to Up Next")
                                                 },
-                                                onSaveToSpotifyLiked = { title, artist, uri ->
-                                                    vm.saveTrackToSpotifyLiked(title, artist, uri)
+                                                onSaveToLiked = { title, artist, _ ->
+                                                    vm.saveTrackToCrossAppLiked(title, artist)
                                                 },
                                                 onExportForYouPlaylist = { recs ->
                                                     val triples = recs.map { Triple(it.title, it.artist, it.spotifyUri) }
@@ -903,8 +871,8 @@ open class MainActivity : ComponentActivity() {
                                                 resolveTrackVaultStatus = { t, a, uri, id ->
                                                     vm.resolveTrackVaultStatus(t, a, uri, id)
                                                 },
-                                                likedTracks = spotifyLikedTracks,
-                                                playlists = spotifyPlaylists,
+                                                crossAppLibraryTracks = crossAppLibraryTracks,
+                                                tuneMindPlaylists = tuneMindPlaylists,
                                                 savedRecommendations = savedAiRecommendations,
                                                 restoredAtMap = vm.getRestoredVaultTimestampsSnapshot(),
                                                 manualFreshTracks = manualFreshTracks,
@@ -918,18 +886,6 @@ open class MainActivity : ComponentActivity() {
                                             )
                                         }
                                         1 -> {
-                                            val matchedCurrentSpotifyUri = spotifyLiveState?.takeIf { sp ->
-                                                trackTitle != null &&
-                                                    nowPlaying?.sourcePackage?.contains("spotify", ignoreCase = true) == true &&
-                                                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
-                                                        trackTitle,
-                                                        artistName,
-                                                        null,
-                                                        sp.title,
-                                                        sp.artistOrShow,
-                                                        sp.spotifyUri
-                                                    )
-                                            }?.spotifyUri
                                             PulseAgentScreen(
                                                 agentState = agentState,
                                                 satietyPercentage = agentSatiety,
@@ -980,13 +936,13 @@ open class MainActivity : ComponentActivity() {
                                                 } else {
                                                     ""
                                                 },
-                                                profileAvatarUrl = authSession.avatarUrl.ifBlank { spotifyUserProfile?.avatarUrl.orEmpty() },
-                                                currentTrackSpotifyUri = matchedCurrentSpotifyUri,
+                                                profileAvatarUrl = authSession.avatarUrl,
+                                                currentTrackSpotifyUri = nowPlaying?.spotifyUri,
                                                 currentTrackPlayCount = if (trackTitle != null) {
                                                     vm.resolvePlayCount(
                                                         title = trackTitle,
                                                         artist = artistName,
-                                                        spotifyUri = matchedCurrentSpotifyUri ?: nowPlaying?.spotifyUri,
+                                                        spotifyUri = nowPlaying?.spotifyUri,
                                                         trackId = nowPlaying?.trackId
                                                     )
                                                 } else {
@@ -1035,34 +991,26 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 listeningStats = listeningStats,
                                                 cleanPlayHistory = cleanPlayHistory,
-                                                spotifyLiveState = spotifyLiveState,
-                                                likedTracks = spotifyLikedTracks,
-                                                playlists = spotifyPlaylists,
-                                                podcasts = spotifyPodcasts,
-                                                isLibrarySyncing = isLibrarySyncing,
-                                                needsLibraryScopeUpgrade = needsLibraryScopeUpgrade,
-                                                loadingPlaylistIds = loadingPlaylistIds,
-                                                loadedPlaylistIds = loadedPlaylistIds,
-                                                playlistTrackErrors = playlistTrackErrors,
+                                                crossAppLibraryTracks = crossAppLibraryTracks,
+                                                detectedPlayerTabs = detectedPlayerTabs,
+                                                tuneMindPlaylists = tuneMindPlaylists,
                                                 resolvePlayCount = { title, artist, uri ->
                                                     vm.resolvePlayCount(title, artist, uri)
                                                 },
                                                 isTrackCurrentlyPlaying = { title, artist, uri ->
                                                     vm.isTrackCurrentlyPlaying(title, artist, uri)
                                                 },
-                                                onRefreshSpotifyLibrary = {
-                                                    vm.refreshSpotifyLibrary(forcePlaylistTracks = true)
+                                                onToggleLibraryLike = { canonicalTrackKey, liked ->
+                                                    vm.toggleLibraryTrackLike(canonicalTrackKey, liked)
                                                 },
-                                                onLoadPlaylistTracks = { playlistId ->
-                                                    vm.loadPlaylistTracksIfNeeded(playlistId, forceRefresh = true)
+                                                onOpenPlaylistsManager = {
+                                                    selectedPlaylistNavName = null
+                                                    showPlaylistsScreen = true
                                                 },
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },
                                                 onOpenStats = { showStatsScreen = true },
-                                                onOpenAccountAuth = {
-                                                    showProfileScreen = true
-                                                },
                                                 tasteShiftSummary = tasteShiftSummary,
                                                 onRefreshStats = { vm.refreshLiveListeningStatsNow() },
                                                 requestedSubDeck = requestedRhythmSubDeck,
@@ -1168,18 +1116,18 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
 
-                                val currentSpotifyMsg = spotifyActionFeedback
-                                if (!currentSpotifyMsg.isNullOrBlank()) {
-                                    LaunchedEffect(currentSpotifyMsg) {
+                                val currentFeedbackMsg = libraryActionFeedback
+                                if (!currentFeedbackMsg.isNullOrBlank()) {
+                                    LaunchedEffect(currentFeedbackMsg) {
                                         kotlinx.coroutines.delay(4000L)
-                                        vm.clearSpotifyActionFeedback()
+                                        vm.clearLibraryActionFeedback()
                                     }
                                     Surface(
                                         shape = RoundedCornerShape(14.dp),
-                                        color = Color(0xFF0E1D17),
+                                        color = Color(0xFF0E1822),
                                         border = androidx.compose.foundation.BorderStroke(
                                             1.dp,
-                                            Color(0xFF1DB954).copy(alpha = 0.65f)
+                                            Color(0xFF00E5FF).copy(alpha = 0.55f)
                                         ),
                                         modifier = Modifier
                                             .align(Alignment.TopCenter)
@@ -1195,16 +1143,16 @@ open class MainActivity : ComponentActivity() {
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                text = currentSpotifyMsg,
+                                                text = currentFeedbackMsg,
                                                 color = Color(0xFFF8FAFC),
                                                 fontSize = 12.5.sp,
                                                 modifier = Modifier.weight(1f)
                                             )
                                             TextButton(
-                                                onClick = { vm.clearSpotifyActionFeedback() },
+                                                onClick = { vm.clearLibraryActionFeedback() },
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                             ) {
-                                                Text("Dismiss", fontSize = 11.5.sp, color = Color(0xFF1DB954))
+                                                Text("Dismiss", fontSize = 11.5.sp, color = Color(0xFF00E5FF))
                                             }
                                         }
                                     }
@@ -1214,9 +1162,7 @@ open class MainActivity : ComponentActivity() {
                                 com.tunemind.app.ui.components.NetworkConnectivityBanner(
                                     modifier = Modifier.align(Alignment.TopCenter),
                                     onRetrySync = {
-                                        if (spotifyAuthManager.isAuthenticated()) {
-                                            vm.refreshSpotifyLibrary(forcePlaylistTracks = false)
-                                        }
+                                        vm.refreshCrossAppIntelligence()
                                     }
                                 )
 
@@ -1260,17 +1206,11 @@ open class MainActivity : ComponentActivity() {
                                         onAskAgentAboutCurrent = { title, artist ->
                                             coroutineScope.launch {
                                                 pagerState.animateScrollToPage(1)
-                                                val spUri = spotifyLiveState?.takeIf { sp ->
-                                                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
-                                                        title, artist, null,
-                                                        sp.title, sp.artistOrShow, sp.spotifyUri
-                                                    )
-                                                }?.spotifyUri
                                                 agentVoiceManager.askAgentAboutTrack(
                                                     title = title,
                                                     artist = artist,
                                                     freshnessPercent = 80,
-                                                    spotifyUri = spUri ?: nowPlaying?.spotifyUri,
+                                                    spotifyUri = nowPlaying?.spotifyUri,
                                                     targetPlayer = selectedTargetPlayer,
                                                     trackId = nowPlaying?.trackId?.takeIf { it.isNotBlank() }
                                                 )
@@ -1475,10 +1415,6 @@ open class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            com.tunemind.app.data.ingestion.SpotifyOAuthRepository.getInstance(applicationContext)
-                .handleAuthRedirectIntent(intent)
-        }
     }
 
     override fun onResume() {

@@ -106,8 +106,10 @@ function renderLegalHtml(title: string, subtitle: string, sections: Array<{ head
     </header>
     ${sectionHtml}
     <footer>
+      <a href="/">Home</a>
       <a href="/privacy">Privacy Policy</a>
       <a href="/terms">Terms of Service</a>
+      <a href="/delete-account">Account Deletion</a>
       <a href="/health">Service Status</a>
     </footer>
   </main>
@@ -128,19 +130,19 @@ router.get('/privacy', (_req: Request, res: Response) => {
       [
         {
           heading: '1. Account Identity & Credentials',
-          body: 'When you sign in to TuneMind with Google or Email & Password, TuneMind stores your profile display name, email address, and taste preferences in our encrypted database so you can switch devices seamlessly. Spotify is never used to create a TuneMind account — it is connected strictly as a music data source.'
+          body: 'When you sign in to TuneMind with Google or Email & Password, TuneMind stores your profile display name, email address, and taste preferences in our encrypted database so you can switch devices seamlessly across devices.'
         },
         {
           heading: '2. Listening Telemetry & On-Device Storage',
-          body: 'Playback history, repetition fatigue (satiety) calculations, and Resting Vault tracks are primarily processed and stored locally on your device inside an encrypted Room SQLite database. You can pause all tracking immediately using Private Session in Profile or Settings.'
+          body: 'Playback history, repetition fatigue (satiety) calculations, per-player track libraries, and Resting Vault tracks are primarily processed and stored locally on your device inside a private Room SQLite database. You can pause all tracking immediately using Private Session in Profile or Settings.'
         },
         {
           heading: '3. Device & Music Permissions',
-          body: 'Microphone access is activated only when wake-word mode is enabled or when you tap the TuneMind orb. Notification Listener permission reads active media session metadata locally on-device. Spotify OAuth scopes are used solely to sync your liked tracks, playlists, podcasts, and recently played catalog.'
+          body: 'Microphone access is activated only when wake-word mode is enabled or when you tap the TuneMind orb. Notification Listener permission reads active media session metadata locally on-device across your installed music players (such as YouTube Music, Boomplay, Spotify, Audiomack, and local audio) so TuneMind can organize per-app listening stats and control active playback.'
         },
         {
           heading: '4. Your Data Controls & Account Deletion',
-          body: 'From the TuneMind Profile screen you can export your complete listening data in JSON format, clear listening history, disconnect Spotify data without deleting your account, or permanently wipe your account and cloud records via Delete Account & Wipe Data.'
+          body: 'From the TuneMind Profile screen you can export your complete listening data in JSON format, clear listening history, or permanently wipe your account and cloud records via Delete Account & Wipe Data.'
         }
       ]
     )
@@ -160,11 +162,11 @@ router.get('/terms', (_req: Request, res: Response) => {
       [
         {
           heading: '1. Personal Listening Companion',
-          body: 'TuneMind helps you track repetition fatigue, protect song freshness, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use.'
+          body: 'TuneMind helps you track repetition fatigue, protect song freshness, monitor safe volume headroom, and control playback across supported Android music apps and local audio for personal, non-commercial use.'
         },
         {
           heading: '2. Third-Party Services & Content Rights',
-          body: 'TuneMind integrates with third-party platforms such as Spotify and Google Play Services under their respective terms. All audio streaming rights remain with your selected music provider; TuneMind does not bypass DRM or redistribute copyrighted audio.'
+          body: 'TuneMind interoperates with installed media players on your device using Android media session standards and queries public music metadata catalogs. All audio streaming rights remain with your selected music provider; TuneMind does not bypass DRM or redistribute copyrighted audio.'
         },
         {
           heading: '3. Safe Listening Disclaimer',
@@ -173,6 +175,34 @@ router.get('/terms', (_req: Request, res: Response) => {
         {
           heading: '4. Account Termination & Support',
           body: 'You may stop using TuneMind or delete your account and associated cloud data at any time from Profile -> Delete Account & Wipe Data, or reach out through Help & Feedback inside the app.'
+        }
+      ]
+    )
+  );
+});
+
+/**
+ * GET /delete-account
+ * Public web deletion instructions & contact URL required by Google Play Data Safety.
+ */
+router.get('/delete-account', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(
+    renderLegalHtml(
+      'Delete Your TuneMind Account & Data',
+      'TuneMind Account & Cloud Data Deletion',
+      [
+        {
+          heading: '1. Instant In-App Deletion (Recommended)',
+          body: 'Open TuneMind on Android, go to Profile -> Delete Account & Wipe Data, and confirm. TuneMind immediately removes your profile, synced listening events, agent memory, taste genome, support feedback, and Supabase Auth login.'
+        },
+        {
+          heading: '2. Request Deletion Without the App',
+          body: 'If you uninstalled TuneMind and want your cloud account and associated listening intelligence deleted, email support@tunemind.co from your registered account email with subject "Delete TuneMind Account". Verified requests are permanently erased within 7 days.'
+        },
+        {
+          heading: '3. Data Removed vs. On-Device Data',
+          body: 'Account deletion permanently erases your Supabase Auth user, profile row, synced listening telemetry, taste genome, discovery outcomes, and support history. Local TuneMind playlists stored on your phone are erased automatically when you clear app data or uninstall.'
         }
       ]
     )

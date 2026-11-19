@@ -165,7 +165,7 @@ fun OnboardingScreen(
                         icon = Icons.Rounded.BatteryChargingFull,
                         accent = Color(0xFF10B981),
                         title = "Keep Sync Running",
-                        description = "Keeps your Spotify listening history up to date and playback responsive even with your screen off.",
+                        description = "Keeps your cross-app listening history up to date and playback responsive even with your screen off.",
                         primaryButtonText = "Allow Background Sync",
                         onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context)) },
                         onSkipClick = { viewModel.skipCurrentPermissionStep() }
@@ -202,8 +202,16 @@ private fun AuthLoginStep(
 
     var showEmailSheet by remember { mutableStateOf(false) }
     var showGoogleConfirmSheet by remember { mutableStateOf(false) }
+    var awaitingGoogleOAuthCallback by remember { mutableStateOf(false) }
     var selectedGoogleEmail by remember { mutableStateOf(session.email.ifBlank { "" }) }
     var selectedGoogleName by remember { mutableStateOf(session.displayName) }
+
+    LaunchedEffect(session.isGoogleConnected, session.isSupabaseAuthenticated, awaitingGoogleOAuthCallback) {
+        if (awaitingGoogleOAuthCallback && (session.isGoogleConnected || session.isSupabaseAuthenticated)) {
+            awaitingGoogleOAuthCallback = false
+            onContinue()
+        }
+    }
 
     val googleAccountPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -249,8 +257,8 @@ private fun AuthLoginStep(
             authError = "Enter a valid email address."
             return
         }
-        if (passwordInput.length < 4) {
-            authError = "Password must be at least 4 characters."
+        if (passwordInput.length < 6) {
+            authError = "Password must be at least 6 characters."
             return
         }
         authError = null
@@ -473,7 +481,19 @@ private fun AuthLoginStep(
 
                 // Button 1: Continue with Google (TuneMind Account)
                 Button(
-                    onClick = { launchGoogleAccountPicker() },
+                    onClick = {
+                        authError = null
+                        if (authManager.isSupabaseConfigured()) {
+                            val launched = authManager.launchGoogleLogin(context)
+                            if (launched) {
+                                awaitingGoogleOAuthCallback = true
+                            } else {
+                                launchGoogleAccountPicker()
+                            }
+                        } else {
+                            launchGoogleAccountPicker()
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
@@ -550,50 +570,7 @@ private fun AuthLoginStep(
                     }
                 }
 
-                // Button 3: Connect Spotify (Pull Music Data Only)
-                Button(
-                    onClick = {
-                        authError = null
-                        authManager.launchSpotifyLogin(context)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1DB954),
-                        contentColor = Color(0xFF0D0D0D)
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (session.isSpotifyConnected) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = null,
-                                tint = Color(0xFF0D0D0D),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        } else {
-                            Image(
-                                painter = painterResource(id = R.drawable.ic_spotify_logo),
-                                contentDescription = "Spotify Music Sync",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (session.isSpotifyConnected) "Spotify Music Data Linked" else "Connect Spotify (Music Data)",
-                            color = Color(0xFF0D0D0D),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                if (session.isGoogleConnected || session.primaryProvider == "EMAIL" || session.isSpotifyConnected) {
+                if (session.isGoogleConnected || session.primaryProvider == "EMAIL") {
                     Button(
                         onClick = onContinue,
                         modifier = Modifier

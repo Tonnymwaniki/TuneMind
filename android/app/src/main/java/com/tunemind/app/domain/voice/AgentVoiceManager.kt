@@ -46,7 +46,7 @@ data class PendingProposedTrack(
     val title: String,
     val artist: String,
     val trackId: String? = null,
-    val source: String = "com.spotify.music",
+    val source: String = "tunemind_inapp",
     val neverOpenExternalApp: Boolean = false,
     val spotifyUri: String? = null
 )
@@ -59,8 +59,8 @@ class AgentVoiceManager(
     private val getVaultTracks: (() -> List<com.tunemind.app.ui.VaultTrack>)? = null,
     private val getDopamineCapsule: (() -> com.tunemind.app.ui.DopamineCapsuleState?)? = null,
     private val getForYouPicks: (() -> List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>)? = null,
-    private val getSpotifyPlaylists: (() -> List<com.tunemind.app.data.ingestion.SpotifyPlaylistEntity>)? = null,
-    private val getSpotifyLikedTracks: (() -> List<com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity>)? = null,
+    private val getCrossAppLibraryTracks: (() -> List<com.tunemind.app.data.local.CrossAppTrackEntity>)? = null,
+    private val getDetectedPlayerTabs: (() -> List<com.tunemind.app.data.local.DetectedPlayerTab>)? = null,
     private val getListeningStats: (() -> com.tunemind.app.domain.memory.OverallListeningStats)? = null,
     private val getCleanPlayHistory: (() -> List<com.tunemind.app.domain.memory.UnifiedPlayEvent>)? = null,
     private val getTuneMindPlaylists: (() -> List<com.tunemind.app.data.local.TuneMindPlaylistWithTracks>)? = null,
@@ -194,7 +194,7 @@ class AgentVoiceManager(
     private var hasCompletedCloudTurn: Boolean = false
 
     @Volatile
-    private var cachedUnifiedTracks: List<com.tunemind.app.data.ingestion.SpotifyTrackAggregate> = emptyList()
+    private var cachedCrossAppLibrary: List<com.tunemind.app.data.local.CrossAppTrackEntity> = emptyList()
 
     private var wakeRecordJob: Job? = null
     private var wakeAudioRecord: AudioRecord? = null
@@ -217,14 +217,14 @@ class AgentVoiceManager(
     @Volatile
     private var lastEndOfSongFinishedArtist: String = ""
     @Volatile
-    private var lastEndOfSongTargetPlayer: String = "com.spotify.music"
+    private var lastEndOfSongTargetPlayer: String = "tunemind_inapp"
 
     @Volatile
     private var monitoredTrackTitle: String = ""
     @Volatile
     private var monitoredTrackArtist: String = ""
     @Volatile
-    private var monitoredTrackPackage: String = "com.spotify.music"
+    private var monitoredTrackPackage: String = "unknown_player"
     @Volatile
     private var monitoredTrackDurationMs: Long = 0L
     @Volatile
@@ -278,14 +278,93 @@ class AgentVoiceManager(
         }
     }
 
+    private fun getCrossAppLibrarySnapshot(): List<com.tunemind.app.data.local.CrossAppTrackEntity> {
+        val live = getCrossAppLibraryTracks?.invoke().orEmpty()
+        if (live.isNotEmpty()) {
+            cachedCrossAppLibrary = live
+            return live
+        }
+        return cachedCrossAppLibrary
+    }
+
     private fun refreshUnifiedTracksCacheAsync() {
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val recents = getRecentTracks?.invoke() ?: emptyList()
-                cachedUnifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver
-                    .getUnifiedUserSpotifyTracksBlocking(context, recents)
+                val fromCallback = getCrossAppLibraryTracks?.invoke().orEmpty()
+                cachedCrossAppLibrary = if (fromCallback.isNotEmpty()) {
+                    fromCallback
+                } else {
+                    com.tunemind.app.data.local.TuneMindDatabase.getInstance(context)
+                        .crossAppLibraryDao()
+                        .getAllLibraryTracksOnce()
+                }
             }
         }
+    }
+
+    private fun resolveOpenCatalogLinkBlocking(
+        title: String,
+        artist: String = "",
+        fullQuery: String = ""
+    ): String? {
+        val resolved = runCatching {
+            com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
+                context = context,
+                cleanTitle = title,
+                cleanArtist = artist,
+                fullQuery = fullQuery.ifBlank { "$title $artist".trim() }
+            )
+        }.getOrNull() ?: return null
+        return resolved.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+            ?: resolved.audiusStreamUrl?.takeIf { it.isNotBlank() }
+            ?: resolved.deezerUrl?.takeIf { it.isNotBlank() }
+            ?: resolved.previewUrl?.takeIf { it.isNotBlank() }
+    }
+
+    private data class OpenDiscoveryPick(
+        val trackTitle: String,
+        val artistName: String,
+        val deepLinkUrl: String?
+    )
+
+    private fun findMostPlayedCrossAppTrack(
+        recents: List<com.tunemind.app.domain.model.TrackMemoryEntry>
+    ): Pair<com.tunemind.app.data.local.CrossAppTrackEntity?, com.tunemind.app.domain.model.TrackMemoryEntry?> {
+        val libTop = getCrossAppLibrarySnapshot()
+            .filter { it.title.isNotBlank() }
+            .maxByOrNull { it.playCount }
+        val memTop = recents
+            .filter { !it.title.isNullOrBlank() }
+            .maxByOrNull { it.distinctAppearanceCount }
+        return if ((libTop?.playCount ?: 0) >= (memTop?.distinctAppearanceCount ?: 0) && libTop != null) {
+            libTop to memTop
+        } else {
+            libTop to memTop
+        }
+    }
+
+    private fun fetchOpenCatalogDiscoveryFallback(
+        excludedTitlesLower: Set<String>
+    ): OpenDiscoveryPick? {
+        val lib = getCrossAppLibrarySnapshot()
+        val seedArtist = lib.firstOrNull { it.artist.isNotBlank() && !it.artist.equals("Unknown Artist", ignoreCase = true) }?.artist
+        val seedGenre = lib.firstOrNull { it.genre.isNotBlank() && !it.genre.equals("Music", ignoreCase = true) }?.genre
+        val query = listOfNotNull(seedArtist, seedGenre).joinToString(" ").ifBlank { "afrobeats soul hits" }
+        val results = runCatching {
+            com.tunemind.app.provider.UniversalTrackResolver.searchCatalogBlocking(
+                context = context,
+                query = query,
+                limit = 10
+            )
+        }.getOrDefault(emptyList())
+        val match = results.firstOrNull { cand ->
+            cand.title.isNotBlank() && !excludedTitlesLower.contains(cand.title.lowercase().trim())
+        } ?: results.firstOrNull() ?: return null
+        val link = match.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+            ?: match.audiusStreamUrl?.takeIf { it.isNotBlank() }
+            ?: match.deezerUrl?.takeIf { it.isNotBlank() }
+            ?: match.previewUrl?.takeIf { it.isNotBlank() }
+        return OpenDiscoveryPick(match.title, match.artist, link)
     }
 
     private fun prewarmCloudConnectionAsync() {
@@ -886,16 +965,6 @@ class AgentVoiceManager(
         }
     }
 
-    private fun getCurrentSpotifyAccessTokenBlocking(): String {
-        return try {
-            runBlocking(Dispatchers.IO) {
-                com.tunemind.app.data.ingestion.SpotifyAuthManager(context).getValidAccessToken()
-            } ?: ""
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
     private fun JSONObject.appendHearingTelemetryJson(hearing: com.tunemind.app.ui.HearingInsightsState?) {
         if (hearing == null) return
         val estDb = hearing.estimatedAverageDb.toDouble().takeIf { !it.isNaN() } ?: 68.0
@@ -988,27 +1057,48 @@ class AgentVoiceManager(
             })
         }
 
-        val playlistsList = getSpotifyPlaylists?.invoke().orEmpty()
-        if (playlistsList.isNotEmpty()) {
-            put("spotify_playlists", org.json.JSONArray().apply {
-                playlistsList.take(25).forEach { pl ->
-                    val decoded = pl.decodeTracks()
+        val libTracks = getCrossAppLibrarySnapshot()
+        if (libTracks.isNotEmpty()) {
+            put("cross_app_library", org.json.JSONArray().apply {
+                libTracks.take(45).forEach { lib ->
                     put(JSONObject().apply {
-                        put("playlist_id", pl.playlistId)
-                        put("name", pl.name)
-                        put("owner", pl.ownerName)
-                        put("track_count", maxOf(pl.trackCount, decoded.size))
-                        put("spotify_uri", "spotify:playlist:${pl.playlistId}")
-                        put("tracks", org.json.JSONArray().apply {
-                            decoded.take(30).forEach { tr ->
-                                put(JSONObject().apply {
-                                    put("title", tr.title)
-                                    put("artist", tr.artist)
-                                    put("spotify_uri", tr.spotifyUri)
-                                    put("track_id", tr.trackId)
-                                })
-                            }
+                        put("title", lib.title)
+                        put("artist", lib.artist)
+                        put("play_count", lib.playCount)
+                        put("source_player", lib.primarySourcePackage)
+                        put("source_packages", lib.sourcePackagesCsv)
+                        put("is_liked", lib.isLiked)
+                        put("genre", lib.genre)
+                        put("track_id", lib.trackId)
+                        lib.ytmVideoId?.takeIf { it.isNotBlank() }?.let { put("ytm_video_id", it) }
+                        lib.audiusStreamUrl?.takeIf { it.isNotBlank() }?.let { put("audius_stream_url", it) }
+                        lib.previewUrl?.takeIf { it.isNotBlank() }?.let { put("preview_url", it) }
+                    })
+                }
+            })
+            val likedTracks = libTracks.filter { it.isLiked }
+            if (likedTracks.isNotEmpty()) {
+                put("cross_app_liked_tracks", org.json.JSONArray().apply {
+                    likedTracks.take(25).forEach { lk ->
+                        put(JSONObject().apply {
+                            put("title", lk.title)
+                            put("artist", lk.artist)
+                            put("source_player", lk.primarySourcePackage)
+                            put("track_id", lk.trackId)
                         })
+                    }
+                })
+            }
+        }
+        val playerTabs = getDetectedPlayerTabs?.invoke().orEmpty()
+        if (playerTabs.isNotEmpty()) {
+            put("detected_player_tabs", org.json.JSONArray().apply {
+                playerTabs.forEach { tab ->
+                    put(JSONObject().apply {
+                        put("package_name", tab.packageName)
+                        put("display_name", tab.displayName)
+                        put("track_count", tab.trackCount)
+                        put("total_plays", tab.totalPlays)
                     })
                 }
             })
@@ -1028,7 +1118,7 @@ class AgentVoiceManager(
                             put(JSONObject().apply {
                                 put("title", tr.title)
                                 put("artist", tr.artist)
-                                put("spotify_uri", tr.spotifyUri)
+                                put("external_uri", tr.externalUri)
                                 put("track_id", tr.trackId)
                                 put("source_player", tr.sourcePlayer)
                             })
@@ -1040,20 +1130,6 @@ class AgentVoiceManager(
         put("kids_mode_enabled", AgentSettingsStore.isKidsModeEnabled(context))
         getSleepTimerRemainingMinutes?.invoke()?.let { mins ->
             put("active_sleep_timer_minutes", mins)
-        }
-
-        val likedList = getSpotifyLikedTracks?.invoke().orEmpty()
-        if (likedList.isNotEmpty()) {
-            put("spotify_liked_tracks", org.json.JSONArray().apply {
-                likedList.take(25).forEach { lk ->
-                    put(JSONObject().apply {
-                        put("title", lk.trackTitle)
-                        put("artist", lk.artistName)
-                        put("spotify_uri", lk.spotifyUri)
-                        put("track_id", lk.trackId)
-                    })
-                }
-            })
         }
 
         val statsSnapshot = getListeningStats?.invoke()
@@ -1184,7 +1260,6 @@ class AgentVoiceManager(
         put("supabase_url", identity.supabaseUrl)
         put("supabase_anon_key", identity.supabaseAnonKey)
         put("dialogue_history", getDialogueHistoryJsonArray())
-        put("spotify_access_token", getCurrentSpotifyAccessTokenBlocking())
         getAppState?.invoke()?.let { put("app_state", it) }
     }
 
@@ -1389,7 +1464,7 @@ class AgentVoiceManager(
         title: String,
         artist: String,
         spotifyUri: String? = null,
-        targetPlayer: String = "com.spotify.music",
+        targetPlayer: String = "tunemind_inapp",
         customSpokenLine: String? = null,
         neverOpenExternalApp: Boolean = false
     ) {
@@ -1423,7 +1498,7 @@ class AgentVoiceManager(
         _flowAnalysisFlow.value = "Direct studio launch: spinning $cleanTitle in peak dopamine state."
         _agentSatietyFlow.value = 18
         mainHandler.post {
-            onTrackDispatched?.invoke(cleanTitle, cleanArtist, targetPlayer.ifBlank { "com.spotify.music" })
+            onTrackDispatched?.invoke(cleanTitle, cleanArtist, targetPlayer.ifBlank { "tunemind_inapp" })
         }
         scope.launch {
             _transcriptionFlow.emit(spokenLine)
@@ -1436,7 +1511,7 @@ class AgentVoiceManager(
             voice_agent_tts = spokenLine,
             os_execution_command = com.tunemind.app.domain.execution.OsExecutionCommand(
                 intent = "OS_MEDIA_NEXT_AND_DEEP_LINK",
-                target_player = targetPlayer.ifBlank { "com.spotify.music" },
+                target_player = targetPlayer.ifBlank { "tunemind_inapp" },
                 search_query = searchQuery,
                 suggested_bpm_target = 108,
                 track_title = cleanTitle,
@@ -1502,23 +1577,7 @@ class AgentVoiceManager(
                 triggerAutonomousEndOfSongHandover(
                     finishedTitle = doneTitle,
                     finishedArtist = doneArtist,
-                    targetPlayer = pkg.ifBlank { "com.spotify.music" }
-                )
-            }
-        }
-
-        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener { title, artist, _, _, isPlaying, posMs, durMs ->
-            if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
-                evaluatePlaybackSnapshotForEndOfSong(
-                    com.tunemind.app.media.ActivePlaybackSnapshot(
-                        packageName = "com.spotify.music",
-                        title = title,
-                        artist = artist,
-                        isPlaying = isPlaying,
-                        positionMs = posMs,
-                        durationMs = durMs,
-                        updatedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
-                    )
+                    targetPlayer = pkg.ifBlank { "tunemind_inapp" }
                 )
             }
         }
@@ -1613,7 +1672,7 @@ class AgentVoiceManager(
                 triggerAutonomousEndOfSongHandover(
                     finishedTitle = rawTitle,
                     finishedArtist = snap.artist,
-                    targetPlayer = snap.packageName.ifBlank { "com.spotify.music" }
+                    targetPlayer = snap.packageName.ifBlank { "tunemind_inapp" }
                 )
             }
             return
@@ -1634,19 +1693,19 @@ class AgentVoiceManager(
             )
         val previousPlayedSubstantially = prevMaxPos >= 25_000L || (prevDur >= 25_000L && prevMaxPos >= (prevDur * 65L) / 100L)
 
-        // TRIGGER B: Previous track played substantially and Spotify auto-advanced to an unapproved random next track!
+        // TRIGGER B: Previous track played substantially and player auto-advanced to an unapproved random next track!
         if (!wasDispatchedByTuneMind &&
             previousPlayedSubstantially &&
             !lastHandoverCompletedForTitle.equals(prevTitle, ignoreCase = true)
         ) {
             Log.i(
                 TAG,
-                "🎵 Autonomous End-of-Song Trigger B (Intercepted unapproved Spotify auto-advance '$prevTitle' -> '$rawTitle')"
+                "🎵 Autonomous End-of-Song Trigger B (Intercepted unapproved auto-advance '$prevTitle' -> '$rawTitle')"
             )
             triggerAutonomousEndOfSongHandover(
                 finishedTitle = prevTitle,
                 finishedArtist = prevArtist,
-                targetPlayer = snap.packageName.ifBlank { "com.spotify.music" }
+                targetPlayer = snap.packageName.ifBlank { "tunemind_inapp" }
             )
             return
         }
@@ -1751,12 +1810,12 @@ class AgentVoiceManager(
     /**
      * Queries Claude (`/api/v1/reasoning/evaluate-satiety` with `AUTO_CURATE_NEXT_TRACK`) to select the best
      * fresh next song after `finishedTitle` and immediately launches playback (even when the screen is off).
-     * Falls back to `SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking` if offline.
+     * Falls back to open-catalog discovery + Dopamine Capsule if offline.
      */
     fun autoCurateAndPlayNextTrackWithClaude(
         finishedTitle: String,
         finishedArtist: String,
-        targetPlayer: String = "com.spotify.music"
+        targetPlayer: String = "tunemind_inapp"
     ) {
         acquireTemporaryHandoverWakeLock(40_000L)
         isExecutingAutonomousHandover = true
@@ -1774,7 +1833,7 @@ class AgentVoiceManager(
 
             try {
                 val recents = getRecentTracks?.invoke() ?: emptyList()
-                val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+                val crossAppLib = getCrossAppLibrarySnapshot()
                 val hearing = getHearingInsights?.invoke()
                 val vaultList = getVaultTracks?.invoke() ?: emptyList()
                 val capsule = getDopamineCapsule?.invoke()
@@ -1801,21 +1860,31 @@ class AgentVoiceManager(
                     })
 
                     val historyArr = org.json.JSONArray()
-                    for (u in unifiedTracks.take(60)) {
-                        val identity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
-                            trackId = u.trackId,
-                            spotifyUri = u.spotifyUri,
-                            title = u.trackTitle,
-                            artist = u.artistName
-                        )
-                        historyArr.put(JSONObject().apply {
-                            put("title", u.trackTitle)
-                            put("artist", u.artistName)
-                            put("source_player", "com.spotify.music")
-                            put("playCount", u.playCount.coerceAtLeast(0))
-                            put("trackId", identity.trackId)
-                            put("spotifyUri", identity.spotifyUri ?: "")
-                        })
+                    if (crossAppLib.isNotEmpty()) {
+                        for (lib in crossAppLib.take(60)) {
+                            historyArr.put(JSONObject().apply {
+                                put("title", lib.title)
+                                put("artist", lib.artist)
+                                put("source_player", lib.primarySourcePackage.ifBlank { "unknown_player" })
+                                put("playCount", lib.playCount.coerceAtLeast(0))
+                                put("trackId", lib.trackId)
+                                val link = lib.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                                    ?: lib.deezerUrl?.takeIf { it.isNotBlank() } ?: ""
+                                put("externalUri", link)
+                            })
+                        }
+                    } else {
+                        for (r in recents.take(60)) {
+                            val tTitle = r.title?.takeIf { it.isNotBlank() } ?: continue
+                            val tArtist = r.artist ?: ""
+                            historyArr.put(JSONObject().apply {
+                                put("title", tTitle)
+                                put("artist", tArtist)
+                                put("source_player", r.sourcePackage?.takeIf { it.isNotBlank() } ?: "unknown_player")
+                                put("playCount", r.distinctAppearanceCount.coerceAtLeast(0))
+                                put("trackId", r.canonicalTrackId())
+                            })
+                        }
                     }
                     put("rolling_history", historyArr)
                     put("recently_played_by_agent", org.json.JSONArray((getRecentlyPlayedByAgent() + listOf(finishedTitle)).distinct()))
@@ -1879,19 +1948,16 @@ class AgentVoiceManager(
                 Log.w(TAG, "Claude auto-curate next track fallback notice: ${e.message}")
             }
 
-            // Fallback to live Spotify Discovery or Dopamine Capsule if backend was unreachable or didn't return a track
+            // Fallback to open-catalog discovery or Dopamine Capsule if backend was unreachable or didn't return a track
             if (chosenTitle.isNullOrBlank()) {
-                val recents = getRecentTracks?.invoke() ?: emptyList()
-                val excluded = (getRecentlyPlayedByAgent() + listOf(finishedTitle)).toSet()
-                val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                    context = context,
-                    fallbackMemoryTracks = recents,
-                    excludedTitles = excluded
-                )
+                val excluded = (getRecentlyPlayedByAgent() + listOf(finishedTitle))
+                    .map { it.lowercase().trim() }
+                    .toSet()
+                val discovery = fetchOpenCatalogDiscoveryFallback(excluded)
                 if (discovery != null) {
                     chosenTitle = discovery.trackTitle
                     chosenArtist = discovery.artistName
-                    chosenUri = discovery.spotifyUri
+                    chosenUri = discovery.deepLinkUrl
                 } else {
                     val capsulePick = getDopamineCapsule?.invoke()?.tracks?.firstOrNull {
                         !it.title.equals(finishedTitle, ignoreCase = true)
@@ -1904,13 +1970,12 @@ class AgentVoiceManager(
 
             val finalTitle = chosenTitle ?: "Midnight City"
             val finalArtist = chosenArtist ?: ""
-            val finalUri = chosenUri?.takeIf { it.startsWith("spotify:track:") }
-                ?: com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
-                    context = context,
-                    cleanTitle = finalTitle,
-                    cleanArtist = finalArtist,
+            val finalUri = chosenUri?.takeIf { it.startsWith("http") }
+                ?: resolveOpenCatalogLinkBlocking(
+                    title = finalTitle,
+                    artist = finalArtist,
                     fullQuery = "$finalTitle $finalArtist".trim()
-                )
+                ) ?: chosenUri
             val artistPart = if (finalArtist.isNotBlank() && !finalArtist.equals("Unknown Artist", ignoreCase = true)) {
                 " by $finalArtist"
             } else {
@@ -1959,7 +2024,7 @@ class AgentVoiceManager(
             title = pending.title,
             artist = pending.artist,
             spotifyUri = canonical.spotifyUri,
-            targetPlayer = pending.source.ifBlank { "com.spotify.music" },
+            targetPlayer = pending.source.ifBlank { "tunemind_inapp" },
             neverOpenExternalApp = pending.neverOpenExternalApp
         )
     }
@@ -2010,7 +2075,7 @@ class AgentVoiceManager(
         artist: String,
         freshnessPercent: Int = 92,
         spotifyUri: String? = null,
-        targetPlayer: String = "com.spotify.music",
+        targetPlayer: String = "tunemind_inapp",
         trackId: String? = null
     ) {
         errorResetJob?.cancel()
@@ -2055,7 +2120,7 @@ class AgentVoiceManager(
      */
     fun launchDopamineCapsuleBriefing(
         capsule: com.tunemind.app.ui.DopamineCapsuleState,
-        targetPlayer: String = "com.spotify.music"
+        targetPlayer: String = "tunemind_inapp"
     ) {
         errorResetJob?.cancel()
         stopMicrophoneStream()
@@ -2153,10 +2218,8 @@ class AgentVoiceManager(
                 try {
                     val np = getNowPlaying?.invoke()
                     val recents: List<com.tunemind.app.domain.model.TrackMemoryEntry> = getRecentTracks?.invoke() ?: emptyList()
-                    val unifiedTracks = cachedUnifiedTracks.ifEmpty {
-                        refreshUnifiedTracksCacheAsync()
-                        emptyList()
-                    }
+                    val crossAppLib = getCrossAppLibrarySnapshot()
+                    if (crossAppLib.isEmpty()) refreshUnifiedTracksCacheAsync()
                     val hearing = getHearingInsights?.invoke()
                     val vaultList = getVaultTracks?.invoke() ?: emptyList()
                     val capsule = getDopamineCapsule?.invoke()
@@ -2165,11 +2228,11 @@ class AgentVoiceManager(
                     val metaJson = JSONObject().apply {
                         put("type", "client_context")
                         val currentIdentity = np?.let { cur ->
-                            val matchedUnified = unifiedTracks.firstOrNull { t -> t.trackTitle.equals(cur.title, ignoreCase = true) }
+                            val matchedLib = crossAppLib.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }
                             val matchedRecent = recents.firstOrNull { t -> t.title.equals(cur.title, ignoreCase = true) }
                             com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
-                                trackId = matchedUnified?.trackId ?: matchedRecent?.trackId?.ifBlank { null },
-                                spotifyUri = matchedUnified?.spotifyUri ?: matchedRecent?.providerTrackId,
+                                trackId = matchedLib?.trackId ?: matchedRecent?.trackId?.ifBlank { null },
+                                spotifyUri = matchedRecent?.providerTrackId,
                                 title = cur.title,
                                 artist = cur.artist
                             )
@@ -2177,7 +2240,7 @@ class AgentVoiceManager(
                         val currentObj = JSONObject().apply {
                             put("title", np?.title ?: "Standing By")
                             put("artist", np?.artist ?: "")
-                            put("source_player", np?.sourcePackage ?: "com.spotify.music")
+                            put("source_player", np?.sourcePackage ?: "unknown_player")
                             put("trackId", currentIdentity?.trackId ?: "")
                             put("spotifyUri", currentIdentity?.spotifyUri ?: "")
                             put("is_playing", np?.isPlaying == true)
@@ -2185,21 +2248,30 @@ class AgentVoiceManager(
                         put("current_track", currentObj)
 
                         val historyArr = org.json.JSONArray()
-                        for (u in unifiedTracks.take(60)) {
-                            val uIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
-                                trackId = u.trackId,
-                                spotifyUri = u.spotifyUri,
-                                title = u.trackTitle,
-                                artist = u.artistName
-                            )
-                            historyArr.put(JSONObject().apply {
-                                put("title", u.trackTitle)
-                                put("artist", u.artistName)
-                                put("source", "com.spotify.music")
-                                put("playCount", u.playCount.coerceAtLeast(0))
-                                put("trackId", uIdentity.trackId)
-                                put("spotifyUri", uIdentity.spotifyUri ?: "")
-                            })
+                        if (crossAppLib.isNotEmpty()) {
+                            for (lib in crossAppLib.take(60)) {
+                                val link = lib.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                                    ?: lib.deezerUrl?.takeIf { it.isNotBlank() } ?: ""
+                                historyArr.put(JSONObject().apply {
+                                    put("title", lib.title)
+                                    put("artist", lib.artist)
+                                    put("source", lib.primarySourcePackage.ifBlank { "unknown_player" })
+                                    put("playCount", lib.playCount.coerceAtLeast(0))
+                                    put("trackId", lib.trackId)
+                                    put("externalUri", link)
+                                })
+                            }
+                        } else {
+                            for (r in recents.take(60)) {
+                                val tTitle = r.title?.takeIf { it.isNotBlank() } ?: continue
+                                historyArr.put(JSONObject().apply {
+                                    put("title", tTitle)
+                                    put("artist", r.artist ?: "")
+                                    put("source", r.sourcePackage?.takeIf { it.isNotBlank() } ?: "unknown_player")
+                                    put("playCount", r.distinctAppearanceCount.coerceAtLeast(0))
+                                    put("trackId", r.canonicalTrackId())
+                                })
+                            }
                         }
                         put("recent_tracks", historyArr)
                         put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
@@ -2368,17 +2440,19 @@ class AgentVoiceManager(
 
     private fun isSpotifyCollectionUri(uri: String?): Boolean {
         val t = uri?.trim().orEmpty()
-        return t.startsWith("spotify:playlist:", ignoreCase = true) ||
-            t.startsWith("spotify:album:", ignoreCase = true) ||
-            t.startsWith("spotify:artist:", ignoreCase = true) ||
-            t.startsWith("spotify:episode:", ignoreCase = true) ||
-            t.startsWith("https://open.spotify.com/playlist/", ignoreCase = true) ||
-            t.startsWith("https://open.spotify.com/album/", ignoreCase = true)
+        return t.startsWith("http://", ignoreCase = true) ||
+            t.startsWith("https://", ignoreCase = true) ||
+            t.startsWith("ytmusic://", ignoreCase = true) ||
+            t.startsWith("boomplay://", ignoreCase = true)
     }
 
     private fun normalizePlayableSpotifyUri(raw: String?): String? {
         val t = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        if (isSpotifyCollectionUri(t)) return t
+        if (t.startsWith("http://", ignoreCase = true) ||
+            t.startsWith("https://", ignoreCase = true) ||
+            t.startsWith("ytmusic://", ignoreCase = true) ||
+            t.startsWith("boomplay://", ignoreCase = true)
+        ) return t
         return com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t)
     }
 
@@ -2400,10 +2474,11 @@ class AgentVoiceManager(
             }
         }
         return when {
-            transcriptLower.contains("boomplay") -> "com.afmobi.boomplayer"
+            transcriptLower.contains("boomplay") -> "com.afmobi.boomplaymusic"
             transcriptLower.contains("youtube music") || transcriptLower.contains("yt music") -> "com.google.android.apps.youtube.music"
             transcriptLower.contains("audiomack") -> "com.audiomack"
-            transcriptLower.contains("apple music") -> "com.apple.android.music"
+            transcriptLower.contains("deezer") -> "deezer.android.app"
+            transcriptLower.contains("soundcloud") -> "com.soundcloud.android"
             transcriptLower.contains("built-in") || transcriptLower.contains("in-app player") || transcriptLower.contains("in app player") -> "tunemind_inapp"
             transcriptLower.contains("local audio") || transcriptLower.contains("local files") || transcriptLower.contains("phone storage") -> "local_files"
             Regex("\\bon spotify\\b|\\bwith spotify\\b|\\buse spotify\\b|\\bto spotify\\b|\\bspotify\\b").containsMatchIn(transcriptLower) &&
@@ -2427,9 +2502,11 @@ class AgentVoiceManager(
             }
             val lower = candidate.lowercase()
             when {
-                lower.contains("boomplay") -> return "com.afmobi.boomplayer"
+                lower.contains("boomplay") -> return "com.afmobi.boomplaymusic"
                 lower.contains("youtube") -> return "com.google.android.apps.youtube.music"
                 lower.contains("audiomack") -> return "com.audiomack"
+                lower.contains("deezer") -> return "deezer.android.app"
+                lower.contains("soundcloud") -> return "com.soundcloud.android"
                 lower.contains("tunemind") || lower.contains("inapp") -> return "tunemind_inapp"
                 lower.contains("local") -> return "local_files"
                 lower.contains("spotify") -> return "com.spotify.music"
@@ -2442,7 +2519,7 @@ class AgentVoiceManager(
             val pref = registry.getProvider(registry.getPreferredProviderId())
             return pref.packageName.ifBlank { pref.providerId }
         }
-        return players.firstOrNull()?.let { it.packageName.ifBlank { it.providerId } } ?: "com.spotify.music"
+        return players.firstOrNull()?.let { it.packageName.ifBlank { it.providerId } } ?: "tunemind_inapp"
     }
 
     fun dispatchReasoningResult(dataObj: JSONObject?, explicitTtsPayload: String = "") {
@@ -2533,31 +2610,33 @@ class AgentVoiceManager(
         var customProposalSpeechOverride: String? = null
         if (wantsMostPlayed && !backendGaveValidTrack) {
             val recents = getRecentTracks?.invoke() ?: emptyList()
-            val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
-            if (topTrack != null) {
-                rawTrackTitle = topTrack.trackTitle
-                rawTrackArtist = topTrack.artistName
-                resolvedSpotifyUri = topTrack.spotifyUri
-                rawSearchQuery = "${topTrack.trackTitle} ${topTrack.artistName}".trim()
-                val artistPart = if (topTrack.artistName.isNotBlank() && topTrack.artistName != "Unknown Artist") " by ${topTrack.artistName}" else ""
-                val countNote = if (topTrack.playCount > 1) " with ${topTrack.playCount} plays in your Spotify history" else " from the top of your Spotify rotation"
-                customProposalSpeechOverride = "Your most-listened song is ${topTrack.trackTitle}$artistPart$countNote. Would you like me to play it right now?"
+            val (libTop, memTop) = findMostPlayedCrossAppTrack(recents)
+            val topTitle = libTop?.title ?: memTop?.title
+            val topArtist = libTop?.artist ?: memTop?.artist ?: ""
+            val topPlays = libTop?.playCount ?: memTop?.distinctAppearanceCount ?: 1
+            if (!topTitle.isNullOrBlank()) {
+                rawTrackTitle = topTitle
+                rawTrackArtist = topArtist
+                resolvedSpotifyUri = libTop?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                    ?: libTop?.deezerUrl?.takeIf { it.isNotBlank() }
+                    ?: resolveOpenCatalogLinkBlocking(topTitle, topArtist)
+                rawSearchQuery = "$topTitle $topArtist".trim()
+                val artistPart = if (topArtist.isNotBlank() && topArtist != "Unknown Artist") " by $topArtist" else ""
+                val countNote = if (topPlays > 1) " with $topPlays plays in your listening history" else " from the top of your rotation"
+                customProposalSpeechOverride = "Your most-listened song is $topTitle$artistPart$countNote. Would you like me to play it right now?"
             }
         } else if (wantsNewOrRecommend && !backendGaveValidTrack) {
-            val recents = getRecentTracks?.invoke() ?: emptyList()
-            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(getNowPlaying?.invoke()?.title)).toSet()
-            val discovery = com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                context = context,
-                fallbackMemoryTracks = recents,
-                excludedTitles = excluded
-            )
+            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(getNowPlaying?.invoke()?.title))
+                .map { it.lowercase().trim() }
+                .toSet()
+            val discovery = fetchOpenCatalogDiscoveryFallback(excluded)
             if (discovery != null) {
                 rawTrackTitle = discovery.trackTitle
                 rawTrackArtist = discovery.artistName
-                resolvedSpotifyUri = discovery.spotifyUri
+                resolvedSpotifyUri = discovery.deepLinkUrl
                 rawSearchQuery = "${discovery.trackTitle} ${discovery.artistName}".trim()
                 val artistPart = if (discovery.artistName.isNotBlank() && discovery.artistName != "Unknown Artist") " by ${discovery.artistName}" else ""
-                customProposalSpeechOverride = "Based on your Spotify listening taste, I recommend ${discovery.trackTitle}$artistPart. Would you like me to play it right now?"
+                customProposalSpeechOverride = "Based on your listening taste, I recommend ${discovery.trackTitle}$artistPart. Would you like me to play it right now?"
             }
         }
 
@@ -2566,31 +2645,26 @@ class AgentVoiceManager(
         }
 
         if (resolvedSpotifyUri.isNullOrBlank() && !rawTrackTitle.isNullOrBlank()) {
-            val normTargetTitle = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackTitle!!)
-            val normExpectedArtist = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackArtist ?: "")
-            val recents = getRecentTracks?.invoke() ?: emptyList()
-            val matchedLocal = recents.firstOrNull { r ->
-                val normLocalTitle = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(r.title ?: "")
-                val normLocalArtist = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(r.artist ?: "")
-                val titleMatchesExactly = normTargetTitle.isNotBlank() && normLocalTitle == normTargetTitle
+            val normTargetTitle = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawTrackTitle!!)
+            val normExpectedArtist = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawTrackArtist ?: "")
+            val libHit = getCrossAppLibrarySnapshot().firstOrNull { lib ->
+                val normLibTitle = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(lib.title)
+                val normLibArtist = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(lib.artist)
+                val titleMatchesExactly = normTargetTitle.isNotBlank() && normLibTitle == normTargetTitle
                 val artistMatches = normExpectedArtist.isBlank() ||
                     normExpectedArtist == "unknown artist" ||
-                    normLocalArtist == normExpectedArtist ||
-                    normLocalArtist.contains(normExpectedArtist) ||
-                    normExpectedArtist.contains(normLocalArtist)
+                    normLibArtist == normExpectedArtist ||
+                    normLibArtist.contains(normExpectedArtist) ||
+                    normExpectedArtist.contains(normLibArtist)
                 titleMatchesExactly && artistMatches
             }
-            if (matchedLocal?.providerTrackId?.startsWith("spotify:track:") == true) {
-                resolvedSpotifyUri = matchedLocal.providerTrackId
-                Log.d(TAG, "Bound exact Spotify URI from local memory: $resolvedSpotifyUri")
-            } else {
-                resolvedSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
-                    context = context,
-                    cleanTitle = rawTrackTitle!!,
-                    cleanArtist = rawTrackArtist ?: "",
+            resolvedSpotifyUri = libHit?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                ?: libHit?.deezerUrl?.takeIf { it.isNotBlank() }
+                ?: resolveOpenCatalogLinkBlocking(
+                    title = rawTrackTitle!!,
+                    artist = rawTrackArtist ?: "",
                     fullQuery = rawSearchQuery.ifBlank { "${rawTrackTitle} ${rawTrackArtist ?: ""}".trim() }
                 )
-            }
         }
 
         val targetPlayerPkg = resolveTargetPlayerPackage(
@@ -2647,8 +2721,8 @@ class AgentVoiceManager(
         val userDeclinedPending = pendingBeforeTurn != null && !isSyntheticPrompt && isRejectingPending
         val isRejectedSameTrack = userDeclinedPending && (
             rawTrackTitle.isNullOrBlank() ||
-            com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawTrackTitle!!) ==
-                com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(pendingBeforeTurn!!.title)
+            com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawTrackTitle!!) ==
+                com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(pendingBeforeTurn!!.title)
         )
 
         if (userDeclinedPending && isRejectedSameTrack) {
@@ -2703,7 +2777,7 @@ class AgentVoiceManager(
                         .take(3)
                         .map { com.tunemind.app.ui.components.MusicPlayerUiHelper.shortDisplayName(it) }
                         .distinct()
-                    val choicesText = if (playerNames.isNotEmpty()) playerNames.joinToString(", ") else "Spotify, Boomplay, or TuneMind"
+                    val choicesText = if (playerNames.isNotEmpty()) playerNames.joinToString(", ") else "Boomplay, YouTube Music, or TuneMind"
                     spokenTts = "I picked $rawTrackTitle$artistPart. Which player should I use — $choicesText?"
                 } else {
                     spokenTts = "I picked $rawTrackTitle$artistPart. Would you like me to play it?"
@@ -3056,7 +3130,7 @@ class AgentVoiceManager(
             try {
                 val np = getNowPlaying?.invoke()
                 val recents = getRecentTracks?.invoke() ?: emptyList()
-                val unifiedTracks = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
+                val crossAppLib = getCrossAppLibrarySnapshot()
                 val hearing = getHearingInsights?.invoke()
                 val vaultList = getVaultTracks?.invoke() ?: emptyList()
                 val capsule = getDopamineCapsule?.invoke()
@@ -3078,26 +3152,35 @@ class AgentVoiceManager(
                     put("current_track", JSONObject().apply {
                         put("title", np?.title ?: "Standing By")
                         put("artist", np?.artist ?: "")
-                        put("source_player", np?.sourcePackage ?: "com.spotify.music")
+                        put("source_player", np?.sourcePackage ?: "unknown_player")
                         put("is_playing", np?.isPlaying == true)
                     })
 
                     val historyArr = org.json.JSONArray()
-                    for (u in unifiedTracks.take(60)) {
-                        val uId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
-                            trackId = u.trackId,
-                            spotifyUri = u.spotifyUri,
-                            title = u.trackTitle,
-                            artist = u.artistName
-                        )
-                        historyArr.put(JSONObject().apply {
-                            put("title", u.trackTitle)
-                            put("artist", u.artistName)
-                            put("source_player", "com.spotify.music")
-                            put("playCount", u.playCount.coerceAtLeast(0))
-                            put("trackId", uId.trackId)
-                            put("spotifyUri", uId.spotifyUri ?: "")
-                        })
+                    if (crossAppLib.isNotEmpty()) {
+                        for (lib in crossAppLib.take(60)) {
+                            val link = lib.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                                ?: lib.deezerUrl?.takeIf { it.isNotBlank() } ?: ""
+                            historyArr.put(JSONObject().apply {
+                                put("title", lib.title)
+                                put("artist", lib.artist)
+                                put("source_player", lib.primarySourcePackage.ifBlank { "unknown_player" })
+                                put("playCount", lib.playCount.coerceAtLeast(0))
+                                put("trackId", lib.trackId)
+                                put("externalUri", link)
+                            })
+                        }
+                    } else {
+                        for (r in recents.take(60)) {
+                            val tTitle = r.title?.takeIf { it.isNotBlank() } ?: continue
+                            historyArr.put(JSONObject().apply {
+                                put("title", tTitle)
+                                put("artist", r.artist ?: "")
+                                put("source_player", r.sourcePackage?.takeIf { it.isNotBlank() } ?: "unknown_player")
+                                put("playCount", r.distinctAppearanceCount.coerceAtLeast(0))
+                                put("trackId", r.canonicalTrackId())
+                            })
+                        }
                     }
                     put("rolling_history", historyArr)
                     put("recently_played_by_agent", org.json.JSONArray(getRecentlyPlayedByAgent()))
@@ -3177,7 +3260,7 @@ class AgentVoiceManager(
         val hearing = getHearingInsights?.invoke()
         val capsule = getDopamineCapsule?.invoke()
         val pending = clientPendingProposedTrack
-        val targetPlayer = np?.sourcePackage?.takeIf { it.isNotBlank() } ?: "com.spotify.music"
+        val targetPlayer = np?.sourcePackage?.takeIf { it.isNotBlank() } ?: "tunemind_inapp"
 
         // 1. Pause / Stop
         if (Regex("\\b(pause|stop|quiet|mute|silence|hold on|simama|nyamaza)\\b").containsMatchIn(lower)) {
@@ -3393,7 +3476,7 @@ class AgentVoiceManager(
                 put("calculated_satiety_percentage", 22)
                 put("reasoning_mode", "DIRECT_EXECUTION")
                 put("flow_state_analysis", if (enableStrict) "Enabled Strict Never-Leave-TuneMind Mode." else "Disabled Strict Never-Leave-TuneMind Mode.")
-                put("voice_agent_tts", if (enableStrict) "Strict Never-Leave-TuneMind mode is now on. I will never switch away from TuneMind to open Spotify or any external player." else "Strict mode is off. Stay-in-TuneMind smart remote and instant return remain active.")
+                put("voice_agent_tts", if (enableStrict) "Strict Never-Leave-TuneMind mode is now on. I will never switch away from TuneMind to open any external player." else "Strict mode is off. Hybrid Mode playback is active.")
                 put("agent_tool_call", JSONObject().apply {
                     put("action", "TOGGLE_STRICT_NO_APP_SWITCH")
                     put("strict_no_app_switch_enabled", enableStrict)
@@ -3533,30 +3616,35 @@ class AgentVoiceManager(
 
         // 9. Most-Played Song Request ("play the song that I have listened the most", "favorite song", "top song")
         if (isMostPlayedSongRequest(lower)) {
-            val topTrack = com.tunemind.app.provider.SpotifyTrackUriResolver.findMostPlayedTrackBlocking(context, recents)
-            if (topTrack != null) {
-                val artistPart = if (topTrack.artistName.isNotBlank() && topTrack.artistName != "Unknown Artist") " by ${topTrack.artistName}" else ""
-                val countText = if (topTrack.playCount > 1) " with ${topTrack.playCount} plays in your Spotify history" else " at the top of your Spotify rotation"
+            val (libTop, memTop) = findMostPlayedCrossAppTrack(recents)
+            val topTitle = libTop?.title ?: memTop?.title
+            val topArtist = libTop?.artist ?: memTop?.artist ?: ""
+            val topPlays = libTop?.playCount ?: memTop?.distinctAppearanceCount ?: 1
+            if (!topTitle.isNullOrBlank()) {
+                val topLink = libTop?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                    ?: libTop?.deezerUrl?.takeIf { it.isNotBlank() } ?: ""
+                val artistPart = if (topArtist.isNotBlank() && topArtist != "Unknown Artist") " by $topArtist" else ""
+                val countText = if (topPlays > 1) " with $topPlays plays in your listening history" else " at the top of your rotation"
                 return JSONObject().apply {
                     put("calculated_satiety_percentage", 22)
                     put("reasoning_mode", "PLAYBACK_SUGGESTION")
-                    put("flow_state_analysis", "Top Track: \"${topTrack.trackTitle}\"$artistPart (${topTrack.playCount}x plays) — awaiting approval.")
-                    put("voice_agent_tts", "Your most-listened song is ${topTrack.trackTitle}$artistPart$countText. Would you like me to play it right now?")
+                    put("flow_state_analysis", "Top Track: \"$topTitle\"$artistPart (${topPlays}x plays) — awaiting approval.")
+                    put("voice_agent_tts", "Your most-listened song is $topTitle$artistPart$countText. Would you like me to play it right now?")
                     put("agent_tool_call", JSONObject().apply {
                         put("action", "PROPOSE_TRACK")
-                        put("track_title", topTrack.trackTitle)
-                        put("track_artist", topTrack.artistName)
-                        put("spotify_uri", topTrack.spotifyUri)
+                        put("track_title", topTitle)
+                        put("track_artist", topArtist)
+                        put("spotify_uri", topLink)
                         put("target_player", targetPlayer)
                         put("expect_follow_up", true)
                     })
                     put("os_execution_command", JSONObject().apply {
                         put("intent", "NONE")
                         put("target_player", targetPlayer)
-                        put("search_query", "${topTrack.trackTitle} ${topTrack.artistName}".trim())
-                        put("track_title", topTrack.trackTitle)
-                        put("track_artist", topTrack.artistName)
-                        put("spotify_uri", topTrack.spotifyUri)
+                        put("search_query", "$topTitle $topArtist".trim())
+                        put("track_title", topTitle)
+                        put("track_artist", topArtist)
+                        put("spotify_uri", topLink)
                     })
                 }
             }
@@ -3569,21 +3657,23 @@ class AgentVoiceManager(
                 .filter { it.isNotBlank() }
                 .toSet()
 
+            val libSnapshot = getCrossAppLibrarySnapshot()
             val genreQuery = extractRequestedGenreQuery(lower)
             val genreMatchedLocal = if (genreQuery != null) {
                 val primaryKeyword = genreQuery.split(" ").first()
-                cachedUnifiedTracks.firstOrNull { u ->
-                    !excludedLower.contains(u.trackTitle.lowercase().trim()) && (
-                        u.trackTitle.contains(primaryKeyword, ignoreCase = true) ||
-                        u.artistName.contains(primaryKeyword, ignoreCase = true) ||
+                libSnapshot.firstOrNull { u ->
+                    !excludedLower.contains(u.title.lowercase().trim()) && (
+                        u.title.contains(primaryKeyword, ignoreCase = true) ||
+                        u.artist.contains(primaryKeyword, ignoreCase = true) ||
+                        u.genre.contains(primaryKeyword, ignoreCase = true) ||
                         (primaryKeyword.equals("Kikuyu", ignoreCase = true) && (
-                            u.artistName.contains("Samidoh", ignoreCase = true) ||
-                            u.artistName.contains("Salim", ignoreCase = true) ||
-                            u.artistName.contains("De'Mathew", ignoreCase = true) ||
-                            u.artistName.contains("Gatutura", ignoreCase = true) ||
-                            u.artistName.contains("Mamaa", ignoreCase = true) ||
-                            u.trackTitle.contains("Gikuyu", ignoreCase = true) ||
-                            u.trackTitle.contains("Mugithi", ignoreCase = true)
+                            u.artist.contains("Samidoh", ignoreCase = true) ||
+                            u.artist.contains("Salim", ignoreCase = true) ||
+                            u.artist.contains("De'Mathew", ignoreCase = true) ||
+                            u.artist.contains("Gatutura", ignoreCase = true) ||
+                            u.artist.contains("Mamaa", ignoreCase = true) ||
+                            u.title.contains("Gikuyu", ignoreCase = true) ||
+                            u.title.contains("Mugithi", ignoreCase = true)
                         ))
                     )
                 }
@@ -3595,43 +3685,49 @@ class AgentVoiceManager(
             val cachedCapsule = if (genreQuery == null) capsule?.tracks.orEmpty().firstOrNull { ct ->
                 ct.title.isNotBlank() && !excludedLower.contains(ct.title.lowercase().trim())
             } else null
-            val cachedUnifiedPick = if (genreQuery == null) cachedUnifiedTracks.firstOrNull { u ->
-                u.trackTitle.isNotBlank() && !excludedLower.contains(u.trackTitle.lowercase().trim())
+            val cachedLibPick = if (genreQuery == null) libSnapshot.firstOrNull { u ->
+                u.title.isNotBlank() && !excludedLower.contains(u.title.lowercase().trim())
             } else null
 
-            val fastMemoryTitle = genreMatchedLocal?.trackTitle ?: cachedForYou?.title ?: cachedCapsule?.title ?: cachedUnifiedPick?.trackTitle
-            val fastMemoryArtist = genreMatchedLocal?.artistName ?: cachedForYou?.artist ?: cachedCapsule?.artist ?: cachedUnifiedPick?.artistName ?: ""
-            val fastMemoryUri = genreMatchedLocal?.spotifyUri ?: cachedForYou?.spotifyUri ?: cachedCapsule?.spotifyUri ?: cachedUnifiedPick?.spotifyUri ?: ""
+            val fastMemoryTitle = genreMatchedLocal?.title ?: cachedForYou?.title ?: cachedCapsule?.title ?: cachedLibPick?.title
+            val fastMemoryArtist = genreMatchedLocal?.artist ?: cachedForYou?.artist ?: cachedCapsule?.artist ?: cachedLibPick?.artist ?: ""
+            val fastMemoryUri = genreMatchedLocal?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                ?: genreMatchedLocal?.deezerUrl?.takeIf { it.isNotBlank() }
+                ?: cachedForYou?.spotifyUri
+                ?: cachedCapsule?.spotifyUri
+                ?: cachedLibPick?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                ?: ""
 
             var genreFallbackTitle: String? = null
             var genreFallbackArtist: String? = null
             var genreFallbackUri: String? = null
             val discovery = if (fastMemoryTitle == null && genreQuery != null) {
-                val resolvedGenreUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
-                    context = context,
-                    cleanTitle = genreQuery,
-                    cleanArtist = "",
-                    fullQuery = genreQuery
-                )
-                if (!resolvedGenreUri.isNullOrBlank()) {
-                    genreFallbackTitle = if (genreQuery.startsWith("Kikuyu")) "Kikuyu Mugithi" else genreQuery
-                    genreFallbackArtist = ""
-                    genreFallbackUri = resolvedGenreUri
+                val searchHits = runCatching {
+                    com.tunemind.app.provider.UniversalTrackResolver.searchCatalogBlocking(
+                        context = context,
+                        query = genreQuery,
+                        limit = 5
+                    )
+                }.getOrDefault(emptyList())
+                val firstHit = searchHits.firstOrNull()
+                if (firstHit != null) {
+                    genreFallbackTitle = firstHit.title
+                    genreFallbackArtist = firstHit.artist
+                    genreFallbackUri = firstHit.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                        ?: firstHit.audiusStreamUrl?.takeIf { it.isNotBlank() }
+                        ?: firstHit.deezerUrl?.takeIf { it.isNotBlank() }
+                        ?: firstHit.previewUrl
                 }
                 null
             } else if (fastMemoryTitle == null) {
-                com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                    context = context,
-                    fallbackMemoryTracks = recents,
-                    excludedTitles = excludedLower
-                )
+                fetchOpenCatalogDiscoveryFallback(excludedLower)
             } else {
                 null
             }
 
             val resolvedTitle = discovery?.trackTitle ?: genreFallbackTitle ?: fastMemoryTitle
             val resolvedArtist = discovery?.artistName ?: genreFallbackArtist ?: fastMemoryArtist
-            val resolvedUri = discovery?.spotifyUri ?: genreFallbackUri ?: fastMemoryUri
+            val resolvedUri = discovery?.deepLinkUrl ?: genreFallbackUri ?: fastMemoryUri
 
             if (!resolvedTitle.isNullOrBlank()) {
                 val artistPart = if (resolvedArtist.isNotBlank() && resolvedArtist != "Unknown Artist") " by $resolvedArtist" else ""
@@ -3666,7 +3762,7 @@ class AgentVoiceManager(
         val explicitMatch = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)
         val rawNamedTarget = explicitMatch?.groupValues?.getOrNull(3)
             ?.replace(Regex("^(me\\s+|for me\\s+)"), "")
-            ?.replace(Regex("\\b(right now|now|for me|please|on spotify)\\b"), "")
+            ?.replace(Regex("\\b(right now|now|for me|please|on spotify|on boomplay|on youtube music)\\b"), "")
             ?.trim()
 
         if (!rawNamedTarget.isNullOrBlank() &&
@@ -3674,19 +3770,19 @@ class AgentVoiceManager(
             !isNewOrRecommendSongRequest(lower) &&
             !isConversationalNonTitlePhrase(rawNamedTarget)
         ) {
-            val normNamed = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(rawNamedTarget)
-            val unified = com.tunemind.app.provider.SpotifyTrackUriResolver.getUnifiedUserSpotifyTracksBlocking(context, recents)
-            val matchedLocal = unified.firstOrNull { u ->
-                val normU = com.tunemind.app.provider.SpotifyTrackUriResolver.normalizeTitleForExactMatch(u.trackTitle)
+            val normNamed = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(rawNamedTarget)
+            val libSnapshot = getCrossAppLibrarySnapshot()
+            val matchedLocal = libSnapshot.firstOrNull { u ->
+                val normU = com.tunemind.app.provider.UniversalTrackResolver.normalizeTitleForExactMatch(u.title)
                 normU.isNotEmpty() && normU == normNamed
             }
-            val finalTitle = matchedLocal?.trackTitle ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
-            val finalArtist = matchedLocal?.artistName ?: ""
-            val finalUri = matchedLocal?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
-                ?: com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
-                    context = context,
-                    cleanTitle = finalTitle,
-                    cleanArtist = finalArtist,
+            val finalTitle = matchedLocal?.title ?: rawNamedTarget.replaceFirstChar { it.uppercase() }
+            val finalArtist = matchedLocal?.artist ?: ""
+            val finalUri = matchedLocal?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+                ?: matchedLocal?.deezerUrl?.takeIf { it.isNotBlank() }
+                ?: resolveOpenCatalogLinkBlocking(
+                    title = finalTitle,
+                    artist = finalArtist,
                     fullQuery = "$finalTitle $finalArtist".trim()
                 ) ?: ""
             val artistPart = if (finalArtist.isNotBlank() && finalArtist != "Unknown Artist") " by $finalArtist" else ""
@@ -3761,7 +3857,7 @@ class AgentVoiceManager(
             }
         }
 
-        // 12. Explicit music request fallback: Check local curated capsule / For-You / unified history in 0ms before HTTP discovery
+        // 12. Explicit music request fallback: Check local curated capsule / For-You / cross-app history in 0ms before HTTP discovery
         val recentSuggested = getRecentlyPlayedByAgent().map { it.lowercase() }.toSet()
         val forYouPick = getForYouPicks?.invoke().orEmpty().firstOrNull { p ->
             p.title.isNotBlank() && !recentSuggested.contains(p.title.lowercase().trim())
@@ -3769,17 +3865,15 @@ class AgentVoiceManager(
         val freshPick = capsule?.tracks?.firstOrNull { ct ->
             !recentSuggested.contains(ct.title.lowercase().trim())
         } ?: capsule?.tracks?.firstOrNull()
-        val unifiedFallback = cachedUnifiedTracks.firstOrNull { u ->
-            u.trackTitle.isNotBlank() && !recentSuggested.contains(u.trackTitle.lowercase().trim())
+        val libFallback = getCrossAppLibrarySnapshot().firstOrNull { u ->
+            u.title.isNotBlank() && !recentSuggested.contains(u.title.lowercase().trim())
         }
-        val hasFastPick = forYouPick != null || freshPick != null || unifiedFallback != null
+        val hasFastPick = forYouPick != null || freshPick != null || libFallback != null
         val discoveryFallback = if (!hasFastPick) {
-            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title)).toSet()
-            com.tunemind.app.provider.SpotifyTrackUriResolver.fetchNewDiscoveryRecommendationBlocking(
-                context = context,
-                fallbackMemoryTracks = recents,
-                excludedTitles = excluded
-            )
+            val excluded = (getRecentlyPlayedByAgent() + listOfNotNull(np?.title))
+                .map { it.lowercase().trim() }
+                .toSet()
+            fetchOpenCatalogDiscoveryFallback(excluded)
         } else {
             null
         }
@@ -3788,20 +3882,21 @@ class AgentVoiceManager(
             discoveryFallback?.trackTitle
                 ?: forYouPick?.title
                 ?: freshPick?.title
-                ?: unifiedFallback?.trackTitle
+                ?: libFallback?.title
                 ?: "Midnight City"
         )
         val chosenArtist = com.tunemind.app.provider.MusicPlayerAutoLauncher.sanitizeArtistForPlay(
             discoveryFallback?.artistName
                 ?: forYouPick?.artist
                 ?: freshPick?.artist
-                ?: unifiedFallback?.artistName
+                ?: libFallback?.artist
                 ?: "M83"
         )
-        val chosenUri = discoveryFallback?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
-            ?: forYouPick?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
+        val chosenUri = discoveryFallback?.deepLinkUrl
+            ?: forYouPick?.spotifyUri?.takeIf { it.startsWith("http") }
             ?: freshPick?.spotifyUri
-            ?: unifiedFallback?.spotifyUri?.takeIf { it.startsWith("spotify:track:") }
+            ?: libFallback?.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
+            ?: libFallback?.deezerUrl?.takeIf { it.isNotBlank() }
             ?: ""
         val mood = com.tunemind.app.ui.theme.AdaptiveThemeEngine.resolveTrackMood(chosenTitle, chosenArtist)
         val artistPart = if (chosenArtist.isNotBlank()) " by $chosenArtist" else ""
@@ -4367,7 +4462,6 @@ class AgentVoiceManager(
     fun destroy() {
         com.tunemind.app.service.TuneMindListenerService.onPlaybackSnapshotUpdated = null
         com.tunemind.app.provider.TuneMindInAppPlayer.setOnTrackCompletedListener(null)
-        com.tunemind.app.provider.SpotifyAppRemoteManager.setOnPlayerStateListener(null)
         wakeWatchdogJob?.cancel()
         noSpeechAfterWakeJob?.cancel()
         postGreetingListenTimeoutJob?.cancel()

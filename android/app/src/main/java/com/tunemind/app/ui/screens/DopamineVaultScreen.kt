@@ -40,9 +40,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.data.ingestion.SpotifyLikedTrackEntity
-import com.tunemind.app.data.ingestion.SpotifyNewReleaseItem
-import com.tunemind.app.data.ingestion.SpotifyPlaylistEntity
+import com.tunemind.app.data.local.CrossAppPlayRecorder
+import com.tunemind.app.data.local.CrossAppTrackEntity
+import com.tunemind.app.data.local.TuneMindPlaylistWithTracks
 import com.tunemind.app.domain.ai.ForYouLearningSummary
 import com.tunemind.app.domain.model.TrackMemoryEntry
 import com.tunemind.app.domain.recommendation.AiRecommendationEntity
@@ -97,7 +97,6 @@ fun DopamineVaultScreen(
     forYouPicks: List<AiRecommendationEntity> = emptyList(),
     learningState: ForYouLearningSummary = ForYouLearningSummary(),
     isDiscovering: Boolean = false,
-    spotifyNewReleases: List<SpotifyNewReleaseItem> = emptyList(),
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { t, _, _ ->
         !nowPlayingTitle.isNullOrBlank() && !t.isNullOrBlank() && t.equals(nowPlayingTitle.trim(), ignoreCase = true)
@@ -106,21 +105,21 @@ fun DopamineVaultScreen(
     onSaveForYou: (AiRecommendationEntity, Boolean) -> Unit = { _, _ -> },
     onDismissForYou: (AiRecommendationEntity) -> Unit = {},
     onPlayForYouTrack: (AiRecommendationEntity) -> Unit = { rec ->
-        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "com.spotify.music")
+        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "unknown_player")
     },
     onPreviewForYouTrack: (AiRecommendationEntity) -> Unit = { rec ->
-        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "com.spotify.music")
+        onPlayTrack(rec.title, rec.artist, rec.spotifyUri, "tunemind_inapp")
     },
     onAddToQueue: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
-    onSaveToSpotifyLiked: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
+    onSaveToLiked: (title: String, artist: String, spotifyUri: String?) -> Unit = { _, _, _ -> },
     onExportForYouPlaylist: (List<AiRecommendationEntity>) -> Unit = {},
     requestedSubTab: Int? = null,
     onConsumeRequestedSubTab: () -> Unit = {},
     graduatedTracks: List<GraduatedVaultSummary> = emptyList(),
     onTickVaultLifecycle: () -> Unit = {},
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
-    likedTracks: List<SpotifyLikedTrackEntity> = emptyList(),
-    playlists: List<SpotifyPlaylistEntity> = emptyList(),
+    crossAppLibraryTracks: List<CrossAppTrackEntity> = emptyList(),
+    tuneMindPlaylists: List<TuneMindPlaylistWithTracks> = emptyList(),
     savedRecommendations: List<AiRecommendationEntity> = emptyList(),
     restoredAtMap: Map<String, Long> = emptyMap(),
     manualFreshTracks: List<ManualFreshTrack> = emptyList(),
@@ -151,8 +150,8 @@ fun DopamineVaultScreen(
         recentTracks,
         vaultTracks,
         graduatedTracks,
-        likedTracks,
-        playlists,
+        crossAppLibraryTracks,
+        tuneMindPlaylists,
         savedRecommendations,
         restoredAtMap,
         manualFreshTracks,
@@ -200,7 +199,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = 99,
                     playCount = plays,
                     spotifyUri = cleanUri,
-                    sourcePackage = mf.sourcePackage ?: "com.spotify.music",
+                    sourcePackage = mf.sourcePackage ?: "unknown_player",
                     isCoolingDown = false,
                     isFromVault = false,
                     trackId = canonicalId,
@@ -237,7 +236,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = rec.freshnessPercent,
                     playCount = resolvedPlays,
                     spotifyUri = cleanUri,
-                    sourcePackage = v.sourcePackage.ifBlank { "com.spotify.music" },
+                    sourcePackage = v.sourcePackage.ifBlank { "unknown_player" },
                     isCoolingDown = true,
                     isFromVault = true,
                     trackId = canonicalId,
@@ -273,7 +272,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = readiness.readinessScore,
                     playCount = resolvedPlays,
                     spotifyUri = cleanUri,
-                    sourcePackage = "com.spotify.music",
+                    sourcePackage = "unknown_player",
                     isCoolingDown = false,
                     isFromVault = false,
                     trackId = grad.trackId,
@@ -333,7 +332,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = if (cooling) baseFresh else readiness.readinessScore,
                     playCount = plays,
                     spotifyUri = uri,
-                    sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
+                    sourcePackage = t.sourcePackage?.ifBlank { "unknown_player" } ?: "unknown_player",
                     isCoolingDown = cooling,
                     isFromVault = vaultStatus.isInVault,
                     trackId = canonicalId,
@@ -375,7 +374,7 @@ fun DopamineVaultScreen(
                     freshnessPercent = readiness.readinessScore,
                     playCount = plays,
                     spotifyUri = cleanUri,
-                    sourcePackage = "com.spotify.music",
+                    sourcePackage = "unknown_player",
                     isCoolingDown = false,
                     trackId = canonicalId,
                     freshCategory = readiness.category,
@@ -385,30 +384,27 @@ fun DopamineVaultScreen(
             )
         }
 
-        // 5. Untouched / Low-Play Spotify Liked Songs (genuine library Fresh gems)
-        for (liked in likedTracks.take(80)) {
-            val title = liked.trackTitle.trim().takeIf { it.isNotEmpty() } ?: continue
-            val artist = liked.artistName.trim().ifBlank { "Spotify Library" }
+        // 5. Liked & Cross-App Library Songs (permanent tracks from Boomplay, YTM, Spotify passive, Audiomack, etc.)
+        for (lib in crossAppLibraryTracks.take(100)) {
+            val title = lib.title.trim().takeIf { it.isNotEmpty() } ?: continue
+            val artist = lib.artist.trim().ifBlank { "Music" }
             val key = "${title.lowercase()}|${artist.lowercase()}"
             if (!seenKeys.add(key)) continue
-            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(liked.spotifyUri)
-            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                trackId = liked.trackId,
-                spotifyUri = cleanUri,
-                title = title,
-                artist = artist
-            )
-            val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
+            val canonicalId = lib.trackId.ifBlank {
+                com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
+            }
+            val vaultStatus = resolveTrackVaultStatus(title, artist, null, canonicalId)
             if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
-            val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
+            val plays = resolvePlayCount(title, artist, null).takeIf { it > 0 } ?: lib.playCount.coerceAtLeast(0)
+            val appName = CrossAppPlayRecorder.resolveFriendlyPlayerName(lib.primarySourcePackage)
             val readiness = RestingVaultEngine.computeFreshReadiness(
                 baseFreshnessPercent = if (plays == 0) 99 else vaultStatus.freshnessPercent,
                 playCount = plays,
-                isLikedOrSaved = true,
-                sourceLabel = "Liked Song",
+                isLikedOrSaved = lib.isLiked,
+                sourceLabel = if (lib.isLiked) "Liked in $appName" else "$appName Library",
                 nowMs = nowMs
             )
-            val safeId = "liked_${canonicalId}".let { if (seenIds.add(it)) it else "liked_${list.size}" }
+            val safeId = "lib_${canonicalId}".let { if (seenIds.add(it)) it else "lib_${list.size}" }
             list.add(
                 DopamineSongItem(
                     id = safeId,
@@ -416,11 +412,11 @@ fun DopamineVaultScreen(
                     artist = artist,
                     freshnessPercent = readiness.readinessScore,
                     playCount = plays,
-                    spotifyUri = cleanUri,
-                    sourcePackage = "com.spotify.music",
+                    spotifyUri = null,
+                    sourcePackage = lib.primarySourcePackage.ifBlank { "unknown_player" },
                     isCoolingDown = false,
                     trackId = canonicalId,
-                    albumArtUrl = liked.albumArtUrl,
+                    albumArtUrl = lib.albumArtUrl,
                     freshCategory = readiness.category,
                     freshReason = readiness.freshReason,
                     readinessScore = readiness.readinessScore
@@ -428,32 +424,27 @@ fun DopamineVaultScreen(
             )
         }
 
-        // 6. Spotify Playlist Tracks (untouched gems from synced playlists)
+        // 6. TuneMind Playlist Tracks
         var playlistGemsAdded = 0
-        for (pl in playlists.take(8)) {
+        for (pl in tuneMindPlaylists.take(8)) {
             if (playlistGemsAdded >= 60) break
-            val decoded = pl.decodeTracks()
-            for (tr in decoded) {
+            for (tr in pl.tracks) {
                 if (playlistGemsAdded >= 60) break
                 val title = tr.title.trim().takeIf { it.isNotEmpty() } ?: continue
-                val artist = tr.artist.trim().ifBlank { "Spotify Playlist" }
+                val artist = tr.artist.trim().ifBlank { "Playlist" }
                 val key = "${title.lowercase()}|${artist.lowercase()}"
                 if (!seenKeys.add(key)) continue
-                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(tr.spotifyUri)
-                val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                    trackId = tr.trackId,
-                    spotifyUri = cleanUri,
-                    title = title,
-                    artist = artist
-                )
-                val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
+                val canonicalId = tr.trackId.ifBlank {
+                    com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
+                }
+                val vaultStatus = resolveTrackVaultStatus(title, artist, null, canonicalId)
                 if (vaultStatus.isInVault || vaultStatus.isCoolingDown) continue
-                val plays = resolvePlayCount(title, artist, cleanUri).coerceAtLeast(0)
+                val plays = resolvePlayCount(title, artist, null).coerceAtLeast(0)
                 val readiness = RestingVaultEngine.computeFreshReadiness(
                     baseFreshnessPercent = if (plays == 0) 98 else vaultStatus.freshnessPercent,
                     playCount = plays,
                     isLikedOrSaved = true,
-                    sourceLabel = pl.name.take(18).ifBlank { "Playlist" },
+                    sourceLabel = pl.playlist.name.take(18).ifBlank { "Playlist" },
                     nowMs = nowMs
                 )
                 val safeId = "pl_${canonicalId}".let { if (seenIds.add(it)) it else "pl_${list.size}" }
@@ -464,11 +455,11 @@ fun DopamineVaultScreen(
                         artist = artist,
                         freshnessPercent = readiness.readinessScore,
                         playCount = plays,
-                        spotifyUri = cleanUri,
-                        sourcePackage = "com.spotify.music",
+                        spotifyUri = null,
+                        sourcePackage = tr.sourcePlayer.ifBlank { "unknown_player" },
                         isCoolingDown = false,
                         trackId = canonicalId,
-                        albumArtUrl = tr.albumArtUrl,
+                        albumArtUrl = null,
                         freshCategory = readiness.category,
                         freshReason = readiness.freshReason,
                         readinessScore = readiness.readinessScore
@@ -813,7 +804,7 @@ fun DopamineVaultScreen(
                                     freshnessPercent = rec.matchScorePercent.coerceIn(72, 99),
                                     playCount = resolvePlayCount(rec.title, rec.artist, cleanUri).coerceAtLeast(0),
                                     spotifyUri = cleanUri,
-                                    sourcePackage = "com.spotify.music",
+                                    sourcePackage = "unknown_player",
                                     isCoolingDown = false,
                                     isFromVault = false,
                                     trackId = rec.resolvedCanonicalTrackId()
@@ -942,11 +933,11 @@ fun DopamineVaultScreen(
                     )
                 }
             },
-            onAddToSpotifyQueue = {
+            onAddToQueue = {
                 onAddToQueue(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
             },
-            onSaveToSpotifyLiked = {
-                onSaveToSpotifyLiked(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
+            onSaveToLiked = {
+                onSaveToLiked(selectedSong.title, selectedSong.artist, selectedSong.spotifyUri)
             }
         )
     }
@@ -955,8 +946,8 @@ fun DopamineVaultScreen(
         ManualVaultFreshPickerSheet(
             isRestingMode = selectedTab == 1,
             recentTracks = recentTracks,
-            likedTracks = likedTracks,
-            playlists = playlists,
+            crossAppLibraryTracks = crossAppLibraryTracks,
+            tuneMindPlaylists = tuneMindPlaylists,
             resolvePlayCount = resolvePlayCount,
             resolveTrackVaultStatus = resolveTrackVaultStatus,
             onAddToFresh = { title, artist, pkg, uri, tid, art ->
@@ -990,8 +981,8 @@ private data class ManualPickerCandidate(
 private fun ManualVaultFreshPickerSheet(
     isRestingMode: Boolean,
     recentTracks: List<TrackMemoryEntry>,
-    likedTracks: List<SpotifyLikedTrackEntity>,
-    playlists: List<SpotifyPlaylistEntity>,
+    crossAppLibraryTracks: List<CrossAppTrackEntity>,
+    tuneMindPlaylists: List<TuneMindPlaylistWithTracks>,
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int,
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus,
     onAddToFresh: (String, String, String?, String?, String?, String?) -> Unit,
@@ -1008,8 +999,8 @@ private fun ManualVaultFreshPickerSheet(
     val candidates by produceState<List<ManualPickerCandidate>>(
         initialValue = emptyList(),
         recentTracks,
-        likedTracks,
-        playlists
+        crossAppLibraryTracks,
+        tuneMindPlaylists
     ) {
         value = withContext(Dispatchers.Default) {
             val seen = mutableSetOf<String>()
@@ -1019,58 +1010,55 @@ private fun ManualVaultFreshPickerSheet(
             val artist = t.artist?.trim()?.ifBlank { "Music" } ?: "Music"
             val key = RestingVaultEngine.normalizeTrackKey(title, artist)
             if (seen.add(key)) {
-                val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t.providerTrackId)
                 items.add(
                     ManualPickerCandidate(
                         title = title,
                         artist = artist,
-                        sourcePackage = t.sourcePackage?.ifBlank { "com.spotify.music" } ?: "com.spotify.music",
-                        spotifyUri = uri,
+                        sourcePackage = t.sourcePackage?.ifBlank { "unknown_player" } ?: "unknown_player",
+                        spotifyUri = null,
                         trackId = t.canonicalTrackId(),
                         albumArtUrl = null
                     )
                 )
             }
         }
-        for (l in likedTracks.take(100)) {
-            val title = l.trackTitle.trim().takeIf { it.isNotEmpty() } ?: continue
-            val artist = l.artistName.trim().ifBlank { "Spotify Library" }
+        for (lib in crossAppLibraryTracks.take(100)) {
+            val title = lib.title.trim().takeIf { it.isNotEmpty() } ?: continue
+            val artist = lib.artist.trim().ifBlank { "Library" }
             val key = RestingVaultEngine.normalizeTrackKey(title, artist)
             if (seen.add(key)) {
-                val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(l.spotifyUri)
-                val tid = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                    trackId = l.trackId, spotifyUri = uri, title = title, artist = artist
-                )
+                val tid = lib.trackId.ifBlank {
+                    com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
+                }
                 items.add(
                     ManualPickerCandidate(
                         title = title,
                         artist = artist,
-                        sourcePackage = "com.spotify.music",
-                        spotifyUri = uri,
+                        sourcePackage = lib.primarySourcePackage.ifBlank { "unknown_player" },
+                        spotifyUri = null,
                         trackId = tid,
-                        albumArtUrl = l.albumArtUrl
+                        albumArtUrl = lib.albumArtUrl
                     )
                 )
             }
         }
-        for (pl in playlists.take(8)) {
-            for (tr in pl.decodeTracks().take(30)) {
+        for (pl in tuneMindPlaylists.take(8)) {
+            for (tr in pl.tracks.take(30)) {
                 val title = tr.title.trim().takeIf { it.isNotEmpty() } ?: continue
-                val artist = tr.artist.trim().ifBlank { "Spotify Playlist" }
+                val artist = tr.artist.trim().ifBlank { "Playlist" }
                 val key = RestingVaultEngine.normalizeTrackKey(title, artist)
                 if (seen.add(key)) {
-                    val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(tr.spotifyUri)
-                    val tid = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                        trackId = tr.trackId, spotifyUri = uri, title = title, artist = artist
-                    )
+                    val tid = tr.trackId.ifBlank {
+                        com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
+                    }
                     items.add(
                         ManualPickerCandidate(
                             title = title,
                             artist = artist,
-                            sourcePackage = "com.spotify.music",
-                            spotifyUri = uri,
+                            sourcePackage = tr.sourcePlayer.ifBlank { "unknown_player" },
+                            spotifyUri = null,
                             trackId = tid,
-                            albumArtUrl = tr.albumArtUrl
+                            albumArtUrl = null
                         )
                     )
                 }
@@ -1141,7 +1129,7 @@ private fun ManualVaultFreshPickerSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search recent plays or Spotify library...", color = Color.White.copy(alpha = 0.42f), fontSize = 13.sp) },
+                placeholder = { Text("Search recent plays or cross-app library...", color = Color.White.copy(alpha = 0.42f), fontSize = 13.sp) },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Rounded.Search,

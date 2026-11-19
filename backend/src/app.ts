@@ -6,7 +6,6 @@ import { optionalAuth, resolveEffectiveUserIdentity } from './middleware/authMid
 import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
-import spotifyAuthRouter from './api/v1/spotifyAuth';
 import discoveryRouter from './api/v1/discovery';
 import musicProfilesRouter from './api/v1/musicProfiles';
 import supportRouter from './api/v1/support';
@@ -48,7 +47,7 @@ export function createApp(): express.Express {
     message: 'Too many support or account requests. Please wait a few minutes.'
   });
 
-  app.use('/api/v1', apiGlobalLimiter, optionalAuth);
+  app.use('/api/v1', optionalAuth, apiGlobalLimiter);
 
   // ─── Public Legal & Mobile App Version Routes ──────────────────────────────
   app.use('/', legalRouter);
@@ -57,7 +56,6 @@ export function createApp(): express.Express {
   app.use('/api/v1/events', eventsRouter);
   app.use('/api/v1/analytics', analyticsRouter);
   app.use('/api/v1/reasoning', aiComputeLimiter, reasoningRouter);
-  app.use('/api/v1/spotify', spotifyAuthRouter);
   app.use('/api/v1/discovery', aiComputeLimiter, discoveryRouter);
   app.use('/api/v1/music', musicProfilesRouter);
   app.use('/api/v1/support', sensitiveOpsLimiter, supportRouter);
@@ -239,7 +237,48 @@ export function createApp(): express.Express {
     }
   });
 
-  app.get('/', (_req: Request, res: Response) => {
+  app.get('/', (req: Request, res: Response) => {
+    const accept = String(req.headers.accept || '').toLowerCase();
+    if (accept.includes('text/html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TuneMind — AI Music Companion & Listening Intelligence</title>
+  <style>
+    body { margin: 0; padding: 48px 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif; background: #07090e; color: #f8fafc; line-height: 1.6; }
+    main { max-width: 720px; margin: 0 auto; }
+    .badge { color: #00f0ff; font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+    h1 { font-size: 36px; margin: 8px 0 12px; }
+    p { color: #cbd5e1; font-size: 16px; }
+    .card { background: #101521; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 20px; margin: 22px 0; }
+    .links { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 24px; }
+    a { color: #00f0ff; text-decoration: none; font-weight: 600; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="badge">TuneMind</div>
+    <h1>TuneMind</h1>
+    <p>TuneMind is your intelligent Android voice music companion — tracking cross-app listening satiety, guarding song freshness with the Resting Vault, monitoring safe ear headroom, and curating TuneMind playlists across your favorite music apps.</p>
+    <div class="card">
+      <strong>Core Capabilities</strong>
+      <p>Real-time conversational music AI, local TuneMind playlists played inside TuneMind or across your favorite Android music apps (YouTube Music, Boomplay, Spotify, Audiomack, local audio), Kids Safe filtering, acoustic headroom insights, and Taste Genome analytics.</p>
+    </div>
+    <div class="links">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/delete-account">Account & Data Deletion</a>
+      <a href="/health">Service Status</a>
+    </div>
+  </main>
+</body>
+</html>`);
+      return;
+    }
     res.json({
       status: 'online',
       service: 'TuneMind Cloud Brain (24/7 Online)',
@@ -247,6 +286,7 @@ export function createApp(): express.Express {
       health_endpoint: '/health',
       privacy_endpoint: '/privacy',
       terms_endpoint: '/terms',
+      delete_account_endpoint: '/delete-account',
       version_endpoint: '/api/v1/app/version',
       timestamp: new Date().toISOString()
     });

@@ -178,7 +178,7 @@ fun TuneMindPlaylistsScreen(
                         onAskAgentForPlaylist("Suggest 3 songs that fit my TuneMind playlist called ${activePlaylist.playlist.name}")
                     },
                     onPlayTrack = { title, artist, uri, srcPkg ->
-                        val pkg = selectedTargetPlayer.ifBlank { srcPkg.ifBlank { "com.spotify.music" } }
+                        val pkg = selectedTargetPlayer.ifBlank { srcPkg.ifBlank { "unknown_player" } }
                         onPlayTrack(title, artist, uri, pkg)
                     },
                     onRemoveTrack = { entryId ->
@@ -340,7 +340,7 @@ private fun PlaylistDirectoryContent(
                         text = if (!nowPlayingTitle.isNullOrBlank() && nowPlayingTitle != "Standing By") {
                             "While \"$nowPlayingTitle\" is playing, say \"Hi TuneMind, add this song to a new playlist\" — TuneMind pauses, negotiates the name with you, saves it here, and resumes your track."
                         } else {
-                            "Say \"Hi TuneMind, create a kids bedtime playlist\" or \"add the current song to a new playlist\". Saved inside TuneMind and played over Spotify or your default player."
+                            "Say \"Hi TuneMind, create a kids bedtime playlist\" or \"add the current song to a new playlist\". Saved inside TuneMind and played natively or across your favorite player."
                         },
                         color = Color.White.copy(alpha = 0.72f),
                         fontSize = 12.5.sp,
@@ -648,7 +648,7 @@ private fun PlaylistDetailContent(
                 val visuals = rememberResolvedTrackMedia(
                     title = tr.title,
                     artist = tr.artist,
-                    spotifyUri = tr.spotifyUri.takeIf { it.isNotBlank() }
+                    spotifyUri = tr.externalUri.takeIf { it.isNotBlank() }
                 )
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -661,7 +661,7 @@ private fun PlaylistDetailContent(
                             onPlayTrack(
                                 tr.title,
                                 tr.artist,
-                                tr.spotifyUri.takeIf { it.isNotBlank() },
+                                tr.externalUri.takeIf { it.isNotBlank() },
                                 tr.sourcePlayer.ifBlank { selectedTargetPlayer }
                             )
                         }

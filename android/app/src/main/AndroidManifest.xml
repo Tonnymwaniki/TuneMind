@@ -6,28 +6,33 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <queries>
         <package android:name="com.spotify.music" />
+        <package android:name="com.spotify.lite" />
         <package android:name="com.google.android.apps.youtube.music" />
         <package android:name="com.afmobi.boomplaymusic" />
-        <package android:name="com.apple.android.music" />
         <package android:name="com.audiomack" />
         <package android:name="deezer.android.app" />
+        <package android:name="com.soundcloud.android" />
         <package android:name="com.amazon.mp3" />
         <package android:name="com.aspiro.tidal" />
         <package android:name="com.sec.android.app.music" />
+        <package android:name="com.miui.player" />
+        <package android:name="com.huawei.music" />
         <package android:name="org.videolan.vlc" />
         <package android:name="com.maxmpz.audioplayer" />
         <package android:name="in.krosbits.musicolet" />
+        <package android:name="com.piyush.music" />
+        <package android:name="com.jio.media.jiobeats" />
+        <package android:name="com.anghami" />
+        <package android:name="com.dywx.larkplayer" />
+        <package android:name="com.gaana" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -64,7 +69,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.App.Starting"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
@@ -76,18 +81,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Spotify OAuth 2.0 Authorization Code Redirect Callback -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="tunemind"
-                    android:host="spotify-callback" />
-            </intent-filter>
         </activity>
 
-        <!-- Dedicated Spotify & Supabase OAuth Callback Activity -->
+        <!-- Dedicated Supabase Google OAuth Callback Activity -->
         <activity
             android:name=".data.ingestion.AuthCallbackActivity"
             android:exported="true"
@@ -97,9 +93,6 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="tunemind"
-                    android:host="spotify-auth-callback" />
                 <data
                     android:scheme="tunemind"
                     android:host="supabase-auth-callback" />

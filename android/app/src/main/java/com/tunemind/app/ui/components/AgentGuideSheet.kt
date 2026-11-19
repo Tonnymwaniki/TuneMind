@@ -46,15 +46,15 @@ fun AgentGuideSheet(
 
     val categories = listOf(
         GuideCategory(
-            title = "Play, Discover & Spotify",
-            subtitle = "Suggest For You picks, launch playlists, or request any artist",
+            title = "Play & Discover Anywhere",
+            subtitle = "Play inside TuneMind or across Boomplay, YouTube Music, Spotify & Audiomack",
             icon = Icons.Rounded.PlayArrow,
             accent = neonCyan,
             prompts = listOf(
                 "What do you have for me in For You today?",
-                "Play a playlist from my Spotify library",
+                "Play songs I listened to on Boomplay",
                 "Play something fresh I haven't overplayed",
-                "Request a new song on Spotify by Burna Boy"
+                "Play Sauti Sol or Burna Boy"
             )
         ),
         GuideCategory(
@@ -82,26 +82,26 @@ fun AgentGuideSheet(
             )
         ),
         GuideCategory(
-            title = "Stats, Hearing & Screens",
-            subtitle = "Voice analytics, acoustic headroom, and hands-free navigation",
+            title = "Stats, Hearing & Library Tabs",
+            subtitle = "Voice analytics, acoustic headroom, and per-app tabs",
             icon = Icons.Rounded.Hearing,
             accent = safeGreen,
             prompts = listOf(
                 "How are my listening stats this week?",
                 "Check my safe listening headroom right now",
                 "Give me my weekly listening recap",
-                "Open my Spotify library screen"
+                "Open my Cross-App Library screen"
             )
         ),
         GuideCategory(
             title = "TuneMind Playlists, Kids & Sleep",
-            subtitle = "In-app playlists stored in TuneMind, kid-safe Spotify songs, and sleep timers",
+            subtitle = "In-app playlists stored in TuneMind, kid-safe tracks, and sleep timers",
             icon = Icons.Rounded.QueueMusic,
             accent = neonCyan,
             prompts = listOf(
                 "Add this song to a new playlist",
                 "Build a workout TuneMind playlist and open it",
-                "Play kid-friendly bedtime songs from Spotify",
+                "Play kid-friendly bedtime songs",
                 "Set a 20-minute sleep timer"
             )
         )

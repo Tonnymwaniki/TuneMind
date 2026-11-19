@@ -40,7 +40,7 @@ class TimePatternEngineTest {
             firstObservedAtMs = morningTime,
             lastObservedAtMs = morningTime + 180_000L,
             supportingObservationIds = listOf("obs-1"),
-            evidenceStatus = TrackAppearanceEvidence.DEFINITIVE,
+            evidenceStatus = TrackAppearanceEvidence.SAME_METADATA_FINGERPRINT,
             hasTimestampOrderingAmbiguity = false,
             hasObservationGap = false
         )
@@ -56,8 +56,8 @@ class TimePatternEngineTest {
             firstObservedAppearanceAtMs = morningTime,
             lastObservedAppearanceAtMs = morningTime + 180_000L,
             supportingObservationIds = listOf("obs-1"),
-            identityBasis = TrackIdentityBasis.TITLE_AND_ARTIST,
-            evidenceQuality = MemoryEvidenceQuality.SUFFICIENT,
+            identityBasis = TrackIdentityBasis.METADATA_FINGERPRINT,
+            evidenceQuality = MemoryEvidenceQuality.SUPPORTED_IDENTITY,
             historyMayBeIncomplete = false,
             appearances = listOf(appearance)
         )

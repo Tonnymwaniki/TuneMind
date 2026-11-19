@@ -50,20 +50,26 @@ object BackendEndpointManager {
         }
     }
 
+    const val PRIMARY_PRODUCTION_URL = "https://tunemind.co"
     const val RENDER_PRODUCTION_URL = "https://tunemind-backend-iudp.onrender.com"
 
     /**
      * Ordered list of WebSocket endpoints to try:
-     * 1. Permanent Render Cloud URL (wss://tunemind-backend-iudp.onrender.com/ws/stt)
-     * 2. Custom Online / Wi-Fi URL configured inside the app (if set)
-     * 3. BuildConfig.TUNEMIND_BASE_URL
-     * 4. USB ADB reverse tunnel fallback (ws://localhost:3000/ws/stt)
+     * 1. Primary Custom Domain Cloud URL (wss://tunemind.co/ws/stt)
+     * 2. Failover Render Cloud URL (wss://tunemind-backend-iudp.onrender.com/ws/stt)
+     * 3. Custom Online / Wi-Fi URL configured inside the app (if set)
+     * 4. BuildConfig.TUNEMIND_BASE_URL
+     * 5. USB ADB reverse tunnel fallback (ws://localhost:3000/ws/stt)
      */
     fun getCandidateWebSocketUrls(context: Context): List<String> {
         val candidates = mutableListOf<String>()
 
+        candidates.add(toWebSocketUrl(PRIMARY_PRODUCTION_URL))
+
         val renderWs = toWebSocketUrl(RENDER_PRODUCTION_URL)
-        candidates.add(renderWs)
+        if (!candidates.contains(renderWs)) {
+            candidates.add(renderWs)
+        }
 
         val custom = getCustomBaseUrl(context)
         if (custom.isNotBlank()) {
@@ -94,7 +100,7 @@ object BackendEndpointManager {
         if (custom.isNotBlank() && custom.startsWith("https://") && !custom.contains(".loca.lt")) {
             return custom
         }
-        return RENDER_PRODUCTION_URL
+        return PRIMARY_PRODUCTION_URL
     }
 
     fun getDisplayConnectionLabel(context: Context): String {
@@ -103,6 +109,6 @@ object BackendEndpointManager {
             val host = custom.removePrefix("https://").removePrefix("http://")
             return if (custom.startsWith("https://")) "ONLINE CLOUD ($host)" else "WI-FI LAN ($host)"
         }
-        return "ONLINE CLOUD (tunemind-backend-iudp.onrender.com)"
+        return "ONLINE CLOUD (tunemind.co)"
     }
 }

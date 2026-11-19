@@ -97,21 +97,25 @@ class ForYouDailyDropWorker(
             val dismissedSignals = dao.getDismissedSignals()
             val previousOutcomes = dao.getPreviousDropsForEvaluation(todayNoonKey, 30)
 
-            val visualRepo = com.tunemind.app.data.ingestion.SpotifyVisualArtworkRepository.getInstance(applicationContext)
-            val tasteSum = visualRepo.tasteShiftSummaryFlow.value
+            val libTracks = db.crossAppLibraryDao().getAllLibraryTracksOnce()
+            val visualsMap = db.crossAppLibraryDao().getTrackVisualSnapshot().associateBy { it.trackKey }
+            val artistsMap = db.crossAppLibraryDao().getArtistProfileSnapshot().associateBy { it.artistKey }
+            val visualRepo = com.tunemind.app.data.ingestion.UniversalMusicVisualRepository.getInstance(applicationContext)
+            val tasteSum = visualRepo.computeTasteShiftSummary(libTracks, visualsMap, artistsMap)
             val genreDist = linkedMapOf<String, Int>()
             tasteSum.topGenres.forEach { gw ->
                 if (gw.genre.isNotBlank() && gw.count > 0) genreDist[gw.genre] = gw.count
             }
             val artistGenreMap = linkedMapOf<String, String>()
-            tasteSum.shortTermTopArtists.forEach { sa ->
+            (tasteSum.risingArtists + tasteSum.consistentArtists).forEach { sa ->
                 if (sa.name.isNotBlank() && sa.genres.isNotEmpty()) {
                     artistGenreMap[sa.name.lowercase()] = sa.genres.first()
                 }
             }
             val dedupSnap = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildSnapshot(
                 rawObservations = observations,
-                spotifyHistory = emptyList(),
+                crossAppTracks = libTracks,
+                crossAppLogs = emptyList(),
                 nowPlayingTitle = null,
                 nowPlayingArtist = null,
                 nowPlayingSourcePkg = null,

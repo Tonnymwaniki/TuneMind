@@ -107,19 +107,19 @@ fun LegalAboutScreen(
                             StudioHairlineDivider()
                             LegalParagraph(
                                 title = "1. Account Identity & Credentials",
-                                body = "When you sign in with Google or Email & Password, TuneMind stores your profile name, email, and taste archetype in our encrypted database to sync your preferences across sessions. Spotify is never used to create your TuneMind login—it is linked strictly to pull your listening library."
+                                body = "When you sign in with Google or Email & Password, TuneMind stores your profile name, email, and taste archetype in our encrypted database to sync your preferences across sessions."
                             )
                             LegalParagraph(
                                 title = "2. Listening Telemetry & Local Storage",
-                                body = "Playback events, freshness scores, and Resting Vault tracks are processed and stored locally on your device inside an encrypted SQLite (Room) database. You can pause all tracking anytime using Private Session in Profile or Settings."
+                                body = "Playback events, cross-app player tabs, freshness scores, and Resting Vault tracks are processed and stored locally on your device inside an encrypted SQLite (Room) database. You can pause all tracking anytime using Private Session in Profile or Settings."
                             )
                             LegalParagraph(
-                                title = "3. Spotify & Device Permissions",
-                                body = "• Microphone: Activated only when you say the wake word or tap the TuneMind orb for voice commands.\n• Music Detection (Notification Listener): Reads currently playing track metadata across installed music players.\n• Local Audio Storage: Optional read-only access so the built-in player can search and play local audio files.\n• Spotify OAuth (Read-Only Library & Playback): Syncs your Liked Tracks, Playlists, Podcasts, and recently played history."
+                                title = "3. Device Permissions",
+                                body = "• Microphone: Activated only when you say the wake word or tap the TuneMind orb for voice commands.\n• Music Detection (Notification Listener): Reads currently playing track metadata locally on-device across installed music players (such as Boomplay, YouTube Music, Spotify, Audiomack, and phone audio).\n• Local Audio Storage: Optional read-only access so the built-in player can search and play local audio files."
                             )
                             LegalParagraph(
                                 title = "4. Your Data Controls",
-                                body = "From the Profile screen you can Export your complete data in JSON format, Clear Listening History, Disconnect Spotify data without deleting your account, or permanently Delete Account & Wipe Data."
+                                body = "From the Profile screen you can Export your complete data in JSON format, Clear Listening History, or permanently Delete Account & Wipe Data."
                             )
                         }
                     }
@@ -152,8 +152,8 @@ fun LegalAboutScreen(
                                 body = "TuneMind helps you track repetition fatigue, protect song freshness, monitor safe volume headroom, and control playback across supported music services for personal, non-commercial use."
                             )
                             LegalParagraph(
-                                title = "2. Third-Party Services",
-                                body = "TuneMind integrates with external services such as Spotify and Google Play services under their respective terms. Audio streaming rights remain with your selected music provider; TuneMind does not bypass DRM or redistribute copyrighted audio."
+                                title = "2. Third-Party Players & Catalogs",
+                                body = "TuneMind interacts with music players installed on your device via standard Android media controls and public catalog APIs under their respective terms. Audio playback rights remain with your chosen player; TuneMind does not bypass DRM or redistribute copyrighted audio."
                             )
                             LegalParagraph(
                                 title = "3. Safe Listening Disclaimer",
@@ -192,7 +192,7 @@ fun LegalAboutScreen(
                             StudioHairlineDivider()
                             LegalParagraph(
                                 title = "Open-Source Libraries & Attributions",
-                                body = "• Jetpack Compose & AndroidX Room (Apache 2.0)\n• Kotlin Coroutines & Material 3 (Apache 2.0)\n• OkHttp Networking & Security Crypto (Apache 2.0)\n• Lottie Android Vector Animations (Apache 2.0)\n• Vosk Offline Wake-Word Engine (Apache 2.0)\n• Spotify Android App Remote SDK (Spotify Developer Terms)"
+                                body = "• Jetpack Compose & AndroidX Room (Apache 2.0)\n• Kotlin Coroutines & Material 3 (Apache 2.0)\n• OkHttp Networking & Security Crypto (Apache 2.0)\n• Lottie Android Vector Animations (Apache 2.0)\n• Vosk Offline Wake-Word Engine (Apache 2.0)\n• Open Catalog APIs (Deezer, iTunes, Audius)"
                             )
                             if (onOpenSupport != null) {
                                 StudioHairlineDivider()

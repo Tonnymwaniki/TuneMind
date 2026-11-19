@@ -246,7 +246,7 @@ router.post('/tag-tracks', async (req: Request, res: Response) => {
  * POST /api/v1/reasoning/satiety-decision
  * Accepts a JSON payload of the user's last 50 tracks from the Android Room DB
  * (with timestamps and skip durations) and runs the Claude 3.5 Haiku / Sonnet
- * Satiety Reasoning Tree with Agentic Tool Calling (SpotifyPlaybackTool & NotificationTool).
+ * Satiety Reasoning Tree with Agentic Tool Calling (CrossAppPlaybackTool & NotificationTool).
  */
 router.post('/satiety-decision', async (req: Request, res: Response) => {
   try {
@@ -279,7 +279,7 @@ router.post('/satiety-decision', async (req: Request, res: Response) => {
 
 /**
  * GET /api/v1/reasoning/tool-schema
- * Returns the formal JSON schema registry for the Agentic Tools (SpotifyPlaybackTool, NotificationTool).
+ * Returns the formal JSON schema registry for the Agentic Tools (CrossAppPlaybackTool, NotificationTool).
  */
 router.get('/tool-schema', async (_req: Request, res: Response) => {
   const { AGENTIC_TOOL_DEFINITIONS } = await import('../../domain/reasoning/SatietyExecutionEngine');

@@ -34,7 +34,12 @@ class YouTubeMusicProvider : MusicProvider {
         val query = "${track.artist} ${track.title}".trim()
         val encodedQuery = Uri.encode(query)
 
-        val webUrl = "https://music.youtube.com/search?q=$encodedQuery"
+        val candidateVideoId = track.providerTrackId?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
+        val watchOrSearchUrl = if (candidateVideoId != null) {
+            "https://music.youtube.com/watch?v=$candidateVideoId"
+        } else {
+            "https://music.youtube.com/search?q=$encodedQuery"
+        }
 
         return TrackMatch(
             providerId = providerId,
@@ -42,8 +47,8 @@ class YouTubeMusicProvider : MusicProvider {
             title = track.title,
             artist = track.artist,
             providerTrackId = track.providerTrackId,
-            deepLinkUri = webUrl,
-            webFallbackUrl = webUrl,
+            deepLinkUri = watchOrSearchUrl,
+            webFallbackUrl = watchOrSearchUrl,
             searchQuery = query,
             confidence = track.confidence
         )

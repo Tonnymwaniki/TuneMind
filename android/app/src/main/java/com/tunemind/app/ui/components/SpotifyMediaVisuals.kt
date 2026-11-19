@@ -32,9 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.tunemind.app.data.ingestion.ArtistProfileCacheEntity
-import com.tunemind.app.data.ingestion.ResolvedTrackVisuals
-import com.tunemind.app.data.ingestion.SpotifyVisualArtworkRepository
+import com.tunemind.app.data.ingestion.UniversalMusicVisualRepository
+import com.tunemind.app.data.local.ArtistProfileCacheEntity
+import com.tunemind.app.data.local.ResolvedTrackVisuals
+import com.tunemind.app.data.local.TrackVisualCacheEntity
+import com.tunemind.app.domain.model.TrackIdentityResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -42,28 +44,34 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
-private fun resolveTrackVisualSlice(
-    visualsMap: Map<String, ResolvedTrackVisuals>,
+private fun resolveVisualSlice(
+    visualsMap: Map<String, TrackVisualCacheEntity>,
     artistsMap: Map<String, ArtistProfileCacheEntity>,
     tKey: String,
-    uKey: String?,
     aKey: String,
-    cleanUri: String?,
     fallbackAlbumArtUrl: String?
 ): ResolvedTrackVisuals {
-    val byUri = uKey?.let { visualsMap[it] }
-    val byTrack = if (tKey.isNotBlank()) visualsMap[tKey] else null
-    val matched = byUri ?: byTrack
+    val matched = if (tKey.isNotBlank()) visualsMap[tKey] else null
     val cachedArtistUrl = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
 
     val effectiveAlbum = matched?.albumArtUrl?.takeIf { it.isNotBlank() }
         ?: fallbackAlbumArtUrl?.takeIf { it.isNotBlank() }
     val effectiveArtist = matched?.artistImageUrl?.takeIf { it.isNotBlank() }
         ?: cachedArtistUrl?.takeIf { it.isNotBlank() }
+        ?: effectiveAlbum
 
-    return (matched ?: ResolvedTrackVisuals(trackKey = tKey, spotifyUri = cleanUri)).copy(
+    return ResolvedTrackVisuals(
+        trackKey = tKey,
+        trackId = matched?.trackId,
+        albumName = matched?.albumName,
         albumArtUrl = effectiveAlbum,
-        artistImageUrl = effectiveArtist
+        artistImageUrl = effectiveArtist,
+        genres = matched?.genresCsv?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList(),
+        popularity = matched?.popularity ?: 0,
+        previewUrl = matched?.previewUrl,
+        audiusStreamUrl = matched?.audiusStreamUrl,
+        ytmVideoId = matched?.ytmVideoId,
+        deezerUrl = matched?.deezerUrl
     )
 }
 
@@ -75,45 +83,38 @@ fun rememberResolvedTrackMedia(
     fallbackAlbumArtUrl: String? = null
 ): ResolvedTrackVisuals {
     val context = LocalContext.current
-    val repo = remember(context) { SpotifyVisualArtworkRepository.getInstance(context) }
+    val repo = remember(context) { UniversalMusicVisualRepository.getInstance(context) }
 
-    val cleanUri = remember(spotifyUri) { spotifyUri?.trim()?.takeIf { it.isNotBlank() } }
-    val tKey = remember(title, artist) { SpotifyVisualArtworkRepository.canonicalTrackKey(title, artist) }
-    val uKey = remember(cleanUri) { cleanUri?.let { SpotifyVisualArtworkRepository.uriKey(it) } }
-    val aKey = remember(artist) {
-        SpotifyVisualArtworkRepository.canonicalArtistKey(
-            SpotifyVisualArtworkRepository.extractPrimaryArtistName(artist)
-        )
+    val cleanTitle = remember(title) { title?.trim().orEmpty() }
+    val cleanArtist = remember(artist) { artist?.trim().orEmpty() }
+    val tKey = remember(cleanTitle, cleanArtist) {
+        TrackIdentityResolver.buildNormalizedMatchKey(cleanTitle, cleanArtist)
+    }
+    val aKey = remember(cleanArtist) {
+        UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist)
     }
 
-    LaunchedEffect(title, artist, spotifyUri, fallbackAlbumArtUrl) {
-        withContext(Dispatchers.IO) {
-            repo.requestTrackVisuals(
-                title = title,
-                artist = artist,
-                spotifyUri = spotifyUri,
-                fallbackAlbumArtUrl = fallbackAlbumArtUrl
-            )
+    LaunchedEffect(cleanTitle, cleanArtist) {
+        if (cleanTitle.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                repo.enqueueVisualEnrichment(listOf(cleanTitle to cleanArtist))
+            }
         }
     }
 
-    val initialValue = remember(tKey, uKey, aKey, fallbackAlbumArtUrl) {
-        resolveTrackVisualSlice(
-            visualsMap = repo.trackVisualsFlow.value,
-            artistsMap = repo.artistProfilesFlow.value,
-            tKey = tKey,
-            uKey = uKey,
-            aKey = aKey,
-            cleanUri = cleanUri,
-            fallbackAlbumArtUrl = fallbackAlbumArtUrl
-        )
-    }
+    val visualsFlow = remember(repo) { repo.observeTrackVisualsMap() }
+    val artistsFlow = remember(repo) { repo.observeArtistProfilesMap() }
 
-    val resolved by remember(tKey, uKey, aKey, fallbackAlbumArtUrl) {
-        combine(repo.trackVisualsFlow, repo.artistProfilesFlow) { visualsMap, artistsMap ->
-            resolveTrackVisualSlice(visualsMap, artistsMap, tKey, uKey, aKey, cleanUri, fallbackAlbumArtUrl)
+    val resolved by remember(tKey, aKey, fallbackAlbumArtUrl) {
+        combine(visualsFlow, artistsFlow) { visualsMap, artistsMap ->
+            resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
-    }.collectAsState(initial = initialValue)
+    }.collectAsState(
+        initial = ResolvedTrackVisuals(
+            trackKey = tKey,
+            albumArtUrl = fallbackAlbumArtUrl?.takeIf { it.isNotBlank() }
+        )
+    )
 
     return resolved
 }
@@ -124,38 +125,33 @@ fun rememberResolvedArtistPhoto(
     artistId: String? = null
 ): String? {
     val context = LocalContext.current
-    val repo = remember(context) { SpotifyVisualArtworkRepository.getInstance(context) }
-    val aKey = remember(artistName) {
-        SpotifyVisualArtworkRepository.canonicalArtistKey(
-            SpotifyVisualArtworkRepository.extractPrimaryArtistName(artistName)
-        )
-    }
+    val repo = remember(context) { UniversalMusicVisualRepository.getInstance(context) }
+    val cleanArtist = remember(artistName) { artistName?.trim().orEmpty() }
+    val aKey = remember(cleanArtist) { UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist) }
 
-    LaunchedEffect(artistName, artistId) {
-        withContext(Dispatchers.IO) {
-            repo.requestArtistProfile(artistName = artistName, artistId = artistId)
+    LaunchedEffect(cleanArtist) {
+        if (cleanArtist.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                repo.enqueueVisualEnrichment(listOf("" to cleanArtist))
+            }
         }
     }
 
-    val initialValue = remember(aKey, artistId) {
-        val snap = repo.artistProfilesFlow.value
-        (if (aKey.isNotBlank()) snap[aKey]?.imageUrl else null)
-            ?: artistId?.takeIf { it.isNotBlank() }?.let { snap["id:$it"]?.imageUrl }
-    }
-
+    val artistsFlow = remember(repo) { repo.observeArtistProfilesMap() }
     val photo by remember(aKey, artistId) {
-        repo.artistProfilesFlow.map { artistsMap ->
-            val byName = if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null
-            val byId = artistId?.takeIf { it.isNotBlank() }?.let { artistsMap["id:$it"]?.imageUrl }
-            byName ?: byId
+        artistsFlow.map { artistsMap ->
+            (if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null)
+                ?: artistId?.takeIf { it.isNotBlank() }?.let { id ->
+                    artistsMap.values.firstOrNull { it.artistId == id }?.imageUrl
+                }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
-    }.collectAsState(initial = initialValue)
+    }.collectAsState(initial = null)
 
     return photo
 }
 
 @Composable
-fun SpotifyAvatarCircle(
+fun TuneMindAvatarCircle(
     imageUrl: String?,
     fallbackInitial: String,
     size: Dp,
@@ -207,10 +203,19 @@ fun SpotifyAvatarCircle(
     }
 }
 
+@Composable
+fun SpotifyAvatarCircle(
+    imageUrl: String?,
+    fallbackInitial: String,
+    size: Dp,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    borderWidth: Dp = 1.5.dp,
+    borderColor: Color = accentColor.copy(alpha = 0.55f)
+) = TuneMindAvatarCircle(imageUrl, fallbackInitial, size, accentColor, modifier, borderWidth, borderColor)
+
 /**
- * Layered Song Art + Mini Artist Badge placed at the end of every song card across TuneMind.
- * Renders a rounded-square album cover with a miniature circular artist photo tucked cleanly
- * at the bottom-right corner with a dark surface cutout ring.
+ * Layered Song Art + Mini Artist Badge placed on track cards across TuneMind.
  */
 @Composable
 fun LayeredSongArtistBadge(
@@ -230,7 +235,7 @@ fun LayeredSongArtistBadge(
 
     val cornerRadius = (size * 0.22f).coerceIn(8.dp, 16.dp)
     val badgeSize = (size * 0.44f).coerceIn(18.dp, 28.dp)
-    val artistInitial = SpotifyVisualArtworkRepository.extractPrimaryArtistName(artist)
+    val artistInitial = UniversalMusicVisualRepository.normalizeArtistKey(artist)
         .ifBlank { title }
         .trim()
         .firstOrNull()
@@ -238,10 +243,7 @@ fun LayeredSongArtistBadge(
         ?.toString()
         ?: "♪"
 
-    Box(
-        modifier = modifier.size(size)
-    ) {
-        // Primary layer: Rounded-square song album art (with clean studio fallback)
+    Box(modifier = modifier.size(size)) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -255,11 +257,7 @@ fun LayeredSongArtistBadge(
                         )
                     )
                 )
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(cornerRadius)
-                )
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(cornerRadius))
         ) {
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
@@ -270,21 +268,15 @@ fun LayeredSongArtistBadge(
 
             if (cleanAlbumUrl != null && !albumFailed) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(cleanAlbumUrl)
-                        .crossfade(true)
-                        .build(),
+                    model = ImageRequest.Builder(context).data(cleanAlbumUrl).crossfade(true).build(),
                     contentDescription = "$title cover",
                     contentScale = ContentScale.Crop,
                     onError = { albumFailed = true },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(cornerRadius))
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(cornerRadius))
                 )
             }
         }
 
-        // Secondary layer: Mini circular artist profile photo tucked bottom-right with cutout ring
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -303,16 +295,11 @@ fun LayeredSongArtistBadge(
             )
             if (cleanArtistUrl != null && !artistFailed) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(cleanArtistUrl)
-                        .crossfade(true)
-                        .build(),
+                    model = ImageRequest.Builder(context).data(cleanArtistUrl).crossfade(true).build(),
                     contentDescription = "$artist profile",
                     contentScale = ContentScale.Crop,
                     onError = { artistFailed = true },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
                 )
             }
         }

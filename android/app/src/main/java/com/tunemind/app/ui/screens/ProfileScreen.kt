@@ -37,14 +37,13 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.data.auth.SavedAccountProfile
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
-import com.tunemind.app.data.ingestion.SpotifyAuthManager
 import com.tunemind.app.domain.voice.AgentSettingsStore
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.SoftGlassCard
-import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.StudioSectionHeader
+import com.tunemind.app.ui.components.TuneMindAvatarCircle
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.util.PermissionUtils
 import kotlinx.coroutines.launch
@@ -68,23 +67,19 @@ fun ProfileScreen(
     val theme = LocalAdaptiveTheme.current
 
     val authManager = remember(context) { TuneMindAuthSessionManager.getInstance(context) }
-    val spotifyAuthManager = remember(context) { SpotifyAuthManager(context) }
     val session by authManager.sessionFlow.collectAsState()
     val savedAccounts by authManager.savedAccountsFlow.collectAsState()
 
     val stats by vm.listeningStats.collectAsState()
     val userProfile by vm.userProfile.collectAsState()
-    val spotifyProfile by vm.spotifyUserProfile.collectAsState()
-    val likedTracks by vm.spotifyLikedTracks.collectAsState()
-    val playlists by vm.spotifyPlaylists.collectAsState()
-    val isLibrarySyncing by vm.isLibrarySyncing.collectAsState()
+    val libraryTracks by vm.crossAppLibraryTracks.collectAsState()
+    val detectedTabs by vm.detectedPlayerTabs.collectAsState()
 
     val privateSession by AgentSettingsStore.privateSessionEnabled.collectAsState()
     val mergeDuplicatePlays by AgentSettingsStore.mergeDuplicatePlaysEnabled.collectAsState()
 
     var hasMicPermission by remember { mutableStateOf(PermissionUtils.hasMicrophonePermission(context)) }
     var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationListenerPermission(context)) }
-    var hasOverlayPermission by remember { mutableStateOf(PermissionUtils.hasOverlayPermission(context)) }
     var isBatteryIgnored by remember { mutableStateOf(PermissionUtils.isIgnoringBatteryOptimizations(context)) }
 
     var showEditProfileSheet by remember { mutableStateOf(false) }
@@ -93,7 +88,6 @@ fun ProfileScreen(
     var showLogoutSheet by remember { mutableStateOf(false) }
     var showClearHistorySheet by remember { mutableStateOf(false) }
     var showDeleteAccountSheet by remember { mutableStateOf(false) }
-    var showDisconnectSpotifySheet by remember { mutableStateOf(false) }
 
     var statusBanner by remember { mutableStateOf<String?>(null) }
 
@@ -135,7 +129,6 @@ fun ProfileScreen(
         {
             hasMicPermission = PermissionUtils.hasMicrophonePermission(context)
             hasNotificationAccess = PermissionUtils.hasNotificationListenerPermission(context)
-            hasOverlayPermission = PermissionUtils.hasOverlayPermission(context)
             isBatteryIgnored = PermissionUtils.isIgnoringBatteryOptimizations(context)
             authManager.refreshSessionState()
         }
@@ -272,8 +265,8 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SpotifyAvatarCircle(
-                            imageUrl = session.avatarUrl.ifBlank { spotifyProfile?.avatarUrl.orEmpty() },
+                        TuneMindAvatarCircle(
+                            imageUrl = session.avatarUrl,
                             fallbackInitial = effectiveDisplayName.ifEmpty { "T" },
                             size = 62.dp,
                             accentColor = neonCyan,
@@ -340,20 +333,6 @@ fun ProfileScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (session.isSupabaseAuthenticated) safeGreen else theme.primaryAccent
                             )
-                            val spProfile = spotifyProfile
-                            if (spProfile != null && spProfile.displayName.isNotBlank()) {
-                                val spPlan = listOfNotNull(
-                                    spProfile.product.takeIf { it.isNotBlank() }?.replaceFirstChar { it.uppercase() },
-                                    spProfile.country.takeIf { it.isNotBlank() }
-                                ).joinToString(" · ")
-                                Text(
-                                    text = if (spPlan.isNotBlank()) "Spotify: ${spProfile.displayName} ($spPlan)" else "Spotify: ${spProfile.displayName}",
-                                    fontSize = 11.5.sp,
-                                    color = safeGreen.copy(alpha = 0.9f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
                     }
 
@@ -448,7 +427,7 @@ fun ProfileScreen(
                     icon = Icons.Rounded.Settings,
                     iconTint = neonCyan,
                     title = "App Settings",
-                    subtitle = "Players, Spotify Remote, voice & theme",
+                    subtitle = "Players, Hybrid Mode, voice & theme",
                     onClick = onOpenSettings
                 )
                 StudioHairlineDivider()
@@ -474,22 +453,21 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // 3. Connected Music Data Source (Spotify is strictly for pulling user data)
+            // 3. Cross-App Detection Overview (Automatic via Notification Listener — Zero API Keys)
             SoftGlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                accentTint = if (session.isSpotifyConnected) Color(0xFF1DB954) else theme.primaryAccent
+                accentTint = if (hasNotificationAccess) safeGreen else theme.primaryAccent
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     StudioSectionHeader(
-                        title = "Music Data Connection",
-                        actionLabel = if (session.isSpotifyConnected) "Connected" else "Not Linked",
+                        title = "Cross-App Music Detection",
+                        actionLabel = if (hasNotificationAccess) "Live" else "Enable Access",
                         onActionClick = {
-                            if (session.isSpotifyConnected) {
-                                vm.refreshSpotifyLibrary(forcePlaylistTracks = true)
-                                statusBanner = "Refreshing your Spotify library..."
-                            } else {
-                                spotifyAuthManager.launchSpotifyAuth(context)
-                            }
+                            context.startActivity(
+                                PermissionUtils.getNotificationListenerIntent().apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                            )
                         }
                     )
 
@@ -502,86 +480,33 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .size(42.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF1DB954).copy(alpha = 0.16f)),
+                                .background((if (hasNotificationAccess) safeGreen else theme.primaryAccent).copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.LibraryMusic,
                                 contentDescription = null,
-                                tint = Color(0xFF1DB954),
+                                tint = if (hasNotificationAccess) safeGreen else theme.primaryAccent,
                                 modifier = Modifier.size(21.dp)
                             )
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Spotify Music Sync",
+                                text = if (detectedTabs.isEmpty()) "All Android Music Apps Supported" else "${detectedTabs.size} Music App Tab(s) Active",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFFF8FAFC)
                             )
                             Text(
-                                text = if (session.isSpotifyConnected) {
-                                    "${likedTracks.size} liked tracks · ${playlists.size} playlists synced for data analysis"
+                                text = if (libraryTracks.isNotEmpty()) {
+                                    "${libraryTracks.size} permanent tracks tracked across Boomplay, YouTube Music, Spotify, Audiomack & phone audio"
                                 } else {
-                                    "Link Spotify to pull your liked tracks, playlists & recent listening history"
+                                    "Play songs in Boomplay, YouTube Music, Spotify, Audiomack, or phone audio — TuneMind creates permanent per-app tabs automatically."
                                 },
                                 fontSize = 12.sp,
                                 color = Color.White.copy(alpha = 0.62f),
                                 lineHeight = 17.sp
                             )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                if (session.isSpotifyConnected) {
-                                    vm.refreshSpotifyLibrary(forcePlaylistTracks = true)
-                                    statusBanner = "Syncing latest tracks from Spotify..."
-                                } else {
-                                    spotifyAuthManager.launchSpotifyAuth(context)
-                                }
-                            },
-                            enabled = !isLibrarySyncing,
-                            shape = RoundedCornerShape(28.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF1DB954),
-                                contentColor = Color(0xFF0D0D0D)
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
-                            Text(
-                                text = when {
-                                    isLibrarySyncing -> "Syncing…"
-                                    session.isSpotifyConnected -> "Sync Music Data"
-                                    else -> "Connect Spotify"
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (session.isSpotifyConnected) {
-                            OutlinedButton(
-                                onClick = { showDisconnectSpotifySheet = true },
-                                shape = RoundedCornerShape(28.dp),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(46.dp)
-                            ) {
-                                Text(
-                                    text = "Disconnect Data",
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
                         }
                     }
                 }
@@ -616,7 +541,7 @@ fun ProfileScreen(
 
                 ProfileSwitchRow(
                     title = "Merge Duplicate Plays",
-                    description = "Combines matching tracks played across Spotify and local players.",
+                    description = "Combines matching tracks played across music apps and local players.",
                     checked = mergeDuplicatePlays,
                     accent = neonCyan,
                     onCheckedChange = { enabled ->
@@ -671,23 +596,17 @@ fun ProfileScreen(
                 StudioHairlineDivider()
 
                 ProfilePermissionRow(
-                    title = "Background Sync & Return",
-                    subtitle = if (isBatteryIgnored && hasOverlayPermission) {
-                        "Unrestricted background sync & auto-return active"
+                    title = "Background Battery Sync",
+                    subtitle = if (isBatteryIgnored) {
+                        "Unrestricted background sync active"
                     } else {
-                        "Tap to review background battery & overlay permissions"
+                        "Tap to review background battery optimization settings"
                     },
-                    granted = isBatteryIgnored && hasOverlayPermission,
+                    granted = isBatteryIgnored,
                     safeGreen = safeGreen,
                     warnAmber = warnAmber,
                     onClick = {
-                        if (!isBatteryIgnored) {
-                            vm.requestIgnoreBatteryOptimization(context)
-                        } else {
-                            runCatching {
-                                context.startActivity(PermissionUtils.getOverlayPermissionIntent(context))
-                            }
-                        }
+                        vm.requestIgnoreBatteryOptimization(context)
                     }
                 )
                 StudioHairlineDivider()
@@ -1145,7 +1064,6 @@ fun ProfileScreen(
     if (showLogoutSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var keepForQuickSwitch by remember { mutableStateOf(true) }
-        var alsoDisconnectSpotify by remember { mutableStateOf(false) }
         var isLoggingOut by remember { mutableStateOf(false) }
 
         ModalBottomSheet(
@@ -1186,16 +1104,6 @@ fun ProfileScreen(
                     )
                 }
 
-                if (session.isSpotifyConnected) {
-                    ProfileSwitchRow(
-                        title = "Also disconnect Spotify music data",
-                        description = "Leave off to keep your Spotify library sync ready.",
-                        checked = alsoDisconnectSpotify,
-                        accent = Color(0xFF1DB954),
-                        onCheckedChange = { alsoDisconnectSpotify = it }
-                    )
-                }
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1208,16 +1116,14 @@ fun ProfileScreen(
                             .weight(1f)
                             .height(50.dp)
                     ) {
-                        Text("Cancel", color = Color(0xFFF8FAFC), fontWeight = FontWeight.Medium)
+                        Text("Cancel", color = Color(0xFFF8FAFC))
                     }
-
                     Button(
                         onClick = {
                             isLoggingOut = true
                             scope.launch {
                                 authManager.signOutRemoteAndLocal(
-                                    removeFromSavedRoster = !keepForQuickSwitch,
-                                    disconnectSpotify = alsoDisconnectSpotify
+                                    removeFromSavedRoster = !keepForQuickSwitch
                                 )
                                 isLoggingOut = false
                                 showLogoutSheet = false
@@ -1232,63 +1138,6 @@ fun ProfileScreen(
                             .height(50.dp)
                     ) {
                         Text(if (isLoggingOut) "Signing Out…" else "Log Out", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-
-    if (showDisconnectSpotifySheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { showDisconnectSpotifySheet = false },
-            sheetState = sheetState,
-            containerColor = Color(0xFF140D24),
-            contentColor = Color(0xFFF8FAFC),
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Text("Disconnect Spotify Data?", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
-                Text(
-                    text = "Stops pulling new liked songs and playlists from Spotify. Your TuneMind account stays signed in.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.68f),
-                    lineHeight = 19.sp
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { showDisconnectSpotifySheet = false },
-                        shape = RoundedCornerShape(28.dp),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                    ) {
-                        Text("Cancel", color = Color(0xFFF8FAFC))
-                    }
-                    Button(
-                        onClick = {
-                            authManager.disconnectSpotifyData()
-                            showDisconnectSpotifySheet = false
-                            statusBanner = "Spotify music data disconnected."
-                        },
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = dangerRed, contentColor = Color.White),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                    ) {
-                        Text("Disconnect", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1373,7 +1222,7 @@ fun ProfileScreen(
             ) {
                 Text("Delete Account & Wipe Data?", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = dangerRed)
                 Text(
-                    text = "Removes your saved profile, clears all local listening telemetry and vault cooldowns, disconnects Spotify data, and signs you out.",
+                    text = "Removes your saved profile, clears all local listening telemetry, cross-app library, and vault cooldowns, and signs you out.",
                     fontSize = 13.sp,
                     color = Color.White.copy(alpha = 0.72f),
                     lineHeight = 19.sp

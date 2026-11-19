@@ -101,7 +101,7 @@ object OrbTelemetryBridge {
 }
 
 // ============================================================================
-// 2. AGENTIC TOOL REGISTRY (SpotifyPlaybackTool & NotificationTool)
+// 2. AGENTIC TOOL REGISTRY (CrossAppPlaybackTool & NotificationTool)
 // ============================================================================
 
 object AgenticToolRegistry {
@@ -126,10 +126,10 @@ object AgenticToolRegistry {
         for (tool in decision.toolCalls) {
             val args = runCatching { JSONObject(tool.argumentsJson) }.getOrNull() ?: JSONObject()
             when (tool.toolName) {
-                "SpotifyPlaybackTool" -> {
+                "CrossAppPlaybackTool", "SpotifyPlaybackTool" -> {
                     playbackExecutedViaTool = true
                     if (allowBackgroundPlayback) {
-                        SpotifyPlaybackTool.execute(
+                        CrossAppPlaybackTool.execute(
                             context = appContext,
                             command = args.optString("command", decision.action),
                             targetUri = args.optString("target_uri", "").ifBlank { decision.recommendedUri },
@@ -138,7 +138,7 @@ object AgenticToolRegistry {
                             rationale = args.optString("rationale", decision.reasoning)
                         )
                     } else {
-                        Log.i(TAG, "Blocked background SpotifyPlaybackTool call because backgroundAutoPlayEnabled is false.")
+                        Log.i(TAG, "Blocked background playback tool call because backgroundAutoPlayEnabled is false.")
                     }
                 }
                 "NotificationTool" -> {
@@ -157,7 +157,7 @@ object AgenticToolRegistry {
 
         // If the backend returned a raw {"state": "fatigued", "action": "skip_track|change_genre"} without explicit tool_calls array:
         if (!playbackExecutedViaTool && decision.isFatigued && allowBackgroundPlayback) {
-            SpotifyPlaybackTool.execute(
+            CrossAppPlaybackTool.execute(
                 context = appContext,
                 command = decision.action,
                 targetUri = decision.recommendedUri,
@@ -185,14 +185,13 @@ object AgenticToolRegistry {
 }
 
 /**
- * Tool 1: [SpotifyPlaybackTool]
- * Executes OS-level Spotify playback commands (`skip_track`, `play_playlist`, `change_genre`, `pause`, `resume`)
- * via Spotify App Remote protocol / Active `MediaSession` TransportControls / `MusicPlayerAutoLauncher`
- * without requiring the user to open the TuneMind app.
+ * Tool 1: [CrossAppPlaybackTool]
+ * Executes cross-app playback commands (`skip_track`, `play_playlist`, `change_genre`, `pause`, `resume`)
+ * via [TuneMindInAppPlayer], active `MediaSession` TransportControls, or [MusicPlayerAutoLauncher]
+ * across TuneMind In-App, Boomplay, YouTube Music, Audiomack, Spotify passive, and OEM players.
  */
-object SpotifyPlaybackTool {
-    private const val TAG = "SpotifyPlaybackTool"
-    private const val SPOTIFY_PACKAGE = "com.spotify.music"
+object CrossAppPlaybackTool {
+    private const val TAG = "CrossAppPlaybackTool"
 
     fun execute(
         context: Context,
@@ -203,7 +202,7 @@ object SpotifyPlaybackTool {
         rationale: String? = null
     ) {
         val normalizedCmd = command.lowercase().trim()
-        Log.i(TAG, "SpotifyPlaybackTool invoking command='$normalizedCmd', uri='$targetUri', query='$searchQuery'")
+        Log.i(TAG, "CrossAppPlaybackTool invoking command='$normalizedCmd', uri='$targetUri', query='$searchQuery'")
 
         when (normalizedCmd) {
             "skip_track" -> {
@@ -230,30 +229,33 @@ object SpotifyPlaybackTool {
                 )
             }
             "pause" -> {
-                val listener = TuneMindListenerService.instance
-                listener?.pause()
+                com.tunemind.app.provider.TuneMindInAppPlayer.pause()
+                TuneMindListenerService.instance?.pause()
                 dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PAUSE)
             }
             "resume" -> {
-                val listener = TuneMindListenerService.instance
-                listener?.play(SPOTIFY_PACKAGE)
-                dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
+                if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack()) {
+                    com.tunemind.app.provider.TuneMindInAppPlayer.resume()
+                } else {
+                    TuneMindListenerService.instance?.play()
+                    dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_PLAY)
+                }
             }
             else -> {
-                Log.d(TAG, "SpotifyPlaybackTool maintaining current playback trajectory.")
+                Log.d(TAG, "CrossAppPlaybackTool maintaining current playback trajectory.")
             }
         }
     }
 
     private fun executeHardwareOrSessionSkip(context: Context) {
         val listener = TuneMindListenerService.instance
-        val hasSpotifySession = listener?.hasActiveSession(SPOTIFY_PACKAGE) == true
-        if (hasSpotifySession) {
-            listener?.skipNext(SPOTIFY_PACKAGE)
+        val hasSession = listener?.hasActiveSession() == true
+        if (hasSession) {
+            listener?.skipNext()
         } else {
             dispatchMediaKeyEvent(context, KeyEvent.KEYCODE_MEDIA_NEXT)
         }
-        Log.i(TAG, "Executed OS-level skip_track (session=$hasSpotifySession)")
+        Log.i(TAG, "Executed OS-level skip_track (session=$hasSession)")
     }
 
     private fun launchPlaylistOrTrackInBackground(
@@ -262,6 +264,8 @@ object SpotifyPlaybackTool {
         query: String,
         rationale: String?
     ) {
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
+        val provider = registry.getProvider(registry.getPreferredProviderId())
         val recommendedTrack = RecommendedTrack(
             id = uri ?: "satiety_shift_${System.currentTimeMillis()}",
             title = query,
@@ -274,9 +278,9 @@ object SpotifyPlaybackTool {
 
         MusicPlayerAutoLauncher.launchWithAutoPlay(
             context = context,
-            providerId = "spotify",
-            displayName = "Spotify",
-            packageName = SPOTIFY_PACKAGE,
+            providerId = provider.providerId,
+            displayName = provider.displayName,
+            packageName = provider.packageName.takeIf { it != "*" },
             track = recommendedTrack,
             query = query,
             deepLinkUri = uri

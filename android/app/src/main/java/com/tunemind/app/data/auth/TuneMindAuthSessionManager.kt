@@ -9,10 +9,6 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tunemind.app.BuildConfig
-import com.tunemind.app.data.ingestion.SpotifyAuthManager
-import com.tunemind.app.data.ingestion.SpotifyOAuthRepository
-import com.tunemind.app.data.ingestion.SpotifyRecentlyPlayedSyncWorker
-import com.tunemind.app.data.ingestion.SpotifyTokenResponse
 import com.tunemind.app.domain.network.BackendEndpointManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +33,6 @@ data class TuneMindUserSession(
     val avatarUrl: String = "",
     val primaryProvider: String = "", // "GOOGLE" | "EMAIL" | "GUEST"
     val isGoogleConnected: Boolean = false,
-    val isSpotifyConnected: Boolean = false, // Music data sync source only (not an account provider)
     val isSupabaseAuthenticated: Boolean = false,
     val tasteArchetype: String = "",
     val supabaseUrl: String = ""
@@ -62,14 +57,10 @@ data class SavedAccountProfile(
  * - **Google Account**: Supabase Google OAuth (`/auth/v1/authorize?provider=google`) or Android Google Account Picker.
  * - **Email & Password**: Supabase Auth (`/auth/v1/signup`, `/auth/v1/token`, `/auth/v1/user`, `/auth/v1/recover`)
  *   with Encrypted Local Vault fallback when Supabase URL/key is not configured.
- *
- * Music Data Connection (Separate from User Account):
- * - **Spotify**: Connected strictly for pulling playlists, liked songs, recently played, and playback control.
  */
 class TuneMindAuthSessionManager private constructor(context: Context) {
 
     private val appContext: Context = context.applicationContext
-    private val spotifyAuthManager = SpotifyAuthManager(appContext)
 
     private val prefs: SharedPreferences by lazy {
         createEncryptedPrefs(appContext)
@@ -112,15 +103,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     fun getAccessToken(): String = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: ""
 
-    private fun isSpotifyLinkedInternal(): Boolean {
-        val oauthRepoAuth = runCatching {
-            SpotifyOAuthRepository.getInstance(appContext).tokenManager.isAuthenticated()
-        }.getOrDefault(false)
-        return spotifyAuthManager.isAuthenticated() || oauthRepoAuth
-    }
-
     private fun readCurrentSession(): TuneMindUserSession {
-        val spotifyConnected = isSpotifyLinkedInternal()
         val googleConnected = prefs.getBoolean(KEY_GOOGLE_CONNECTED, false)
         val email = prefs.getString(KEY_USER_EMAIL, "") ?: ""
         val storedProvider = prefs.getString(KEY_PRIMARY_PROVIDER, "") ?: ""
@@ -153,7 +136,6 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             avatarUrl = prefs.getString(KEY_AVATAR_URL, "") ?: "",
             primaryProvider = sanitizedProvider,
             isGoogleConnected = googleConnected,
-            isSpotifyConnected = spotifyConnected,
             isSupabaseAuthenticated = supabaseToken.isNotBlank() && isSupabaseConfigured(),
             tasteArchetype = prefs.getString(KEY_TASTE_ARCHETYPE, "") ?: "",
             supabaseUrl = getSupabaseUrl()
@@ -167,26 +149,6 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         if (email.isNotBlank()) editor.putString("user_email", email)
         if (!archetype.isNullOrBlank()) editor.putString("user_archetype", archetype)
         editor.apply()
-    }
-
-    fun updateSpotifyProfileCache(displayName: String?, avatarUrl: String?) {
-        val editor = prefs.edit()
-        var changed = false
-        val cleanName = displayName?.trim().orEmpty()
-        val currentName = prefs.getString(KEY_DISPLAY_NAME, "").orEmpty()
-        if (cleanName.isNotBlank() && (currentName.isBlank() || currentName == "TuneMind Listener")) {
-            editor.putString(KEY_DISPLAY_NAME, cleanName)
-            changed = true
-        }
-        val cleanAvatar = avatarUrl?.trim().orEmpty()
-        if (cleanAvatar.isNotBlank()) {
-            editor.putString(KEY_AVATAR_URL, cleanAvatar)
-            changed = true
-        }
-        if (changed) {
-            editor.apply()
-            refreshSessionState()
-        }
     }
 
     // ========================================================================
@@ -322,7 +284,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             ""
         }
         if (activeKey == accountKey) {
-            signOut(removeFromSavedRoster = true, disconnectSpotify = false)
+            signOut(removeFromSavedRoster = true)
         } else {
             refreshSessionState()
         }
@@ -357,32 +319,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     }
 
     // ========================================================================
-    // 1. SPOTIFY MUSIC DATA CONNECTION (STRICTLY DATA PULL, NOT ACCOUNT AUTH)
-    // ========================================================================
-
-    fun launchSpotifyLogin(activityOrContext: Context) {
-        spotifyAuthManager.launchSpotifyAuth(activityOrContext)
-    }
-
-    fun onSpotifyOAuthSucceeded() {
-        // Spotify is used solely for pulling music library & playback data.
-        // Do NOT overwrite the user's Google/Email TuneMind account provider.
-        prefs.edit()
-            .putBoolean(KEY_IS_LOGGED_IN, true)
-            .apply()
-        refreshSessionState()
-    }
-
-    fun disconnectSpotifyData() {
-        spotifyAuthManager.clearTokens()
-        runCatching {
-            SpotifyOAuthRepository.getInstance(appContext).tokenManager.clearTokens()
-        }
-        refreshSessionState()
-    }
-
-    // ========================================================================
-    // 2. GOOGLE ACCOUNT SIGN-IN (SUPABASE OAUTH OR ON-DEVICE GOOGLE PICKER)
+    // GOOGLE ACCOUNT SIGN-IN (SUPABASE OAUTH OR ON-DEVICE GOOGLE PICKER)
     // ========================================================================
 
     fun launchGoogleLogin(activityOrContext: Context): Boolean {
@@ -630,22 +567,6 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             mirrorIdentityToUserPrefs(finalName, email)
         }
 
-        if (!providerToken.isNullOrBlank()) {
-            spotifyAuthManager.saveTokens(
-                SpotifyTokenResponse(
-                    accessToken = providerToken,
-                    refreshToken = providerRefreshToken,
-                    expiresInSeconds = 3600L
-                )
-            )
-            SpotifyRecentlyPlayedSyncWorker.schedulePeriodic15MinSync(appContext)
-            SpotifyRecentlyPlayedSyncWorker.enqueueImmediateOnAudioFocusChange(
-                context = appContext,
-                reason = "SUPABASE_SPOTIFY_OAUTH_SUCCESS",
-                bypassDebounce = true
-            )
-        }
-
         syncProfileFromSupabase()
         refreshSessionState()
         true
@@ -713,7 +634,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                     put("primary_provider", provider)
                     put("google_connected", provider == "GOOGLE")
                 }
-                put("spotify_connected", isSpotifyLinkedInternal())
+                put("spotify_connected", false)
                 tasteArchetype?.takeIf { it.isNotBlank() }?.let { put("taste_archetype", it) }
                 privateSessionEnabled?.let { put("private_session_enabled", it) }
                 mergeDuplicatePlays?.let { put("merge_duplicate_plays", it) }
@@ -888,8 +809,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     }
 
     suspend fun signOutRemoteAndLocal(
-        removeFromSavedRoster: Boolean = false,
-        disconnectSpotify: Boolean = false
+        removeFromSavedRoster: Boolean = false
     ) = withContext(Dispatchers.IO) {
         val accessToken = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, null)?.takeIf { it.isNotBlank() }
         if (accessToken != null && isSupabaseConfigured()) {
@@ -903,10 +823,10 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                 httpClient.newCall(req).execute().close()
             }
         }
-        signOut(removeFromSavedRoster = removeFromSavedRoster, disconnectSpotify = disconnectSpotify)
+        signOut(removeFromSavedRoster = removeFromSavedRoster)
     }
 
-    fun signOut(removeFromSavedRoster: Boolean = false, disconnectSpotify: Boolean = false) {
+    fun signOut(removeFromSavedRoster: Boolean = false) {
         val currentEmail = prefs.getString(KEY_USER_EMAIL, "") ?: ""
         val currentProvider = prefs.getString(KEY_PRIMARY_PROVIDER, "") ?: ""
         if (removeFromSavedRoster && currentEmail.isNotBlank()) {
@@ -933,12 +853,6 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .remove(KEY_PRIMARY_PROVIDER)
             .apply()
 
-        if (disconnectSpotify) {
-            spotifyAuthManager.clearTokens()
-            runCatching {
-                SpotifyOAuthRepository.getInstance(appContext).tokenManager.clearTokens()
-            }
-        }
         refreshSessionState()
     }
 
@@ -977,7 +891,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
 
         onWipeLocalAppData()
-        signOutRemoteAndLocal(removeFromSavedRoster = true, disconnectSpotify = true)
+        signOutRemoteAndLocal(removeFromSavedRoster = true)
     }
 
     private fun openCustomTab(context: Context, uri: Uri) {

@@ -49,7 +49,8 @@ object SupabaseIntelligenceSyncManager {
         val userId: String,
         val email: String,
         val supabaseUrl: String,
-        val supabaseAnonKey: String
+        val supabaseAnonKey: String,
+        val accessToken: String
     )
 
     fun resolveUserIdentity(context: Context): ActiveUserIdentity {
@@ -65,7 +66,8 @@ object SupabaseIntelligenceSyncManager {
             userId = effectiveUserId,
             email = email,
             supabaseUrl = sessionManager.getSupabaseUrl(),
-            supabaseAnonKey = sessionManager.getSupabaseAnonKey()
+            supabaseAnonKey = sessionManager.getSupabaseAnonKey(),
+            accessToken = sessionManager.getAccessToken().trim()
         )
     }
 
@@ -112,6 +114,7 @@ object SupabaseIntelligenceSyncManager {
                     postDirectToSupabaseInterventions(
                         supabaseUrl = identity.supabaseUrl,
                         anonKey = identity.supabaseAnonKey,
+                        accessToken = identity.accessToken,
                         userId = identity.userId,
                         triggerTranscript = triggerTranscript,
                         satietyPercent = satietyPercent,
@@ -144,6 +147,11 @@ object SupabaseIntelligenceSyncManager {
 
                 val req = Request.Builder()
                     .url("$baseUrl/api/v1/intelligence/sync")
+                    .apply {
+                        if (identity.accessToken.isNotBlank()) {
+                            addHeader("Authorization", "Bearer ${identity.accessToken}")
+                        }
+                    }
                     .post(payload.toString().toRequestBody(jsonMediaType))
                     .build()
 
@@ -156,53 +164,56 @@ object SupabaseIntelligenceSyncManager {
     }
 
     /**
-     * Syncs the user's aggregated Spotify listening history from local Room database into live Supabase
-     * whenever the 15-minute or immediate Spotify sync completes.
+     * Syncs the user's permanent Cross-App Library from local Room database (`cross_app_track_library`)
+     * into live Supabase Taste Genome & `/api/v1/intelligence/sync`.
      */
-    suspend fun syncSpotifyHistoryToSupabase(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun syncCrossAppLibraryToSupabase(context: Context) = withContext(Dispatchers.IO) {
         val appCtx = context.applicationContext
         try {
             val identity = resolveUserIdentity(appCtx)
-            val dao = TuneMindDatabase.getInstance(appCtx).spotifyListeningHistoryDao()
-            val aggregated = dao.getAggregatedTracksSnapshot(limit = 60)
+            val dao = TuneMindDatabase.getInstance(appCtx).crossAppLibraryDao()
+            val aggregated = dao.getAllLibraryTracksOnce().sortedByDescending { it.lastPlayedAtMs }.take(80)
             if (aggregated.isEmpty()) return@withContext
 
             val tracksArr = JSONArray()
             for (item in aggregated) {
                 val canonical = TrackIdentityResolver.resolveCanonicalIdentity(
                     trackId = item.trackId,
-                    spotifyUri = item.spotifyUri,
-                    title = item.trackTitle,
-                    artist = item.artistName
+                    spotifyUri = null,
+                    title = item.title,
+                    artist = item.artist
                 )
                 tracksArr.put(JSONObject().apply {
-                    put("title", item.trackTitle)
-                    put("artist", item.artistName)
+                    put("title", item.title)
+                    put("artist", item.artist)
                     put("trackId", canonical.trackId)
-                    put("spotifyUri", canonical.spotifyUri ?: "")
                     put("playCount", item.playCount.coerceAtLeast(0))
-                    put("source", "com.spotify.music")
+                    put("source", item.primarySourcePackage.ifBlank { "unknown_player" })
+                    put("sourcePackages", item.sourcePackagesCsv)
+                    put("album", item.album)
+                    put("genre", item.genre)
+                    put("totalListenedMs", item.totalListenedMs)
+                    put("isLiked", item.isLiked)
                 })
             }
 
-            // 1. Direct write to live Supabase if configured on-device
             if (identity.supabaseUrl.startsWith("https://") && identity.supabaseAnonKey.isNotBlank()) {
                 val topSummary = aggregated.take(10).joinToString(" | ") { t ->
-                    "${t.trackTitle} by ${t.artistName} (${t.playCount}x) [${t.spotifyUri}]"
+                    "${t.title} by ${t.artist} (${t.playCount}x) [${t.primarySourcePackage}]"
                 }
                 postDirectToSupabaseInterventions(
                     supabaseUrl = identity.supabaseUrl,
                     anonKey = identity.supabaseAnonKey,
+                    accessToken = identity.accessToken,
                     userId = identity.userId,
-                    triggerTranscript = "SPOTIFY_HISTORY_TELEMETRY_SYNC",
+                    triggerTranscript = "CROSS_APP_LIBRARY_TELEMETRY_SYNC",
                     satietyPercent = 22,
-                    agentTtsResponse = "Synced ${aggregated.size} Spotify tracks from Android device.",
+                    agentTtsResponse = "Synced ${aggregated.size} cross-app library tracks from Android device.",
                     osIntent = "TELEMETRY_SYNC",
                     targetSearchQuery = topSummary.take(900)
                 )
             }
 
-            // 2. Push full track batch to Cloud Brain `/api/v1/intelligence/sync`
             val baseUrl = BackendEndpointManager.getActiveHttpBaseUrl(appCtx).trimEnd('/')
             val payload = JSONObject().apply {
                 put("user_id", identity.userId)
@@ -214,19 +225,25 @@ object SupabaseIntelligenceSyncManager {
 
             val req = Request.Builder()
                 .url("$baseUrl/api/v1/intelligence/sync")
+                .apply {
+                    if (identity.accessToken.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${identity.accessToken}")
+                    }
+                }
                 .post(payload.toString().toRequestBody(jsonMediaType))
                 .build()
 
             httpClient.newCall(req).execute().close()
-            Log.i(TAG, "✅ Synced ${aggregated.size} Spotify tracks to live Supabase Taste Genome for user=${identity.userId}")
+            Log.i(TAG, "✅ Synced ${aggregated.size} cross-app library tracks to live Supabase for user=${identity.userId}")
         } catch (e: Exception) {
-            Log.d(TAG, "Spotify -> Supabase sync note: ${e.message}")
+            Log.d(TAG, "Cross-app -> Supabase sync note: ${e.message}")
         }
     }
 
     private fun postDirectToSupabaseInterventions(
         supabaseUrl: String,
         anonKey: String,
+        accessToken: String,
         userId: String,
         triggerTranscript: String,
         satietyPercent: Int,
@@ -235,6 +252,7 @@ object SupabaseIntelligenceSyncManager {
         targetSearchQuery: String
     ) {
         try {
+            val bearer = accessToken.ifBlank { anonKey }
             val row = JSONObject().apply {
                 put("user_id", userId)
                 put("trigger_transcript", triggerTranscript.take(500))
@@ -246,7 +264,7 @@ object SupabaseIntelligenceSyncManager {
             val req = Request.Builder()
                 .url("${supabaseUrl.trimEnd('/')}/rest/v1/agent_interventions")
                 .addHeader("apikey", anonKey)
-                .addHeader("Authorization", "Bearer $anonKey")
+                .addHeader("Authorization", "Bearer $bearer")
                 .addHeader("Content-Type", "application/json")
                 .addHeader("Prefer", "return=minimal")
                 .post(row.toString().toRequestBody(jsonMediaType))

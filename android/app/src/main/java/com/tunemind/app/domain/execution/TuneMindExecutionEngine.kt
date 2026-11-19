@@ -311,16 +311,11 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             com.tunemind.app.provider.TuneMindInAppPlayer.pause()
         } catch (_: Throwable) {}
         try {
-            com.tunemind.app.provider.SpotifyAppRemoteManager.pause()
-        } catch (_: Throwable) {}
-        try {
-            // 1. Direct MediaController transportControls.pause() via TuneMindListenerService
             com.tunemind.app.service.TuneMindListenerService.instance?.pause()
         } catch (e: Exception) {
             Log.w(TAG, "MediaController pause notice: ${e.message}")
         }
         try {
-            // 2. OS AudioManager dispatchMediaKeyEvent (DOWN + UP) for universal Android 11-14 support
             val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
             val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PAUSE)
             audioManager.dispatchMediaKeyEvent(downEvent)
@@ -341,66 +336,51 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             Log.d(TAG, "Resumed native TuneMind In-App Player")
             return
         }
-        val remoteResumed = runCatching {
-            com.tunemind.app.provider.SpotifyAppRemoteManager.resume()
-        }.getOrDefault(false)
-        if (!remoteResumed) {
-            try {
-                com.tunemind.app.service.TuneMindListenerService.instance?.play()
-            } catch (e: Exception) {
-                Log.w(TAG, "MediaController play notice: ${e.message}")
-            }
-            try {
-                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
-                audioManager.dispatchMediaKeyEvent(downEvent)
-                audioManager.dispatchMediaKeyEvent(upEvent)
-            } catch (e: Exception) {
-                Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
-            }
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController play notice: ${e.message}")
         }
-        Log.d(TAG, "Executed Multi-Layer OS Media Resume (appRemote=$remoteResumed)")
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
+        }
+        Log.d(TAG, "Executed Multi-Layer OS Media Resume")
     }
 
     fun skipToNextMedia() {
-        val remoteSkipped = runCatching {
-            com.tunemind.app.provider.SpotifyAppRemoteManager.skipNext()
-        }.getOrDefault(false)
-        if (!remoteSkipped) {
-            try {
-                com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
-            } catch (e: Exception) {
-                Log.w(TAG, "MediaController skipNext notice: ${e.message}")
-            }
-            try {
-                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
-                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
-                audioManager.dispatchMediaKeyEvent(downEvent)
-                audioManager.dispatchMediaKeyEvent(upEvent)
-            } catch (e: Exception) {
-                Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
-            }
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController skipNext notice: ${e.message}")
+        }
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_NEXT)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
         }
     }
 
     fun skipToPreviousMedia() {
-        val remotePrev = runCatching {
-            com.tunemind.app.provider.SpotifyAppRemoteManager.skipPrev()
-        }.getOrDefault(false)
-        if (!remotePrev) {
-            try {
-                com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
-            } catch (e: Exception) {
-                Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
-            }
-            try {
-                val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-                val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-                audioManager.dispatchMediaKeyEvent(downEvent)
-                audioManager.dispatchMediaKeyEvent(upEvent)
-            } catch (e: Exception) {
-                Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
-            }
+        try {
+            com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
+        }
+        try {
+            val downEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            val upEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            audioManager.dispatchMediaKeyEvent(downEvent)
+            audioManager.dispatchMediaKeyEvent(upEvent)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
         }
     }
 
@@ -466,7 +446,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 }
                 val finalPackageName = resolvedProvider?.packageName ?: when (finalProviderId) {
                     "tunemind_inapp" -> "com.tunemind.app"
-                    "boomplay" -> "com.afmobi.boomplayer"
+                    "boomplay" -> "com.afmobi.boomplaymusic"
                     "youtube_music" -> "com.google.android.apps.youtube.music"
                     "audiomack" -> "com.audiomack"
                     else -> targetTrim
@@ -480,36 +460,27 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     else -> "Target Player"
                 }
 
-                // Preserve collection URIs (spotify:playlist/album/artist/episode) as-is; normalize track URIs
-                val trimmedUri = spotifyUri?.trim().orEmpty()
-                val isCollectionUri = trimmedUri.startsWith("spotify:playlist:", ignoreCase = true) ||
-                    trimmedUri.startsWith("spotify:album:", ignoreCase = true) ||
-                    trimmedUri.startsWith("spotify:artist:", ignoreCase = true) ||
-                    trimmedUri.startsWith("spotify:episode:", ignoreCase = true) ||
-                    trimmedUri.startsWith("https://open.spotify.com/playlist/", ignoreCase = true) ||
-                    trimmedUri.startsWith("https://open.spotify.com/album/", ignoreCase = true)
-
-                var canonicalSpotifyUri: String? = if (isCollectionUri) {
-                    trimmedUri
-                } else {
-                    com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(trimmedUri)
-                }
-                if (canonicalSpotifyUri.isNullOrBlank() && finalPackageName.contains("spotify", ignoreCase = true)) {
-                    canonicalSpotifyUri = com.tunemind.app.provider.SpotifyTrackUriResolver.resolveTrackUriBlocking(
-                        context = context,
-                        cleanTitle = resolvedTitle,
-                        cleanArtist = resolvedArtist,
-                        fullQuery = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() }
-                    )
-                }
+                // Resolve clean cross-app playable metadata (no Spotify Developer API needed)
+                val openResolved = com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
+                    context = context,
+                    cleanTitle = resolvedTitle,
+                    cleanArtist = resolvedArtist,
+                    fullQuery = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() }
+                )
 
                 val canonicalIdentity = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
-                    trackId = trackId,
-                    spotifyUri = if (isCollectionUri) null else canonicalSpotifyUri,
+                    trackId = trackId ?: openResolved?.trackId,
+                    spotifyUri = null,
                     title = resolvedTitle,
                     artist = resolvedArtist
                 )
-                val finalDeepLinkUri = if (isCollectionUri) canonicalSpotifyUri else canonicalIdentity.spotifyUri
+                val explicitDeepLink = when {
+                    !openResolved?.ytmVideoId.isNullOrBlank() && finalPackageName.contains("youtube", ignoreCase = true) ->
+                        "https://music.youtube.com/watch?v=${openResolved!!.ytmVideoId}"
+                    !openResolved?.deezerUrl.isNullOrBlank() -> openResolved!!.deezerUrl
+                    !spotifyUri.isNullOrBlank() && spotifyUri.startsWith("http", ignoreCase = true) -> spotifyUri.trim()
+                    else -> null
+                }
 
                 val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
                     id = canonicalIdentity.trackId,
@@ -518,7 +489,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     reason = "Autonomous neuro-acoustic flow match",
                     confidence = 0.98f,
                     trackId = canonicalIdentity.trackId,
-                    spotifyUri = finalDeepLinkUri
+                    providerTrackId = openResolved?.ytmVideoId
                 )
 
                 val useInAppNow = finalProviderId == "tunemind_inapp" ||
@@ -534,7 +505,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                         packageName = finalPackageName,
                         track = targetTrack,
                         query = cleanQuery.ifBlank { "$resolvedTitle $resolvedArtist".trim() },
-                        deepLinkUri = finalDeepLinkUri,
+                        deepLinkUri = explicitDeepLink,
                         neverOpenExternalApp = neverOpenExternalApp
                     )
                 }

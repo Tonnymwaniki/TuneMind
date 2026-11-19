@@ -48,7 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private enum class SearchOrigin {
-    HISTORY, SPOTIFY, VAULT, LOCAL, DISCOVERY
+    HISTORY, LIBRARY, VAULT, LOCAL, CATALOG, DISCOVERY
 }
 
 private data class UniversalSearchItem(
@@ -80,20 +80,20 @@ fun SearchScreen(
     val historyState by vm.historyState.collectAsState()
     val homeState by vm.homeState.collectAsState()
     val vaultTracks by vm.vaultState.collectAsState()
-    val likedTracks by vm.spotifyLikedTracks.collectAsState()
-    val playlists by vm.spotifyPlaylists.collectAsState()
-    val podcasts by vm.spotifyPodcasts.collectAsState()
+    val libraryTracks by vm.crossAppLibraryTracks.collectAsState()
+    val playlists by vm.tuneMindPlaylists.collectAsState()
     val aiCrate by vm.aiDiscoveryCrate.collectAsState()
 
     var query by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableStateOf(0) } // 0=All, 1=History, 2=Spotify, 3=Vault, 4=Local
+    var selectedTab by remember { mutableStateOf(0) } // 0=All, 1=History, 2=Library, 3=Vault, 4=Local
     var hasAudioPerm by remember { mutableStateOf(PermissionUtils.hasAudioStoragePermission(context)) }
     var localAudioTracks by remember { mutableStateOf<List<LocalAudioMatch>>(emptyList()) }
+    var onlineCatalogHits by remember { mutableStateOf<List<com.tunemind.app.provider.OpenCatalogSearchTrack>>(emptyList()) }
     var feedbackBanner by remember { mutableStateOf<String?>(null) }
     var inspectedSearchItem by remember { mutableStateOf<UniversalSearchItem?>(null) }
 
     val neonCyan = theme.primaryAccent
-    val spotifyGreen = Color(0xFF1DB954)
+    val libraryTeal = Color(0xFF38BDF8)
     val vaultAmber = Color(0xFFF59E0B)
     val electricPurple = theme.secondaryAccent
 
@@ -113,15 +113,33 @@ fun SearchScreen(
         }
     }
 
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length >= 2) {
+            kotlinx.coroutines.delay(320L)
+            val kidsOnly = com.tunemind.app.domain.voice.AgentSettingsStore.kidsModeEnabled.value
+            onlineCatalogHits = withContext(Dispatchers.IO) {
+                com.tunemind.app.provider.UniversalTrackResolver.searchCatalogBlocking(
+                    context = context,
+                    query = q,
+                    limit = 14,
+                    excludeExplicit = kidsOnly
+                )
+            }
+        } else {
+            onlineCatalogHits = emptyList()
+        }
+    }
+
     val allSearchItems = remember(
         historyState.tracks,
         homeState.recentTracks,
-        likedTracks,
+        libraryTracks,
         playlists,
-        podcasts,
         vaultTracks,
         aiCrate,
-        localAudioTracks
+        localAudioTracks,
+        onlineCatalogHits
     ) {
         val list = mutableListOf<UniversalSearchItem>()
 
@@ -130,9 +148,8 @@ fun SearchScreen(
             val t = entry.title?.trim().orEmpty()
             if (t.isNotBlank()) {
                 val a = entry.artist?.trim()?.ifBlank { "Unknown Artist" } ?: "Unknown Artist"
-                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(entry.providerTrackId)
                 val canonicalId = entry.canonicalTrackId()
-                val truePlays = vm.resolvePlayCount(t, a, cleanUri, canonicalId)
+                val truePlays = vm.resolvePlayCount(t, a, null, canonicalId)
                     .takeIf { it > 0 } ?: entry.distinctAppearanceCount.coerceAtLeast(0)
                 list.add(
                     UniversalSearchItem(
@@ -140,7 +157,7 @@ fun SearchScreen(
                         title = t,
                         artist = a,
                         subtitle = entry.album?.takeIf { it.isNotBlank() } ?: "History",
-                        spotifyUri = cleanUri,
+                        spotifyUri = null,
                         sourcePkg = entry.sourcePackage ?: selectedTargetPlayer,
                         origin = SearchOrigin.HISTORY,
                         playCount = truePlays,
@@ -150,72 +167,56 @@ fun SearchScreen(
             }
         }
 
-        likedTracks.forEach { lt ->
-            val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(lt.spotifyUri)
-            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                trackId = lt.trackId,
-                spotifyUri = cleanUri,
-                title = lt.trackTitle,
-                artist = lt.artistName
-            )
+        libraryTracks.forEach { lib ->
+            val appName = com.tunemind.app.data.local.CrossAppPlayRecorder.resolveFriendlyPlayerName(lib.primarySourcePackage)
             list.add(
                 UniversalSearchItem(
-                    id = "sp_like_${lt.trackId}",
-                    title = lt.trackTitle,
-                    artist = lt.artistName,
-                    subtitle = "Spotify Liked",
-                    spotifyUri = cleanUri,
-                    sourcePkg = "com.spotify.music",
-                    origin = SearchOrigin.SPOTIFY,
-                    playCount = vm.resolvePlayCount(lt.trackTitle, lt.artistName, cleanUri, canonicalId),
-                    trackId = canonicalId
+                    id = "lib_${lib.canonicalTrackKey}",
+                    title = lib.title,
+                    artist = lib.artist,
+                    subtitle = if (lib.isLiked) "Liked · $appName" else "$appName Library",
+                    spotifyUri = null,
+                    sourcePkg = lib.primarySourcePackage.ifBlank { selectedTargetPlayer },
+                    origin = SearchOrigin.LIBRARY,
+                    playCount = vm.resolvePlayCount(lib.title, lib.artist, null, lib.trackId).takeIf { it > 0 } ?: lib.playCount,
+                    trackId = lib.trackId
                 )
             )
         }
 
         playlists.forEach { pl ->
-            pl.decodeTracks().forEachIndexed { i, pt ->
-                val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(pt.spotifyUri)
-                val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                    trackId = pt.trackId,
-                    spotifyUri = cleanUri,
-                    title = pt.title,
-                    artist = pt.artist
-                )
+            pl.tracks.forEachIndexed { i, pt ->
+                val canonicalId = pt.trackId.ifBlank {
+                    com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(pt.title, pt.artist)
+                }
                 list.add(
                     UniversalSearchItem(
-                        id = "sp_pl_${pl.playlistId}_${pt.trackId}_$i",
+                        id = "pl_${pl.playlist.playlistId}_${pt.entryId}_$i",
                         title = pt.title,
                         artist = pt.artist,
-                        subtitle = "Playlist · ${pl.name}",
-                        spotifyUri = cleanUri,
-                        sourcePkg = "com.spotify.music",
-                        origin = SearchOrigin.SPOTIFY,
-                        playCount = vm.resolvePlayCount(pt.title, pt.artist, cleanUri, canonicalId),
+                        subtitle = "Playlist · ${pl.playlist.name}",
+                        spotifyUri = null,
+                        sourcePkg = pt.sourcePlayer.ifBlank { selectedTargetPlayer },
+                        origin = SearchOrigin.LIBRARY,
+                        playCount = vm.resolvePlayCount(pt.title, pt.artist, null, canonicalId),
                         trackId = canonicalId
                     )
                 )
             }
         }
 
-        podcasts.filter { !it.isShowSummary }.forEach { pod ->
-            val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
-                trackId = pod.itemId,
-                spotifyUri = pod.uri,
-                title = pod.episodeTitle,
-                artist = pod.showName
-            )
+        onlineCatalogHits.forEachIndexed { idx, hit ->
             list.add(
                 UniversalSearchItem(
-                    id = "sp_pod_${pod.itemId}",
-                    title = pod.episodeTitle,
-                    artist = pod.showName,
-                    subtitle = "Podcast",
-                    spotifyUri = pod.uri,
-                    sourcePkg = "com.spotify.music",
-                    origin = SearchOrigin.SPOTIFY,
-                    playCount = vm.resolvePlayCount(pod.episodeTitle, pod.showName, pod.uri, canonicalId),
-                    trackId = canonicalId
+                    id = "cat_${hit.trackId}_$idx",
+                    title = hit.title,
+                    artist = hit.artist,
+                    subtitle = "Open Catalog · ${hit.genre}",
+                    spotifyUri = hit.ytmVideoId,
+                    sourcePkg = selectedTargetPlayer,
+                    origin = SearchOrigin.CATALOG,
+                    playCount = vm.resolvePlayCount(hit.title, hit.artist, null, hit.trackId),
+                    trackId = hit.trackId
                 )
             )
         }
@@ -292,7 +293,7 @@ fun SearchScreen(
         allSearchItems.filter { item ->
             val tabOk = when (selectedTab) {
                 1 -> item.origin == SearchOrigin.HISTORY
-                2 -> item.origin == SearchOrigin.SPOTIFY
+                2 -> item.origin == SearchOrigin.LIBRARY
                 3 -> item.origin == SearchOrigin.VAULT
                 4 -> item.origin == SearchOrigin.LOCAL
                 else -> true
@@ -407,7 +408,7 @@ fun SearchScreen(
                 tabs = listOf(
                     MagicalTabItem("All", neonCyan),
                     MagicalTabItem("History", electricPurple),
-                    MagicalTabItem("Spotify", spotifyGreen),
+                    MagicalTabItem("Library", libraryTeal),
                     MagicalTabItem("Vault", vaultAmber),
                     MagicalTabItem("Local", theme.primaryAccent)
                 ),
@@ -526,7 +527,8 @@ fun SearchScreen(
                 ) {
                     itemsIndexed(filteredItems, key = { idx, item -> "search_${item.id}_$idx" }) { _, item ->
                         val accent = when (item.origin) {
-                            SearchOrigin.SPOTIFY -> spotifyGreen
+                            SearchOrigin.LIBRARY -> libraryTeal
+                            SearchOrigin.CATALOG -> Color(0xFF10B981)
                             SearchOrigin.VAULT -> vaultAmber
                             SearchOrigin.LOCAL -> neonCyan
                             SearchOrigin.DISCOVERY -> electricPurple

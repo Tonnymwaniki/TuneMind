@@ -170,7 +170,7 @@ object ClaudeReasoningEngine {
 
     fun isConfigured(@Suppress("UNUSED_PARAMETER") context: Context): Boolean {
         return BuildConfig.TUNEMIND_BASE_URL.trim().isNotBlank() ||
-            BackendEndpointManager.RENDER_PRODUCTION_URL.isNotBlank()
+            BackendEndpointManager.PRIMARY_PRODUCTION_URL.isNotBlank()
     }
 
     private fun resolveActiveBackendUrl(context: Context): String {
@@ -245,7 +245,7 @@ object ClaudeReasoningEngine {
     suspend fun callBackendAnalyze(payload: JSONObject): Result<JSONObject> = withContext(Dispatchers.IO) {
         try {
             val baseUrl = BuildConfig.TUNEMIND_BASE_URL.trim().trimEnd('/')
-                .ifBlank { BackendEndpointManager.RENDER_PRODUCTION_URL }
+                .ifBlank { BackendEndpointManager.PRIMARY_PRODUCTION_URL }
             val url = URL("$baseUrl/api/v1/reasoning/analyze")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
@@ -321,7 +321,7 @@ object ClaudeReasoningEngine {
                 } else null
                 val osCommand = OsExecutionCommand(
                     intent = cmdJson?.optString("intent", "NONE") ?: "NONE",
-                    target_player = cmdJson?.optString("target_player", "com.spotify.music") ?: "com.spotify.music",
+                    target_player = cmdJson?.optString("target_player", "unknown_player") ?: "unknown_player",
                     search_query = cmdJson?.optString("search_query", "") ?: "",
                     suggested_bpm_target = if (cmdJson?.has("suggested_bpm_target") == true) cmdJson.optInt("suggested_bpm_target") else null,
                     track_title = rawCmdTitle,
@@ -372,7 +372,7 @@ object ClaudeReasoningEngine {
         val payload = JSONObject().apply {
             put("timeSlot", timeSlot)
             put("eventCount", recentTracks.sumOf { it.distinctAppearanceCount })
-            put("topSourceApp", nowPlaying?.sourcePackage ?: "Spotify")
+            put("topSourceApp", nowPlaying?.sourcePackage ?: "Music App")
             if (nowPlaying != null && !nowPlaying.title.isNullOrBlank()) {
                 put("nowPlaying", JSONObject().apply {
                     put("title", nowPlaying.title)
@@ -478,7 +478,7 @@ object ClaudeReasoningEngine {
         val payload = JSONObject().apply {
             put("timeSlot", "Track Profile")
             put("eventCount", safePlayCount)
-            put("topSourceApp", "Spotify")
+            put("topSourceApp", "Music App")
             put("nowPlaying", JSONObject().apply {
                 put("trackId", canonicalId)
                 put("title", title)
@@ -699,7 +699,7 @@ object ClaudeReasoningEngine {
                     put("playCount", safeCount)
                     put("plays", safeCount)
                     put("satiety", minOf(95, safeCount * 22))
-                    put("sourceApp", t.sourcePackage ?: "Spotify")
+                    put("sourceApp", t.sourcePackage ?: "Music App")
                     put("timeSlot", evSlot)
                     if (matchedEv != null) {
                         put("listenedMs", matchedEv.listenedMs)

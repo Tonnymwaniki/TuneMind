@@ -29,7 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.tunemind.app.data.ingestion.SpotifyTasteShiftSummary
+import com.tunemind.app.data.local.CrossAppTasteShiftSummary
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.OverallListeningStats
 import com.tunemind.app.domain.memory.StatsTimeWindow
@@ -69,7 +69,6 @@ fun StatsScreen(
     val tasteShifts by vm.tasteShiftSummary.collectAsState()
     val vaultTracks by vm.vaultState.collectAsState()
     val nowPlaying = vm.homeState.collectAsState().value.nowPlaying
-    val liveSpotify by vm.spotifyLiveState.collectAsState()
 
     var selectedWindow by rememberSaveable { mutableStateOf(StatsTimeWindow.SEVEN_DAYS) }
     var liveTickMs by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -153,9 +152,7 @@ fun StatsScreen(
                 onSelectWindow = { selectedWindow = it },
                 tasteShiftSummary = tasteShifts,
                 isTrackCurrentlyPlaying = { t, a, uri ->
-                    // Reactive read on nowPlaying & liveSpotify ensures immediate live highlight
                     val _np = nowPlaying
-                    val _ls = liveSpotify
                     vm.isTrackCurrentlyPlaying(t, a, uri)
                 },
                 onPlayTrack = onPlayTrack,
@@ -212,7 +209,7 @@ fun StatsDashboardContent(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    tasteShiftSummary: CrossAppTasteShiftSummary = CrossAppTasteShiftSummary(),
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onToggleTrackVault: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
     onToggleTrackFresh: ((title: String, artist: String, sourcePkg: String?, uri: String?, trackId: String?) -> Unit)? = null,
@@ -298,7 +295,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
     onOpenWeeklyReport: () -> Unit,
     onOpenHearingHealth: () -> Unit,
     onOpenMusicProfile: () -> Unit,
-    tasteShiftSummary: SpotifyTasteShiftSummary = SpotifyTasteShiftSummary(),
+    tasteShiftSummary: CrossAppTasteShiftSummary = CrossAppTasteShiftSummary(),
     resolveTrackVaultStatus: (title: String?, artist: String?, uri: String?, trackId: String?) -> TrackVaultUiStatus = { _, _, _, _ -> TrackVaultUiStatus() },
     onInspectTrack: ((UnifiedTrackStats) -> Unit)? = null
 ) {
@@ -800,7 +797,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
 
     // 6b. Open-Canvas Genre Breakdown
     if (tasteShiftSummary.topGenres.isNotEmpty()) {
-        item(key = "stats_spotify_genres") {
+        item(key = "stats_crossapp_genres") {
             val theme = LocalAdaptiveTheme.current
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 StudioSectionHeader(

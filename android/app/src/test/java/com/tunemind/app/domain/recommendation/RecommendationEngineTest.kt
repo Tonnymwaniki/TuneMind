@@ -27,7 +27,7 @@ class RecommendationEngineTest {
             firstObservedAppearanceAtMs = 1000L,
             lastObservedAppearanceAtMs = 2000L,
             supportingObservationIds = emptyList(),
-            identityBasis = TrackIdentityBasis.TITLE_AND_ARTIST,
+            identityBasis = TrackIdentityBasis.METADATA_FINGERPRINT,
             evidenceQuality = MemoryEvidenceQuality.SUPPORTED_IDENTITY,
             historyMayBeIncomplete = false,
             appearances = emptyList()
@@ -46,7 +46,7 @@ class RecommendationEngineTest {
         assertTrue("All recommendations should have titles", recommendations.all { it.title.isNotBlank() })
         assertTrue("All recommendations should have artists", recommendations.all { it.artist.isNotBlank() })
         assertTrue("All recommendations should have non-empty reason explanations", recommendations.all { it.reason.isNotBlank() })
-        assertTrue("Target provider should match preferredProviderId", recommendations.all { it.targetProviderId == "spotify" })
+        assertTrue("Target provider should match preferredProviderId", recommendations.all { it.suggestedProviderId == "spotify" })
     }
 
     @Test
@@ -74,7 +74,7 @@ class RecommendationEngineTest {
         // Ensure "Midnight City" is suppressed because it's actively resting in vault
         val midnightCityRec = recommendations.firstOrNull { it.title.equals("Midnight City", ignoreCase = true) }
         assertNull("Quarantined track should not be recommended", midnightCityRec)
-        assertTrue("Target provider should be youtube_music", recommendations.all { it.targetProviderId == "youtube_music" })
+        assertTrue("Target provider should be youtube_music", recommendations.all { it.suggestedProviderId == "youtube_music" })
     }
 
     @Test

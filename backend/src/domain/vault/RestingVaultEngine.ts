@@ -282,7 +282,7 @@ export class RestingVaultEngine {
       const satietyScore = Math.round(clamp(Number(raw.satietyScore ?? raw.satiety_score ?? 82), 40, 99));
       const entryReason = String(raw.entryReason || raw.entry_reason || (raw.isAutoQuarantined ? 'Overplay fatigue' : 'Manual Vault Lock'));
       const isAutoQuarantined = Boolean(raw.isAutoQuarantined ?? raw.is_auto_quarantined ?? false);
-      const sourcePackage = String(raw.sourcePackage || raw.source_package || 'com.spotify.music');
+      const sourcePackage = String(raw.sourcePackage || raw.source_package || 'unknown_player');
       const id = String(raw.id || `vault-${identity.trackId}`);
 
       const rec = this.computeRecoveryState(quarantinedAtMs, totalDays, satietyScore, nowMs);

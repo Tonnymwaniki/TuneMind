@@ -153,12 +153,11 @@ object MusicPlayerUiHelper {
 
         val priorityOrder = mapOf(
             "tunemind_inapp" to 0,
-            "spotify" to 1,
-            "boomplay" to 2,
-            "youtube_music" to 3,
-            "audiomack" to 4,
-            "apple_music" to 5,
-            "local_files" to 6
+            "boomplay" to 1,
+            "youtube_music" to 2,
+            "audiomack" to 3,
+            "spotify" to 4,
+            "local_files" to 5
         )
 
         return filtered
@@ -178,7 +177,6 @@ object MusicPlayerUiHelper {
             "boomplay" -> "Boomplay"
             "spotify" -> "Spotify"
             "youtube_music" -> "YT Music"
-            "apple_music" -> "Apple Music"
             "audiomack" -> "Audiomack"
             else -> provider.displayName
                 .replace(" Music Player", "", ignoreCase = true)
@@ -192,7 +190,6 @@ object MusicPlayerUiHelper {
             provider.providerId == "spotify" -> Color(0xFF1DB954)
             provider.providerId == "boomplay" -> Color(0xFFFF6B00)
             provider.providerId == "youtube_music" -> Color(0xFFFF3D57)
-            provider.providerId == "apple_music" -> Color(0xFFFA243C)
             provider.providerId == "audiomack" -> Color(0xFFFFA200)
             provider.providerId == "tunemind_inapp" -> fallbackPrimary
             provider.providerId == "local_files" -> fallbackSecondary

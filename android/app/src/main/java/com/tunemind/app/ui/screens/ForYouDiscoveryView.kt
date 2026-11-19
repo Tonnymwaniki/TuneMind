@@ -522,7 +522,7 @@ private fun ForYouAiHeroCard(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.PlaylistAdd,
-                            contentDescription = "Save Drop as Spotify Playlist",
+                            contentDescription = "Save Drop as TuneMind Playlist",
                             tint = Color(0xFF1DB954),
                             modifier = Modifier.size(16.dp)
                         )

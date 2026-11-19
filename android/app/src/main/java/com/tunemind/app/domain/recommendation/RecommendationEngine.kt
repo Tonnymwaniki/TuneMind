@@ -21,7 +21,7 @@ object RecommendationEngine {
         tracks: List<TrackMemoryEntry> = emptyList(),
         memory: ListeningMemory? = null,
         vaultTracks: List<VaultTrack> = emptyList(),
-        preferredProviderId: String = "spotify"
+        preferredProviderId: String = "tunemind_inapp"
     ): List<RecommendedTrack> {
         val recommendations = mutableListOf<RecommendedTrack>()
         val quarantinedTitles = vaultTracks.map { it.title.lowercase().trim() }.toSet()

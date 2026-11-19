@@ -6,6 +6,7 @@ export interface RateLimiterOptions {
   keyPrefix?: string;
   message?: string;
   skipWhenEnvDisabled?: boolean;
+  keyGenerator?: (req: Request) => string;
 }
 
 interface RateBucket {
@@ -65,7 +66,10 @@ export function createRateLimiter(options: RateLimiterOptions) {
       pruneExpired(now);
     }
 
-    const key = `${keyPrefix}:${extractClientIp(req)}`;
+    const subjectKey = options.keyGenerator
+      ? options.keyGenerator(req)
+      : (req.authUser?.id ? `user:${req.authUser.id}` : `ip:${extractClientIp(req)}`);
+    const key = `${keyPrefix}:${subjectKey}`;
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       bucket = { count: 0, resetAt: now + windowMs };

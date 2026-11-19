@@ -23,8 +23,60 @@ interface CachedTokenEntry {
 }
 
 const TOKEN_CACHE_TTL_MS = 60_000;
-const MAX_CACHE_ENTRIES = 1000;
+const MAX_CACHE_ENTRIES = 10_000;
 const verifiedTokenCache = new Map<string, CachedTokenEntry>();
+
+function base64UrlDecodeToBuffer(segment: string): Buffer {
+  const padded = segment.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (segment.length % 4)) % 4);
+  return Buffer.from(padded, 'base64');
+}
+
+/**
+ * Verifies a Supabase HS256 JWT locally using SUPABASE_JWT_SECRET (0ms network cost during traffic spikes).
+ * Returns null cleanly if secret is not configured or token uses asymmetric signing (falls back to Supabase Auth API).
+ */
+function tryVerifySupabaseHs256Locally(token: string): AuthenticatedUser | 'INVALID' | null {
+  const jwtSecret = (process.env.SUPABASE_JWT_SECRET || '').trim();
+  if (!jwtSecret) return null;
+
+  const parts = token.split('.');
+  if (parts.length !== 3) return 'INVALID';
+
+  try {
+    const header = JSON.parse(base64UrlDecodeToBuffer(parts[0]).toString('utf8'));
+    if (!header || header.alg !== 'HS256') {
+      return null; // Let Supabase HTTP verifier handle ES256/RS256 tokens
+    }
+
+    const expectedSig = crypto
+      .createHmac('sha256', jwtSecret)
+      .update(`${parts[0]}.${parts[1]}`)
+      .digest();
+    const actualSig = base64UrlDecodeToBuffer(parts[2]);
+    if (expectedSig.length !== actualSig.length || !crypto.timingSafeEqual(expectedSig, actualSig)) {
+      return 'INVALID';
+    }
+
+    const payload = JSON.parse(base64UrlDecodeToBuffer(parts[1]).toString('utf8'));
+    const exp = Number(payload?.exp || 0);
+    if (exp > 0 && exp * 1000 <= Date.now()) {
+      return 'INVALID';
+    }
+
+    const uid = typeof payload?.sub === 'string' ? payload.sub.trim() : '';
+    if (!uid) return 'INVALID';
+
+    return {
+      id: uid,
+      email: typeof payload?.email === 'string' ? payload.email.trim().toLowerCase() : undefined,
+      provider: typeof payload?.app_metadata?.provider === 'string'
+        ? payload.app_metadata.provider
+        : undefined
+    };
+  } catch {
+    return null;
+  }
+}
 
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -47,16 +99,29 @@ export async function verifySupabaseJwt(token: string): Promise<{
   user: AuthenticatedUser | null;
   serverConfigured: boolean;
 }> {
-  const client = getSupabaseAdminClient() || getLiveSupabaseClient();
-  if (!client) {
-    return { user: null, serverConfigured: false };
-  }
-
   const key = hashToken(token);
   const now = Date.now();
   const cached = verifiedTokenCache.get(key);
   if (cached && cached.expiresAtMs > now) {
     return { user: cached.user, serverConfigured: true };
+  }
+
+  const localResult = tryVerifySupabaseHs256Locally(token);
+  if (localResult === 'INVALID') {
+    verifiedTokenCache.delete(key);
+    return { user: null, serverConfigured: true };
+  }
+  if (localResult) {
+    verifiedTokenCache.set(key, {
+      user: localResult,
+      expiresAtMs: now + TOKEN_CACHE_TTL_MS
+    });
+    return { user: localResult, serverConfigured: true };
+  }
+
+  const client = getSupabaseAdminClient() || getLiveSupabaseClient();
+  if (!client) {
+    return { user: null, serverConfigured: false };
   }
 
   try {

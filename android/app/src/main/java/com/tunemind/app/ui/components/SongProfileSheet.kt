@@ -242,7 +242,7 @@ data class SongProfileData(
             val title = np?.title?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.title ?: "Active Track"
             val artist = np?.artist?.takeIf { it.isNotBlank() } ?: latestRecentTrack?.artist ?: "Observed Player"
             val album = np?.album ?: latestRecentTrack?.album
-            val sourcePackage = np?.sourcePackage ?: latestRecentTrack?.sourcePackage ?: "com.spotify.music"
+            val sourcePackage = np?.sourcePackage ?: latestRecentTrack?.sourcePackage ?: "unknown_player"
             val plays = latestRecentTrack?.distinctAppearanceCount?.coerceAtLeast(0) ?: 0
             val satiety = if (plays <= 0) 0 else minOf(95, maxOf(18, plays * 22))
             val duration = if ((np?.durationMs ?: 0L) > 0L) np!!.durationMs else if (plays > 0) (latestRecentTrack?.appearances?.firstOrNull()?.let { (it.lastObservedAtMs - it.firstObservedAtMs).takeIf { d -> d > 0L } } ?: 180_000L) else 0L
@@ -291,7 +291,7 @@ data class SongProfileData(
                 title = title,
                 artist = artist,
                 album = rec.album ?: rec.category.name,
-                sourcePackage = "com.spotify.music",
+                sourcePackage = "unknown_player",
                 appearanceCount = plays,
                 satietyScore = satiety,
                 firstObservedMs = if (plays > 0) System.currentTimeMillis() else null,
@@ -323,7 +323,7 @@ data class SongProfileData(
                 title = title,
                 artist = artist,
                 album = "Resting Vault",
-                sourcePackage = vault.sourcePackage.ifBlank { "com.spotify.music" },
+                sourcePackage = vault.sourcePackage.ifBlank { "unknown_player" },
                 appearanceCount = count,
                 satietyScore = satiety,
                 firstObservedMs = vault.quarantinedAtMs,
@@ -362,13 +362,15 @@ fun SongProfile(
     val warnAmber = Color(0xFFFFB000)
     val alertRed = Color(0xFFFF4D6D)
 
-    val appName = (profile.sourcePackage ?: "com.spotify.music")
-        .substringAfterLast(".").replaceFirstChar { it.uppercase() }
+    val appName = com.tunemind.app.data.local.CrossAppPlayRecorder.resolveFriendlyPlayerName(
+        profile.sourcePackage.orEmpty()
+    )
 
     val appColor = when {
         profile.sourcePackage?.contains("spotify") == true -> Color(0xFF1DB954)
         profile.sourcePackage?.contains("youtube") == true -> Color(0xFFFF0033)
-        profile.sourcePackage?.contains("apple") == true -> Color(0xFFFA243C)
+        profile.sourcePackage?.contains("boomplay") == true -> Color(0xFF00E5FF)
+        profile.sourcePackage?.contains("audiomack") == true -> Color(0xFFFFA200)
         else -> theme.primaryAccent
     }
 

@@ -42,7 +42,6 @@ fun WeeklyReportScreen(
     val cleanPlayHistory by vm.cleanPlayHistory.collectAsState()
     val vaultTracks by vm.vaultState.collectAsState()
     val homeState by vm.homeState.collectAsState()
-    val liveSpotify by vm.spotifyLiveState.collectAsState()
     val theme = LocalAdaptiveTheme.current
     var inspectedWeeklyTrack by remember { mutableStateOf<UnifiedTrackStats?>(null) }
 
@@ -122,7 +121,7 @@ fun WeeklyReportScreen(
                         )
                         Text(
                             text = if (weekStats.appBreakdown.isEmpty()) {
-                                "Play music in any supported app or connect Spotify to populate your 7-day recap."
+                                "Play music in Boomplay, YouTube Music, Spotify, Audiomack, or phone audio to populate your 7-day recap."
                             } else {
                                 "Built from your verified 7-day plays across ${weekStats.appBreakdown.size} music ${if (weekStats.appBreakdown.size == 1) "app" else "apps"}, tracking repeat habits and fresh discoveries."
                             },
@@ -191,7 +190,6 @@ fun WeeklyReportScreen(
 
                     weekStats.topTracks.take(5).forEachIndexed { index, track ->
                         val _np = homeState.nowPlaying
-                        val _ls = liveSpotify
                         val isPlaying = vm.isTrackCurrentlyPlaying(track.title, track.artist, track.spotifyUri)
                         val weekSubtitle = listOfNotNull(
                             track.album?.takeIf { it.isNotBlank() },

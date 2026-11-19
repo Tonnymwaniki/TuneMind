@@ -61,7 +61,7 @@ fun SupportFeedbackScreen(
     val safeGreen = Color(0xFF10B981)
     val warnAmber = Color(0xFFF59E0B)
 
-    val categories = listOf("Bug Report", "Spotify Sync", "Voice & Agent", "Feature Idea", "Other")
+    val categories = listOf("Bug Report", "Player Detection", "Voice & Agent", "Feature Idea", "Other")
     var selectedCategory by remember { mutableStateOf(categories.first()) }
     var messageText by remember { mutableStateOf("") }
     var includeDiagnostics by remember { mutableStateOf(true) }
@@ -212,10 +212,10 @@ fun SupportFeedbackScreen(
                     StudioHairlineDivider()
 
                     TroubleshootingGuideItem(
-                        title = "Spotify Remote won't connect",
-                        steps = "1. Open the Spotify app and play any song for 2 seconds so Android wakes its playback service.\n2. Return to TuneMind and tap Connect Remote in Settings.\n3. Confirm Spotify isn't restricted in Android Battery settings.",
+                        title = "Hybrid playback or app handoff needs setup",
+                        steps = "1. Toggle 'Never Leave TuneMind' in Settings if you want 100% in-app playback or 30s previews.\n2. Keep Built-In Audio Player on so local files and Audius streams play directly inside TuneMind.\n3. Confirm Notification Access is enabled so Boomplay, YouTube Music, Spotify, and Audiomack sessions stay synchronized.",
                         expanded = expandedGuideIdx == 0,
-                        accent = Color(0xFF1DB954),
+                        accent = safeGreen,
                         actionLabel = "Open Settings",
                         onToggle = { expandedGuideIdx = if (expandedGuideIdx == 0) -1 else 0 },
                         onAction = onOpenSettings

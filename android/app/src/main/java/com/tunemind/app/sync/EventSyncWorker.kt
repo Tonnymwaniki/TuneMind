@@ -213,7 +213,7 @@ object SyncConfig {
         return com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context)
     }
 
-    private const val DEFAULT_BASE_URL = "https://tunemind-backend-iudp.onrender.com"
+    private const val DEFAULT_BASE_URL = "https://tunemind.co"
 }
 
 /**

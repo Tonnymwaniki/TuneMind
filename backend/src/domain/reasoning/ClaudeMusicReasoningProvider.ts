@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
+import {
+  discoverOpenMusicRecommendations,
+  resolveUniversalTrackProfile,
+  searchOpenMusicCatalog
+} from '../../api/v1/musicProfiles';
 import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
 import { SelfLearningDiscoveryEngine } from '../recommendation/SelfLearningDiscoveryEngine';
@@ -60,6 +65,10 @@ export interface AgentToolCall {
   track_title?: string;
   track_artist?: string;
   spotify_uri?: string;
+  ytm_video_id?: string;
+  preview_url?: string;
+  audius_stream_url?: string;
+  deezer_url?: string;
   target_player?: string;
   remember_default_player?: boolean;
   volume_percent?: number;
@@ -143,7 +152,6 @@ export interface TuneMindTelemetryContext {
     source?: string;
     never_open_external_app?: boolean;
   } | null;
-  spotify_access_token?: string;
   dialogue_history?: Array<{ role: 'user' | 'assistant'; text: string }>;
   user_id?: string;
   user_email?: string;
@@ -162,24 +170,22 @@ export interface TuneMindTelemetryContext {
     spotify_uri?: string;
     track_id?: string;
   }>;
-  spotify_playlists?: Array<{
-    playlist_id: string;
-    name: string;
-    owner?: string;
-    track_count: number;
-    spotify_uri?: string;
-    tracks?: Array<{
-      title: string;
-      artist: string;
-      spotify_uri?: string;
-      track_id?: string;
-    }>;
-  }>;
-  spotify_liked_tracks?: Array<{
+  cross_app_library?: Array<{
+    track_id?: string;
     title: string;
     artist: string;
-    spotify_uri?: string;
-    track_id?: string;
+    play_count?: number;
+    primary_source_package?: string;
+    primary_app_name?: string;
+    source_packages?: string[];
+    is_liked?: boolean;
+    genres?: string[];
+  }>;
+  detected_player_tabs?: Array<{
+    package_name: string;
+    app_name: string;
+    track_count: number;
+    total_plays: number;
   }>;
   tunemind_playlists?: Array<{
     playlist_id: string;
@@ -257,6 +263,10 @@ export interface TuneMindReasoningResponse {
     track_title?: string;
     track_artist?: string;
     spotify_uri?: string;
+    ytm_video_id?: string;
+    preview_url?: string;
+    audius_stream_url?: string;
+    deezer_url?: string;
     never_open_external_app?: boolean;
     suggested_bpm_target: number;
   };
@@ -271,7 +281,6 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   private lastKeyCheckAt: number = 0;
   private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
   private lastErrorDetails: { status?: number | string; message?: string } | null = null;
-  private spotifyAccessToken: { token: string; expiresAt: number } | null = null;
 
   private static cachedWorkingModel: string | null = null;
   private static discoveredAnthropicModels: string[] | null = null;
@@ -579,18 +588,22 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'query_user_listening_history',
         description:
-          'Queries the user\'s synced Spotify listening history and play counts. Call this whenever the user asks about their most played song, favorite song, recent listening habits, or overplayed songs.',
+          'Queries the user\'s permanent cross-app listening history and play counts across all music apps (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, TuneMind In-App). Call whenever the user asks about their most played song, favorite song, or songs played on a specific player.',
         input_schema: {
           type: 'object',
           properties: {
             sort_by: {
               type: 'string',
               enum: ['most_played', 'most_recent', 'least_played_fresh', 'overplayed_fatigued'],
-              description: 'How to rank the user\'s tracks: most_played (highest play count #1), most_recent, least_played_fresh, or overplayed_fatigued.'
+              description: 'How to rank the user\'s tracks.'
             },
             artist_or_keyword: {
               type: 'string',
               description: 'Optional artist name or keyword filter.'
+            },
+            player_filter: {
+              type: 'string',
+              description: 'Optional player app filter (e.g. "Boomplay", "YouTube Music", "Spotify", "Audiomack", "Phone Audio").'
             },
             limit: {
               type: 'number',
@@ -601,9 +614,9 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         }
       },
       {
-        name: 'discover_and_recommend_spotify_tracks',
+        name: 'discover_and_recommend_tracks',
         description:
-          'Discovers real, playable songs from the live Spotify catalog tailored to the user\'s top artists, mood, or genre while filtering out songs they have already overplayed. Call this whenever the user asks for a new song, a recommendation, a suggestion, or a specific mood/genre.',
+          'Discovers real, playable songs from open music catalogs (Deezer, iTunes, Audius, Last.fm, YouTube Music) tailored to the user\'s top artists, mood, or genre while filtering out songs they have already overplayed. Call whenever the user asks for a new song, recommendation, suggestion, or mood/genre.',
         input_schema: {
           type: 'object',
           properties: {
@@ -615,15 +628,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             seed_artists: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Optional list of artist names to base the discovery on. If omitted, uses the user\'s top Spotify artists automatically.'
+              description: 'Optional list of artist names to base the discovery on. If omitted, uses the user\'s top artists automatically.'
             },
             mood_or_genre_query: {
               type: 'string',
-              description: 'Optional mood, vibe, or genre search query (e.g., "chill afrobeats", "bongo flava", "upbeat gospel", "late night r&b", "acoustic").'
+              description: 'Optional mood, vibe, or genre search query (e.g., "chill afrobeats", "bongo flava", "kikuyu mugithi", "upbeat gospel", "late night r&b", "acoustic").'
             },
             exclude_overplayed: {
               type: 'boolean',
-              description: 'If true (default), excludes tracks the user has already played heavily or that were recently suggested.'
+              description: 'If true (default), excludes tracks the user has already played heavily or recently.'
             },
             kids_safe_only: {
               type: 'boolean',
@@ -634,15 +647,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         }
       },
       {
-        name: 'search_spotify_catalog',
+        name: 'search_music_catalog',
         description:
-          'Searches the live Spotify Web API catalog by track, artist, album, or Spotify playlist. Supports kids-safe explicit filtering for kids/family music queries.',
+          'Searches open music catalogs (Deezer, iTunes, Audius, YouTube Music) by track, artist, or mood/genre, returning playable metadata, 30s preview availability, full Audius stream availability, and YouTube Music videoIds. Supports kids-safe explicit filtering.',
         input_schema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'The song title, artist name, genre, kids theme, album, or search query.'
+              description: 'The song title, artist name, genre, kids theme, or search query.'
             },
             artist: {
               type: 'string',
@@ -650,8 +663,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             search_type: {
               type: 'string',
-              enum: ['track', 'artist', 'album', 'playlist'],
-              description: 'Entity type to search for on Spotify (defaults to "track"). Use "artist" for artist top songs, "album" for albums, or "playlist" for curated mixes.'
+              enum: ['track', 'artist', 'mood'],
+              description: 'Entity type to search for (defaults to "track"). Use "artist" for artist top songs.'
             },
             kids_safe_only: {
               type: 'boolean',
@@ -668,7 +681,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'inspect_tunemind_playlists',
         description:
-          'Inspects the user\'s TuneMind-owned local playlists (stored inside TuneMind, not Spotify), including playlist names, descriptions, and songs inside each playlist.',
+          'Inspects the user\'s TuneMind-owned local playlists (stored permanently inside TuneMind), including playlist names, descriptions, and songs inside each playlist.',
         input_schema: {
           type: 'object',
           properties: {
@@ -719,16 +732,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         }
       },
       {
-        name: 'query_spotify_library',
+        name: 'query_user_library',
         description:
-          'Inspects the user\'s synced Spotify Library (personal playlists, tracks inside playlists, and liked songs). Call whenever the user asks about their Spotify playlists, wants to play a playlist from their Spotify library, asks how many playlists or liked songs they have, or picks a song from their saved library.',
+          'Inspects the user\'s permanent Cross-App Music Library (organized dynamically by the players they actually used such as Boomplay, YouTube Music, Spotify, Audiomack, Phone Audio, liked songs) and TuneMind Playlists. Call whenever the user asks about their library, wants a song they played in a specific app, asks which players they listen on, or asks about liked tracks.',
         input_schema: {
           type: 'object',
           properties: {
             scope: {
               type: 'string',
-              enum: ['playlists', 'liked_tracks', 'all'],
-              description: 'Whether to inspect playlists, liked tracks, or both.'
+              enum: ['by_player', 'liked_tracks', 'playlists', 'all'],
+              description: 'Whether to inspect songs grouped by player tab, liked tracks, playlists, or all.'
+            },
+            player_filter: {
+              type: 'string',
+              description: 'Optional player app name filter (e.g. "Boomplay", "YouTube Music", "Spotify", "Audiomack", "Phone Audio").'
             },
             query: {
               type: 'string',
@@ -823,19 +840,19 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             track_artist: {
               type: 'string',
-              description: 'Exact artist name (or playlist owner / "Spotify Playlist" when launching a playlist).'
+              description: 'Exact artist name.'
             },
             track_id: {
               type: 'string',
-              description: 'Optional canonical trackId or Vault track ID.'
+              description: 'Canonical trackId returned by tools.'
             },
             spotify_uri: {
               type: 'string',
-              description: 'Exact canonical Spotify URI (spotify:track:... or spotify:playlist:...) returned by tools.'
+              description: 'Leave empty unless user specifically passes a legacy URI; playback runs natively across TuneMind In-App and installed Android music players.'
             },
             target_player: {
               type: 'string',
-              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.spotify.music", "com.afmobi.boomplayer", "com.google.android.apps.youtube.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
+              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.google.android.apps.youtube.music", "com.afmobi.boomplayer", "com.spotify.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
             },
             remember_default_player: {
               type: 'boolean',
@@ -927,7 +944,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             target_screen: {
               type: 'string',
-              description: 'Target screen or sub-tab when action is NAVIGATE_SCREEN: "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".'
+              description: 'Target screen or sub-tab when action is NAVIGATE_SCREEN: "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".'
             },
             extra_actions: {
               type: 'array',
@@ -981,25 +998,25 @@ HUMAN-LIKE REASONING & NATURAL BOUNDARIES (NEVER SCRIPTED OR ROBOTIC):
   - Kids & Family Safety Boundary: Whenever a child is speaking, the user asks for kids/children/baby/nursery/bedtime songs, or 'kids_mode_enabled' is true -> ALWAYS pass kids_safe_only=true to Spotify search/discovery, keep language warm/kid-friendly, refuse explicit songs gracefully, and protect young ears.
 
 ACCURATE TUNEMIND APP ARCHITECTURE KNOWLEDGE:
-- Main 3-pager: **Vault / Dopamine** (Fresh tracks, Resting Vault 5-day cooldown & recovery, Daily For You), **Agent** (center voice orb, Playlists button, Stats, Search, Palette switcher, Profile), and **Flow / Rhythm DNA** (Overview, Spotify Library, Clean Play History, plus Hearing Health & Weekly Recap).
-- **TuneMind Playlists Screen**: TuneMind stores its own custom playlists INSIDE TuneMind (NOT created in the user's Spotify account!), while every track inside them plays smoothly via Spotify or the user's chosen default music app.
-- Settings & Controls: **Hands-Free DJ**, **Auto Queue Takeover**, **Never Leave TuneMind**, **Kids & Family Safe Mode**, **Sleep Timer**, **Adaptive / Custom Theme Colors**, and **Preferred Music Player** (Spotify, Boomplay, YouTube Music, Audiomack, TuneMind In-App, Local Audio).
+- Main 3-pager: **Vault / Dopamine** (Fresh tracks, Resting Vault 5-day cooldown & recovery, Daily For You), **Agent** (center voice orb, Playlists button, Stats, Search, Palette switcher, Profile), and **Flow / Rhythm DNA** (Overview, **Cross-App Library** with dynamic tabs for every player you use like YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, plus Clean Play History, Hearing Health, and Weekly Recap).
+- **TuneMind Playlists Screen**: TuneMind stores its own custom playlists permanently INSIDE TuneMind, and plays tracks cleanly through TuneMind's Hybrid Audio Engine or your chosen Android music app.
+- Settings & Controls: **Hands-Free DJ**, **Auto Queue Takeover**, **Never Leave TuneMind (Hybrid In-App Playback)**, **Kids & Family Safe Mode**, **Sleep Timer**, **Adaptive / Custom Theme Colors**, and **Preferred Music Player** (YouTube Music, Boomplay, Spotify, Audiomack, TuneMind In-App, Local Audio, or any installed Android music player).
 - Voice activation works while TuneMind is open ("Hi TuneMind" or orb tap). When music is playing and the user calls "Hi TuneMind", TuneMind pauses the music, listens to them, executes/negotiates with them, and resumes playback when done unless they start a new track or pause. Do NOT claim background/closed-app wake works.
 
-TUNEMIND-OWNED PLAYLIST NEGOTIATION & CREATION (CRITICAL — STORED IN TUNEMIND, NOT SPOTIFY):
-- NEVER claim a playlist is being created inside the user's Spotify account — TuneMind playlists belong exclusively to TuneMind and appear immediately on the TuneMind Playlists screen!
+TUNEMIND-OWNED PLAYLIST NEGOTIATION & CREATION:
+- TuneMind playlists belong inside TuneMind and appear immediately on the TuneMind Playlists screen!
 - Scenario 1 ("Add that current song playing to our new playlist"):
-  - Inspect 'current_track' in telemetry (remember it may have just paused when they called "Hi TuneMind" — its title, artist, and spotifyUri are in 'current_track'!).
+  - Inspect 'current_track' in telemetry (remember it may have just paused when they called "Hi TuneMind" — its title, artist, and trackId are in 'current_track'!).
   - If they did NOT name the playlist yet: respond warmly naming the current song, suggest 1-2 fitting names OR ask what name they want, using action="ADVISE_ONLY", expect_follow_up=true! That keeps playback paused smoothly while waiting for their reply.
-  - Once they tell you the playlist name (or confirm a name across negotiation turns): call 'inspect_tunemind_playlists' if needed, then call 'submit_agent_turn' with action="CREATE_TUNEMIND_PLAYLIST", playlist_name=<agreed name>, mood_or_audience=<short vibe tag>, playlist_tracks=[{title: current_track.title, artist: current_track.artist, spotify_uri: current_track.spotifyUri, track_id: current_track.trackId}], open_playlist_screen=true, expect_follow_up=false!
+  - Once they tell you the playlist name (or confirm a name across negotiation turns): call 'inspect_tunemind_playlists' if needed, then call 'submit_agent_turn' with action="CREATE_TUNEMIND_PLAYLIST", playlist_name=<agreed name>, mood_or_audience=<short vibe tag>, playlist_tracks=[{title: current_track.title, artist: current_track.artist, track_id: current_track.trackId}], open_playlist_screen=true, expect_follow_up=false!
 - Scenario 2 ("Create a playlist for kids / road trip / workout / Kikuyu chill"):
-  - Search Spotify using 'search_spotify_catalog' / 'discover_and_recommend_spotify_tracks' (with kids_safe_only=true if kids/bedtime/clean!) to gather 4-8 real verified tracks, then either ask to confirm the playlist name & tracks OR create it cleanly with action="CREATE_TUNEMIND_PLAYLIST", playlist_tracks=[...], open_playlist_screen=true!
+  - Search open catalogs using 'search_music_catalog' / 'discover_and_recommend_tracks' (with kids_safe_only=true if kids/bedtime/clean!) to gather 4-8 real verified tracks, then either ask to confirm the playlist name & tracks OR create it cleanly with action="CREATE_TUNEMIND_PLAYLIST", playlist_tracks=[...], open_playlist_screen=true!
 - Scenario 3 ("Add this song to [existing playlist]" / "Play my [playlist name] playlist"):
   - Call 'inspect_tunemind_playlists' first to find the exact TuneMind playlist, then use action="ADD_TO_TUNEMIND_PLAYLIST" or action="PLAY_TUNEMIND_PLAYLIST" (with playlist_name)!
 
-KIDS MUSIC, GENRE MASTERY & FULL SPOTIFY QUERYING:
+KIDS MUSIC, GENRE MASTERY & MULTI-CATALOG QUERYING:
 - **Kids Songs:** Handle kids requests seamlessly ("play kids songs", "nursery rhymes", "Cocomelon", "Super Simple Songs", "Akili and Me", "Ubongo Kids", "Disney songs", "baby bedtime lullabies"). ALWAYS set kids_safe_only=true!
-- **Multi-Entity Spotify Queries:** Use 'search_spotify_catalog' with search_type="artist" (to pull an artist's top tracks!), "album", "playlist", or "track".
+- **Multi-Entity Catalog Queries:** Use 'search_music_catalog' with search_type="artist" (to pull an artist's top tracks!), "mood", or "track".
 - **East African & Global Mastery:** Know Kikuyu / Gikuyu (Mugithi, Benga, Gospel — Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Grace Mwai, Shiru Wa GP, Muigai Wa Njoroge, Kamaru), Bongo Flava, Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Hip-Hop, R&B, Reggae, Jazz, Classical, Kids & Lullabies. NEVER search literally for "Any Song" when user says "play any song".
 
 FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
@@ -1007,37 +1024,38 @@ FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE
 - COOLDOWN VAULT & FRESH POOL: When the user says "play for me a song in the vault", asks what's resting in the Vault, wants to un-vault/restore a track, or asks for a fresh song from their rotation -> call 'inspect_vault_tracks' first! Never invent Vault songs. You can propose playing/restoring a real Vault track (with RESTORE_FROM_VAULT or PROPOSE_TRACK) or pick from 'fresh_low_satiety_user_tracks'.
 - STATS, WEEKLY RECAP & HEARING HEALTH (UNIFIED SCREEN ACCESS):
   Whenever the user asks "how are my listening stats", asks about listening time, top artists/tracks, skips, completion rate, fresh mix %, app share, OR ear/hearing safety -> ALWAYS call 'query_listening_stats'! That tool returns BOTH the complete Stats Screen windows (Today, 7 Days, 30 Days, All Time, top artists, top tracks, app breakdown, recent plays) AND the live Hearing Health Screen metrics (estimated_db, safe_headroom_db, daily_exposure_minutes, sound_dose_percent, safe_hours_remaining, risk_level, output_device). Combine key listening stats AND ear safety headroom naturally in your response, and navigate to "STATS" or "HEARING_HEALTH" if they ask to open the screen.
-- SPOTIFY LIBRARY PLAYLISTS & LIKED SONGS:
-  Whenever the user asks about their playlists ("play a song in my playlists", "play from our playlist", "what's in my Spotify library?", "play from my liked songs") -> ALWAYS call 'query_spotify_library'! It inspects both cached TuneMind library playlists AND fetches live Spotify Web API playlists & tracks when connected. NEVER tell the user their playlists aren't synced or to restart TuneMind when 'spotify_playlists_count' > 0 or 'app_state.spotify_connected' is true! Pick a verified song from that playlist (or launch the playlist's canonical spotify:playlist:<id> URI directly if they ask for the whole playlist), fill track_title, track_artist, and spotify_uri, and propose it cleanly with PROPOSE_TRACK!
+- CROSS-APP USER LIBRARY & PLAYER TABS:
+  Whenever the user asks about songs they played on specific music apps ("what did I play on Boomplay?", "play a song from my YouTube Music tab", "show my Audiomack songs", "play from my liked songs", "what's in my library?") -> ALWAYS call 'query_user_library'! It inspects the permanent Cross-App Library grouped by each music player (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, etc.), liked tracks, and TuneMind playlists! Pick a real track from that library, fill track_title, track_artist, and track_id (plus target_player matching the source app if requested!), and propose it cleanly with PROPOSE_TRACK!
 - GENRE, LANGUAGE & DIRECT SONG REQUESTS:
   - Understand both broad requests ("play any song", "play something good") AND cultural/regional/language genres cleanly: e.g., **Kikuyu / Gikuyu** music (Mugithi, Kikuyu Benga, Kikuyu Gospel by Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Shiru Wa GP, Phyllis Mbuthia, Muigai Wa Njoroge, Kamaru), Bongo Flava, Kenyan Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Reggae, Hip-Hop, R&B, Jazz, Rock, etc.
-  - NEVER search Spotify literally for generic phrases like 'Any Song', 'A Song', or 'Play Any Song'! When a user says 'play any song' or 'play any good song', recommend a fresh personalized song via 'discover_and_recommend_spotify_tracks' or their history/For You picks.
-  - When a user asks for 'a Kikuyu song' / 'Kikuyu music' / 'Gikuyu song' / any genre, ALWAYS call 'search_spotify_catalog' (e.g. query="Kikuyu Mugithi", or artist="Samidoh", etc.) or 'discover_and_recommend_spotify_tracks' with mood_or_genre_query="Kikuyu Mugithi Gikuyu" and pick a real verified track returned by the tool!
-  - For any specific song or artist ("Calm Down by Rema", "Blinding Lights"), ALWAYS call 'search_spotify_catalog' so you return exact verified metadata and spotify_uri.
+  - NEVER search catalogs literally for generic phrases like 'Any Song', 'A Song', or 'Play Any Song'! When a user says 'play any song' or 'play any good song', recommend a fresh personalized song via 'discover_and_recommend_tracks' or their history/For You picks.
+  - When a user asks for 'a Kikuyu song' / 'Kikuyu music' / 'Gikuyu song' / any genre, ALWAYS call 'search_music_catalog' (e.g. query="Samidoh" or "Kikuyu Mugithi") or 'discover_and_recommend_tracks' with mood_or_genre_query="Kikuyu Mugithi Gikuyu" and pick a real verified track returned by the tool!
+  - For any specific song or artist ("Calm Down by Rema", "Blinding Lights"), ALWAYS call 'search_music_catalog' so you return exact verified metadata!
 
 SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
 - Check 'player_preferences' in the telemetry! It tells you:
   - 'has_explicit_default_player': true if the user already chose a default music player, false if they have NOT chosen one yet.
   - 'default_player_name' / 'default_player_package'
-  - 'available_players': list of genuine music players installed on their phone (e.g. Spotify, Boomplay, YouTube Music, Audiomack, TuneMind In-App, Local Audio).
+  - 'available_players': list of genuine music players installed on their phone (e.g. YouTube Music, Boomplay, Spotify, Audiomack, TuneMind In-App, Local Audio).
 - RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet (for example they only said "suggest a song for me" or "play a fresh song"):
-  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, spotify_uri, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to play it on (naming 2-4 actual choices from 'player_preferences.available_players', e.g., Spotify, Boomplay, YouTube Music, or TuneMind In-App), and whether they want to make it their default!
-- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use Spotify", "Boomplay please, make it default", "Audiomack", "TuneMind"):
-  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and spotify_uri, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players', and set 'remember_default_player'=true if they agreed/asked to save it as default (or when no explicit default was set yet and they confirmed a player!).
-- RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to Spotify" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
+  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, track_id, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to play it on (naming 2-4 actual choices from 'player_preferences.available_players', e.g., YouTube Music, Boomplay, Spotify, Audiomack, or TuneMind In-App), and whether they want to make it their default!
+- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use YouTube Music", "Boomplay please, make it default", "Audiomack", "Spotify", "TuneMind"):
+  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and track_id, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players', and set 'remember_default_player'=true if they agreed/asked to save it as default (or when no explicit default was set yet and they confirmed a player!).
+- RULE 3 (Switching Player Without a Track): If the user says "set Boomplay as my default music player" or "switch my player to YouTube Music" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
 
 TWO-STEP APPROVAL vs. REJECTION vs. AUTONOMOUS END-OF-SONG DJ:
 - By default, NEVER jump straight to playing an unapproved track on your own! Always propose with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they want it played (and which player if no default is set).
-- APPROVAL ONLY ON CLEAR POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, spotify_uri, and target_player (honoring default player or explicitly chosen player).
+- APPROVAL ONLY ON CLEAR POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, track_id, and target_player (honoring default player or explicitly chosen player).
 - STRICT REJECTION & CANCELLATION RULE: When 'pending_proposed_track_awaiting_user_approval' is present and the user declines or says anything negative ("no", "nope", "I don't want that song", "I do not want that", "don't play it", "not that one", "cancel", "pass", "skip", "never mind"):
   -> NEVER output action="PLAY_TRACK_NOW"! NEVER play or keep the rejected song pending!
-  -> If they simply rejected/cancelled without naming a replacement, set action="ADVISE_ONLY", leave track_title/track_artist/spotify_uri EMPTY, expect_follow_up=true, and kindly ask what kind of song or vibe they'd prefer instead.
-  -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_spotify_tracks' or 'search_spotify_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
-- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_spotify_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
+  -> If they simply rejected/cancelled without naming a replacement, set action="ADVISE_ONLY", leave track_title/track_artist/track_id EMPTY, expect_follow_up=true, and kindly ask what kind of song or vibe they'd prefer instead.
+  -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_tracks' or 'search_music_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
+- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
-STAY-IN-TUNEMIND ARCHITECTURE:
-- Respect app_state flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'app_remote_connected', 'has_overlay_permission', 'prefer_in_app_player_enabled').
-- WHENEVER the user says "without opening Spotify", "don't open an external app", "stay in TuneMind", or 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true and never claim you are switching away to an external app UI!
+HYBRID IN-APP & STAY-IN-TUNEMIND ARCHITECTURE:
+- Respect app_state flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled').
+- WHENEVER the user says "without opening another app", "don't open an external app", "play inside TuneMind", "stay in TuneMind", or 'strict_no_app_switch_enabled' is true -> set "never_open_external_app": true and explain accurately that TuneMind will play local phone audio, a full open-catalog stream (Audius), active background player session, or a 30s preview inside TuneMind without leaving the app!
+- Note honestly when an external app has to open for a full cold commercial stream: you'll start it and show a 1-tap return notification.
 
 FULL APP-WIDE CONTROL ACTIONS:
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
@@ -1045,7 +1063,7 @@ FULL APP-WIDE CONTROL ACTIONS:
 - Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH".
 - Volume: action="SET_VOLUME_PERCENT" (volume_percent: 10-100).
 - Navigation: action="NAVIGATE_SCREEN" with target_screen in:
-  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "SPOTIFY_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
+  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
 - Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
@@ -1054,348 +1072,41 @@ FULL APP-WIDE CONTROL ACTIONS:
 Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken text (1-3 sentences).`;
   }
 
-  private async getSpotifyAccessToken(userOAuthToken?: string): Promise<string | null> {
-    if (userOAuthToken && userOAuthToken.trim().length > 10) {
-      return userOAuthToken.trim();
-    }
-
-    const clientId = (process.env.SPOTIFY_CLIENT_ID || 'dcfad6acbd594477b0705ecc1e6ace3a').trim();
-    const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '134028eff64c4e2cafa4b1f617463650').trim();
-
-    if (this.spotifyAccessToken && Date.now() < this.spotifyAccessToken.expiresAt) {
-      return this.spotifyAccessToken.token;
-    }
-
-    try {
-      const response = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64')
-        },
-        body: new URLSearchParams({ grant_type: 'client_credentials' })
-      });
-
-      const data = (await response.json()) as any;
-      if (data.access_token) {
-        this.spotifyAccessToken = {
-          token: data.access_token,
-          expiresAt: Date.now() + (data.expires_in * 1000) - 60000
-        };
-        return data.access_token;
-      }
-    } catch (error) {
-      console.error('[Spotify Middleware] Failed to fetch access token:', error);
-    }
-    return null;
-  }
-
-  public async lookupSpotifyTrack(
+  public async lookupOpenCatalogTrack(
     query: string,
-    artist?: string,
-    userOAuthToken?: string
-  ): Promise<{ trackId: string; uri: string; title: string; artist: string } | null> {
-    const hits = await this.searchSpotifyCatalogTracks(query, artist, 3, userOAuthToken);
-    return hits[0] || null;
-  }
-
-  private async searchSpotifyCatalogTracks(
-    query: string,
-    artist?: string,
-    limit: number = 6,
-    userOAuthToken?: string,
-    excludeExplicit: boolean = false
-  ): Promise<Array<{ trackId: string; uri: string; title: string; artist: string; album: string; popularity: number; explicit: boolean }>> {
-    const token = await this.getSpotifyAccessToken(userOAuthToken);
-    if (!token) return [];
-
-    const cleanTitle = ClaudeMusicReasoningProvider.sanitizeTrackTitle(query);
-    const cleanArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(artist);
-
-    const searchCandidates: string[] = [];
-    if (cleanTitle && cleanArtist) {
-      searchCandidates.push(`track:${cleanTitle} artist:${cleanArtist}`);
-      searchCandidates.push(`${cleanTitle} ${cleanArtist}`);
-    }
-    if (cleanTitle) {
-      searchCandidates.push(cleanTitle);
-    }
-
-    const boundedLimit = Math.min(10, Math.max(1, Number(limit) || 6));
-    for (const q of searchCandidates) {
-      try {
-        const searchRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${boundedLimit}`,
-          {
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-
-        if (!searchRes.ok) continue;
-        const searchData = (await searchRes.json()) as any;
-        const items = searchData.tracks?.items;
-        if (Array.isArray(items) && items.length > 0) {
-          const mapped = items
-            .filter((item: any) => item && typeof item.uri === 'string' && item.uri.startsWith('spotify:track:'))
-            .filter((item: any) => !excludeExplicit || !Boolean(item.explicit))
-            .map((item: any) => ({
-              trackId: item.id,
-              uri: item.uri,
-              title: item.name,
-              artist: item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
-              album: item.album?.name || '',
-              popularity: Number(item.popularity || 50),
-              explicit: Boolean(item.explicit)
-            }));
-          if (mapped.length > 0) return mapped;
-        }
-      } catch (error) {
-        console.warn('[Spotify Search] Notice:', error);
-      }
-    }
-    return [];
-  }
-
-  private async searchSpotifyMultiCatalog(
-    query: string,
-    searchType: 'track' | 'artist' | 'album' | 'playlist' = 'track',
-    artist?: string,
-    limit: number = 6,
-    userOAuthToken?: string,
-    excludeExplicit: boolean = false
+    artist?: string
   ): Promise<{
-    search_type: string;
-    tracks: Array<{ trackId: string; uri: string; title: string; artist: string; album: string; popularity: number; explicit: boolean }>;
-    albums?: Array<{ id: string; uri: string; name: string; artist: string; release_date: string; total_tracks: number }>;
-    playlists?: Array<{ id: string; uri: string; name: string; owner: string; total_tracks: number }>;
-    artists?: Array<{ id: string; uri: string; name: string; genres: string[]; popularity: number }>;
-  }> {
-    const token = await this.getSpotifyAccessToken(userOAuthToken);
-    if (!token) return { search_type: searchType, tracks: [] };
-    const boundedLimit = Math.min(10, Math.max(1, Number(limit) || 6));
-
-    if (searchType === 'track') {
-      const tracks = await this.searchSpotifyCatalogTracks(query, artist, boundedLimit, userOAuthToken, excludeExplicit);
-      return { search_type: 'track', tracks };
-    }
-
-    if (searchType === 'artist') {
-      try {
-        const aRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=artist&limit=3`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (aRes.ok) {
-          const aData = (await aRes.json()) as any;
-          const artists = (aData?.artists?.items || []).map((a: any) => ({
-            id: a.id,
-            uri: a.uri,
-            name: a.name,
-            genres: Array.isArray(a.genres) ? a.genres : [],
-            popularity: Number(a.popularity || 50)
-          }));
-          const topTracks: Array<{ trackId: string; uri: string; title: string; artist: string; album: string; popularity: number; explicit: boolean }> = [];
-          if (artists[0]?.id) {
-            const market = userOAuthToken ? 'from_token' : 'US';
-            const topRes = await fetch(
-              `https://api.spotify.com/v1/artists/${artists[0].id}/top-tracks?market=${market}`,
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-            if (topRes.ok) {
-              const topData = (await topRes.json()) as any;
-              for (const item of topData?.tracks || []) {
-                if (excludeExplicit && item.explicit) continue;
-                topTracks.push({
-                  trackId: item.id,
-                  uri: item.uri,
-                  title: item.name,
-                  artist: item.artists?.map((x: any) => x.name).join(', ') || artists[0].name,
-                  album: item.album?.name || '',
-                  popularity: Number(item.popularity || 60),
-                  explicit: Boolean(item.explicit)
-                });
-              }
-            }
-          }
-          if (topTracks.length === 0) {
-            const fallbackTracks = await this.searchSpotifyCatalogTracks(query, query, boundedLimit, userOAuthToken, excludeExplicit);
-            return { search_type: 'artist', artists, tracks: fallbackTracks };
-          }
-          return { search_type: 'artist', artists, tracks: topTracks.slice(0, boundedLimit) };
-        }
-      } catch (err) {
-        console.warn('[Spotify Artist Search] Notice:', err);
-      }
-    }
-
-    if (searchType === 'album') {
-      try {
-        const alRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=album&limit=4`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (alRes.ok) {
-          const alData = (await alRes.json()) as any;
-          const albums = (alData?.albums?.items || []).map((al: any) => ({
-            id: al.id,
-            uri: al.uri,
-            name: al.name,
-            artist: al.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
-            release_date: al.release_date || '',
-            total_tracks: Number(al.total_tracks || 0)
-          }));
-          const tracks = albums[0]?.id
-            ? await this.searchSpotifyCatalogTracks(`${albums[0].name} ${albums[0].artist}`, undefined, boundedLimit, userOAuthToken, excludeExplicit)
-            : [];
-          return { search_type: 'album', albums, tracks };
-        }
-      } catch (err) {
-        console.warn('[Spotify Album Search] Notice:', err);
-      }
-    }
-
-    if (searchType === 'playlist') {
-      try {
-        const plRes = await fetch(
-          `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=playlist&limit=${boundedLimit}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (plRes.ok) {
-          const plData = (await plRes.json()) as any;
-          const playlists = (plData?.playlists?.items || [])
-            .filter((p: any) => p && p.uri)
-            .map((p: any) => ({
-              id: p.id,
-              uri: p.uri,
-              name: p.name,
-              owner: p.owner?.display_name || 'Spotify',
-              total_tracks: Number(p.tracks?.total || 0)
-            }));
-          const tracks = await this.searchSpotifyCatalogTracks(query, undefined, boundedLimit, userOAuthToken, excludeExplicit);
-          return { search_type: 'playlist', playlists, tracks };
-        }
-      } catch (err) {
-        console.warn('[Spotify Playlist Search] Notice:', err);
-      }
-    }
-
-    const tracks = await this.searchSpotifyCatalogTracks(query, artist, boundedLimit, userOAuthToken, excludeExplicit);
-    return { search_type: searchType, tracks };
+    trackId: string;
+    title: string;
+    artist: string;
+    album: string;
+    ytmVideoId?: string | null;
+    previewUrl?: string | null;
+    audiusStreamUrl?: string | null;
+    deezerUrl?: string | null;
+  } | null> {
+    const profile = await resolveUniversalTrackProfile(query, artist || '');
+    if (!profile) return null;
+    return {
+      trackId: profile.trackId,
+      title: profile.cleanTitle,
+      artist: profile.cleanArtist,
+      album: profile.albumName || '',
+      ytmVideoId: profile.ytmVideoId,
+      previewUrl: profile.previewUrl,
+      audiusStreamUrl: profile.audiusStreamUrl,
+      deezerUrl: profile.deezerUrl
+    };
   }
 
-  private async fetchUserSpotifyTopTracks(
-    userOAuthToken: string | undefined,
-    timeRange: 'short_term' | 'medium_term' | 'long_term' = 'short_term',
-    limit: number = 15
-  ): Promise<Array<{ trackId: string; uri: string; title: string; artist: string; album: string; popularity: number; playCount: number }>> {
-    if (!userOAuthToken || userOAuthToken.trim().length < 10) return [];
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/me/top/tracks?time_range=${timeRange}&limit=${limit}`,
-        {
-          headers: { Authorization: `Bearer ${userOAuthToken.trim()}` }
-        }
-      );
-      if (!res.ok) return [];
-      const data = (await res.json()) as any;
-      const items = data.items;
-      if (!Array.isArray(items)) return [];
-      return items
-        .filter((item: any) => item && typeof item.uri === 'string' && item.uri.startsWith('spotify:track:'))
-        .map((item: any) => ({
-          trackId: item.id,
-          uri: item.uri,
-          title: item.name,
-          artist: item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
-          album: item.album?.name || '',
-          popularity: Number(item.popularity || 60),
-          playCount: 0
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  private async fetchSpotifyUserPlaylistsLive(
-    userOAuthToken?: string,
-    limit: number = 50
-  ): Promise<Array<{ playlist_id: string; name: string; owner?: string; track_count: number; spotify_uri: string }>> {
-    if (!userOAuthToken || userOAuthToken.trim().length < 10) return [];
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/me/playlists?limit=${Math.min(50, Math.max(1, limit))}`,
-        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
-      );
-      if (!res.ok) return [];
-      const data = (await res.json()) as any;
-      const items = Array.isArray(data?.items) ? data.items : [];
-      return items
-        .filter((pl: any) => pl && typeof pl.id === 'string' && typeof pl.name === 'string')
-        .map((pl: any) => ({
-          playlist_id: pl.id,
-          name: pl.name,
-          owner: pl.owner?.display_name || pl.owner?.id || '',
-          track_count: Number(pl.tracks?.total || 0),
-          spotify_uri: pl.uri || `spotify:playlist:${pl.id}`
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  private async fetchSpotifyPlaylistTracksLive(
-    userOAuthToken: string | undefined,
-    playlistId: string,
-    limit: number = 50
-  ): Promise<Array<{ title: string; artist: string; spotify_uri: string; track_id: string }>> {
-    if (!userOAuthToken || userOAuthToken.trim().length < 10 || !playlistId) return [];
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=${Math.min(50, Math.max(1, limit))}&fields=items(track(id,name,uri,artists(name)))`,
-        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
-      );
-      if (!res.ok) return [];
-      const data = (await res.json()) as any;
-      const items = Array.isArray(data?.items) ? data.items : [];
-      return items
-        .map((it: any) => it?.track)
-        .filter((tr: any) => tr && typeof tr.name === 'string' && typeof tr.uri === 'string' && tr.uri.startsWith('spotify:track:'))
-        .map((tr: any) => ({
-          title: tr.name,
-          artist: tr.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
-          spotify_uri: tr.uri,
-          track_id: tr.id || tr.uri
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  private async fetchSpotifyLikedTracksLive(
-    userOAuthToken?: string,
-    limit: number = 50
-  ): Promise<Array<{ title: string; artist: string; spotify_uri: string; track_id: string }>> {
-    if (!userOAuthToken || userOAuthToken.trim().length < 10) return [];
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/me/tracks?limit=${Math.min(50, Math.max(1, limit))}`,
-        { headers: { Authorization: `Bearer ${userOAuthToken.trim()}` } }
-      );
-      if (!res.ok) return [];
-      const data = (await res.json()) as any;
-      const items = Array.isArray(data?.items) ? data.items : [];
-      return items
-        .map((it: any) => it?.track)
-        .filter((tr: any) => tr && typeof tr.name === 'string' && typeof tr.uri === 'string' && tr.uri.startsWith('spotify:track:'))
-        .map((tr: any) => ({
-          title: tr.name,
-          artist: tr.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
-          spotify_uri: tr.uri,
-          track_id: tr.id || tr.uri
-        }));
-    } catch {
-      return [];
-    }
+  private async searchCatalogTracks(
+    query: string,
+    artist?: string,
+    limit: number = 6,
+    excludeExplicit: boolean = false
+  ) {
+    const res = await searchOpenMusicCatalog(query, 'track', artist, limit, excludeExplicit, 0);
+    return res.tracks;
   }
 
   private rememberTurn(userId: string, userText: string, assistantText: string) {
@@ -1414,7 +1125,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
   public async evaluateSatiety(context: TuneMindTelemetryContext): Promise<TuneMindReasoningResponse> {
     const eventStore = new EventStore();
     const userCommandRaw = (context.user_command || '').trim();
-    const targetPlayerDefault = context.current_track?.source_player || 'com.spotify.music';
+    const targetPlayerDefault = context.current_track?.source_player || 'unknown_player';
     const userId = SupabaseIntelligenceStore.normalizeUserId(context.user_id, context.user_email);
     const supabaseOverride = {
       supabaseUrl: context.supabase_url,
@@ -1588,7 +1299,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       activeVaultTitles.has(title.toLowerCase().trim()) ||
       (trackId ? activeVaultTrackIds.has(trackId.trim()) : false);
 
-    // Enrich candidate Fresh pool with untouched Spotify Liked Songs (not already heard / vaulted)
+    // Enrich candidate Fresh pool with liked songs from Cross-App Library (not already heard / vaulted)
     const freshCandidatePool: Array<typeof allUserTracks[number] & {
       readinessScore?: number;
       freshCategory?: string;
@@ -1614,26 +1325,27 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       });
     }
 
-    for (const liked of context.spotify_liked_tracks || []) {
-      const cleanTitle = String(liked.title || '').trim();
+    for (const libTrack of context.cross_app_library || []) {
+      const cleanTitle = String(libTrack.title || '').trim();
       if (!cleanTitle || excludedSet.has(cleanTitle.toLowerCase())) continue;
-      if (isLockedInVault(cleanTitle, liked.track_id)) continue;
-      const cleanArtist = String(liked.artist || 'Spotify Library').trim();
+      if (isLockedInVault(cleanTitle, libTrack.track_id)) continue;
+      const cleanArtist = String(libTrack.artist || 'Unknown Artist').trim();
       const dupKey = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
       if (historyMap.has(dupKey)) continue;
+      const plays = coerceNonNegativePlayCount(libTrack.play_count ?? 0);
       const assessed = RestingVaultEngine.computeFreshReadiness({
-        baseFreshnessPercent: 99,
-        playCount: 0,
-        isLikedOrSaved: true,
-        sourceLabel: 'Liked Song'
+        baseFreshnessPercent: Math.max(20, 99 - plays * 12),
+        playCount: plays,
+        isLikedOrSaved: Boolean(libTrack.is_liked),
+        sourceLabel: libTrack.primary_app_name || 'Cross-App Library'
       });
       freshCandidatePool.push({
         title: cleanTitle,
         artist: cleanArtist,
-        trackId: liked.track_id || `trk:${cleanTitle.toLowerCase()}`,
-        spotifyUri: normalizeSpotifyUri(liked.spotify_uri),
-        source: 'com.spotify.music',
-        playCount: 0,
+        trackId: libTrack.track_id || `trk:${cleanTitle.toLowerCase()}`,
+        spotifyUri: undefined,
+        source: libTrack.primary_source_package || 'unknown_player',
+        playCount: plays,
         readinessScore: assessed.readinessScore,
         freshCategory: assessed.category,
         freshReason: assessed.freshReason
@@ -1754,21 +1466,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       player_preferences: context.player_preferences || {
         has_explicit_default_player: false,
         default_player_package: targetPlayerDefault,
-        default_player_name: 'Spotify',
+        default_player_name: 'Your Music Player',
         available_players: []
       },
       for_you_picks_count: Array.isArray(context.for_you_picks) ? context.for_you_picks.length : 0,
-      spotify_token_available: Boolean(context.spotify_access_token),
-      spotify_playlists_count: Array.isArray(context.spotify_playlists) ? context.spotify_playlists.length : 0,
-      spotify_playlists_preview: Array.isArray(context.spotify_playlists)
-        ? context.spotify_playlists.slice(0, 12).map(pl => ({
-            name: pl.name,
-            track_count: pl.track_count,
-            hydrated_tracks_count: Array.isArray(pl.tracks) ? pl.tracks.length : 0,
-            spotify_uri: pl.spotify_uri || `spotify:playlist:${pl.playlist_id}`
-          }))
-        : [],
-      spotify_liked_tracks_count: Array.isArray(context.spotify_liked_tracks) ? context.spotify_liked_tracks.length : 0,
+      cross_app_library_count: Array.isArray(context.cross_app_library) ? context.cross_app_library.length : 0,
+      detected_player_tabs: Array.isArray(context.detected_player_tabs) ? context.detected_player_tabs : [],
       tunemind_playlists_count: Array.isArray(context.tunemind_playlists) ? context.tunemind_playlists.length : 0,
       tunemind_playlists: Array.isArray(context.tunemind_playlists) ? context.tunemind_playlists.slice(0, 20) : [],
       kids_mode_enabled: Boolean(context.kids_mode_enabled || (context.app_state as any)?.kids_mode_enabled),
@@ -1825,7 +1528,16 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     };
 
     let submittedTurnDecision: any = null;
-    let lastDiscoveredOrSearchedTrack: { title: string; artist: string; uri: string; trackId?: string } | null = null;
+    let lastDiscoveredOrSearchedTrack: {
+      title: string;
+      artist: string;
+      uri: string;
+      trackId?: string;
+      ytmVideoId?: string | null;
+      previewUrl?: string | null;
+      audiusStreamUrl?: string | null;
+      deezerUrl?: string | null;
+    } | null = null;
     let providerTag = 'autonomous-tool-agent';
 
     const available = await this.isAvailable();
@@ -1837,7 +1549,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         const messages: any[] = [
           {
             role: 'user',
-            content: `Here is the live studio telemetry, Supabase long-term Taste Genome memory, conversation history, and the user's latest spoken message. Reason naturally, call any Spotify, listening-history, or Supabase Taste Genome tools you need, and finish by calling 'submit_agent_turn':\n\n${JSON.stringify(initialContextPayload, null, 2)}`
+            content: `Here is the live studio telemetry, cross-app music library, Supabase long-term Taste Genome memory, conversation history, and the user's latest spoken message. Reason naturally, call any open-catalog, listening-history, or library tools you need, and finish by calling 'submit_agent_turn':\n\n${JSON.stringify(initialContextPayload, null, 2)}`
           }
         ];
 
@@ -1950,31 +1662,31 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             } else if (toolName === 'query_user_listening_history') {
               const sortBy = String(input.sort_by || 'most_played');
               const filterKeyword = String(input.artist_or_keyword || '').toLowerCase().trim();
+              const playerFilter = String(input.player_filter || '').toLowerCase().trim();
               const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
 
               let combinedPool = [...allUserTracks];
-              if (sortBy === 'most_played' && context.spotify_access_token) {
-                const apiTop = await this.fetchUserSpotifyTopTracks(context.spotify_access_token, 'short_term', 10);
-                for (const topItem of apiTop) {
-                  const exists = combinedPool.find(
-                    p => p.title.toLowerCase() === topItem.title.toLowerCase()
-                  );
-                  if (!exists) {
-                    combinedPool.push({
-                      title: topItem.title,
-                      artist: topItem.artist,
-                      trackId: topItem.trackId,
-                      spotifyUri: topItem.uri,
-                      source: 'com.spotify.music',
-                      playCount: topItem.playCount
-                    });
-                  } else {
-                    if (!exists.spotifyUri && topItem.uri) exists.spotifyUri = topItem.uri;
-                    if ((!exists.trackId || exists.trackId.startsWith('trk:')) && topItem.trackId) {
-                      exists.trackId = topItem.trackId;
-                    }
-                  }
+              for (const lib of context.cross_app_library || []) {
+                const exists = combinedPool.find(
+                  p => p.title.toLowerCase() === String(lib.title || '').toLowerCase()
+                );
+                if (!exists && lib.title) {
+                  combinedPool.push({
+                    title: lib.title,
+                    artist: lib.artist || 'Unknown Artist',
+                    trackId: lib.track_id || '',
+                    spotifyUri: undefined,
+                    source: lib.primary_source_package || 'unknown_player',
+                    playCount: coerceNonNegativePlayCount(lib.play_count ?? 0)
+                  });
                 }
+              }
+
+              if (playerFilter) {
+                combinedPool = combinedPool.filter(t => {
+                  const srcLower = String(t.source || '').toLowerCase();
+                  return srcLower.includes(playerFilter);
+                });
               }
 
               if (filterKeyword) {
@@ -1992,25 +1704,17 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
               }
 
               const topSlice = combinedPool.slice(0, limit);
-              if (topSlice[0] && !topSlice[0].spotifyUri) {
-                const resolved = await this.lookupSpotifyTrack(
-                  topSlice[0].title,
-                  topSlice[0].artist,
-                  context.spotify_access_token
-                );
-                if (resolved) {
-                  topSlice[0].spotifyUri = resolved.uri;
-                  if ((!topSlice[0].trackId || topSlice[0].trackId.startsWith('trk:')) && resolved.trackId) {
-                    topSlice[0].trackId = resolved.trackId;
-                  }
-                }
-              }
               if (topSlice[0]) {
+                const enrichedTop = await this.lookupOpenCatalogTrack(topSlice[0].title, topSlice[0].artist);
                 lastDiscoveredOrSearchedTrack = {
                   title: topSlice[0].title,
                   artist: topSlice[0].artist,
-                  uri: topSlice[0].spotifyUri || '',
-                  trackId: topSlice[0].trackId
+                  uri: '',
+                  trackId: enrichedTop?.trackId || topSlice[0].trackId,
+                  ytmVideoId: enrichedTop?.ytmVideoId,
+                  previewUrl: enrichedTop?.previewUrl,
+                  audiusStreamUrl: enrichedTop?.audiusStreamUrl,
+                  deezerUrl: enrichedTop?.deezerUrl
                 };
               }
 
@@ -2027,14 +1731,14 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                       track_id: t.trackId,
                       title: t.title,
                       artist: t.artist,
+                      source_player: t.source,
                       play_count: plays,
-                      spotify_uri: t.spotifyUri || '',
                       freshness_percent: Math.max(15, 96 - plays * 8)
                     };
                   })
                 })
               });
-            } else if (toolName === 'discover_and_recommend_spotify_tracks') {
+            } else if (toolName === 'discover_and_recommend_tracks' || toolName === 'discover_and_recommend_spotify_tracks') {
               const seedArtists: string[] = Array.isArray(input.seed_artists) && input.seed_artists.length > 0
                 ? input.seed_artists.map(String)
                 : topUserArtists.slice(0, 3);
@@ -2046,8 +1750,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                 /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(userCommandRaw)
               );
 
-              const discovered = await this.discoverSpotifyTracksForContext(
-                context,
+              const discovered = await this.discoverTracksForContext(
                 allUserTracks,
                 excludeOverplayed ? strictDiscoveryExclusionSet : excludedSet,
                 seedArtists,
@@ -2057,16 +1760,15 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
               );
 
               if (discovered[0]) {
-                const discIdentity = resolveCanonicalTrackIdentity({
-                  spotifyUri: discovered[0].spotify_uri,
-                  title: discovered[0].title,
-                  artist: discovered[0].artist
-                });
                 lastDiscoveredOrSearchedTrack = {
                   title: discovered[0].title,
                   artist: discovered[0].artist,
-                  uri: discIdentity.spotifyUri || discovered[0].spotify_uri,
-                  trackId: discIdentity.trackId
+                  uri: '',
+                  trackId: discovered[0].trackId,
+                  ytmVideoId: discovered[0].ytmVideoId,
+                  previewUrl: discovered[0].previewUrl,
+                  audiusStreamUrl: discovered[0].audiusStreamUrl,
+                  deezerUrl: discovered[0].deezerUrl
                 };
               }
 
@@ -2079,38 +1781,37 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                   recommended_tracks: discovered
                 })
               });
-            } else if (toolName === 'search_spotify_catalog') {
+            } else if (toolName === 'search_music_catalog' || toolName === 'search_spotify_catalog') {
               const q = String(input.query || '').trim();
               const artist = input.artist ? String(input.artist).trim() : undefined;
-              const searchType = (['track', 'artist', 'album', 'playlist'].includes(String(input.search_type || ''))
+              const searchType = (['track', 'artist', 'mood'].includes(String(input.search_type || ''))
                 ? String(input.search_type)
-                : 'track') as 'track' | 'artist' | 'album' | 'playlist';
+                : 'track') as 'track' | 'artist' | 'mood';
               const kidsSafeOnly = Boolean(
                 input.kids_safe_only ||
                 context.kids_mode_enabled ||
                 /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(`${q} ${userCommandRaw}`)
               );
               const limitNum = Math.min(10, Math.max(1, Number(input.limit || 6)));
-              const multi = await this.searchSpotifyMultiCatalog(
+              const multi = await searchOpenMusicCatalog(
                 q,
                 searchType,
                 artist,
                 limitNum,
-                context.spotify_access_token,
-                kidsSafeOnly
+                kidsSafeOnly,
+                0
               );
               const hits = multi.tracks || [];
               if (hits[0]) {
-                const hitIdentity = resolveCanonicalTrackIdentity({
-                  spotifyUri: hits[0].uri,
-                  title: hits[0].title,
-                  artist: hits[0].artist
-                });
                 lastDiscoveredOrSearchedTrack = {
                   title: hits[0].title,
                   artist: hits[0].artist,
-                  uri: hitIdentity.spotifyUri || hits[0].uri,
-                  trackId: hitIdentity.trackId
+                  uri: '',
+                  trackId: hits[0].trackId,
+                  ytmVideoId: hits[0].ytmVideoId,
+                  previewUrl: hits[0].previewUrl,
+                  audiusStreamUrl: hits[0].audiusStreamUrl,
+                  deezerUrl: hits[0].deezerUrl
                 };
               }
               toolResults.push({
@@ -2121,15 +1822,17 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                   search_type: searchType,
                   kids_safe_only: kidsSafeOnly,
                   results: hits.map(h => ({
+                    track_id: h.trackId,
                     title: h.title,
                     artist: h.artist,
                     album: h.album,
-                    spotify_uri: h.uri,
+                    genre: h.genre,
                     popularity: h.popularity,
-                    explicit: h.explicit
+                    explicit: h.explicit,
+                    has_preview: Boolean(h.previewUrl),
+                    has_full_audius_stream: Boolean(h.audiusStreamUrl),
+                    ytm_video_id: h.ytmVideoId || undefined
                   })),
-                  albums: multi.albums,
-                  playlists: multi.playlists,
                   artists: multi.artists
                 })
               });
@@ -2180,83 +1883,49 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                   picks: sliced
                 })
               });
-            } else if (toolName === 'query_spotify_library') {
+            } else if (toolName === 'query_user_library' || toolName === 'query_spotify_library') {
               const scope = String(input.scope || 'all');
+              const playerFilter = String(input.player_filter || '').toLowerCase().trim();
               const q = String(input.query || '').toLowerCase().trim();
-              let playlists = Array.isArray(context.spotify_playlists)
-                ? context.spotify_playlists.map(pl => ({
-                    ...pl,
-                    tracks: Array.isArray(pl.tracks) ? [...pl.tracks] : []
-                  }))
-                : [];
-              let liked = Array.isArray(context.spotify_liked_tracks) ? [...context.spotify_liked_tracks] : [];
 
-              // Live Spotify Web API fallback if Room hasn't populated playlists yet or matches are missing
-              if (scope !== 'liked_tracks' && context.spotify_access_token && playlists.length === 0) {
-                const livePls = await this.fetchSpotifyUserPlaylistsLive(context.spotify_access_token, 50);
-                playlists = livePls.map(lp => ({
-                  ...lp,
-                  tracks: []
-                }));
+              const libTracks = Array.isArray(context.cross_app_library) ? [...context.cross_app_library] : [];
+              const tmPlaylists = Array.isArray(context.tunemind_playlists) ? [...context.tunemind_playlists] : [];
+
+              let filteredTracks = libTracks;
+              if (playerFilter) {
+                filteredTracks = filteredTracks.filter(t => {
+                  const appMatch = (t.primary_app_name || '').toLowerCase().includes(playerFilter);
+                  const pkgMatch = (t.primary_source_package || '').toLowerCase().includes(playerFilter);
+                  const listMatch = Array.isArray(t.source_packages)
+                    && t.source_packages.some(pkg => String(pkg).toLowerCase().includes(playerFilter));
+                  return appMatch || pkgMatch || listMatch;
+                });
               }
-
-              let matchedPlaylists = q
-                ? playlists.filter(pl =>
-                    pl.name.toLowerCase().includes(q) ||
-                    (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
-                  )
-                : [...playlists];
-
-              if (q && matchedPlaylists.length === 0 && context.spotify_access_token && playlists.length > 0) {
-                // Retry after fetching live list in case Room was stale
-                const livePls = await this.fetchSpotifyUserPlaylistsLive(context.spotify_access_token, 50);
-                for (const lp of livePls) {
-                  if (!playlists.some(p => p.playlist_id === lp.playlist_id)) {
-                    playlists.push({ ...lp, tracks: [] });
-                  }
-                }
-                matchedPlaylists = playlists.filter(pl =>
-                  pl.name.toLowerCase().includes(q) ||
-                  (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+              if (scope === 'liked_tracks' || scope === 'liked') {
+                filteredTracks = filteredTracks.filter(t => t.is_liked);
+              }
+              if (q) {
+                filteredTracks = filteredTracks.filter(t =>
+                  String(t.title || '').toLowerCase().includes(q) ||
+                  String(t.artist || '').toLowerCase().includes(q)
                 );
               }
 
-              // Hydrate tracks via Spotify Web API for matching playlists (or top 2 non-empty playlists) that still have tracks=[]
-              const toHydrate = (matchedPlaylists.length > 0 ? matchedPlaylists : playlists)
-                .filter(pl => (pl.tracks || []).length === 0 && (pl.track_count || 0) > 0 && pl.playlist_id)
-                .slice(0, 3);
-              if (context.spotify_access_token && toHydrate.length > 0) {
-                for (const pl of toHydrate) {
-                  const fetchedTracks = await this.fetchSpotifyPlaylistTracksLive(
-                    context.spotify_access_token,
-                    pl.playlist_id,
-                    50
-                  );
-                  if (fetchedTracks.length > 0) {
-                    pl.tracks = fetchedTracks;
-                  }
-                }
-              }
+              const matchedPlaylists = q
+                ? tmPlaylists.filter(pl =>
+                    pl.name.toLowerCase().includes(q) ||
+                    (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                  )
+                : tmPlaylists;
 
-              if (scope !== 'playlists' && liked.length === 0 && context.spotify_access_token) {
-                liked = await this.fetchSpotifyLikedTracksLive(context.spotify_access_token, 50);
-              }
-              const matchedLiked = q
-                ? liked.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
-                : liked;
-
-              // Prefer hydrated playlists first, avoiding repeating recently played tracks
-              const candidateTrack = matchedPlaylists
-                .flatMap(pl => pl.tracks || [])
-                .find(t => t.title && !excludedSet.has(t.title.toLowerCase().trim()))
-                || matchedPlaylists.flatMap(pl => pl.tracks || [])[0]
-                || matchedLiked[0];
-              if (candidateTrack && candidateTrack.spotify_uri) {
+              const picked = filteredTracks.find(t => t.title && !excludedSet.has(t.title.toLowerCase().trim()))
+                || filteredTracks[0];
+              if (picked) {
                 lastDiscoveredOrSearchedTrack = {
-                  title: candidateTrack.title,
-                  artist: candidateTrack.artist,
-                  uri: candidateTrack.spotify_uri,
-                  trackId: candidateTrack.track_id
+                  title: picked.title,
+                  artist: picked.artist,
+                  uri: '',
+                  trackId: picked.track_id
                 };
               }
 
@@ -2264,11 +1933,11 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                 type: 'tool_result',
                 tool_use_id: toolCall.id,
                 content: JSON.stringify({
-                  spotify_connected: Boolean(context.spotify_access_token || context.app_state?.spotify_connected),
-                  playlists: scope === 'liked_tracks' ? [] : (matchedPlaylists.length > 0 ? matchedPlaylists : playlists).slice(0, 15),
-                  liked_tracks: scope === 'playlists' ? [] : matchedLiked.slice(0, 20),
-                  total_playlists: playlists.length,
-                  total_liked_tracks: liked.length
+                  detected_player_tabs: context.detected_player_tabs || [],
+                  tracks: scope === 'playlists' ? [] : filteredTracks.slice(0, 25),
+                  tunemind_playlists: scope === 'liked_tracks' ? [] : matchedPlaylists.slice(0, 15),
+                  total_library_tracks: libTracks.length,
+                  total_playlists: tmPlaylists.length
                 })
               });
             } else if (toolName === 'query_listening_stats') {
@@ -2398,7 +2067,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             return 'com.google.android.apps.youtube.music';
           }
           if (lower.includes('audiomack')) return 'com.audiomack';
-          if (lower.includes('apple')) return 'com.apple.android.music';
+          if (lower.includes('deezer')) return 'deezer.android.app';
           if (lower.includes('tunemind') || lower.includes('inapp') || lower.includes('built-in')) return 'tunemind_inapp';
           if (lower.includes('local')) return 'local_files';
           if (lower.includes('spotify')) return 'com.spotify.music';
@@ -2486,18 +2155,21 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         candidateTrackId = pending.trackId || candidateTrackId;
       }
 
-      // Resolve Spotify URI if we are playing or proposing a track and spotifyUri is still empty
-      if (!spotifyUri && trackTitle && (action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE')) {
+      // Resolve playable open-catalog endpoints (YouTube Music videoId, Audius full stream, 30s preview, Deezer URL)
+      let ytmVideoId = lastDiscoveredOrSearchedTrack?.ytmVideoId || undefined;
+      let previewUrl = lastDiscoveredOrSearchedTrack?.previewUrl || undefined;
+      let audiusStreamUrl = lastDiscoveredOrSearchedTrack?.audiusStreamUrl || undefined;
+      let deezerUrl = lastDiscoveredOrSearchedTrack?.deezerUrl || undefined;
+      if (trackTitle && (action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE')) {
         const cleanArtist = trackArtist && trackArtist !== 'Unknown Artist' ? trackArtist : undefined;
-        const resolved = await this.lookupSpotifyTrack(trackTitle, cleanArtist, context.spotify_access_token);
+        const resolved = await this.lookupOpenCatalogTrack(trackTitle, cleanArtist);
         if (resolved) {
-          spotifyUri = resolved.uri;
-          if (!candidateTrackId && resolved.trackId) {
-            candidateTrackId = resolved.trackId;
-          }
-          if (!trackArtist || trackArtist === 'Unknown Artist') {
-            trackArtist = resolved.artist;
-          }
+          if (!candidateTrackId && resolved.trackId) candidateTrackId = resolved.trackId;
+          if (!trackArtist || trackArtist === 'Unknown Artist') trackArtist = resolved.artist;
+          ytmVideoId = resolved.ytmVideoId || ytmVideoId;
+          previewUrl = resolved.previewUrl || previewUrl;
+          audiusStreamUrl = resolved.audiusStreamUrl || audiusStreamUrl;
+          deezerUrl = resolved.deezerUrl || deezerUrl;
         }
       }
 
@@ -2661,10 +2333,6 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             uri = normalizeSpotifyUri(context.current_track.spotifyUri) || uri;
           }
           if (!title) continue;
-          if (!uri) {
-            const hit = await this.lookupSpotifyTrack(title, artist || undefined, context.spotify_access_token);
-            if (hit) uri = hit.uri;
-          }
           const canon = resolveCanonicalTrackIdentity({
             trackId: item?.track_id || item?.trackId,
             spotifyUri: uri || undefined,
@@ -2708,6 +2376,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         track_title: (cleanTitleForSearch || trackTitle) || undefined,
         track_artist: (cleanArtistForSearch || trackArtist) || undefined,
         spotify_uri: spotifyUri || undefined,
+        ytm_video_id: ytmVideoId || undefined,
+        preview_url: previewUrl || undefined,
+        audius_stream_url: audiusStreamUrl || undefined,
+        deezer_url: deezerUrl || undefined,
         target_player: targetPlayer,
         remember_default_player:
           typeof submittedTurnDecision.remember_default_player === 'boolean'
@@ -2771,6 +2443,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           track_title: (cleanTitleForSearch || trackTitle) || undefined,
           track_artist: (cleanArtistForSearch || trackArtist) || undefined,
           spotify_uri: spotifyUri || undefined,
+          ytm_video_id: ytmVideoId || undefined,
+          preview_url: previewUrl || undefined,
+          audius_stream_url: audiusStreamUrl || undefined,
+          deezer_url: deezerUrl || undefined,
           never_open_external_app: requestedNeverOpenExternal,
           suggested_bpm_target: 108
         },
@@ -2821,279 +2497,60 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       .trim();
   }
 
-  private async discoverSpotifyTracksForContext(
-    context: TuneMindTelemetryContext,
+  private async discoverTracksForContext(
     allUserTracks: Array<{ title: string; artist: string; trackId?: string; source?: string; playCount?: number }>,
     excludedSet: Set<string>,
     seedArtists: string[],
     moodQuery: string = '',
     excludeOverplayed: boolean = true,
     excludeExplicit: boolean = false
-  ): Promise<Array<{ title: string; artist: string; album: string; spotify_uri: string; popularity: number; source_reason: string }>> {
-    const discovered: Array<{ title: string; artist: string; album: string; spotify_uri: string; popularity: number; source_reason: string }> = [];
-    const strictExclusion = new Set<string>();
-    const addExcluded = (title?: string, uri?: string) => {
-      if (title) {
-        const lower = title.toLowerCase().trim();
-        const norm = ClaudeMusicReasoningProvider.normalizeForExclusion(title);
-        if (lower) strictExclusion.add(lower);
-        if (norm) strictExclusion.add(norm);
-      }
-      if (uri && uri.startsWith('spotify:track:')) {
-        strictExclusion.add(uri.trim());
-      }
+  ): Promise<Array<{
+    trackId: string;
+    title: string;
+    artist: string;
+    album: string;
+    genre: string;
+    popularity: number;
+    ytmVideoId?: string | null;
+    previewUrl?: string | null;
+    audiusStreamUrl?: string | null;
+    deezerUrl?: string | null;
+    source_reason: string;
+  }>> {
+    const excludeNorm = new Set<string>();
+    const addExcl = (t?: string) => {
+      if (!t) return;
+      const lower = t.toLowerCase().trim();
+      const norm = ClaudeMusicReasoningProvider.normalizeForExclusion(t);
+      if (lower) excludeNorm.add(lower);
+      if (norm) excludeNorm.add(norm);
     };
-
-    for (const e of excludedSet) {
-      if (e.startsWith('spotify:track:')) {
-        strictExclusion.add(e);
-      } else {
-        addExcluded(e);
-      }
-    }
+    for (const e of excludedSet) addExcl(e);
     if (excludeOverplayed) {
-      for (const ut of allUserTracks) {
-        addExcluded(ut.title, ut.trackId);
-      }
+      for (const ut of allUserTracks) addExcl(ut.title);
     }
 
-    const seedArtistIds: string[] = [];
-    const seedArtistNamesFromApi: string[] = [];
-    const token = await this.getSpotifyAccessToken(context.spotify_access_token);
-    const hasUserOAuth = Boolean(context.spotify_access_token && context.spotify_access_token.trim().length > 10);
+    const hits = await discoverOpenMusicRecommendations({
+      seedArtists,
+      moodQuery,
+      excludeExplicit,
+      offset: ClaudeMusicReasoningProvider.rotationIndex++,
+      excludeNormalizedTitles: excludeNorm
+    });
 
-    // 1. Pull user's daily/top/saved Spotify Web API listening history to STRICTLY EXCLUDE already-listened songs
-    if (hasUserOAuth && context.spotify_access_token) {
-      const oauth = context.spotify_access_token.trim();
-      const headers = { Authorization: `Bearer ${oauth}` };
-
-      try {
-        const recentRes = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=50', { headers });
-        if (recentRes.ok) {
-          const data = (await recentRes.json()) as any;
-          for (const entry of data?.items || []) {
-            const trk = entry?.track;
-            if (trk) {
-              addExcluded(trk.name, trk.uri);
-              for (const a of trk.artists || []) {
-                if (a?.id && !seedArtistIds.includes(a.id)) seedArtistIds.push(a.id);
-                if (a?.name && !seedArtistNamesFromApi.includes(a.name)) seedArtistNamesFromApi.push(a.name);
-              }
-            }
-          }
-        }
-      } catch {}
-
-      for (const range of ['short_term', 'medium_term', 'long_term'] as const) {
-        try {
-          const topRes = await fetch(`https://api.spotify.com/v1/me/top/tracks?time_range=${range}&limit=25`, { headers });
-          if (topRes.ok) {
-            const data = (await topRes.json()) as any;
-            for (const trk of data?.items || []) {
-              if (trk) {
-                addExcluded(trk.name, trk.uri);
-                for (const a of trk.artists || []) {
-                  if (a?.id && !seedArtistIds.includes(a.id)) seedArtistIds.push(a.id);
-                  if (a?.name && !seedArtistNamesFromApi.includes(a.name)) seedArtistNamesFromApi.push(a.name);
-                }
-              }
-            }
-          }
-        } catch {}
-      }
-
-      try {
-        const savedRes = await fetch('https://api.spotify.com/v1/me/tracks?limit=50', { headers });
-        if (savedRes.ok) {
-          const data = (await savedRes.json()) as any;
-          for (const entry of data?.items || []) {
-            const trk = entry?.track;
-            if (trk) addExcluded(trk.name, trk.uri);
-          }
-        }
-      } catch {}
-    }
-
-    const isUnheardCandidate = (title: string, uri: string, isExplicit: boolean = false): boolean => {
-      if (excludeExplicit && isExplicit) return false;
-      const lower = title.toLowerCase().trim();
-      const norm = ClaudeMusicReasoningProvider.normalizeForExclusion(title);
-      if (!lower || !uri || !uri.startsWith('spotify:track:')) return false;
-      if (strictExclusion.has(uri) || strictExclusion.has(lower) || (norm && strictExclusion.has(norm))) return false;
-      if (discovered.some(d => d.spotify_uri === uri || ClaudeMusicReasoningProvider.normalizeForExclusion(d.title) === norm)) {
-        return false;
-      }
-      return true;
-    };
-
-    // 2. If user asked for a specific mood/culture/genre/audience (e.g. "Kikuyu", "Kids", "Lullaby", "Bongo Flava"),
-    // run targeted catalog searches FIRST so generic seed-artist hits never drown out the requested vibe!
-    const cleanMood = moodQuery.trim();
-    const isKikuyuQuery = /\b(kikuyu|gikuyu|mugithi)\b/i.test(cleanMood);
-    const isKidsQuery = excludeExplicit || /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(cleanMood);
-    if (token && (cleanMood || isKidsQuery)) {
-      const moodQueries: Array<{ q: string; reason: string }> = isKikuyuQuery
-        ? [
-            { q: 'Kikuyu Mugithi Samidoh', reason: 'Authentic Kikuyu / Mugithi discovery matching your request' },
-            { q: 'Gikuyu Benga', reason: 'Fresh Kikuyu Benga track matching your request' },
-            { q: 'Kikuyu Gospel', reason: 'Kikuyu / Gikuyu catalog discovery matching your request' }
-          ]
-        : isKidsQuery
-        ? [
-            { q: cleanMood ? `${cleanMood} kids` : 'Super Simple Songs kids', reason: 'Kid-safe family music matching your request' },
-            { q: 'Cocomelon nursery rhymes', reason: 'Popular kid-friendly song on Spotify' },
-            { q: 'kids bedtime lullaby', reason: 'Gentle family-safe track for children' }
-          ]
-        : [{ q: cleanMood, reason: `Matches requested vibe: "${cleanMood}"` }];
-
-      for (const mq of moodQueries) {
-        try {
-          const res = await fetch(
-            `https://api.spotify.com/v1/search?q=${encodeURIComponent(mq.q)}&type=track&limit=10&offset=0`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (res.ok) {
-            const data = (await res.json()) as any;
-            for (const item of data?.tracks?.items || []) {
-              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist';
-              if (isUnheardCandidate(item.name || '', item.uri || '', Boolean(item.explicit))) {
-                discovered.push({
-                  title: item.name,
-                  artist: artistLabel,
-                  album: item.album?.name || '',
-                  spotify_uri: item.uri,
-                  popularity: Number(item.popularity || 55),
-                  source_reason: mq.reason
-                });
-              }
-              if (discovered.length >= 8) break;
-            }
-          }
-        } catch {}
-        if (discovered.length >= 8) break;
-      }
-    }
-
-    // 3. Resolve Spotify Artist IDs from user's seed artists if still needing candidates
-    if (token && discovered.length < 6) {
-      const mergedSeeds = Array.from(new Set([...seedArtists, ...seedArtistNamesFromApi])).slice(0, 3);
-      for (const artistName of mergedSeeds) {
-        if (seedArtistIds.length >= 4) break;
-        try {
-          const aRes = await fetch(
-            `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (aRes.ok) {
-            const aData = (await aRes.json()) as any;
-            const id = aData?.artists?.items?.[0]?.id;
-            if (id && !seedArtistIds.includes(id)) seedArtistIds.push(id);
-          }
-        } catch {}
-      }
-
-      const relatedArtists: Array<{ id: string; name: string }> = [];
-      for (const seedId of seedArtistIds.slice(0, 3)) {
-        try {
-          const relRes = await fetch(`https://api.spotify.com/v1/artists/${seedId}/related-artists`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (relRes.ok) {
-            const relData = (await relRes.json()) as any;
-            for (const rel of (relData?.artists || []).slice(0, 4)) {
-              if (rel?.id && rel?.name && !relatedArtists.some(r => r.id === rel.id)) {
-                relatedArtists.push({ id: rel.id, name: rel.name });
-              }
-            }
-          }
-        } catch {}
-      }
-
-      const marketParam = hasUserOAuth ? 'from_token' : 'US';
-      for (const rel of relatedArtists.slice(0, 5)) {
-        try {
-          const topRes = await fetch(
-            `https://api.spotify.com/v1/artists/${rel.id}/top-tracks?market=${marketParam}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (topRes.ok) {
-            const topData = (await topRes.json()) as any;
-            for (const item of topData?.tracks || []) {
-              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || rel.name;
-              if (isUnheardCandidate(item.name || '', item.uri || '')) {
-                discovered.push({
-                  title: item.name,
-                  artist: artistLabel,
-                  album: item.album?.name || '',
-                  spotify_uri: item.uri,
-                  popularity: Number(item.popularity || 55),
-                  source_reason: `Fresh discovery via artist kindred to your taste genome (${rel.name})`
-                });
-              }
-              if (discovered.length >= 6) break;
-            }
-          }
-        } catch {}
-        if (discovered.length >= 6) break;
-      }
-    }
-
-    // 3. Fallback / Mood Catalog Searches with rotating offset so every call yields novel unheard tracks
-    const queriesToRun: Array<{ q: string; reason: string }> = [];
-    if (moodQuery) {
-      queriesToRun.push({ q: moodQuery, reason: `Matches requested vibe: "${moodQuery}"` });
-    }
-    for (const artist of seedArtists.slice(0, 2)) {
-      queriesToRun.push({
-        q: artist,
-        reason: `Fresh adjacent discovery inspired by ${artist}`
-      });
-    }
-    if (queriesToRun.length === 0) {
-      queriesToRun.push(
-        { q: 'afrobeats chill new', reason: 'Fresh melodic Afrobeats discovery' },
-        { q: 'neo soul r&b groove', reason: 'Warm Neo-Soul discovery outside daily rotation' }
-      );
-    }
-
-    const searchOffset = (ClaudeMusicReasoningProvider.rotationIndex * 5) % 25;
-    if (token) {
-      for (const qItem of queriesToRun) {
-        try {
-          const res = await fetch(
-            `https://api.spotify.com/v1/search?q=${encodeURIComponent(qItem.q)}&type=track&limit=10&offset=${searchOffset}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (res.ok) {
-            const data = (await res.json()) as any;
-            for (const item of data?.tracks?.items || []) {
-              const artistLabel = item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist';
-              if (isUnheardCandidate(item.name || '', item.uri || '')) {
-                discovered.push({
-                  title: item.name,
-                  artist: artistLabel,
-                  album: item.album?.name || '',
-                  spotify_uri: item.uri,
-                  popularity: Number(item.popularity || 55),
-                  source_reason: qItem.reason
-                });
-              }
-              if (discovered.length >= 10) break;
-            }
-          }
-        } catch {}
-        if (discovered.length >= 10) break;
-      }
-    }
-
-    if (discovered.length > 1) {
-      const offset = ClaudeMusicReasoningProvider.rotationIndex % discovered.length;
-      ClaudeMusicReasoningProvider.rotationIndex++;
-      const rotated = [...discovered.slice(offset), ...discovered.slice(0, offset)];
-      discovered.splice(0, discovered.length, ...rotated);
-    }
-
-    return discovered;
+    return hits.map(h => ({
+      trackId: h.trackId,
+      title: h.title,
+      artist: h.artist,
+      album: h.album,
+      genre: h.genre,
+      popularity: h.popularity,
+      ytmVideoId: h.ytmVideoId,
+      previewUrl: h.previewUrl,
+      audiusStreamUrl: h.audiusStreamUrl,
+      deezerUrl: h.deezerUrl,
+      source_reason: h.source_reason
+    }));
   }
 
   /**
@@ -3112,8 +2569,8 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     const lowerMsg = userMsg.toLowerCase();
 
     let fallbackTrack: { title: string; artist: string; uri: string; trackId?: string } | null = null;
-    let liveSpotifyDiscovery: any[] = [];
-    let liveSpotifySearchHits: any[] = [];
+    let liveDiscovery: any[] = [];
+    let liveSearchHits: any[] = [];
 
     const wantsMostPlayed = /\b(most\s+(played|listened|heard)|listened\s+(to\s+)?(the\s+)?most|listen\s+(to\s+)?(the\s+)?most|played\s+(the\s+)?most|favorite\s+(song|track)|favourite\s+(song|track)|top\s+(song|track)|number\s+one\s+(song|track))\b/i.test(lowerMsg);
     const requestedGenreMatch = lowerMsg.match(/\b(kikuyu|gikuyu|mugithi|bongo\s*flava?|bongo|gengetone|ohangla|lingala|benga|gospel|afrobeats?|amapiano|reggae|dancehall|r&b|rnb|hip\s*hop|rap|jazz|rock|chill|lofi|lo-fi|upbeat|workout|romantic)\b/i);
@@ -3122,18 +2579,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
 
     if (wantsMostPlayed && mostPlayedTracks[0]) {
       const top = mostPlayedTracks[0];
-      let uri = normalizeSpotifyUri(top.spotifyUri || top.trackId) || '';
-      if (!uri) {
-        const resolved = await this.lookupSpotifyTrack(top.title, top.artist, context.spotify_access_token);
-        if (resolved) uri = resolved.uri;
-      }
       const topIdentity = resolveCanonicalTrackIdentity({
         trackId: top.trackId,
-        spotifyUri: uri,
         title: top.title,
         artist: top.artist
       });
-      fallbackTrack = { title: top.title, artist: top.artist, uri: topIdentity.spotifyUri || uri, trackId: topIdentity.trackId };
+      fallbackTrack = { title: top.title, artist: top.artist, uri: '', trackId: topIdentity.trackId };
     } else if (wantsDiscoveryOrNew) {
       const isKidsSingleShot = Boolean(
         context.kids_mode_enabled ||
@@ -3144,8 +2595,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         : requestedGenreMatch
         ? (/kikuyu|gikuyu|mugithi/i.test(requestedGenreMatch[1]) ? 'Kikuyu Mugithi Gikuyu' : requestedGenreMatch[1])
         : '';
-      liveSpotifyDiscovery = await this.discoverSpotifyTracksForContext(
-        context,
+      liveDiscovery = await this.discoverTracksForContext(
         allUserTracks,
         excludedSet,
         topUserArtists.slice(0, 3),
@@ -3153,23 +2603,18 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         true,
         isKidsSingleShot
       );
-      if (liveSpotifyDiscovery[0]) {
-        const discIdentity = resolveCanonicalTrackIdentity({
-          spotifyUri: liveSpotifyDiscovery[0].spotify_uri,
-          title: liveSpotifyDiscovery[0].title,
-          artist: liveSpotifyDiscovery[0].artist
-        });
+      if (liveDiscovery[0]) {
         fallbackTrack = {
-          title: liveSpotifyDiscovery[0].title,
-          artist: liveSpotifyDiscovery[0].artist,
-          uri: discIdentity.spotifyUri || liveSpotifyDiscovery[0].spotify_uri,
-          trackId: discIdentity.trackId
+          title: liveDiscovery[0].title,
+          artist: liveDiscovery[0].artist,
+          uri: '',
+          trackId: liveDiscovery[0].trackId
         };
       }
     } else if (explicitPlayMatch && explicitPlayMatch[1]) {
       const queryTarget = explicitPlayMatch[1]
         .replace(/^(?:for\s+me\s+|me\s+)/i, '')
-        .replace(/\b(?:right\s+now|now|please|on\s+spotify)\b/gi, '')
+        .replace(/\b(?:right\s+now|now|please|on\s+spotify|on\s+youtube\s+music|on\s+boomplay)\b/gi, '')
         .trim();
       const isGenericNonTitle = /^(?:a|an|any|some|random|good|nice|fresh|new)?\s*(?:song|songs|track|tracks|music|tune|anything|whatever)$/i.test(queryTarget);
       if (queryTarget.length >= 2 && !isGenericNonTitle) {
@@ -3177,24 +2622,18 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           context.kids_mode_enabled ||
           /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(lowerMsg)
         );
-        liveSpotifySearchHits = await this.searchSpotifyCatalogTracks(
+        liveSearchHits = await this.searchCatalogTracks(
           queryTarget,
           undefined,
           5,
-          context.spotify_access_token,
           isKidsSingle
         );
-        if (liveSpotifySearchHits[0]) {
-          const hitIdentity = resolveCanonicalTrackIdentity({
-            spotifyUri: liveSpotifySearchHits[0].uri,
-            title: liveSpotifySearchHits[0].title,
-            artist: liveSpotifySearchHits[0].artist
-          });
+        if (liveSearchHits[0]) {
           fallbackTrack = {
-            title: liveSpotifySearchHits[0].title,
-            artist: liveSpotifySearchHits[0].artist,
-            uri: hitIdentity.spotifyUri || liveSpotifySearchHits[0].uri,
-            trackId: hitIdentity.trackId
+            title: liveSearchHits[0].title,
+            artist: liveSearchHits[0].artist,
+            uri: '',
+            trackId: liveSearchHits[0].trackId
           };
         }
       }
@@ -3202,21 +2641,21 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
 
     const enrichedContext = {
       ...initialContextPayload,
-      pre_fetched_spotify_discovery_candidates: liveSpotifyDiscovery.slice(0, 5),
-      pre_fetched_spotify_catalog_search_results: liveSpotifySearchHits.slice(0, 4)
+      pre_fetched_discovery_candidates: liveDiscovery.slice(0, 5),
+      pre_fetched_catalog_search_results: liveSearchHits.slice(0, 4)
     };
 
     const jsonSystemPrompt = `Your name is TuneMind. You are an intelligent, warm, human-sounding, self-reasoning AI music companion, DJ, and full-app controller on Android powered by Anthropic Claude Sonnet 5.5.
 Reason naturally about what the user actually said and maintain clear, honest boundaries:
 1. IDENTITY, BOUNDARIES & CONVERSATION: You know your name is TuneMind! When the user greets you ("hi tunemind", "hello", "hey", "how are you", "who are you"), talks about their day/feelings, asks general questions, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly in your own natural words — never robotic templates, never pitch a song unprompted. Stay honest: never invent tracks, stats, or actions you didn't observe; if asked for out-of-scope tasks (medical/legal/financial advice, external APIs, purchasing), warmly decline and refocus on music.
-2. DISCOVERY, KIDS MODE & 2-STEP APPROVAL: Only when the user asks to play music, requests a genre/culture (e.g. Kikuyu/Gikuyu/Mugithi, Bongo Flava, Afrobeats, Kids/Cocomelon/Lullabies/Disney), or asks for a recommendation/most-played song, pick a matching real track from pre_fetched_spotify_discovery_candidates, search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want it played. If app_state.kids_mode_enabled is true or the user mentions kids/children/toddlers/family/clean/lullabies, choose strictly non-explicit ("explicit": false) age-appropriate songs. Never pick a track literally named "Any Song" unless the user explicitly asked for Zico.
+2. DISCOVERY, KIDS MODE & 2-STEP APPROVAL: Only when the user asks to play music, requests a genre/culture (e.g. Kikuyu/Gikuyu/Mugithi, Bongo Flava, Afrobeats, Kids/Cocomelon/Lullabies/Disney), or asks for a recommendation/most-played song, pick a matching real track from pre_fetched_discovery_candidates, search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want it played. If app_state.kids_mode_enabled is true or the user mentions kids/children/toddlers/family/clean/lullabies, choose strictly non-explicit ("explicit": false) age-appropriate songs. Never pick a track literally named "Any Song" unless the user explicitly asked for Zico.
 3. APPROVAL vs. REJECTION OF PENDING TRACK:
    - ONLY if pending_proposed_track_awaiting_user_approval is present AND the user clearly approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that exact pending track.
    - If pending_proposed_track_awaiting_user_approval is present AND the user declines ("no", "I don't want that song", "don't play it", "cancel", "pass", "not that one"), NEVER return PLAY_TRACK_NOW! Use "action": "ADVISE_ONLY" with empty track fields (or propose a different alternative with "PROPOSE_TRACK" if they asked for another song).
-4. TUNEMIND-OWNED VOICE PLAYLISTS (STORED IN TUNEMIND, NEVER SPOTIFY):
-   - All TuneMind playlists live exclusively in TuneMind's own playlist vault/screen (context.tunemind_playlists) and play through Spotify or the user's chosen default music app. NEVER tell the user you are creating a playlist in Spotify!
-   - When the user says "add this/current song to a new playlist" without giving a name yet -> ask conversationally what name they'd like using "action": "ADVISE_ONLY", "expect_follow_up": true (music stays paused cleanly while negotiating!).
-   - Once you have a playlist name -> "CREATE_TUNEMIND_PLAYLIST" (new curated/single-song playlist, optionally set "open_playlist_screen": true) or "ADD_TO_TUNEMIND_PLAYLIST" (adds track(s) or current song to existing TuneMind playlist). Include "playlist_name", "playlist_tracks": [{"title": "...", "artist": "..."}]!
+4. TUNEMIND-OWNED VOICE PLAYLISTS:
+   - All TuneMind playlists live permanently inside TuneMind (context.tunemind_playlists) and play via TuneMind's Hybrid player or the user's chosen music app.
+   - When the user says "add this/current song to a new playlist" without giving a name yet -> ask conversationally what name they'd like using "action": "ADVISE_ONLY", "expect_follow_up": true.
+   - Once you have a playlist name -> "CREATE_TUNEMIND_PLAYLIST" or "ADD_TO_TUNEMIND_PLAYLIST" with "playlist_name" and "playlist_tracks".
    - Play an existing TuneMind playlist -> "PLAY_TUNEMIND_PLAYLIST" with "playlist_name".
 5. FULL APP & PLAYBACK CONTROLS (inspect app_state):
    - Accent color -> "SET_THEME_COLOR" ("custom_accent_hex": "#00FFA3" | "#FF2A85" | "#A855F7" | "#00E5FF" | "#FF9400" | "#3B82F6" | "AUTO")
@@ -3224,8 +2663,8 @@ Reason naturally about what the user actually said and maintain clear, honest bo
    - Toggles -> "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE"
    - Queue tracks up next -> "QUEUE_TRACKS" ("queue_tracks": [{"title": "...", "artist": "..."}])
    - Sleep timer -> "SET_SLEEP_TIMER" ("sleep_timer_minutes": N or 0 to cancel)
-   - If user says "without opening Spotify" / "don't leave TuneMind" OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true and NEVER say you will open Spotify UI!
-   - Screens -> "OPEN_SETTINGS" or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS")
+   - If user asks to play without opening an external app OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true.
+   - Screens -> "OPEN_SETTINGS" or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
    - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
    - Optionally include "extra_actions": [...] to combine actions in one turn.
 
@@ -3237,7 +2676,7 @@ Respond ONLY with a single valid JSON object:
   "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
-  "spotify_uri": "",
+  "track_id": "",
   "playlist_name": "",
   "playlist_description": "",
   "mood_or_audience": "",
@@ -3259,7 +2698,7 @@ Respond ONLY with a single valid JSON object:
   "expect_follow_up": true
 }`;
 
-    const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, app_state, conversation history, tunemind_playlists, and Spotify data, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
+    const userPromptContent = `Reason over the user's spoken message ("${userMsg}") using this live telemetry, app_state, cross_app_library, conversation history, and tunemind_playlists, and output ONLY the JSON object:\n${JSON.stringify(enrichedContext)}`;
 
     try {
       const claudeRes = await this.callClaudeWithSonnetPriority(jsonSystemPrompt, userPromptContent, 950);
@@ -3291,7 +2730,7 @@ Respond ONLY with a single valid JSON object:
   ): Promise<TuneMindReasoningResponse> {
     const userCommandRaw = (context.user_command || '').trim();
     const userCommandLower = userCommandRaw.toLowerCase();
-    const targetPlayer = context.current_track?.source_player || 'com.spotify.music';
+    const targetPlayer = context.current_track?.source_player || 'unknown_player';
     const userId = SupabaseIntelligenceStore.normalizeUserId(context.user_id, context.user_email);
     const pending = ClaudeMusicReasoningProvider.getPendingProposedTrack(userId);
     const fallbackNeverOpenExternal = Boolean(
@@ -3314,26 +2753,38 @@ Respond ONLY with a single valid JSON object:
             .filter(Boolean)
         )
       ).slice(0, 3);
-      const discovered = await this.discoverSpotifyTracksForContext(
-        context,
+      const discovered = await this.discoverTracksForContext(
         allUserTracks,
         excluded,
         seedArtists,
         '',
         true
       );
-      const chosen: { title: string; artist: string; uri: string; trackId?: string } = discovered[0]
+      const chosen: {
+        title: string;
+        artist: string;
+        uri: string;
+        trackId?: string;
+        ytmVideoId?: string | null;
+        previewUrl?: string | null;
+        audiusStreamUrl?: string | null;
+        deezerUrl?: string | null;
+      } = discovered[0]
         ? {
             title: discovered[0].title,
             artist: discovered[0].artist,
-            uri: normalizeSpotifyUri(discovered[0].spotify_uri) || '',
-            trackId: undefined
+            uri: '',
+            trackId: discovered[0].trackId,
+            ytmVideoId: discovered[0].ytmVideoId,
+            previewUrl: discovered[0].previewUrl,
+            audiusStreamUrl: discovered[0].audiusStreamUrl,
+            deezerUrl: discovered[0].deezerUrl
           }
         : freshTracks[0]
         ? {
             title: freshTracks[0].title,
             artist: freshTracks[0].artist,
-            uri: normalizeSpotifyUri(freshTracks[0].spotifyUri || freshTracks[0].trackId) || '',
+            uri: '',
             trackId: freshTracks[0].trackId
           }
         : {
@@ -3342,19 +2793,24 @@ Respond ONLY with a single valid JSON object:
             uri: '',
             trackId: undefined
           };
-      if (!chosen.uri && chosen.title) {
-        const resolved = await this.lookupSpotifyTrack(chosen.title, chosen.artist, context.spotify_access_token);
-        if (resolved) chosen.uri = resolved.uri;
+      if (chosen.title && !chosen.ytmVideoId && !chosen.previewUrl) {
+        const resolved = await this.lookupOpenCatalogTrack(chosen.title, chosen.artist);
+        if (resolved) {
+          chosen.trackId = chosen.trackId || resolved.trackId;
+          chosen.ytmVideoId = resolved.ytmVideoId;
+          chosen.previewUrl = resolved.previewUrl;
+          chosen.audiusStreamUrl = resolved.audiusStreamUrl;
+          chosen.deezerUrl = resolved.deezerUrl;
+        }
       }
       const cleanTitle = ClaudeMusicReasoningProvider.sanitizeTrackTitle(chosen.title) || chosen.title;
       const cleanArtist = ClaudeMusicReasoningProvider.sanitizeArtistName(chosen.artist) || chosen.artist;
       const chosenIdentity = resolveCanonicalTrackIdentity({
         trackId: chosen.trackId,
-        spotifyUri: chosen.uri,
         title: cleanTitle,
         artist: cleanArtist
       });
-      const resolvedUri = chosenIdentity.spotifyUri || normalizeSpotifyUri(chosen.uri) || undefined;
+      const resolvedUri = undefined;
       const artistPart = cleanArtist && cleanArtist !== 'Unknown Artist' ? ` by ${cleanArtist}` : '';
       eventStore.recordAgentTrackAction(cleanTitle);
       return {
@@ -3608,15 +3064,15 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    if (/\b(strict\s+mode|strict\s+never\s+leave|never\s+leave\s+tunemind|never\s+open\s+spotify\s+mode)\b/i.test(userCommandLower)) {
+    if (/\b(strict\s+mode|strict\s+never\s+leave|never\s+leave\s+tunemind|never\s+open\s+(?:spotify|external)\s+mode)\b/i.test(userCommandLower)) {
       const enableStrict = !/\b(off|disable|stop)\b/i.test(userCommandLower);
       return {
         calculated_satiety_percentage: 24,
         reasoning_mode: 'DIRECT_EXECUTION',
         flow_state_analysis: `Strict Never-Leave-TuneMind mode set to ${enableStrict ? 'ON' : 'OFF'}.`,
         voice_agent_tts: enableStrict
-          ? 'Strict Never-Leave-TuneMind mode is now ON. I will never switch away to Spotify or any external player.'
-          : 'Strict mode is now OFF. Smart remote playback and automatic return remain active.',
+          ? 'Strict Never-Leave-TuneMind mode is now ON. I will play local files, Audius streams, previews, or background sessions without switching away.'
+          : 'Strict mode is now OFF. Hybrid in-app playback and external player handoff remain active.',
         agent_tool_call: {
           action: 'TOGGLE_STRICT_NO_APP_SWITCH',
           strict_no_app_switch_enabled: enableStrict,
@@ -3632,9 +3088,9 @@ Respond ONLY with a single valid JSON object:
       return {
         calculated_satiety_percentage: 24,
         reasoning_mode: 'DIRECT_EXECUTION',
-        flow_state_analysis: `Stay-in-TuneMind mode set to ${enableStay ? 'ON' : 'OFF'}.`,
+        flow_state_analysis: `Stay-in-TuneMind Hybrid mode set to ${enableStay ? 'ON' : 'OFF'}.`,
         voice_agent_tts: enableStay
-          ? 'Stay-in-TuneMind mode is ON so Spotify plays without pulling you out of TuneMind.'
+          ? 'Hybrid Stay-in-TuneMind mode is ON so TuneMind prioritizes in-app and background playback first.'
           : 'Stay-in-TuneMind mode is now OFF.',
         agent_tool_call: {
           action: 'TOGGLE_STAY_IN_TUNEMIND',
@@ -3732,21 +3188,15 @@ Respond ONLY with a single valid JSON object:
       if (topTrack) {
         const identity = resolveCanonicalTrackIdentity({
           trackId: topTrack.trackId,
-          spotifyUri: (topTrack as any).spotifyUri,
           title: topTrack.title,
           artist: topTrack.artist
         });
-        let uri = identity.spotifyUri || '';
-        if (!uri) {
-          const resolved = await this.lookupSpotifyTrack(topTrack.title, topTrack.artist, context.spotify_access_token);
-          if (resolved) uri = resolved.uri;
-        }
+        const uri = '';
         ClaudeMusicReasoningProvider.setPendingProposedTrack(
           {
             title: topTrack.title,
             artist: topTrack.artist,
             trackId: identity.trackId,
-            spotifyUri: uri || undefined,
             source: targetPlayer
           },
           userId
@@ -3843,9 +3293,9 @@ Respond ONLY with a single valid JSON object:
     let chosen: { title: string; artist: string; trackId?: string; spotifyUri?: string; source?: string } | null = null;
 
     if (explicitlyNamedQuery) {
-      const hits = await this.searchSpotifyCatalogTracks(explicitlyNamedQuery, undefined, 4, context.spotify_access_token);
+      const hits = await this.searchCatalogTracks(explicitlyNamedQuery, undefined, 4);
       if (hits[0]) {
-        chosen = { title: hits[0].title, artist: hits[0].artist, spotifyUri: hits[0].uri, source: targetPlayer };
+        chosen = { title: hits[0].title, artist: hits[0].artist, trackId: hits[0].trackId, source: targetPlayer };
       } else if (matchedExplicitLibraryTrack) {
         chosen = matchedExplicitLibraryTrack;
       }
@@ -3855,8 +3305,7 @@ Respond ONLY with a single valid JSON object:
       const requestedMoodQuery = genreMatch
         ? (/kikuyu|gikuyu|mugithi/i.test(genreMatch[1]) ? 'Kikuyu Mugithi Gikuyu' : genreMatch[1])
         : '';
-      const discovered = await this.discoverSpotifyTracksForContext(
-        context,
+      const discovered = await this.discoverTracksForContext(
         allUserTracks,
         excludedTitlesSet,
         topArtistsForFallback,
@@ -3867,7 +3316,7 @@ Respond ONLY with a single valid JSON object:
         chosen = {
           title: discovered[0].title,
           artist: discovered[0].artist,
-          spotifyUri: discovered[0].spotify_uri,
+          trackId: discovered[0].trackId,
           source: targetPlayer
         };
       }
@@ -3884,25 +3333,19 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    let spotifyUri = normalizeSpotifyUri(chosen.spotifyUri || chosen.trackId) || '';
-    if (!spotifyUri && chosen.title) {
-      const resolved = await this.lookupSpotifyTrack(chosen.title, chosen.artist, context.spotify_access_token);
-      if (resolved) spotifyUri = resolved.uri;
-    }
+    const chosenProfile = chosen.title ? await this.lookupOpenCatalogTrack(chosen.title, chosen.artist) : null;
     const chosenIdentity = resolveCanonicalTrackIdentity({
-      trackId: chosen.trackId,
-      spotifyUri: spotifyUri || chosen.spotifyUri,
+      trackId: chosen.trackId || chosenProfile?.trackId,
       title: chosen.title,
       artist: chosen.artist
     });
-    const resolvedSpotifyUri = spotifyUri || chosenIdentity.spotifyUri || '';
+    const resolvedSpotifyUri = '';
 
     ClaudeMusicReasoningProvider.setPendingProposedTrack(
       {
         title: chosen.title,
         artist: chosen.artist,
         trackId: chosenIdentity.trackId,
-        spotifyUri: resolvedSpotifyUri || undefined,
         source: chosen.source || targetPlayer,
         never_open_external_app: fallbackNeverOpenExternal
       },
@@ -4055,7 +3498,7 @@ Respond ONLY with a valid JSON object matching this schema:
         : [];
 
       return {
-        reportId: uuidv4(),
+        reportId: crypto.randomUUID(),
         userId: context.userId,
         generatedAt: new Date().toISOString(),
         analyzedEventCount: stats.totalPlayEvents + stats.totalSkipEvents,
@@ -4164,7 +3607,7 @@ Respond ONLY with a valid JSON object matching this schema:
     ];
 
     return {
-      reportId: uuidv4(),
+      reportId: crypto.randomUUID(),
       userId: context.userId,
       generatedAt: new Date().toISOString(),
       analyzedEventCount: stats.totalPlayEvents + stats.totalSkipEvents,
@@ -4216,7 +3659,7 @@ Respond ONLY with a valid JSON object matching this schema:
       try {
         const prompt = `Real-time User Music Telemetry:
 - Time Slot: ${payload.timeSlot || 'Active Session'}
-- Primary Source: ${payload.topSourceApp || 'Spotify'}
+- Primary Source: ${payload.topSourceApp || 'Cross-App Audio'}
 - Now Playing: ${payload.nowPlaying ? `"${payload.nowPlaying.title}" by ${payload.nowPlaying.artist}` : 'Standby'}
 - Recent Tracks: ${(payload.recentTracks || []).map(t => `${t.title} - ${t.artist}`).join(', ')}
 
@@ -4415,7 +3858,7 @@ Respond ONLY with a JSON array:
         artist: typeof currentPlaying === 'object' ? (currentPlaying?.artist || '') : '',
         trackId: typeof currentPlaying === 'object' ? (currentPlaying?.trackId || undefined) : undefined,
         spotifyUri: typeof currentPlaying === 'object' ? (currentPlaying?.spotifyUri || undefined) : undefined,
-        source_player: 'com.spotify.music'
+        source_player: typeof currentPlaying === 'object' ? (currentPlaying?.source_player || currentPlaying?.source || 'unknown_player') : 'unknown_player'
       },
       user_command: query,
       rolling_history: Array.isArray(tracks)
@@ -4432,7 +3875,7 @@ Respond ONLY with a JSON array:
               trackId: identity.trackId,
               spotifyUri: identity.spotifyUri,
               playCount: coerceNonNegativePlayCount(t.playCount ?? t.distinctAppearanceCount ?? 0),
-              source_player: 'com.spotify.music'
+              source_player: t.source_player || t.source || 'unknown_player'
             };
           })
         : [],

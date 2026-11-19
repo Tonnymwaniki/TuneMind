@@ -56,14 +56,14 @@ data class TuneMindPlaylistTrackEntity(
     @ColumnInfo(name = "artist")
     val artist: String = "",
 
-    @ColumnInfo(name = "spotify_uri")
-    val spotifyUri: String = "",
+    @ColumnInfo(name = "external_uri")
+    val externalUri: String = "",
 
     @ColumnInfo(name = "track_id")
     val trackId: String = "",
 
     @ColumnInfo(name = "source_player")
-    val sourcePlayer: String = "com.spotify.music",
+    val sourcePlayer: String = "unknown_player",
 
     @ColumnInfo(name = "position_index")
     val positionIndex: Int = 0,

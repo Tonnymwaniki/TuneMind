@@ -32,7 +32,7 @@ export interface SatietyEvaluationRequest {
   tracks: TrackHistoryTelemetryItem[]; // Last 50 tracks from Android Room DB
 }
 
-export interface SpotifyPlaybackToolArgs {
+export interface CrossAppPlaybackToolArgs {
   command: 'skip_track' | 'play_playlist' | 'change_genre' | 'pause' | 'resume' | 'maintain';
   target_uri?: string;
   search_query?: string;
@@ -49,8 +49,8 @@ export interface NotificationToolArgs {
 }
 
 export interface AgentToolInvocation {
-  tool_name: 'SpotifyPlaybackTool' | 'NotificationTool';
-  arguments: SpotifyPlaybackToolArgs | NotificationToolArgs;
+  tool_name: 'CrossAppPlaybackTool' | 'NotificationTool';
+  arguments: CrossAppPlaybackToolArgs | NotificationToolArgs;
 }
 
 export interface SatietyDecisionOutput {
@@ -77,9 +77,9 @@ export interface SatietyDecisionOutput {
 
 export const AGENTIC_TOOL_DEFINITIONS: Anthropic.Tool[] = [
   {
-    name: 'SpotifyPlaybackTool',
+    name: 'CrossAppPlaybackTool',
     description:
-      'Executes OS-level Spotify playback interventions on the Android device (via Spotify App Remote SDK / MediaSession / Deep-Link Intent) when listener satiety or acoustic fatigue is detected.',
+      'Executes OS-level cross-app playback interventions on the Android device (via TuneMind In-App Hybrid Player, active MediaSession TransportControls, or precision Deep-Link Intent) when listener satiety or acoustic fatigue is detected.',
     input_schema: {
       type: 'object',
       properties: {
@@ -87,12 +87,12 @@ export const AGENTIC_TOOL_DEFINITIONS: Anthropic.Tool[] = [
           type: 'string',
           enum: ['skip_track', 'play_playlist', 'change_genre', 'pause', 'resume', 'maintain'],
           description:
-            'The playback command to execute on the Android device without requiring user interaction.'
+            'The playback command to execute across the active or preferred music player.'
         },
         target_uri: {
           type: 'string',
           description:
-            'Optional Spotify URI to launch (e.g. "spotify:track:..." or "spotify:playlist:37i9dQZF1DX4sWSpwq3LiO").'
+            'Optional direct track/media URI or YouTube Music watch URL.'
         },
         search_query: {
           type: 'string',
@@ -297,9 +297,9 @@ DECISION TREE RULES:
 MANDATORY TOOL INVOCATION:
 You MUST invoke all three tools in your response:
 1. 'EmitSatietyDecision': Output the structured {"state": "fatigued|focused", "action": "change_genre|skip_track|maintain", "satiety_score": 0..100, "reasoning": "..."} decision.
-2. 'SpotifyPlaybackTool':
-   - If "action" == "skip_track", set command="skip_track" (or "play_playlist" with a fresh track/URI).
-   - If "action" == "change_genre", set command="change_genre" and provide a fresh 'search_query' and 'target_uri' from the listener's low-satiety tracks or a palate-cleansing Spotify playlist URI.
+2. 'CrossAppPlaybackTool':
+   - If "action" == "skip_track", set command="skip_track" (or "play_playlist" with a fresh query).
+   - If "action" == "change_genre", set command="change_genre" and provide a fresh 'search_query' from the listener's low-satiety tracks or a palate-cleansing query.
    - If "action" == "maintain", set command="maintain".
 3. 'NotificationTool':
    - Update the TuneMind Android Orb UI ('orb_state': "FATIGUE_ALERT" if fatigued else "FLOW_LOCKED").`;
@@ -379,15 +379,15 @@ You MUST invoke all three tools in your response:
 
         if (response && Array.isArray(response.content)) {
           let decisionBlock: any = null;
-          let playbackToolCall: SpotifyPlaybackToolArgs | null = null;
+          let playbackToolCall: CrossAppPlaybackToolArgs | null = null;
           let notificationToolCall: NotificationToolArgs | null = null;
 
           for (const block of response.content) {
             if (block.type === 'tool_use') {
               if (block.name === 'EmitSatietyDecision') {
                 decisionBlock = block.input;
-              } else if (block.name === 'SpotifyPlaybackTool') {
-                playbackToolCall = block.input as SpotifyPlaybackToolArgs;
+              } else if (block.name === 'CrossAppPlaybackTool' || block.name === 'SpotifyPlaybackTool') {
+                playbackToolCall = block.input as CrossAppPlaybackToolArgs;
               } else if (block.name === 'NotificationTool') {
                 notificationToolCall = block.input as NotificationToolArgs;
               }
@@ -427,12 +427,11 @@ You MUST invoke all three tools in your response:
               ? `${metrics.fresh_candidate.track_title} ${metrics.fresh_candidate.artist_name}`.trim()
               : 'Afro Acoustic Chill';
 
-            const finalPlaybackArgs: SpotifyPlaybackToolArgs = playbackToolCall || {
+            const finalPlaybackArgs: CrossAppPlaybackToolArgs = playbackToolCall || {
               command: action === 'maintain' ? 'maintain' : action,
               target_uri:
                 decisionBlock?.recommended_uri ||
-                normalizeSpotifyUri(metrics.fresh_candidate?.spotify_uri || metrics.fresh_candidate?.track_id) ||
-                'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO',
+                normalizeSpotifyUri(metrics.fresh_candidate?.spotify_uri || metrics.fresh_candidate?.track_id),
               search_query: decisionBlock?.recommended_query || fallbackQuery,
               target_genre: decisionBlock?.target_genre || 'Acoustic Flow',
               rationale: reasoning
@@ -458,7 +457,7 @@ You MUST invoke all three tools in your response:
               recommended_query: finalPlaybackArgs.search_query,
               target_genre: finalPlaybackArgs.target_genre,
               tool_calls: [
-                { tool_name: 'SpotifyPlaybackTool', arguments: finalPlaybackArgs },
+                { tool_name: 'CrossAppPlaybackTool', arguments: finalPlaybackArgs },
                 { tool_name: 'NotificationTool', arguments: finalNotificationArgs }
               ],
               telemetry_metrics: {
@@ -516,9 +515,7 @@ You MUST invoke all three tools in your response:
     const recommendedQuery = freshTrack
       ? `${freshTrack.track_title} ${freshTrack.artist_name}`.trim()
       : 'Chill Afro Acoustic Reset';
-    const recommendedUri =
-      normalizeSpotifyUri(freshTrack?.spotify_uri || freshTrack?.track_id) ||
-      'spotify:playlist:37i9dQZF1DX4sWSpwq3LiO';
+    const recommendedUri = normalizeSpotifyUri(freshTrack?.spotify_uri || freshTrack?.track_id);
 
     const reasoning =
       action === 'change_genre'
@@ -537,7 +534,7 @@ You MUST invoke all three tools in your response:
       target_genre: action === 'change_genre' ? 'Fresh Dopamine Reset' : undefined,
       tool_calls: [
         {
-          tool_name: 'SpotifyPlaybackTool',
+          tool_name: 'CrossAppPlaybackTool',
           arguments: {
             command: action === 'maintain' ? 'maintain' : action,
             target_uri: recommendedUri,

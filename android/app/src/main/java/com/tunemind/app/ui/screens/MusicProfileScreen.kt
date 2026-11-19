@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,11 +45,14 @@ fun MusicProfileScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val stats by vm.listeningStats.collectAsState()
     val userProfile by vm.userProfile.collectAsState()
     val tasteAnchors by vm.userTasteAnchors.collectAsState()
-    val spotifyProfile by vm.spotifyUserProfile.collectAsState()
     val tasteShifts by vm.tasteShiftSummary.collectAsState()
+    val authSession by remember(context) {
+        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context).sessionFlow
+    }.collectAsState()
     val theme = LocalAdaptiveTheme.current
 
     val monitoredHours = formatListeningDuration(stats.allTimeListeningMs)
@@ -127,7 +131,7 @@ fun MusicProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SpotifyAvatarCircle(
-                            imageUrl = spotifyProfile?.avatarUrl.orEmpty(),
+                            imageUrl = authSession?.avatarUrl.orEmpty(),
                             fallbackInitial = userProfile.name.ifEmpty { "T" },
                             size = 56.dp,
                             accentColor = theme.primaryAccent
@@ -219,7 +223,7 @@ fun MusicProfileScreen(
                             color = Color(0xFFF8FAFC)
                         )
                         Text(
-                            text = "Spotify Remote, players & permissions",
+                            text = "Hybrid mode, players & permissions",
                             fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.56f)
                         )
@@ -307,7 +311,7 @@ fun MusicProfileScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 if (tasteShifts.topGenres.isNotEmpty()) {
-                    StudioSectionHeader(title = "Spotify Genre DNA")
+                    StudioSectionHeader(title = "Genre DNA")
                     Spacer(modifier = Modifier.height(10.dp))
                     tasteShifts.topGenres.take(5).forEach { weight ->
                         Column(
@@ -370,7 +374,7 @@ fun MusicProfileScreen(
                                 )
                                 val genreLine = artistInsight.genres.take(2)
                                     .joinToString(" · ") { g -> g.replaceFirstChar { it.uppercase() } }
-                                    .ifBlank { "Recent Spotify favorite" }
+                                    .ifBlank { "Frequent favorite" }
                                 Text(
                                     text = genreLine,
                                     fontSize = 12.sp,

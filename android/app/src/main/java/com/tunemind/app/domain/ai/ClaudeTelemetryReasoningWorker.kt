@@ -57,7 +57,7 @@ class ClaudeTelemetryReasoningWorker(
             val latestTrackMeta = observations.firstOrNull { !it.trackTitle.isNullOrBlank() }
             val topSourcePackage = latestStateObs?.sourcePackage
                 ?: latestTrackMeta?.sourcePackage
-                ?: "com.spotify.music"
+                ?: "unknown_player"
             val topSourceApp = topSourcePackage.substringAfterLast(".").replaceFirstChar { it.uppercase() }
 
             val isPlayingNow = latestStateObs?.playbackStateCode == 3

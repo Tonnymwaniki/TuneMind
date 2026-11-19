@@ -1,6 +1,7 @@
 package com.tunemind.app.domain.memory
 
-import com.tunemind.app.data.ingestion.SpotifyListeningHistoryEntity
+import com.tunemind.app.data.local.CrossAppPlayLogEntity
+import com.tunemind.app.data.local.CrossAppTrackEntity
 import com.tunemind.app.domain.model.PlaybackObservation
 import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.vault.RestingVaultEngine
@@ -185,14 +186,22 @@ object ListeningPlayDeduplicator {
             pkg.contains("spotify") -> "Spotify"
             pkg.contains("youtube.music") -> "YouTube Music"
             pkg.contains("boomplay") -> "Boomplay"
-            pkg.contains("apple") -> "Apple Music"
             pkg.contains("audiomack") -> "Audiomack"
             pkg.contains("soundcloud") -> "SoundCloud"
             pkg.contains("deezer") -> "Deezer"
             pkg.contains("tidal") -> "Tidal"
+            pkg.contains("amazon.mp3") -> "Amazon Music"
+            pkg.contains("sec.android.app.music") -> "Samsung Music"
+            pkg.contains("miui.player") -> "Xiaomi Music"
+            pkg.contains("huawei.music") -> "Huawei Music"
+            pkg.contains("larkplayer") -> "Lark Player"
+            pkg.contains("anghami") -> "Anghami"
+            pkg.contains("jio.media") -> "JioSaavn"
+            pkg.contains("gaana") -> "Gaana"
             pkg.contains("tunemind") -> "TuneMind"
-            pkg.contains("phonograph") || pkg.contains("retro") || pkg.contains("vlc") || pkg.contains("musicolet") -> "Local Player"
-            pkg.isBlank() -> "Music App"
+            pkg.contains("phonograph") || pkg.contains("retro") || pkg.contains("vlc") ||
+                pkg.contains("musicolet") || pkg.contains("maxmpz") || pkg.contains("piyush") -> "Phone Audio"
+            pkg.isBlank() || pkg == "unknown_player" -> "Music App"
             else -> packageName!!.substringAfterLast(".").replaceFirstChar { it.uppercase() }
         }
     }
@@ -228,7 +237,8 @@ object ListeningPlayDeduplicator {
 
     fun buildSnapshot(
         rawObservations: List<PlaybackObservation>,
-        spotifyHistory: List<SpotifyListeningHistoryEntity>,
+        crossAppTracks: List<CrossAppTrackEntity> = emptyList(),
+        crossAppLogs: List<CrossAppPlayLogEntity> = emptyList(),
         nowPlayingTitle: String?,
         nowPlayingArtist: String?,
         nowPlayingSourcePkg: String?,
@@ -242,7 +252,7 @@ object ListeningPlayDeduplicator {
         restoredAtByKey: Map<String, Long> = emptyMap(),
         activeVaultFreshnessByKey: Map<String, Int> = emptyMap()
     ): DeduplicatedListeningSnapshot {
-        // 1. Reconstruct genuine plays from raw MediaSession observations (ignoring mirrored spotify_web_api_ingestion rows & browser clutter)
+        // 1. Reconstruct genuine plays from raw MediaSession observations (ignoring legacy spotify_web_api_ingestion rows & browser clutter)
         val filteredObs = rawObservations
             .filter {
                 it.observerSessionId != "spotify_web_api_ingestion" &&
@@ -259,7 +269,7 @@ object ListeningPlayDeduplicator {
         for (obs in filteredObs) {
             val title = obs.trackTitle?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             val artist = obs.trackArtist?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown Artist"
-            val pkg = obs.sourcePackage?.trim()?.takeIf { it.isNotEmpty() } ?: "com.spotify.music"
+            val pkg = obs.sourcePackage?.trim()?.takeIf { it.isNotEmpty() } ?: "unknown_player"
             val key = canonicalTrackKey(title, artist)
             val prev = currentBySource[pkg]
 
@@ -426,49 +436,48 @@ object ListeningPlayDeduplicator {
             )
         }
 
-        // 2. Gather verified Spotify Web API plays (strictly ignore legacy CURRENTLY_PLAYING poll spam and synthetic TOP_TRACKS; keep RECENTLY_PLAYED)
-        val verifiedSpotifyRows = spotifyHistory
-            .filter { it.ingestionSource == "RECENTLY_PLAYED" && it.trackTitle.isNotBlank() }
-            .sortedByDescending { it.playedAtEpochMs }
+        val libraryByKey = crossAppTracks.associateBy { canonicalTrackKey(it.title, it.artist) }
 
+        // 2. Seed permanent cross-app play logs across ALL music apps (never pruned!)
         val mergedEvents = mutableListOf<UnifiedPlayEvent>()
 
-        // Collapse any duplicate Spotify RECENTLY_PLAYED items that fall within 4 mins when mergeDuplicatePlays is enabled
-        for (row in verifiedSpotifyRows) {
-            val key = canonicalTrackKey(row.trackTitle, row.artistName)
+        for (row in crossAppLogs.filter { it.title.isNotBlank() }.sortedByDescending { it.playedAtMs }) {
+            val key = canonicalTrackKey(row.title, row.artist)
+            val rowPkg = row.sourcePackage.ifBlank { "unknown_player" }
             val alreadyNear = mergeDuplicatePlays && mergedEvents.any { existing ->
-                existing.sourcePackage == "com.spotify.music" &&
-                    isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.trackTitle, row.artistName, row.spotifyUri) &&
-                    kotlin.math.abs(existing.playedAtMs - row.playedAtEpochMs) <= MERGE_WINDOW_MS
+                existing.sourcePackage == rowPkg &&
+                    isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.title, row.artist, null) &&
+                    kotlin.math.abs(existing.playedAtMs - row.playedAtMs) <= MERGE_WINDOW_MS
             }
             if (alreadyNear) continue
 
-            val durMs = row.durationMs.takeIf { it > 0L } ?: 195_000L
-            val rowIdentity = TrackIdentityResolver.resolveCanonicalIdentity(
+            val durMs = row.trackDurationMs.takeIf { it > 0L } ?: 195_000L
+            val libRow = libraryByKey[key]
+            val resolvedId = TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = row.trackId,
-                spotifyUri = row.spotifyUri,
-                title = row.trackTitle,
-                artist = row.artistName
+                spotifyUri = null,
+                title = row.title,
+                artist = row.artist
             )
             mergedEvents += UnifiedPlayEvent(
-                playId = "sp_${row.historyId}",
+                playId = "calog_${row.playLogId}",
                 trackKey = key,
-                title = row.trackTitle.trim(),
-                artist = row.artistName.trim().ifBlank { "Unknown Artist" },
-                album = row.albumName.trim().takeIf { it.isNotEmpty() },
-                albumArtUrl = row.albumArtUrl,
-                spotifyUri = rowIdentity.spotifyUri,
-                sourcePackage = "com.spotify.music",
-                appDisplayName = "Spotify",
-                playedAtMs = row.playedAtEpochMs,
+                title = row.title.trim(),
+                artist = row.artist.trim().ifBlank { "Unknown Artist" },
+                album = row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
+                albumArtUrl = libRow?.albumArtUrl,
+                spotifyUri = null,
+                sourcePackage = rowPkg,
+                appDisplayName = resolveAppDisplayName(rowPkg),
+                playedAtMs = row.playedAtMs,
                 durationMs = durMs,
-                listenedMs = durMs,
+                listenedMs = row.listenedMs.coerceAtLeast(1_000L).coerceAtMost(durMs),
                 isNowPlaying = false,
-                trackId = rowIdentity.trackId
+                trackId = resolvedId
             )
         }
 
-        // Merge local device plays without double counting any Spotify play already synced within ±4 minutes
+        // Merge live OS event_queue segments without double counting permanent log entries within ±4 mins
         for (localEvent in localPlayEvents) {
             val matchingIdx = if (mergeDuplicatePlays) {
                 mergedEvents.indexOfFirst { existing ->
@@ -481,7 +490,6 @@ object ListeningPlayDeduplicator {
                 val existing = mergedEvents[matchingIdx]
                 mergedEvents[matchingIdx] = existing.copy(
                     album = existing.album ?: localEvent.album,
-                    spotifyUri = existing.spotifyUri ?: localEvent.spotifyUri,
                     listenedMs = maxOf(existing.listenedMs, localEvent.listenedMs)
                 )
             } else {
@@ -528,6 +536,7 @@ object ListeningPlayDeduplicator {
                     title = nowPlayingTitle,
                     artist = nowPlayingArtist
                 )
+                val effPkg = nowPlayingSourcePkg?.takeIf { it.isNotBlank() } ?: "unknown_player"
                 finalTimeline.add(
                     0,
                     UnifiedPlayEvent(
@@ -536,10 +545,10 @@ object ListeningPlayDeduplicator {
                         title = nowPlayingTitle.trim(),
                         artist = nowPlayingArtist?.trim()?.ifBlank { "Unknown Artist" } ?: "Unknown Artist",
                         album = knownMatch?.album,
-                        albumArtUrl = knownMatch?.albumArtUrl,
+                        albumArtUrl = knownMatch?.albumArtUrl ?: libraryByKey[activeKey]?.albumArtUrl,
                         spotifyUri = resolvedLiveIdentity.spotifyUri,
-                        sourcePackage = nowPlayingSourcePkg?.takeIf { it.isNotBlank() } ?: "com.spotify.music",
-                        appDisplayName = resolveAppDisplayName(nowPlayingSourcePkg ?: "com.spotify.music"),
+                        sourcePackage = effPkg,
+                        appDisplayName = resolveAppDisplayName(effPkg),
                         playedAtMs = nowMs,
                         durationMs = resolvedDur,
                         listenedMs = resolvedListened,
@@ -551,9 +560,9 @@ object ListeningPlayDeduplicator {
         }
 
         // 3. Aggregate per-track strict statistics (SINGLE SOURCE OF TRUTH for Play Counts everywhere)
-        val artMap = spotifyHistory
+        val artMap = crossAppTracks
             .filter { !it.albumArtUrl.isNullOrBlank() }
-            .associate { canonicalTrackKey(it.trackTitle, it.artistName) to it.albumArtUrl }
+            .associate { canonicalTrackKey(it.title, it.artist) to it.albumArtUrl }
 
         val sensitivity = repetitionSensitivity.coerceIn(0.2f, 1.0f)
 

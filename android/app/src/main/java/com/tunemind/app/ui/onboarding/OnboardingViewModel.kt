@@ -31,7 +31,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         if (!session.hasCompletedAccountOnboarding) {
             return OnboardingStep.AUTH_LOGIN
         }
-        val isReturningUser = session.isLoggedIn || session.isSpotifyConnected || session.hasCompletedStartFlow
+        val isReturningUser = session.isLoggedIn || session.hasCompletedStartFlow
         return if (isReturningUser) {
             if (session.hasCompletedStartFlow && PermissionUtils.hasMicrophonePermission(app)) {
                 OnboardingStep.COMPLETE

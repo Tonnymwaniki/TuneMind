@@ -31,7 +31,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.domain.voice.PendingProposedTrack
-import com.tunemind.app.provider.SpotifyAppRemoteManager
+import com.tunemind.app.provider.MusicPlayerAutoLauncher
 import com.tunemind.app.provider.TuneMindInAppPlayer
 import com.tunemind.app.ui.DopamineCapsuleState
 import com.tunemind.app.ui.TuneMindViewModel
@@ -61,7 +61,6 @@ fun NowPlayingSheet(
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
     val homeState by vm.homeState.collectAsState()
-    val liveSpotify by vm.spotifyLiveState.collectAsState()
     val vaultState by vm.vaultState.collectAsState()
     val unifiedTracks by vm.unifiedTracks.collectAsState()
     val manualFreshTracks by vm.manualFreshTracks.collectAsState()
@@ -75,6 +74,9 @@ fun NowPlayingSheet(
     val inAppArtist by TuneMindInAppPlayer.currentArtistFlow.collectAsState()
     val inAppPosMs by TuneMindInAppPlayer.positionMsFlow.collectAsState()
     val inAppDurMs by TuneMindInAppPlayer.durationMsFlow.collectAsState()
+    val inAppIsPreview by TuneMindInAppPlayer.isPreviewFlow.collectAsState()
+    val inAppFallbackPkg by TuneMindInAppPlayer.externalPlayerPackageFlow.collectAsState()
+    val inAppFallbackName by TuneMindInAppPlayer.externalPlayerNameFlow.collectAsState()
 
     val effectiveUpNext = remember(upNextQueueState, dopamineCapsule) {
         if (upNextQueueState.tracks.isNotEmpty()) upNextQueueState else dopamineCapsule
@@ -118,13 +120,9 @@ fun NowPlayingSheet(
     }
 
     val sourceLabel = when {
-        isInAppCurrent -> "TuneMind Built-In Player"
-        nowPlaying?.sourcePackage?.contains("spotify", ignoreCase = true) == true -> "Spotify"
-        nowPlaying?.sourcePackage?.contains("youtube", ignoreCase = true) == true -> "YouTube Music"
-        nowPlaying?.sourcePackage?.contains("boomplay", ignoreCase = true) == true -> "Boomplay"
-        nowPlaying?.sourcePackage?.contains("apple", ignoreCase = true) == true -> "Apple Music"
-        nowPlaying?.sourcePackage?.contains("audiomack", ignoreCase = true) == true -> "Audiomack"
-        nowPlaying?.sourcePackage?.isNotBlank() == true -> nowPlaying.sourcePackage.substringAfterLast(".").replaceFirstChar { it.uppercase() }
+        isInAppCurrent -> if (inAppIsPreview) "TuneMind 30s Preview" else "TuneMind Built-In Player"
+        nowPlaying?.sourcePackage?.isNotBlank() == true ->
+            com.tunemind.app.data.local.CrossAppPlayRecorder.resolveFriendlyPlayerName(nowPlaying.sourcePackage)
         else -> "Playback Queue"
     }
 
@@ -138,22 +136,10 @@ fun NowPlayingSheet(
     val warnAmber = Color(0xFFF59E0B)
 
     val hasTrack = effectiveTitle != "Nothing Playing"
-    val matchedLiveSpotify = remember(liveSpotify, effectiveTitle, effectiveArtist, hasTrack) {
-        if (!hasTrack) null
-        else liveSpotify?.takeIf { sp ->
-            com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
-                effectiveTitle, effectiveArtist, null,
-                sp.title, sp.artistOrShow, sp.spotifyUri
-            )
-        }
-    }
-    val activeSpotifyUri = matchedLiveSpotify?.spotifyUri ?: nowPlaying?.spotifyUri
     val activeMedia = if (hasTrack) {
         rememberResolvedTrackMedia(
             title = effectiveTitle,
-            artist = effectiveArtist,
-            spotifyUri = activeSpotifyUri,
-            fallbackAlbumArtUrl = matchedLiveSpotify?.albumArtUrl
+            artist = effectiveArtist
         )
     } else null
     val durationSafe = effectiveDurationMs.coerceAtLeast(1L)
@@ -333,14 +319,14 @@ fun NowPlayingSheet(
             val currentVaultStatus = remember(
                 effectiveTitle,
                 effectiveArtist,
-                activeSpotifyUri,
+                nowPlaying?.trackId,
                 vaultState,
                 manualFreshTracks,
                 freshExcludedKeys,
                 hasTrack
             ) {
                 if (hasTrack) {
-                    vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, activeSpotifyUri, nowPlaying?.trackId)
+                    vm.resolveTrackVaultStatus(effectiveTitle, effectiveArtist, null, nowPlaying?.trackId)
                 } else {
                     com.tunemind.app.ui.TrackVaultUiStatus()
                 }
@@ -350,13 +336,12 @@ fun NowPlayingSheet(
                 Spacer(modifier = Modifier.height(8.dp))
                 val currentCanonicalTrackId = remember(
                     nowPlaying?.trackId,
-                    activeSpotifyUri,
                     effectiveTitle,
                     effectiveArtist
                 ) {
                     TrackIdentityResolver.resolveCanonicalTrackId(
                         trackId = nowPlaying?.trackId,
-                        spotifyUri = activeSpotifyUri,
+                        spotifyUri = null,
                         title = effectiveTitle,
                         artist = effectiveArtist
                     )
@@ -364,14 +349,13 @@ fun NowPlayingSheet(
                 val currentPlayCount = remember(
                     effectiveTitle,
                     effectiveArtist,
-                    activeSpotifyUri,
                     currentCanonicalTrackId,
                     unifiedTracks
                 ) {
                     vm.resolvePlayCount(
                         title = effectiveTitle,
                         artist = effectiveArtist,
-                        spotifyUri = activeSpotifyUri,
+                        spotifyUri = null,
                         trackId = currentCanonicalTrackId
                     )
                 }
@@ -483,6 +467,32 @@ fun NowPlayingSheet(
                 }
             }
 
+            if (isInAppCurrent && inAppIsPreview && hasTrack) {
+                Spacer(modifier = Modifier.height(10.dp))
+                val targetAppName = inAppFallbackName?.takeIf { it.isNotBlank() } ?: "External Player"
+                val targetAppPkg = inAppFallbackPkg ?: selectedTargetPlayer.takeIf { it.isNotBlank() }
+                OutlinedButton(
+                    onClick = {
+                        MusicPlayerAutoLauncher.openFullTrackExternally(
+                            context = context,
+                            title = effectiveTitle,
+                            artist = effectiveArtist,
+                            packageName = targetAppPkg,
+                            displayName = targetAppName
+                        )
+                    },
+                    shape = RoundedCornerShape(24.dp),
+                    border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.55f))
+                ) {
+                    Text(
+                        text = "Open full track in $targetAppName",
+                        color = neonCyan,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
             if (!displayActionStatus.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
@@ -506,7 +516,7 @@ fun NowPlayingSheet(
                 val trackVaultStatus = vm.resolveTrackVaultStatus(
                     effectiveTitle,
                     effectiveArtist,
-                    activeSpotifyUri,
+                    null,
                     nowPlaying?.trackId
                 )
                 Row(
@@ -527,13 +537,13 @@ fun NowPlayingSheet(
                                     title = effectiveTitle,
                                     artist = effectiveArtist,
                                     sourcePackage = nowPlaying?.sourcePackage,
-                                    spotifyUri = activeSpotifyUri,
+                                    spotifyUri = null,
                                     trackId = nowPlaying?.trackId
                                 )
                                 val afterStatus = vm.resolveTrackVaultStatus(
                                     effectiveTitle,
                                     effectiveArtist,
-                                    activeSpotifyUri,
+                                    null,
                                     nowPlaying?.trackId
                                 )
                                 val durHint = afterStatus.cooldownRemainingLabel?.let { " ($it)" }.orEmpty()
@@ -552,7 +562,7 @@ fun NowPlayingSheet(
                                 vm.removeFromFresh(
                                     title = effectiveTitle,
                                     artist = effectiveArtist,
-                                    spotifyUri = activeSpotifyUri,
+                                    spotifyUri = null,
                                     trackId = nowPlaying?.trackId
                                 )
                                 actionStatus = "Removed \"$effectiveTitle\" from Fresh"
@@ -561,7 +571,7 @@ fun NowPlayingSheet(
                                     title = effectiveTitle,
                                     artist = effectiveArtist,
                                     sourcePackage = nowPlaying?.sourcePackage,
-                                    spotifyUri = activeSpotifyUri,
+                                    spotifyUri = null,
                                     trackId = nowPlaying?.trackId,
                                     albumArtUrl = activeMedia?.albumArtUrl
                                 )
