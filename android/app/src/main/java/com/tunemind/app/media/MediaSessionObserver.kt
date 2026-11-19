@@ -362,9 +362,14 @@ class MediaSessionObserver(
     fun playFromMediaId(targetPackage: String?, mediaId: String, extras: android.os.Bundle? = null): Boolean {
         return try {
             refreshSessions()
-            val entry = controllers.values.firstOrNull { entry ->
-                targetPackage == null || entry.controller.packageName == targetPackage
-            } ?: controllers.values.firstOrNull() ?: return false
+            val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+            val entry = if (cleanPkg != null) {
+                controllers.values.firstOrNull { candidate ->
+                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                } ?: return false
+            } else {
+                controllers.values.firstOrNull() ?: return false
+            }
 
             val tc = entry.controller.transportControls ?: return false
             tc.playFromMediaId(mediaId, extras)
@@ -378,9 +383,14 @@ class MediaSessionObserver(
     fun playFromUri(targetPackage: String?, uri: android.net.Uri, extras: android.os.Bundle? = null): Boolean {
         return try {
             refreshSessions()
-            val entry = controllers.values.firstOrNull { entry ->
-                targetPackage == null || entry.controller.packageName == targetPackage
-            } ?: controllers.values.firstOrNull() ?: return false
+            val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+            val entry = if (cleanPkg != null) {
+                controllers.values.firstOrNull { candidate ->
+                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                } ?: return false
+            } else {
+                controllers.values.firstOrNull() ?: return false
+            }
 
             val tc = entry.controller.transportControls ?: return false
             tc.playFromUri(uri, extras)

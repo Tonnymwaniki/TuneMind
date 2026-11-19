@@ -122,4 +122,29 @@ class ProviderModelTest {
             )
         )
     }
+
+    @Test
+    fun testSpotifyTrackUriExtractionFromSonglinkOrUri() {
+        val fromUrl = MusicPlayerAutoLauncher.extractSpotifyTrackUri(
+            candidateUri = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=abc123"
+        )
+        assertEquals("spotify:track:4cOdK2wGLETKBW3PvgPWqT", fromUrl)
+
+        val fromResolved = MusicPlayerAutoLauncher.extractSpotifyTrackUri(
+            candidateUri = "https://www.deezer.com/track/12345",
+            resolvedLinks = ResolvedPlayableLinks(
+                canonicalTrackKey = "k",
+                trackId = "t",
+                cleanTitle = "Song",
+                cleanArtist = "Artist",
+                spotifyUri = "spotify:track:4iV5W9uYEdYUVa79Axb7Rh"
+            )
+        )
+        assertEquals("spotify:track:4iV5W9uYEdYUVa79Axb7Rh", fromResolved)
+
+        val searchOnly = MusicPlayerAutoLauncher.extractSpotifyTrackUri(
+            candidateUri = "https://open.spotify.com/search/Calm%20Down"
+        )
+        assertNull(searchOnly)
+    }
 }

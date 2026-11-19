@@ -484,10 +484,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     title = resolvedTitle,
                     artist = resolvedArtist
                 )
+                val isSpotifyTarget = finalPackageName.contains("spotify", ignoreCase = true)
                 val explicitDeepLink = when {
                     !openResolved?.ytmVideoId.isNullOrBlank() && finalPackageName.contains("youtube", ignoreCase = true) ->
                         "https://music.youtube.com/watch?v=${openResolved!!.ytmVideoId}"
-                    !openResolved?.deezerUrl.isNullOrBlank() -> openResolved!!.deezerUrl
+                    isSpotifyTarget && !openResolved?.spotifyUri.isNullOrBlank() -> openResolved!!.spotifyUri
+                    isSpotifyTarget && !spotifyUri.isNullOrBlank() && spotifyUri.contains("spotify", ignoreCase = true) ->
+                        spotifyUri.trim()
+                    isSpotifyTarget && !openResolved?.spotifyUrl.isNullOrBlank() -> openResolved!!.spotifyUrl
+                    !isSpotifyTarget && !openResolved?.deezerUrl.isNullOrBlank() -> openResolved!!.deezerUrl
                     !spotifyUri.isNullOrBlank() && spotifyUri.startsWith("http", ignoreCase = true) -> spotifyUri.trim()
                     else -> null
                 }

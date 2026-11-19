@@ -19,6 +19,8 @@ export interface UniversalTrackProfile {
   audiusStreamUrl: string | null;
   ytmVideoId: string | null;
   deezerUrl: string | null;
+  spotifyUri: string | null;
+  spotifyUrl: string | null;
   source: 'deezer' | 'itunes' | 'audius' | 'lastfm' | 'mixed';
   resolvedAtMs: number;
 }
@@ -61,6 +63,7 @@ const AUDIUS_HOST_TTL_MS = 30 * 60 * 1000;
 
 const trackProfileCache = new Map<string, CachedEntry<UniversalTrackProfile | null>>();
 const ytmVideoCache = new Map<string, CachedEntry<string | null>>();
+const songlinkSpotifyCache = new Map<string, CachedEntry<{ spotifyUri: string | null; spotifyUrl: string | null }>>();
 const catalogSearchCache = new Map<string, CachedEntry<OpenCatalogSearchResult>>();
 const lastFmTagsCache = new Map<string, CachedEntry<string[]>>();
 let cachedAudiusHost: CachedEntry<string | null> | null = null;
@@ -395,6 +398,51 @@ export async function resolveYouTubeMusicVideoId(rawTitle: string, rawArtist: st
   return videoId;
 }
 
+export async function resolveSpotifyUriViaSonglink(
+  sourceUrls: Array<string | null | undefined>
+): Promise<{ spotifyUri: string | null; spotifyUrl: string | null }> {
+  const candidates = sourceUrls
+    .map(u => String(u || '').trim())
+    .filter(u => u.startsWith('http'));
+  if (candidates.length === 0) {
+    return { spotifyUri: null, spotifyUrl: null };
+  }
+
+  const now = Date.now();
+  for (const sourceUrl of candidates) {
+    const cached = songlinkSpotifyCache.get(sourceUrl);
+    if (cached && cached.expiresAtMs > now) {
+      if (cached.value.spotifyUri || cached.value.spotifyUrl) {
+        return cached.value;
+      }
+      continue;
+    }
+
+    const data = await fetchJsonWithTimeout(
+      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(sourceUrl)}`,
+      3200
+    );
+    const spUrlRaw: string | null = data?.linksByPlatform?.spotify?.url
+      ? String(data.linksByPlatform.spotify.url).trim()
+      : null;
+    const match = spUrlRaw ? /\/track\/([A-Za-z0-9]{22})/i.exec(spUrlRaw) : null;
+    const spotifyUri = match ? `spotify:track:${match[1]}` : null;
+    const spotifyUrl = match ? `https://open.spotify.com/track/${match[1]}` : spUrlRaw;
+    const result = { spotifyUri, spotifyUrl };
+
+    songlinkSpotifyCache.set(sourceUrl, {
+      value: result,
+      expiresAtMs: now + (spotifyUri || spotifyUrl ? YTM_CACHE_TTL_MS : NEGATIVE_CACHE_TTL_MS)
+    });
+    trimMapIfNeeded(songlinkSpotifyCache, 2500);
+    if (spotifyUri || spotifyUrl) {
+      return result;
+    }
+  }
+
+  return { spotifyUri: null, spotifyUrl: null };
+}
+
 export async function resolveUniversalTrackProfile(
   rawTitle: string,
   rawArtist: string
@@ -445,6 +493,12 @@ export async function resolveUniversalTrackProfile(
   ).slice(0, 4);
 
   const sourcesUsed = [dz ? 'deezer' : '', it ? 'itunes' : '', au ? 'audius' : ''].filter(Boolean);
+  const ytmWatchUrl = ytmVideoId ? `https://music.youtube.com/watch?v=${ytmVideoId}` : null;
+  const { spotifyUri, spotifyUrl } = await resolveSpotifyUriViaSonglink([
+    dz?.deezerUrl || null,
+    ytmWatchUrl
+  ]);
+
   const profile: UniversalTrackProfile = {
     trackId: canonical.trackId,
     trackKey: key,
@@ -461,6 +515,8 @@ export async function resolveUniversalTrackProfile(
     audiusStreamUrl: au?.audiusStreamUrl || null,
     ytmVideoId,
     deezerUrl: dz?.deezerUrl || null,
+    spotifyUri,
+    spotifyUrl,
     source: sourcesUsed.length > 1 ? 'mixed' : ((sourcesUsed[0] as UniversalTrackProfile['source']) || 'deezer'),
     resolvedAtMs: now
   };

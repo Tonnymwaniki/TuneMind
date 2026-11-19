@@ -1108,7 +1108,9 @@ HYBRID IN-APP & AUDIENCE-GATED STAY-IN-TUNEMIND ARCHITECTURE:
     - If they reply allowing YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
     - If they instead say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
 - QUICK RETURN POLICY FOR EXTERNAL PLAYERS (SPOTIFY, BOOMPLAY, AUDIOMACK, DEEZER, SOUNDCLOUD):
-  - When TuneMind launches an external app from cold state, TuneMind immediately shows an unmistakable Heads-Up **"Back to TuneMind"** banner at the top as soon as playback starts so one tap returns straight to TuneMind while the song keeps playing. Android OS blocks apps from forcing themselves back over another app automatically without special overlay permissions. Whenever the external app is already warm/running in the background, TuneMind tries silent MediaSession switching with zero screen switch first.
+  - When TuneMind launches an external app from cold state, TuneMind immediately posts a Heads-Up **"Back to TuneMind"** banner (updating once playback starts — and offering a 1-tap **"Play in TuneMind"** recovery banner if the external app stays paused or on Search!). Android OS blocks apps from forcing themselves back over another app automatically without special overlay permissions.
+  - Whenever an external player is already warm/running in the background, TuneMind tries silent MediaSession switching ('playFromUri' / 'playFromSearch') with zero screen switch first.
+  - If a user reports Spotify only opened Search or refused to auto-play: explain clearly that cold Spotify (or Spotify Free mobile) often restricts outside intents to Search/paused track view — starting any song in Spotify once enables warm switching, or they can tap **"Play in TuneMind"** / allow TuneMind's Built-In YouTube player to stream full songs seamlessly inside TuneMind without leaving!
 
 FULL APP-WIDE CONTROL ACTIONS:
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
@@ -2115,7 +2117,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
               lower.includes(p.id.toLowerCase())
           );
           if (matched) return matched.package_name || matched.id;
-          if (lower.includes('boomplay')) return 'com.afmobi.boomplayer';
+          if (lower.includes('boomplay')) return 'com.afmobi.boomplaymusic';
           if (
             lower.includes('youtube music') ||
             lower.includes('yt music') ||

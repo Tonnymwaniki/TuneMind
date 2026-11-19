@@ -24,13 +24,14 @@ class BoomplayMusicProvider : MusicProvider {
         ProviderCapability.CAN_REPORT_PLAYBACK
     )
 
-    override fun isInstalled(context: Context): Boolean {
-        return try {
-            context.packageManager.getPackageInfo(packageName, 0)
-            true
-        } catch (_: Exception) {
-            false
+    override fun isInstalled(context: Context): Boolean = resolveInstalledPackage(context) != null
+
+    private fun resolveInstalledPackage(context: Context): String? {
+        for (pkg in BOOMPLAY_PACKAGE_CANDIDATES) {
+            val found = runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
+            if (found) return pkg
         }
+        return null
     }
 
     override fun resolveTrack(track: RecommendedTrack): TrackMatch {
@@ -55,7 +56,8 @@ class BoomplayMusicProvider : MusicProvider {
         val query = match.searchQuery
         val webUrl = match.webFallbackUrl ?: "https://www.boomplay.com/search/${Uri.encode(query)}"
 
-        if (!isInstalled(context)) {
+        val installedPkg = resolveInstalledPackage(context)
+        if (installedPkg == null) {
             return try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -89,7 +91,7 @@ class BoomplayMusicProvider : MusicProvider {
             context = context,
             providerId = providerId,
             displayName = displayName,
-            packageName = packageName,
+            packageName = installedPkg,
             track = track,
             query = query,
             deepLinkUri = match.deepLinkUri,
@@ -100,5 +102,10 @@ class BoomplayMusicProvider : MusicProvider {
     companion object {
         const val PROVIDER_ID = "boomplay"
         const val BOOMPLAY_PACKAGE = "com.afmobi.boomplaymusic"
+        private val BOOMPLAY_PACKAGE_CANDIDATES = listOf(
+            "com.afmobi.boomplaymusic",
+            "com.afmobi.boomplay",
+            "com.boomplay.music"
+        )
     }
 }

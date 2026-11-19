@@ -47,6 +47,16 @@ import kotlinx.coroutines.withContext
 open class MainActivity : ComponentActivity() {
 
     private var startupError: Throwable? = null
+    private val pendingRecoveryBundleFlow =
+        kotlinx.coroutines.flow.MutableStateFlow<Bundle?>(null)
+
+    private fun captureRecoveryIntent(intent: Intent?) {
+        if (intent?.action == com.tunemind.app.provider.MusicPlayerAutoLauncher.ACTION_RECOVER_PLAYBACK_IN_TUNEMIND) {
+            val extras = intent.extras ?: return
+            pendingRecoveryBundleFlow.value = Bundle(extras)
+            intent.action = Intent.ACTION_MAIN
+        }
+    }
 
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,6 +65,7 @@ open class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
         AppHolder.context = applicationContext
+        captureRecoveryIntent(intent)
 
         var isInitializationComplete by mutableStateOf(false)
 
@@ -608,6 +619,17 @@ open class MainActivity : ComponentActivity() {
                         hasCompletedAccountGate &&
                         hasAllPermissions
 
+                    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) {
+                        playerPrefs.edit().putBoolean("prompted_post_notifications", true).apply()
+                    }
+
+                    var stalledRecoveryAttempt by remember {
+                        mutableStateOf<com.tunemind.app.provider.MusicPlayerAutoLauncher.StalledPlaybackAttempt?>(null)
+                    }
+                    val pendingRecoveryBundle by pendingRecoveryBundleFlow.collectAsState()
+
                     LaunchedEffect(isMainAppActive) {
                         if (!isMainAppActive) {
                             showSettingsScreen = false
@@ -625,9 +647,43 @@ open class MainActivity : ComponentActivity() {
                             orchestrator.stop()
                         } else {
                             orchestrator.start()
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                !PermissionUtils.hasPostNotificationsPermission(context) &&
+                                !playerPrefs.getBoolean("prompted_post_notifications", false)
+                            ) {
+                                playerPrefs.edit().putBoolean("prompted_post_notifications", true).apply()
+                                runCatching {
+                                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
                         }
                         agentVoiceManager.setForegroundActive(isMainAppActive)
                         vm.setUiForegroundActive(isMainAppActive)
+                    }
+
+                    LaunchedEffect(isMainAppActive, pendingRecoveryBundle) {
+                        val bundle = pendingRecoveryBundle ?: return@LaunchedEffect
+                        if (!isMainAppActive) return@LaunchedEffect
+                        pendingRecoveryBundleFlow.value = null
+                        stalledRecoveryAttempt = null
+                        com.tunemind.app.provider.MusicPlayerAutoLauncher.cancelReturnNotification(context)
+                        val rTitle = bundle.getString(com.tunemind.app.provider.MusicPlayerAutoLauncher.EXTRA_RECOVER_TITLE).orEmpty()
+                        val rArtist = bundle.getString(com.tunemind.app.provider.MusicPlayerAutoLauncher.EXTRA_RECOVER_ARTIST).orEmpty()
+                        val rPlayerName = bundle.getString(com.tunemind.app.provider.MusicPlayerAutoLauncher.EXTRA_RECOVER_PLAYER_NAME).orEmpty().ifBlank { "External player" }
+                        if (rTitle.isNotBlank()) {
+                            val recoverTargetPkg = if (com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)) {
+                                com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE
+                            } else {
+                                com.tunemind.app.provider.TuneMindInAppProvider.PROVIDER_ID
+                            }
+                            agentVoiceManager.playTrackImmediatelyWithVoice(
+                                title = rTitle,
+                                artist = rArtist,
+                                targetPlayer = recoverTargetPkg,
+                                customSpokenLine = "$rPlayerName stayed paused, so I'm playing $rTitle right here inside TuneMind.",
+                                neverOpenExternalApp = true
+                            )
+                        }
                     }
 
                     DisposableEffect(lifecycleOwner, agentVoiceManager, orchestrator, isMainAppActive) {
@@ -638,6 +694,11 @@ open class MainActivity : ComponentActivity() {
                                         orchestrator.start()
                                         agentVoiceManager.setForegroundActive(true)
                                         vm.setUiForegroundActive(true)
+                                        com.tunemind.app.provider.MusicPlayerAutoLauncher
+                                            .consumeFreshStalledPlaybackAttempt()
+                                            ?.let { stalled ->
+                                                stalledRecoveryAttempt = stalled
+                                            }
                                     }
                                 }
                                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
@@ -1158,6 +1219,77 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
 
+                                val activeStalled = stalledRecoveryAttempt
+                                if (!hasOverlayOpen && currentFeedback == null && activeStalled != null) {
+                                    LaunchedEffect(activeStalled) {
+                                        kotlinx.coroutines.delay(14_000L)
+                                        if (stalledRecoveryAttempt === activeStalled) {
+                                            stalledRecoveryAttempt = null
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = Color(0xFF20180E),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            Color(0xFFF59E0B).copy(alpha = 0.72f)
+                                        ),
+                                        modifier = Modifier
+                                            .align(Alignment.TopCenter)
+                                            .statusBarsPadding()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                                            .fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = "${activeStalled.playerDisplayName} stayed paused or on Search for '${activeStalled.title}'. Play right inside TuneMind instead?",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                lineHeight = 16.sp
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Button(
+                                                    onClick = {
+                                                        val recovered = activeStalled
+                                                        stalledRecoveryAttempt = null
+                                                        val recoverPkg = if (com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)) {
+                                                            com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE
+                                                        } else {
+                                                            com.tunemind.app.provider.TuneMindInAppProvider.PROVIDER_ID
+                                                        }
+                                                        agentVoiceManager.playTrackImmediatelyWithVoice(
+                                                            title = recovered.title,
+                                                            artist = recovered.artist,
+                                                            targetPlayer = recoverPkg,
+                                                            customSpokenLine = "Playing ${recovered.title} right here inside TuneMind.",
+                                                            neverOpenExternalApp = true
+                                                        )
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        "Play Inside TuneMind",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.Black
+                                                    )
+                                                }
+                                                TextButton(
+                                                    onClick = { stalledRecoveryAttempt = null },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Dismiss", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
                                 val currentFeedbackMsg = libraryActionFeedback
                                 if (!currentFeedbackMsg.isNullOrBlank()) {
                                     LaunchedEffect(currentFeedbackMsg) {
@@ -1486,6 +1618,7 @@ open class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        captureRecoveryIntent(intent)
     }
 
     override fun onResume() {
