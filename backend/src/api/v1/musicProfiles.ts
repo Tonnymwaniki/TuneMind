@@ -38,6 +38,7 @@ export interface OpenCatalogTrackHit {
   audiusStreamUrl: string | null;
   ytmVideoId: string | null;
   deezerUrl: string | null;
+  itunesUrl?: string | null;
   albumArtUrl: string | null;
   artistImageUrl: string | null;
   source: string;
@@ -289,6 +290,7 @@ async function searchItunesTracks(
         audiusStreamUrl: null,
         ytmVideoId: null,
         deezerUrl: null,
+        itunesUrl: typeof item.trackViewUrl === 'string' && item.trackViewUrl.startsWith('http') ? item.trackViewUrl : null,
         albumArtUrl: highResArt,
         artistImageUrl: null,
         source: 'itunes'
@@ -496,6 +498,7 @@ export async function resolveUniversalTrackProfile(
   const ytmWatchUrl = ytmVideoId ? `https://music.youtube.com/watch?v=${ytmVideoId}` : null;
   const { spotifyUri, spotifyUrl } = await resolveSpotifyUriViaSonglink([
     dz?.deezerUrl || null,
+    it?.itunesUrl || null,
     ytmWatchUrl
   ]);
 

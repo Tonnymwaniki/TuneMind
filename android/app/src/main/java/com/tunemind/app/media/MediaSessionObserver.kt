@@ -114,6 +114,7 @@ class MediaSessionObserver(
     }
 
     fun isPlaying(targetPackage: String? = null): Boolean {
+        refreshSessions()
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         return controllers.values.any { entry ->
             val pkgOk = cleanPkg == null ||
@@ -122,22 +123,45 @@ class MediaSessionObserver(
         }
     }
 
+    fun isPlayingOrBuffering(targetPackage: String? = null): Boolean {
+        refreshSessions()
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
+        return controllers.values.any { entry ->
+            val pkgOk = cleanPkg == null ||
+                sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
+            val state = entry.controller.playbackState?.state
+            pkgOk && (
+                state == android.media.session.PlaybackState.STATE_PLAYING ||
+                    state == android.media.session.PlaybackState.STATE_BUFFERING ||
+                    state == android.media.session.PlaybackState.STATE_CONNECTING
+                )
+        }
+    }
+
     fun hasActiveSession(targetPackage: String? = null): Boolean {
         refreshSessions()
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         return controllers.values.any { entry ->
-            targetPackage == null || entry.controller.packageName == targetPackage
+            cleanPkg == null || sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
         }
     }
 
     fun getActiveTitle(targetPackage: String? = null): String? {
+        refreshSessions()
         val entries = orderedEntries()
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
-        val entry = entries.firstOrNull { e ->
-            (cleanPkg == null || sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true) &&
+        val entry = if (cleanPkg != null) {
+            entries.firstOrNull { e ->
+                sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true &&
+                    e.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            } ?: entries.firstOrNull { e ->
+                sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true
+            }
+        } else {
+            entries.firstOrNull { e ->
                 e.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-        } ?: entries.firstOrNull { e ->
-            cleanPkg == null || sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true
-        } ?: entries.firstOrNull() ?: return null
+            } ?: entries.firstOrNull()
+        } ?: return null
         return entry.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
     }
 

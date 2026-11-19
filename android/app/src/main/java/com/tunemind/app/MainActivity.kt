@@ -694,11 +694,17 @@ open class MainActivity : ComponentActivity() {
                                         orchestrator.start()
                                         agentVoiceManager.setForegroundActive(true)
                                         vm.setUiForegroundActive(true)
-                                        com.tunemind.app.provider.MusicPlayerAutoLauncher
+                                        val stalled = com.tunemind.app.provider.MusicPlayerAutoLauncher
                                             .consumeFreshStalledPlaybackAttempt()
-                                            ?.let { stalled ->
-                                                stalledRecoveryAttempt = stalled
-                                            }
+                                        val isPlayingTarget = stalled?.let {
+                                            com.tunemind.app.service.TuneMindListenerService.instance
+                                                ?.isPlayingOrBuffering(it.targetPackage) == true
+                                        } ?: false
+                                        if (com.tunemind.app.provider.MusicPlayerAutoLauncher.shouldShowStalledRecoveryForAttempt(stalled, isPlayingTarget)) {
+                                            stalledRecoveryAttempt = stalled
+                                        } else {
+                                            stalledRecoveryAttempt = null
+                                        }
                                     }
                                 }
                                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE,

@@ -95,6 +95,7 @@ object MusicPlayerUiHelper {
     private val boomplayPackages = listOf(
         "com.afmobi.boomplay",
         "com.afmobi.boomplaymusic",
+        "com.transsion.boomplay",
         "com.boomplay.music"
     )
 

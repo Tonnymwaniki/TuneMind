@@ -27,6 +27,7 @@ data class ResolvedPlayableLinks(
     val deezerUrl: String? = null,
     val spotifyUri: String? = null,
     val spotifyUrl: String? = null,
+    val audiomackUrl: String? = null,
     val source: String = "open_catalog"
 )
 
@@ -41,6 +42,7 @@ data class OpenCatalogSearchTrack(
     val audiusStreamUrl: String? = null,
     val ytmVideoId: String? = null,
     val deezerUrl: String? = null,
+    val itunesUrl: String? = null,
     val popularity: Int = 70,
     val isExplicit: Boolean = false
 )
@@ -109,7 +111,7 @@ object UniversalTrackResolver {
         val audiusStream = fetchAudiusStreamUrl(t, a, q)
 
         if (deezer != null || itunes != null || !audiusStream.isNullOrBlank()) {
-            val songlinkSpotify = deezer?.deezerUrl?.let { resolveSpotifyViaSonglink(it) }
+            val songlink = resolveLinksViaSonglink(listOfNotNull(deezer?.deezerUrl, itunes?.itunesUrl))
             val resolved = ResolvedPlayableLinks(
                 canonicalTrackKey = matchKey,
                 trackId = TrackIdentityResolver.buildDeterministicTrackId(
@@ -127,8 +129,9 @@ object UniversalTrackResolver {
                 audiusStreamUrl = audiusStream,
                 ytmVideoId = null,
                 deezerUrl = deezer?.deezerUrl,
-                spotifyUri = songlinkSpotify?.first,
-                spotifyUrl = songlinkSpotify?.second,
+                spotifyUri = songlink?.spotifyUri,
+                spotifyUrl = songlink?.spotifyUrl,
+                audiomackUrl = songlink?.audiomackUrl,
                 source = if (!audiusStream.isNullOrBlank()) "audius+open" else "deezer+itunes"
             )
             resolvedCache[matchKey] = resolved
@@ -258,12 +261,16 @@ object UniversalTrackResolver {
                     }
                 }
                 val deezerLink = resolvedObj.optString("deezerUrl").takeIf { it.startsWith("http") }
+                val ytmId = resolvedObj.optString("ytmVideoId").takeIf { it.isNotBlank() && it != "null" }
+                val ytmWatchUrl = ytmId?.let { "https://music.youtube.com/watch?v=$it" }
                 var spUri = resolvedObj.optString("spotifyUri").takeIf { it.startsWith("spotify:track:") }
                 var spUrl = resolvedObj.optString("spotifyUrl").takeIf { it.startsWith("http") }
-                if (spUri == null && deezerLink != null) {
-                    val fallbackSp = resolveSpotifyViaSonglink(deezerLink)
-                    spUri = fallbackSp?.first
-                    spUrl = fallbackSp?.second ?: spUrl
+                var audiomackUrl: String? = null
+                if (spUri == null) {
+                    val songlink = resolveLinksViaSonglink(listOfNotNull(deezerLink, ytmWatchUrl))
+                    spUri = songlink?.spotifyUri
+                    spUrl = songlink?.spotifyUrl ?: spUrl
+                    audiomackUrl = songlink?.audiomackUrl
                 }
                 ResolvedPlayableLinks(
                     canonicalTrackKey = resolvedObj.optString("trackKey")
@@ -279,10 +286,11 @@ object UniversalTrackResolver {
                     popularity = resolvedObj.optInt("popularity", 74),
                     previewUrl = resolvedObj.optString("previewUrl").takeIf { it.startsWith("http") },
                     audiusStreamUrl = resolvedObj.optString("audiusStreamUrl").takeIf { it.startsWith("http") },
-                    ytmVideoId = resolvedObj.optString("ytmVideoId").takeIf { it.isNotBlank() && it != "null" },
+                    ytmVideoId = ytmId,
                     deezerUrl = deezerLink,
                     spotifyUri = spUri,
                     spotifyUrl = spUrl,
+                    audiomackUrl = audiomackUrl,
                     source = resolvedObj.optString("source").ifBlank { "backend_open_catalog" }
                 )
             }
@@ -368,6 +376,7 @@ object UniversalTrackResolver {
                                 albumArtUrl = art600.takeIf { it.startsWith("http") },
                                 genre = obj.optString("primaryGenreName").ifBlank { "Music" },
                                 previewUrl = obj.optString("previewUrl").takeIf { it.startsWith("http") },
+                                itunesUrl = obj.optString("trackViewUrl").takeIf { it.startsWith("http") },
                                 popularity = 76,
                                 isExplicit = obj.optString("trackExplicitness").equals("explicit", ignoreCase = true)
                             )
@@ -418,34 +427,48 @@ object UniversalTrackResolver {
         }
     }
 
-    private val songlinkCache = ConcurrentHashMap<String, Pair<String?, String?>>()
+    private data class SonglinkResult(
+        val spotifyUri: String?,
+        val spotifyUrl: String?,
+        val audiomackUrl: String?
+    )
 
-    private fun resolveSpotifyViaSonglink(sourceUrl: String): Pair<String?, String?>? {
-        val clean = sourceUrl.trim().takeIf { it.startsWith("http") } ?: return null
-        songlinkCache[clean]?.let { return it }
-        return try {
-            val url = "https://api.song.link/v1-alpha.1/links?url=${Uri.encode(clean)}"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    songlinkCache[clean] = null to null
-                    return null
-                }
-                val json = JSONObject(resp.body?.string().orEmpty())
-                val spUrl = json.optJSONObject("linksByPlatform")
-                    ?.optJSONObject("spotify")
-                    ?.optString("url")
-                    ?.trim()
-                    ?.takeIf { it.startsWith("http") }
-                val idMatch = spUrl?.let { Regex("/track/([A-Za-z0-9]{22})", RegexOption.IGNORE_CASE).find(it) }
-                val spUri = idMatch?.groupValues?.getOrNull(1)?.let { "spotify:track:$it" }
-                val canonicalUrl = idMatch?.groupValues?.getOrNull(1)?.let { "https://open.spotify.com/track/$it" } ?: spUrl
-                val result = spUri to canonicalUrl
-                songlinkCache[clean] = result
-                result
+    private val songlinkCache = ConcurrentHashMap<String, SonglinkResult>()
+
+    private fun resolveLinksViaSonglink(sourceUrls: List<String?>): SonglinkResult? {
+        for (rawUrl in sourceUrls) {
+            val clean = rawUrl?.trim()?.takeIf { it.startsWith("http") } ?: continue
+            songlinkCache[clean]?.let { cached ->
+                if (cached.spotifyUri != null || cached.spotifyUrl != null) return cached
             }
-        } catch (_: Exception) {
-            null
+            try {
+                val url = "https://api.song.link/v1-alpha.1/links?url=${Uri.encode(clean)}"
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val json = JSONObject(resp.body?.string().orEmpty())
+                    val platforms = json.optJSONObject("linksByPlatform")
+                    val spUrl = platforms?.optJSONObject("spotify")
+                        ?.optString("url")
+                        ?.trim()
+                        ?.takeIf { it.startsWith("http") }
+                    val audiomackUrl = platforms?.optJSONObject("audiomack")
+                        ?.optString("url")
+                        ?.trim()
+                        ?.takeIf { it.startsWith("http") }
+                    val idMatch = spUrl?.let { Regex("/track/([A-Za-z0-9]{22})", RegexOption.IGNORE_CASE).find(it) }
+                    val spUri = idMatch?.groupValues?.getOrNull(1)?.let { "spotify:track:$it" }
+                    val canonicalUrl = idMatch?.groupValues?.getOrNull(1)?.let { "https://open.spotify.com/track/$it" } ?: spUrl
+                    val result = SonglinkResult(spUri, canonicalUrl, audiomackUrl)
+                    if (spUri != null || canonicalUrl != null || audiomackUrl != null) {
+                        songlinkCache[clean] = result
+                    }
+                    if (spUri != null || canonicalUrl != null) return result
+                }
+            } catch (_: Exception) {
+                // Transient error: never cache negative result forever so next attempt succeeds.
+            }
         }
+        return null
     }
 }

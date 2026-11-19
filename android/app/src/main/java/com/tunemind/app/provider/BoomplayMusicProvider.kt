@@ -105,6 +105,7 @@ class BoomplayMusicProvider : MusicProvider {
         private val BOOMPLAY_PACKAGE_CANDIDATES = listOf(
             "com.afmobi.boomplaymusic",
             "com.afmobi.boomplay",
+            "com.transsion.boomplay",
             "com.boomplay.music"
         )
     }

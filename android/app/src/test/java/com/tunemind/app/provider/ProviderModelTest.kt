@@ -147,4 +147,35 @@ class ProviderModelTest {
         )
         assertNull(searchOnly)
     }
+
+    @Test
+    fun testStalledRecoveryBannerSuppressedWhenExternalPlayerIsActivelyPlaying() {
+        val attempt = MusicPlayerAutoLauncher.StalledPlaybackAttempt(
+            title = "Calm Down",
+            artist = "Rema",
+            targetPackage = "com.spotify.music",
+            playerDisplayName = "Spotify",
+            ytmVideoId = null
+        )
+        // False alarm prevented: when Spotify is actually playing or buffering, never show "didn't auto-play".
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldShowStalledRecoveryForAttempt(
+                attempt = attempt,
+                isTargetPlayingOrBuffering = true
+            )
+        )
+        // Genuine stall: Spotify remained paused/on Search, show recovery option cleanly.
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldShowStalledRecoveryForAttempt(
+                attempt = attempt,
+                isTargetPlayingOrBuffering = false
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldShowStalledRecoveryForAttempt(
+                attempt = null,
+                isTargetPlayingOrBuffering = false
+            )
+        )
+    }
 }

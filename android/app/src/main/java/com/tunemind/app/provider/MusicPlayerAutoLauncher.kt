@@ -58,6 +58,7 @@ object MusicPlayerAutoLauncher {
     data class StalledPlaybackAttempt(
         val title: String,
         val artist: String,
+        val targetPackage: String?,
         val playerDisplayName: String,
         val ytmVideoId: String?,
         val createdAtMs: Long = System.currentTimeMillis()
@@ -70,6 +71,13 @@ object MusicPlayerAutoLauncher {
         val current = lastStalledPlaybackAttempt ?: return null
         lastStalledPlaybackAttempt = null
         return if ((System.currentTimeMillis() - current.createdAtMs) <= maxAgeMs) current else null
+    }
+
+    internal fun shouldShowStalledRecoveryForAttempt(
+        attempt: StalledPlaybackAttempt?,
+        isTargetPlayingOrBuffering: Boolean
+    ): Boolean {
+        return attempt != null && !isTargetPlayingOrBuffering
     }
 
     internal fun extractSpotifyTrackUri(
@@ -660,19 +668,28 @@ object MusicPlayerAutoLauncher {
                     ytmVideoId = resolvedLinks?.ytmVideoId
                 )
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                val honestMsg = if (isSpotifyTarget && exactSpotifyUri == null) {
+                    "Opened Spotify search for '$cleanTitle' — tap Play if Spotify pauses on search."
+                } else {
+                    "Playing '$cleanTitle' in $displayName."
+                }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = false,
                     destinationUri = "search:$targetPkg",
-                    detailMessage = "Playing '$cleanTitle' in $displayName."
+                    detailMessage = honestMsg
                 )
             } catch (e: Exception) {
                 Log.d(TAG, "MEDIA_PLAY_FROM_SEARCH not accepted by $targetPkg: ${e.message}")
             }
         }
 
-        // C. Explicit Deep Link / Deezer / Web Search Fallback
-        val fallbackLink = exactSpotifyUri ?: deepLinkUri ?: resolvedLinks?.deezerUrl
+        // C. Explicit Deep Link / Audiomack / Deezer / Web Search Fallback
+        val isAudiomackTarget = targetPkg?.contains("audiomack", ignoreCase = true) == true
+        val fallbackLink = exactSpotifyUri
+            ?: (if (isAudiomackTarget) resolvedLinks?.audiomackUrl else null)
+            ?: deepLinkUri
+            ?: resolvedLinks?.deezerUrl
         if (!fallbackLink.isNullOrBlank()) {
             try {
                 val uriIntent = Intent(Intent.ACTION_VIEW, Uri.parse(fallbackLink)).apply {
@@ -812,6 +829,7 @@ object MusicPlayerAutoLauncher {
 
     private fun postStalledPlaybackRecoveryNotification(
         context: Context,
+        targetPackage: String?,
         trackTitle: String,
         trackArtist: String,
         playerDisplayName: String,
@@ -820,6 +838,7 @@ object MusicPlayerAutoLauncher {
         lastStalledPlaybackAttempt = StalledPlaybackAttempt(
             title = trackTitle,
             artist = trackArtist,
+            targetPackage = targetPackage,
             playerDisplayName = playerDisplayName,
             ytmVideoId = ytmVideoId
         )
@@ -862,15 +881,16 @@ object MusicPlayerAutoLauncher {
 
             val notification = NotificationCompat.Builder(context, RETURN_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("$playerDisplayName didn't auto-play '$trackTitle'")
-                .setContentText("Tap 'Play in TuneMind' to start now, or press Play in $playerDisplayName.")
+                .setContentTitle("$playerDisplayName paused on '$trackTitle'")
+                .setContentText("Tap Play in $playerDisplayName, or use 'Play in TuneMind' below.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setTimeoutAfter(35_000L)
                 .setDefaults(NotificationCompat.DEFAULT_VIBRATE)
-                .setContentIntent(recoverPi)
+                // Tapping the banner itself ALWAYS returns to TuneMind cleanly without stopping Spotify!
+                .setContentIntent(backPi)
                 .addAction(
                     R.drawable.ic_launcher_foreground,
                     "Play in TuneMind",
@@ -930,6 +950,33 @@ object MusicPlayerAutoLauncher {
         val normExpected = UniversalTrackResolver.normalizeTitleForExactMatch(cleanTitle)
         val normPrev = UniversalTrackResolver.normalizeTitleForExactMatch(previousTitle.orEmpty())
         val confirmedReturnNotified = AtomicBoolean(false)
+        val cleanDisplayTitle = cleanTitle.ifBlank { track.title }
+
+        lateinit var reactiveListener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit
+        reactiveListener = { snap ->
+            val pkgMatches = targetPackage.isNullOrBlank() ||
+                snap.packageName.equals(targetPackage, ignoreCase = true)
+            val normSnap = UniversalTrackResolver.normalizeTitleForExactMatch(snap.title)
+            val snapTitleMatches = normSnap.isNotBlank() && (
+                (normExpected.isNotBlank() && (normSnap == normExpected || (normExpected.length >= 4 && (normSnap.contains(normExpected) || normExpected.contains(normSnap))))) ||
+                    (normPrev.isNotBlank() && normSnap != normPrev)
+                )
+            val isActiveState = snap.isPlaying || snap.playbackStateCode == 3 || snap.playbackStateCode == 6
+            if (pkgMatches && snapTitleMatches && isActiveState) {
+                lastStalledPlaybackAttempt = null
+                if (confirmedReturnNotified.compareAndSet(false, true)) {
+                    postReturnToTuneMindNotification(
+                        context = context,
+                        trackTitle = cleanDisplayTitle,
+                        playerDisplayName = displayName,
+                        confirmedPlaying = true,
+                        silentUpdate = true
+                    )
+                }
+                TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
+            }
+        }
+        TuneMindListenerService.addPlaybackSnapshotListener(reactiveListener)
 
         for ((index, delay) in listOf(550L, 1250L, 2100L, 3100L).withIndex()) {
             mainHandler.postDelayed({
@@ -955,7 +1002,7 @@ object MusicPlayerAutoLauncher {
         }
 
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        for (delay in listOf(1400L, 2250L, 3250L, 4100L)) {
+        for (delay in listOf(1400L, 2250L, 3250L, 4200L, 5200L)) {
             mainHandler.postDelayed({
                 try {
                     val listener = TuneMindListenerService.instance
@@ -965,19 +1012,20 @@ object MusicPlayerAutoLauncher {
                         (normExpected.isNotBlank() && (normCur == normExpected || (normExpected.length >= 4 && (normCur.contains(normExpected) || normExpected.contains(normCur))))) ||
                             (normPrev.isNotBlank() && normCur != normPrev && delay >= 1400L)
                         )
-                    val playingTarget = listener?.isPlaying(targetPackage) == true
-                    if (titleMatchesNewSong && playingTarget) {
+                    val playingOrBufferingTarget = listener?.isPlayingOrBuffering(targetPackage) == true
+                    if (titleMatchesNewSong && playingOrBufferingTarget) {
                         lastStalledPlaybackAttempt = null
                         if (confirmedReturnNotified.compareAndSet(false, true)) {
                             postReturnToTuneMindNotification(
                                 context = context,
-                                trackTitle = cleanTitle.ifBlank { track.title },
+                                trackTitle = cleanDisplayTitle,
                                 playerDisplayName = displayName,
                                 confirmedPlaying = true,
                                 silentUpdate = true
                             )
                         }
-                    } else if (titleMatchesNewSong || (delay >= 2250L && listener?.hasActiveSession(targetPackage) == true)) {
+                        TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
+                    } else if (titleMatchesNewSong || (delay >= 2250L && listener?.hasActiveSession(targetPackage) == true && !playingOrBufferingTarget)) {
                         listener?.play(targetPackage)
                         audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
                         audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
@@ -992,19 +1040,25 @@ object MusicPlayerAutoLauncher {
             try {
                 if (confirmedReturnNotified.get()) return@postDelayed
                 val listener = TuneMindListenerService.instance
-                if (listener?.isPlaying(targetPackage) == true) {
+                if (listener?.isPlayingOrBuffering(targetPackage) == true) {
                     lastStalledPlaybackAttempt = null
+                    TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
                     return@postDelayed
                 }
-                Log.w(TAG, "$displayName did not confirm playback for '$cleanTitle' within 4.8s; offering TuneMind recovery.")
+                Log.w(TAG, "$displayName did not confirm playback for '$cleanTitle' within 6.2s; offering TuneMind recovery.")
                 postStalledPlaybackRecoveryNotification(
                     context = context,
-                    trackTitle = cleanTitle.ifBlank { track.title },
+                    targetPackage = targetPackage,
+                    trackTitle = cleanDisplayTitle,
                     trackArtist = cleanArtist.ifBlank { track.artist },
                     playerDisplayName = displayName,
                     ytmVideoId = ytmVideoId
                 )
             } catch (_: Exception) {}
-        }, 4800L)
+        }, 6200L)
+
+        mainHandler.postDelayed({
+            TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
+        }, 12_000L)
     }
 }

@@ -150,6 +150,9 @@ class TuneMindListenerService : NotificationListenerService() {
 
     fun isPlaying(targetPackage: String? = null): Boolean = observerOrNull()?.isPlaying(targetPackage) ?: false
 
+    fun isPlayingOrBuffering(targetPackage: String? = null): Boolean =
+        observerOrNull()?.isPlayingOrBuffering(targetPackage) ?: false
+
     fun hasActiveSession(targetPackage: String? = null): Boolean =
         observerOrNull()?.hasActiveSession(targetPackage) ?: false
 
