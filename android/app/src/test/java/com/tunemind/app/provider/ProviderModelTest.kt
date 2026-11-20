@@ -314,6 +314,15 @@ class ProviderModelTest {
                 isSpotifyPremiumConnected = true
             )
         )
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = "tunemind_inapp",
+                providerId = "tunemind_inapp",
+                stayInTuneMind = false,
+                strictNoSwitch = false,
+                isSpotifyPremiumConnected = true
+            )
+        )
         assertFalse(
             MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
                 targetPkg = "com.spotify.music",
@@ -327,6 +336,15 @@ class ProviderModelTest {
             MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
                 targetPkg = "com.afmobi.boomplaymusic",
                 providerId = "boomplay",
+                stayInTuneMind = true,
+                strictNoSwitch = true,
+                isSpotifyPremiumConnected = true
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                providerId = "youtube_music",
                 stayInTuneMind = true,
                 strictNoSwitch = true,
                 isSpotifyPremiumConnected = true

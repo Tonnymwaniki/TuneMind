@@ -861,7 +861,9 @@ fun SongProfile(
                     trackId = resolvedIdentity.trackId,
                     spotifyUri = resolvedIdentity.spotifyUri
                 )
-                vm.playRecommendation(context, rec)
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    vm.playRecommendation(context, rec)
+                }
                 onDismiss?.invoke()
             },
             colors = ButtonDefaults.buttonColors(containerColor = theme.primaryAccent, contentColor = Color(0xFF05060A)),

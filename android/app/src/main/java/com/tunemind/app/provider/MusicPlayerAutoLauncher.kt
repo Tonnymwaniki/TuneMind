@@ -308,9 +308,25 @@ object MusicPlayerAutoLauncher {
         strictNoSwitch: Boolean,
         isSpotifyPremiumConnected: Boolean
     ): Boolean {
-        val isSpotifyTarget = targetPkg?.contains("spotify", ignoreCase = true) == true ||
-            providerId.equals("spotify", ignoreCase = true)
-        return isSpotifyTarget && (stayInTuneMind || strictNoSwitch) && isSpotifyPremiumConnected
+        if (!isSpotifyPremiumConnected) return false
+        val pkgLower = targetPkg?.trim()?.lowercase().orEmpty()
+        val idLower = providerId?.trim()?.lowercase().orEmpty()
+        val isExplicitOtherExternalApp =
+            pkgLower.contains("boomplay") || idLower == "boomplay" ||
+                pkgLower.contains("audiomack") || idLower == "audiomack" ||
+                pkgLower.contains("youtube") || idLower == "youtube_music" ||
+                pkgLower.contains("deezer") || idLower == "deezer" ||
+                pkgLower.contains("soundcloud") || idLower == "soundcloud"
+        if (isExplicitOtherExternalApp) return false
+        val isSpotifyOrInAppTarget = pkgLower.contains("spotify") ||
+            idLower == "spotify" ||
+            pkgLower.isBlank() ||
+            pkgLower == "tunemind_inapp" ||
+            pkgLower == "com.tunemind.app" ||
+            pkgLower == "unknown_player" ||
+            idLower == "tunemind_inapp" ||
+            idLower.isBlank()
+        return isSpotifyOrInAppTarget && (stayInTuneMind || strictNoSwitch || pkgLower.contains("spotify") || idLower == "spotify" || idLower == "tunemind_inapp")
     }
 
     private fun launchHybridPlayback(
@@ -332,9 +348,11 @@ object MusicPlayerAutoLauncher {
             AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
         val isYtmTarget = isYouTubeMusicTarget(targetPkg, providerId)
 
-        // TIER 1S: Spotify Premium Direct Connect (Bring-Your-Own Client ID via PKCE)
+        // TIER 1S: Spotify Premium Direct Connect (1-Tap / PKCE)
         // Plays the exact full Spotify track silently in the background with ZERO app switch.
         val spotifyPremiumReady = SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+        var spotifyResolvedUriFromConnect: String? = null
+        var spotifyHadNoActiveDevice = false
         if (shouldTrySpotifyPremiumConnect(
                 targetPkg = targetPkg,
                 providerId = providerId,
@@ -363,7 +381,26 @@ object MusicPlayerAutoLauncher {
                     )
                 }
                 is SpotifyPlayResult.NoActiveDevice -> {
-                    Log.w(TAG, "Tier-1S Spotify Connect: ${connectRes.message} Falling through to warm MediaSession / in-app full stream.")
+                    spotifyHadNoActiveDevice = true
+                    spotifyResolvedUriFromConnect = connectRes.trackUri
+                    Log.w(TAG, "Tier-1S Spotify Connect: ${connectRes.message}")
+                    // If strict mode is OFF, wake Spotify immediately with the exact full track URI
+                    // instead of falling into a 30s preview; this also wakes Spotify Connect for next songs!
+                    if (!strictNoSwitch && !connectRes.trackUri.isNullOrBlank()) {
+                        val wakeOutcome = launchExternalColdHandoff(
+                            context = context,
+                            targetPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                            displayName = "Spotify",
+                            track = track,
+                            cleanTitle = cleanTitle,
+                            cleanArtist = cleanArtist,
+                            fullSearchQuery = fullSearchQuery,
+                            deepLinkUri = connectRes.trackUri,
+                            previousTitle = previousTitle,
+                            resolvedLinks = null
+                        )
+                        if (wakeOutcome.launched) return wakeOutcome
+                    }
                 }
                 is SpotifyPlayResult.PremiumRequired -> {
                     Log.w(TAG, "Tier-1S Spotify Connect requires Premium: ${connectRes.message}")
@@ -506,15 +543,18 @@ object MusicPlayerAutoLauncher {
                     fallbackExternalName = displayName
                 )
             ) {
-                val extraHint = if (ytmInstalled) {
-                    "Say 'use YouTube inside TuneMind' for the full song, or tap 'Open full track in $displayName'."
-                } else {
-                    "Tap 'Open full track in $displayName' for the full song."
+                val extraHint = when {
+                    spotifyHadNoActiveDevice ->
+                        "Open Spotify briefly once to wake your phone for full silent Spotify playback, or tap 'Open full track in Spotify'."
+                    ytmInstalled ->
+                        "Say 'use YouTube inside TuneMind' for the full song, or tap 'Open full track in $displayName'."
+                    else ->
+                        "Tap 'Open full track in $displayName' for the full song."
                 }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = true,
-                    destinationUri = previewUrl,
+                    destinationUri = spotifyResolvedUriFromConnect ?: previewUrl,
                     detailMessage = "Playing '$cleanTitle' (30s preview) inside TuneMind · $extraHint"
                 )
             }

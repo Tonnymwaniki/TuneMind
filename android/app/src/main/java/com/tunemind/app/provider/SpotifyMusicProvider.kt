@@ -45,7 +45,7 @@ class SpotifyMusicProvider : MusicProvider {
             title = track.title,
             artist = track.artist,
             providerTrackId = track.providerTrackId,
-            deepLinkUri = null,
+            deepLinkUri = track.spotifyUri ?: track.providerTrackId?.takeIf { it.startsWith("spotify:track:", ignoreCase = true) },
             webFallbackUrl = searchWebUrl,
             searchQuery = query,
             confidence = track.confidence

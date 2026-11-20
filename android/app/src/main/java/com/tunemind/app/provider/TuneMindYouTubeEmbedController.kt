@@ -422,6 +422,39 @@ object TuneMindYouTubeEmbedController {
                 val fallbackName = _fallbackExternalNameFlow.value ?: "YouTube Music"
 
                 stop(clearMetadata = true)
+                if (ctx != null && title.isNotBlank() && SpotifyPremiumConnectManager.isConnectedAndPremium(ctx)) {
+                    Thread {
+                        val spotifyRes = SpotifyPremiumConnectManager.playTrackSilently(
+                            context = ctx,
+                            title = title,
+                            artist = artist
+                        )
+                        if (spotifyRes is SpotifyPlayResult.Success) {
+                            mainHandler.post {
+                                _statusNoticeFlow.value =
+                                    "Playing full track '$title' silently on Spotify (${spotifyRes.deviceName})."
+                            }
+                        } else if (!fallbackPreview.isNullOrBlank()) {
+                            mainHandler.post {
+                                _statusNoticeFlow.value =
+                                    "Open Spotify briefly once to wake your phone for full silent Spotify playback (playing 30s preview for now)."
+                                TuneMindInAppPlayer.playStreamUrl(
+                                    context = ctx,
+                                    streamUrl = fallbackPreview,
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    expectedDurationMs = 30_000L,
+                                    isPreview = true,
+                                    fallbackExternalPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                                    fallbackExternalName = "Spotify"
+                                )
+                            }
+                        }
+                    }.start()
+                    return@post
+                }
+
                 _statusNoticeFlow.value = if (!fallbackPreview.isNullOrBlank() && ctx != null && title.isNotBlank()) {
                     "YouTube blocked in-app embedding for '$title' (code $errorCode) — playing 30s preview inside TuneMind instead."
                 } else {

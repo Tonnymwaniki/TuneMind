@@ -58,7 +58,7 @@ data class SpotifyDeviceCheckResult(
 
 sealed class SpotifyPlayResult {
     data class Success(val trackUri: String, val deviceName: String) : SpotifyPlayResult()
-    data class NoActiveDevice(val message: String) : SpotifyPlayResult()
+    data class NoActiveDevice(val message: String, val trackUri: String? = null) : SpotifyPlayResult()
     data class PremiumRequired(val message: String) : SpotifyPlayResult()
     object NotConnected : SpotifyPlayResult()
     data class Failed(val reason: String) : SpotifyPlayResult()
@@ -246,9 +246,11 @@ object SpotifyPremiumConnectManager {
         val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, "")?.trim().orEmpty()
         val hasSession = activeSessionClientId.isNotBlank() && (accessToken.isNotBlank() || refreshToken.isNotBlank())
         val product = prefs.getString(KEY_PRODUCT, "")?.trim().orEmpty()
-        val isPremium = hasSession && (
+        val explicitlyFree = product.equals("free", ignoreCase = true) || product.equals("open", ignoreCase = true)
+        val isPremium = hasSession && !explicitlyFree && (
             prefs.getBoolean(KEY_IS_PREMIUM, false) ||
-                product.equals("premium", ignoreCase = true)
+                product.equals("premium", ignoreCase = true) ||
+                product.isBlank()
             )
         return SpotifyPremiumStatus(
             isConnected = hasSession,
@@ -918,19 +920,49 @@ object SpotifyPremiumConnectManager {
         var token = refreshAccessTokenIfNeeded(context)
             ?: return SpotifyPlayResult.Failed("Spotify token unavailable — reconnect in Settings.")
 
+        // If /v1/me product was unknown when token was saved, verify it once now.
+        if (status.product.isBlank()) {
+            fetchSpotifyProfile(token)?.let { (name, prod) ->
+                val prefs = getPrefs(context)
+                val verifiedPremium = prod.equals("premium", ignoreCase = true)
+                prefs.edit()
+                    .putString(KEY_DISPLAY_NAME, name)
+                    .putString(KEY_PRODUCT, prod)
+                    .putBoolean(KEY_IS_PREMIUM, verifiedPremium)
+                    .apply()
+                _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
+                if (prod.equals("free", ignoreCase = true) || prod.equals("open", ignoreCase = true)) {
+                    return SpotifyPlayResult.PremiumRequired("Spotify Premium is required for silent background playback.")
+                }
+            }
+        }
+
         val resolvedUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
             ?: searchExactTrackUri(context, title, artist, query)
             ?: return SpotifyPlayResult.Failed("Could not locate '$title' on Spotify.")
 
-        val device = findBestConnectDevice(token)
-        val deviceId = device?.first
-        val deviceName = device?.second ?: "Spotify"
+        var device = findBestConnectDevice(token)
 
-        fun executePlay(activeToken: String): okhttp3.Response {
+        // If Spotify Connect currently reports no awake device, try a silent MediaSession wake pulse first.
+        if (device == null) {
+            val listener = com.tunemind.app.service.TuneMindListenerService.instance
+            val hasWarmSpotify = listener?.hasActiveSession("com.spotify.music") == true ||
+                listener?.hasActiveSession("com.spotify.lite") == true
+            if (hasWarmSpotify) {
+                try {
+                    Log.i(TAG, "Spotify Connect idle but MediaSession warm — sending silent wake pulse before Connect play")
+                    listener?.play("com.spotify.music")
+                    Thread.sleep(850L)
+                    device = findBestConnectDevice(token)
+                } catch (_: Throwable) {}
+            }
+        }
+
+        fun executePlay(activeToken: String, targetDeviceId: String?): okhttp3.Response {
             val url = buildString {
                 append("$API_BASE/me/player/play")
-                if (!deviceId.isNullOrBlank()) {
-                    append("?device_id=").append(URLEncoder.encode(deviceId, "UTF-8"))
+                if (!targetDeviceId.isNullOrBlank()) {
+                    append("?device_id=").append(URLEncoder.encode(targetDeviceId, "UTF-8"))
                 }
             }
             val payload = JSONObject().apply {
@@ -946,14 +978,37 @@ object SpotifyPremiumConnectManager {
         }
 
         return try {
-            var response = executePlay(token)
+            var response = executePlay(token, device?.first)
             if (response.code == 401) {
                 response.close()
                 token = refreshAccessTokenIfNeeded(context, forceRefresh = true)
                     ?: return SpotifyPlayResult.Failed("Spotify session expired — reconnect in Settings.")
-                response = executePlay(token)
+                device = findBestConnectDevice(token)
+                response = executePlay(token, device?.first)
             }
 
+            // If Spotify returned 404 NO_ACTIVE_DEVICE on a stale/missing device_id, retry once after refreshing device list
+            if (response.code == 404) {
+                response.close()
+                val retryListener = com.tunemind.app.service.TuneMindListenerService.instance
+                if (retryListener?.hasActiveSession("com.spotify.music") == true) {
+                    runCatching {
+                        retryListener.play("com.spotify.music")
+                        Thread.sleep(750L)
+                    }
+                }
+                device = findBestConnectDevice(token)
+                if (device != null) {
+                    response = executePlay(token, device.first)
+                } else {
+                    return SpotifyPlayResult.NoActiveDevice(
+                        message = "No active Spotify device found. Open Spotify once so your phone wakes up for silent playback.",
+                        trackUri = resolvedUri
+                    )
+                }
+            }
+
+            val deviceName = device?.second ?: "Spotify"
             response.use { resp ->
                 if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
                     val prefs = getPrefs(context)
@@ -975,7 +1030,8 @@ object SpotifyPremiumConnectManager {
                 when {
                     resp.code == 404 || reason.equals("NO_ACTIVE_DEVICE", ignoreCase = true) -> {
                         SpotifyPlayResult.NoActiveDevice(
-                            "No active Spotify device found. Open Spotify once so your phone wakes up for silent playback."
+                            message = "No active Spotify device found. Open Spotify once so your phone wakes up for silent playback.",
+                            trackUri = resolvedUri
                         )
                     }
                     resp.code == 403 && reason.equals("PREMIUM_REQUIRED", ignoreCase = true) -> {

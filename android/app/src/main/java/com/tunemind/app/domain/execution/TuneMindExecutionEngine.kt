@@ -513,7 +513,10 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 val directBackendSpotifyUri = com.tunemind.app.provider.MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
 
                 // Resolve clean cross-app playable metadata (skip pre-fetch when Spotify Premium Direct Connect is active)
-                val spotifyPremiumDirectReady = isSpotifyTarget &&
+                val isSpotifyOrInAppTarget = isSpotifyTarget ||
+                    finalProviderId == "tunemind_inapp" ||
+                    finalPackageName.equals("com.tunemind.app", ignoreCase = true)
+                val spotifyPremiumDirectReady = isSpotifyOrInAppTarget &&
                     com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)
                 val needsInAppFullStreamId = neverOpenExternalApp && ytmVideoId.isNullOrBlank() && !spotifyPremiumDirectReady
                 val openResolved = if (
@@ -558,6 +561,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     else -> null
                 }
 
+                val effectiveSpotifyUri = directBackendSpotifyUri ?: openResolved?.spotifyUri ?: spotifyUri
                 val targetTrack = com.tunemind.app.domain.recommendation.RecommendedTrack(
                     id = canonicalIdentity.trackId,
                     title = resolvedTitle,
@@ -565,7 +569,8 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     reason = "Autonomous neuro-acoustic flow match",
                     confidence = 0.98f,
                     trackId = canonicalIdentity.trackId,
-                    providerTrackId = effectiveYtmId
+                    providerTrackId = effectiveYtmId,
+                    spotifyUri = effectiveSpotifyUri
                 )
 
                 val useInAppNow = finalProviderId == "tunemind_inapp" ||

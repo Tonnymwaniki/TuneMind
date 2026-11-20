@@ -1067,10 +1067,15 @@ open class MainActivity : ComponentActivity() {
                                                     playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
                                                 },
                                                 onPreviewForYouTrack = { rec ->
-                                                    val previewed = vm.previewAiRecommendation(context, rec)
-                                                    if (!previewed) {
+                                                    if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
                                                         vm.markRecommendationPlayed(rec.id)
                                                         playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                    } else {
+                                                        val previewed = vm.previewAiRecommendation(context, rec)
+                                                        if (!previewed) {
+                                                            vm.markRecommendationPlayed(rec.id)
+                                                            playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                        }
                                                     }
                                                 },
                                                 onAddToQueue = { title, artist, uri ->

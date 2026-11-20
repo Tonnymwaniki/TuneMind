@@ -218,7 +218,7 @@ class TuneMindInAppProvider : MusicProvider {
             title = track.title,
             artist = track.artist,
             providerTrackId = track.providerTrackId,
-            deepLinkUri = track.providerTrackId,
+            deepLinkUri = track.spotifyUri ?: track.providerTrackId,
             webFallbackUrl = null,
             searchQuery = query,
             confidence = track.confidence
@@ -226,7 +226,60 @@ class TuneMindInAppProvider : MusicProvider {
     }
 
     override fun launchPlayback(context: Context, match: TrackMatch): PlaybackLaunchResult {
-        // 1. Try local device audio file first
+        // 0. If user has connected Spotify Premium Direct Connect, play the FULL song silently on Spotify first!
+        if (SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            try {
+                TuneMindInAppPlayer.pause()
+                TuneMindYouTubeEmbedController.pause()
+            } catch (_: Throwable) {}
+
+            when (
+                val connectRes = SpotifyPremiumConnectManager.playTrackSilently(
+                    context = context,
+                    title = match.title,
+                    artist = match.artist,
+                    query = match.searchQuery,
+                    spotifyUri = match.deepLinkUri
+                )
+            ) {
+                is SpotifyPlayResult.Success -> {
+                    return PlaybackLaunchResult.DirectPlaybackLaunched(
+                        providerId = SpotifyMusicProvider.PROVIDER_ID,
+                        providerDisplayName = "Spotify",
+                        trackTitle = match.title,
+                        destinationUri = connectRes.trackUri,
+                        message = "Playing '${match.title}' silently on Spotify (${connectRes.deviceName}) without leaving TuneMind."
+                    )
+                }
+                is SpotifyPlayResult.NoActiveDevice -> {
+                    val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
+                    if (!strictNoSwitch) {
+                        val rec = RecommendedTrack(
+                            id = connectRes.trackUri ?: match.title,
+                            title = match.title,
+                            artist = match.artist,
+                            reason = "Waking Spotify for full-track playback",
+                            confidence = match.confidence,
+                            spotifyUri = connectRes.trackUri
+                        )
+                        val wakeLaunch = MusicPlayerAutoLauncher.launchWithAutoPlay(
+                            context = context,
+                            providerId = SpotifyMusicProvider.PROVIDER_ID,
+                            displayName = "Spotify",
+                            packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                            track = rec,
+                            query = match.searchQuery,
+                            deepLinkUri = connectRes.trackUri,
+                            neverOpenExternalApp = false
+                        )
+                        if (wakeLaunch.isSuccess) return wakeLaunch
+                    }
+                }
+                else -> Unit
+            }
+        }
+
+        // 1. Try local device audio file next
         if (TuneMindInAppPlayer.playLocalMatch(context, match.title, match.artist)) {
             val localUri = TuneMindInAppPlayer.currentUriFlow.value ?: "content://media/external/audio/media"
             return PlaybackLaunchResult.DirectPlaybackLaunched(
