@@ -489,8 +489,8 @@ object SpotifyLibrarySyncEngine {
             val localPlaylistId = "$SPOTIFY_PLAYLIST_ID_PREFIX${pl.spotifyId}"
             val rawDesc = pl.description.replace(Regex("<[^>]*>"), "").trim()
             val cleanDesc = when {
-                !pl.isOwnedOrCollaborative && pl.tracks.isEmpty() ->
-                    "Followed Spotify playlist · Spotify restricts third-party track lists on editorial/other-user playlists"
+                pl.tracks.isEmpty() && !pl.isOwnedOrCollaborative ->
+                    "Personalized Spotify Mix · Tap 'Play on Spotify' or ask TuneMind Agent to play it (TuneMind captures songs live as they play)"
                 rawDesc.isNotBlank() -> rawDesc
                 pl.ownerName.isNotBlank() -> "Synced from Spotify · by ${pl.ownerName}"
                 else -> "Synced from Spotify"

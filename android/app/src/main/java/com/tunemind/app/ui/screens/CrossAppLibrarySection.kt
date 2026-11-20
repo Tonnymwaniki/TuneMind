@@ -24,8 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Headphones
@@ -145,7 +144,6 @@ fun CrossAppLibrarySection(
     var selectedTabKey by rememberSaveable { mutableStateOf("ALL") }
     // Sub-tab inside Spotify Hub: "SONGS", "LIKED", "PLAYLISTS"
     var spotifySubTab by rememberSaveable { mutableStateOf("SONGS") }
-    var expandedSpotifyPlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
 
     val spotifyPlaylists = remember(playlists) {
         playlists.filter { SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
@@ -447,35 +445,44 @@ fun CrossAppLibrarySection(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(spotifyPlaylists, key = { it.playlist.playlistId }) { pl ->
-                            val isExpanded = expandedSpotifyPlaylistId == pl.playlist.playlistId
-                            Column(
+                            val previewArtists = pl.tracks
+                                .map { it.artist }
+                                .filter { it.isNotBlank() }
+                                .distinct()
+                                .take(2)
+                                .joinToString(" · ")
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(Color(0xFF101726))
-                                    .border(
-                                        1.dp,
-                                        if (isExpanded) Color(0xFF1DB954).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
-                                        RoundedCornerShape(16.dp)
-                                    )
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        onOpenPlaylistByName?.invoke(pl.playlist.name)
+                                            ?: onOpenPlaylistsManager()
+                                    }
+                                    .padding(14.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            expandedSpotifyPlaylistId = if (isExpanded) null else pl.playlist.playlistId
-                                        }
-                                        .padding(14.dp)
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.QueueMusic,
-                                            contentDescription = null,
-                                            tint = Color(0xFF1DB954),
-                                            modifier = Modifier.size(22.dp)
-                                        )
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(RoundedCornerShape(11.dp))
+                                                .background(Color(0xFF1DB954).copy(alpha = 0.16f))
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.QueueMusic,
+                                                contentDescription = null,
+                                                tint = Color(0xFF1DB954),
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
                                             Text(
@@ -487,9 +494,18 @@ fun CrossAppLibrarySection(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
-                                                text = "${pl.tracks.size} song${if (pl.tracks.size == 1) "" else "s"} · Spotify Playlist",
+                                                text = when {
+                                                    pl.tracks.isNotEmpty() && previewArtists.isNotBlank() ->
+                                                        "${pl.tracks.size} song${if (pl.tracks.size == 1) "" else "s"} · $previewArtists"
+                                                    pl.tracks.isNotEmpty() ->
+                                                        "${pl.tracks.size} song${if (pl.tracks.size == 1) "" else "s"} · Tap to view all"
+                                                    else ->
+                                                        "Spotify Playlist · Tap to open & play"
+                                                },
                                                 color = Color.White.copy(alpha = 0.64f),
-                                                fontSize = 12.sp
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
@@ -509,100 +525,11 @@ fun CrossAppLibrarySection(
                                             }
                                         }
                                         Icon(
-                                            imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                            contentDescription = if (isExpanded) "Collapse tracks" else "Show tracks",
-                                            tint = Color.White.copy(alpha = 0.65f)
+                                            imageVector = Icons.Rounded.ChevronRight,
+                                            contentDescription = "Open playlist",
+                                            tint = Color.White.copy(alpha = 0.55f),
+                                            modifier = Modifier.size(22.dp)
                                         )
-                                    }
-                                }
-
-                                if (isExpanded) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color(0xFF0A0F1A))
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        if (pl.tracks.isEmpty()) {
-                                            Text(
-                                                text = pl.playlist.description.ifBlank {
-                                                    "No tracks returned yet — tap Sync Spotify above to fetch songs."
-                                                },
-                                                color = Color.White.copy(alpha = 0.65f),
-                                                fontSize = 12.sp,
-                                                lineHeight = 17.sp,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                                            )
-                                        } else {
-                                            pl.tracks.take(25).forEachIndexed { idx, tr ->
-                                                val truePlays = resolvePlayCount(
-                                                    tr.title,
-                                                    tr.artist,
-                                                    tr.externalUri.takeIf { it.isNotBlank() }
-                                                )
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .background(Color.White.copy(alpha = 0.03f))
-                                                        .clickable {
-                                                            onPlayTrack(tr.title, tr.artist, spotifyPkg)
-                                                        }
-                                                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "${idx + 1}",
-                                                        color = Color.White.copy(alpha = 0.45f),
-                                                        fontSize = 11.5.sp,
-                                                        modifier = Modifier.width(22.dp)
-                                                    )
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = tr.title,
-                                                            color = Color.White,
-                                                            fontSize = 13.sp,
-                                                            fontWeight = FontWeight.Medium,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = "${tr.artist.ifBlank { "Artist" }} · ${formatTruePlayCount(truePlays)}",
-                                                            color = Color.White.copy(alpha = 0.6f),
-                                                            fontSize = 11.sp,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.PlayArrow,
-                                                        contentDescription = "Play",
-                                                        tint = Color(0xFF1DB954),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            }
-                                            if (pl.tracks.size > 25 || onOpenPlaylistByName != null) {
-                                                Text(
-                                                    text = if (pl.tracks.size > 25) {
-                                                        "Open all ${pl.tracks.size} songs →"
-                                                    } else {
-                                                        "Open full playlist view →"
-                                                    },
-                                                    color = Color(0xFF1DB954),
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            onOpenPlaylistByName?.invoke(pl.playlist.name)
-                                                                ?: onOpenPlaylistsManager()
-                                                        }
-                                                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                                                )
-                                            }
-                                        }
                                     }
                                 }
                             }

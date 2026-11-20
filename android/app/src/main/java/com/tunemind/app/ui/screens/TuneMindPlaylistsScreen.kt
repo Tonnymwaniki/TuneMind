@@ -130,9 +130,10 @@ fun TuneMindPlaylistsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
+                    val openedDirectlyToPlaylist = !initialSelectedPlaylistName.isNullOrBlank()
                     IconButton(
                         onClick = {
-                            if (activePlaylist != null) {
+                            if (activePlaylist != null && !openedDirectlyToPlaylist) {
                                 selectedPlaylistId = null
                             } else {
                                 onBack()
@@ -256,7 +257,11 @@ fun TuneMindPlaylistsScreen(
                         { vm.addCurrentTrackToTuneMindPlaylist(activePlaylist.playlist.playlistId) }
                     } else null,
                     onAskAgentAddMore = {
-                        onAskAgentForPlaylist("Suggest 3 songs that fit my TuneMind playlist called ${activePlaylist.playlist.name}")
+                        if (isSyncedFromSpotify) {
+                            onAskAgentForPlaylist("Play my Spotify playlist called ${activePlaylist.playlist.name} or play songs with the same vibe")
+                        } else {
+                            onAskAgentForPlaylist("Suggest 3 songs that fit my TuneMind playlist called ${activePlaylist.playlist.name}")
+                        }
                     },
                     onPlayTrack = { title, artist, uri, srcPkg ->
                         val pkg = if (isSyncedFromSpotify) {
@@ -728,8 +733,12 @@ private fun PlaylistDirectoryContent(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "$count song${if (count == 1) "" else "s"}" +
-                                    if (previewArtists.isNotBlank()) " · $previewArtists" else " · Tap to open",
+                                text = when {
+                                    count > 0 && previewArtists.isNotBlank() -> "$count song${if (count == 1) "" else "s"} · $previewArtists"
+                                    count > 0 -> "$count song${if (count == 1) "" else "s"} · Tap to open"
+                                    activeTab == 1 -> "Spotify Mix · Tap to open & play"
+                                    else -> "0 songs · Tap to add songs"
+                                },
                                 color = Color.White.copy(alpha = 0.62f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -737,7 +746,7 @@ private fun PlaylistDirectoryContent(
                             )
                         }
 
-                        if (count > 0) {
+                        if (count > 0 || activeTab == 1) {
                             IconButton(onClick = { onPlayPlaylist(pl) }) {
                                 Icon(
                                     imageVector = Icons.Rounded.PlayArrow,
@@ -810,7 +819,8 @@ private fun PlaylistDetailContent(
                 ) {
                     Button(
                         onClick = onPlayAll,
-                        enabled = playlistWithTracks.tracks.isNotEmpty(),
+                        // Spotify playlists can ALWAYS play directly via Spotify Connect / Spotify app even if personalized
+                        enabled = isSyncedFromSpotify || playlistWithTracks.tracks.isNotEmpty(),
                         colors = ButtonDefaults.buttonColors(containerColor = accentColor),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
@@ -851,6 +861,22 @@ private fun PlaylistDetailContent(
                             )
                             Spacer(Modifier.width(5.dp))
                             Text("+ Add Songs", color = Color(0xFFF8FAFC), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            onClick = onAskAgentAddMore,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = accentColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text("Ask Agent", color = Color(0xFFF8FAFC), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -964,18 +990,18 @@ private fun PlaylistDetailContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = if (isSyncedFromSpotify) "No songs loaded for this playlist" else "No songs in this playlist yet",
+                        text = if (isSyncedFromSpotify) "Ready to Play on Spotify" else "No songs in this playlist yet",
                         color = Color(0xFFF8FAFC),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         text = if (isSyncedFromSpotify) {
-                            "Tap 'Refresh Songs' above to sync the latest tracks from Spotify (note: Spotify only exposes tracks on playlists you own or collaborate on)."
+                            "Tap 'Refresh Songs' to load public playlist tracks, or tap 'Play on Spotify' / 'Ask Agent' above — TuneMind will launch this playlist directly and automatically capture every song you play."
                         } else {
                             "Tap '+ Add Songs' above to pick songs from Spotify, YouTube Music, Boomplay, or any player — or ask TuneMind Voice Agent to add songs."
                         },
-                        color = Color.White.copy(alpha = 0.56f),
+                        color = Color.White.copy(alpha = 0.6f),
                         fontSize = 12.5.sp,
                         lineHeight = 18.sp
                     )

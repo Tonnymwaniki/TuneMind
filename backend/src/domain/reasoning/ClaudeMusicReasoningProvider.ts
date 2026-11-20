@@ -1278,6 +1278,7 @@ FULL APP-WIDE CONTROL ACTIONS:
 - Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).
 - Open Spotify guided setup / troubleshooting: action="OPEN_SPOTIFY_CONNECT_GUIDE".
 - Sync Spotify Liked Songs, Playlists, Recently Played & Top Artists into TuneMind (works for BOTH Free & Premium connected Spotify users): action="SYNC_SPOTIFY_LIBRARY" (set "open_playlist_screen": true if the user asked to see their synced playlists).
+- Play ANY TuneMind playlist OR synced Spotify playlist (including followed editorial playlists & personalized mixes like Discover Weekly / Daily Mix — even if a personalized mix lists 0 cached songs locally!): call 'inspect_tunemind_playlists' to match the exact name, then call action="PLAY_TUNEMIND_PLAYLIST" with "playlist_name". TuneMind will launch the playlist context straight on Spotify Connect (Premium) or open the playlist directly in Spotify (Free) while capturing every song played!
 - Export any TuneMind playlist directly into the user's real Spotify account (works for BOTH Free & Premium connected Spotify users): action="EXPORT_PLAYLIST_TO_SPOTIFY" with "playlist_name".
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
 - Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").

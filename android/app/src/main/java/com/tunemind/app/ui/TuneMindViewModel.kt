@@ -5215,13 +5215,6 @@ class TuneMindViewModel : ViewModel() {
         playTrack: (title: String, artist: String, spotifyUri: String?, sourcePkg: String) -> Unit
     ) {
         val items = playlistWithTracks.tracks
-        if (items.isEmpty()) {
-            postNowPlayingStatus("\"${playlistWithTracks.playlist.name}\" has no songs yet.")
-            return
-        }
-
-        // If this is a synced Spotify playlist and the user has Spotify Premium Direct Connect,
-        // try launching the full Spotify playlist context silently on their active device first!
         val ctx = AppHolder.context
         val spotifyPlaylistId = com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
             .extractSpotifyPlaylistId(playlistWithTracks.playlist.playlistId)
@@ -5230,34 +5223,51 @@ class TuneMindViewModel : ViewModel() {
             targetPlayerPkg == "spotify" ||
             targetPlayerPkg == "tunemind_inapp"
 
-        if (ctx != null && spotifyPlaylistId != null && prefersSpotify &&
-            com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(ctx)
-        ) {
-            viewModelScope.launch(Dispatchers.IO) {
-                val res = com.tunemind.app.provider.SpotifyPremiumConnectManager
-                    .playPlaylistContextSilently(ctx, spotifyPlaylistId)
-                kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    if (res is com.tunemind.app.provider.SpotifyPlayResult.Success) {
-                        postNowPlayingStatus("Playing Spotify playlist \"${playlistWithTracks.playlist.name}\" on ${res.deviceName}")
-                    } else {
-                        // Seamless fallback to TuneMind track-by-track + Up Next queue playback
-                        items.drop(1).reversed().forEach { tr ->
-                            enqueueUpNextTrack(
-                                title = tr.title,
-                                artist = tr.artist,
-                                spotifyUri = tr.externalUri.takeIf { it.isNotBlank() },
-                                reason = "From ${playlistWithTracks.playlist.name}",
-                                freshnessPercent = 96,
-                                playNext = true
-                            )
+        // 1. If this is ANY Spotify playlist (owned, followed editorial, or personalized mix like Discover Weekly),
+        // launch the full Spotify playlist context directly — works even when local track list is empty!
+        if (ctx != null && spotifyPlaylistId != null && (prefersSpotify || items.isEmpty())) {
+            if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(ctx)) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val res = com.tunemind.app.provider.SpotifyPremiumConnectManager
+                        .playPlaylistContextSilently(ctx, spotifyPlaylistId)
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        if (res is com.tunemind.app.provider.SpotifyPlayResult.Success) {
+                            postNowPlayingStatus("Playing Spotify playlist \"${playlistWithTracks.playlist.name}\" on ${res.deviceName}")
+                        } else if (items.isNotEmpty()) {
+                            items.drop(1).reversed().forEach { tr ->
+                                enqueueUpNextTrack(
+                                    title = tr.title,
+                                    artist = tr.artist,
+                                    spotifyUri = tr.externalUri.takeIf { it.isNotBlank() },
+                                    reason = "From ${playlistWithTracks.playlist.name}",
+                                    freshnessPercent = 96,
+                                    playNext = true
+                                )
+                            }
+                            val first = items.first()
+                            val chosenPkg = targetPlayerPkg.ifBlank { first.sourcePlayer.ifBlank { "tunemind_inapp" } }
+                            playTrack(first.title, first.artist, first.externalUri.takeIf { it.isNotBlank() }, chosenPkg)
+                            postNowPlayingStatus("Playing \"${playlistWithTracks.playlist.name}\" (${items.size} tracks)")
+                        } else {
+                            // No active silent device awake + personalized mix -> open directly in Spotify app
+                            com.tunemind.app.provider.SpotifyPremiumConnectManager
+                                .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
+                            postNowPlayingStatus("Opening \"${playlistWithTracks.playlist.name}\" in Spotify — TuneMind will track every song you play")
                         }
-                        val first = items.first()
-                        val chosenPkg = targetPlayerPkg.ifBlank { first.sourcePlayer.ifBlank { "tunemind_inapp" } }
-                        playTrack(first.title, first.artist, first.externalUri.takeIf { it.isNotBlank() }, chosenPkg)
-                        postNowPlayingStatus("Playing \"${playlistWithTracks.playlist.name}\" (${items.size} tracks)")
                     }
                 }
+                return
+            } else if (items.isEmpty()) {
+                // Spotify Free Smart Mode or personalized mix: open directly in Spotify app so full tracks play
+                com.tunemind.app.provider.SpotifyPremiumConnectManager
+                    .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
+                postNowPlayingStatus("Opening \"${playlistWithTracks.playlist.name}\" in Spotify — TuneMind will capture every song you play")
+                return
             }
+        }
+
+        if (items.isEmpty()) {
+            postNowPlayingStatus("\"${playlistWithTracks.playlist.name}\" has no songs yet — tap '+ Add Songs' to add tracks.")
             return
         }
 

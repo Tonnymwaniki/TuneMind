@@ -605,6 +605,38 @@ object SpotifyPremiumConnectManager {
         }
     }
 
+    /**
+     * Opens a specific Spotify playlist directly in the Spotify app (or web fallback),
+     * enabling 1-tap playback for Spotify Free users and personalized Spotify mixes
+     * (Discover Weekly, Daily Mix, etc.) where track-level OAuth reading is restricted.
+     */
+    fun openSpotifyPlaylistInApp(context: Context, spotifyPlaylistId: String): Boolean {
+        val cleanId = spotifyPlaylistId.trim()
+        if (cleanId.isBlank()) return false
+        return try {
+            val nativeIntent = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:playlist:$cleanId")).apply {
+                setPackage("com.spotify.music")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (nativeIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(nativeIntent)
+                true
+            } else {
+                val webIntent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://open.spotify.com/playlist/$cleanId")
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(webIntent)
+                true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to open Spotify playlist $cleanId: ${e.message}")
+            false
+        }
+    }
+
     private fun openExternalUrl(context: Context, url: String): Result<Unit> {
         return try {
             val parsedUri = Uri.parse(url)
@@ -1794,7 +1826,7 @@ object SpotifyPremiumConnectManager {
             drainPages("$API_BASE/playlists/$cleanId/tracks?limit=100&offset=0&additional_types=track")
         }
 
-        // Extra fallback: read embedded items/tracks directly from GET /v1/playlists/{id} if empty
+        // Extra fallback 1: read embedded items/tracks directly from GET /v1/playlists/{id} if empty
         if (tracks.isEmpty() && primaryCode !in listOf(401, 403)) {
             val (_, detailJson) = executeAuthorizedGetJson(context, "$API_BASE/playlists/$cleanId?additional_types=track")
             val container = detailJson?.optJSONObject("items") ?: detailJson?.optJSONObject("tracks")
@@ -1812,7 +1844,110 @@ object SpotifyPremiumConnectManager {
                 }
             }
         }
+
+        // Extra fallback 2: Public Spotify Embed hydrator for Spotify Editorial & followed public playlists!
+        // Spotify's Feb 2026 OAuth API hides /items on editorial/other-user playlists, while Spotify's
+        // official public embed page exposes the full public trackList (title, artists, spotify:track URI).
+        if (tracks.isEmpty()) {
+            val embedTracks = fetchPlaylistTracksFromPublicEmbed(cleanId, maxTracks = maxTracks)
+            if (embedTracks.isNotEmpty()) {
+                tracks.addAll(embedTracks)
+            }
+        }
         return tracks
+    }
+
+    /**
+     * Hydrates track metadata (title, artist, exact `spotify:track:` URI, duration, previewUrl)
+     * from Spotify's official public embed page for public & editorial playlists.
+     */
+    fun fetchPlaylistTracksFromPublicEmbed(
+        spotifyPlaylistId: String,
+        maxTracks: Int = 100
+    ): List<SpotifySyncedTrack> {
+        val cleanId = spotifyPlaylistId.trim()
+        if (cleanId.isBlank()) return emptyList()
+        return try {
+            val req = Request.Builder()
+                .url("https://open.spotify.com/embed/playlist/$cleanId")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                )
+                .header("Accept", "text/html,application/xhtml+xml")
+                .get()
+                .build()
+
+            val html = httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                resp.body?.string().orEmpty()
+            }
+            if (html.isBlank()) return emptyList()
+
+            val marker = "<script id=\"__NEXT_DATA__\" type=\"application/json\">"
+            val startIdx = html.indexOf(marker)
+            if (startIdx < 0) return emptyList()
+            val jsonStart = startIdx + marker.length
+            val endIdx = html.indexOf("</script>", jsonStart)
+            if (endIdx <= jsonStart) return emptyList()
+
+            val root = JSONObject(html.substring(jsonStart, endIdx))
+            val entity = root
+                .optJSONObject("props")
+                ?.optJSONObject("pageProps")
+                ?.optJSONObject("state")
+                ?.optJSONObject("data")
+                ?.optJSONObject("entity")
+                ?: return emptyList()
+
+            val coverArr = entity.optJSONObject("visualIdentity")?.optJSONArray("image")
+            val playlistCoverUrl = if (coverArr != null && coverArr.length() > 0) {
+                coverArr.optJSONObject(0)?.optString("url")?.trim()?.takeIf { it.isNotBlank() }
+            } else null
+
+            val trackList = entity.optJSONArray("trackList") ?: return emptyList()
+            val results = mutableListOf<SpotifySyncedTrack>()
+            for (i in 0 until trackList.length()) {
+                val item = trackList.optJSONObject(i) ?: continue
+                val title = item.optString("title").trim()
+                val uri = item.optString("uri").trim()
+                if (title.isBlank() || !uri.startsWith("spotify:track:")) continue
+                val artist = item.optString("subtitle")
+                    .replace('\u00A0', ' ')
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                    .ifBlank { "Spotify Artist" }
+                val trackId = uri.substringAfter("spotify:track:").trim()
+                val durationMs = item.optLong("duration", 0L).coerceAtLeast(0L)
+                val previewUrl = item.optJSONObject("audioPreview")
+                    ?.optString("url")
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+
+                results.add(
+                    SpotifySyncedTrack(
+                        spotifyId = trackId,
+                        spotifyUri = uri,
+                        title = title,
+                        artist = artist,
+                        album = "",
+                        durationMs = durationMs,
+                        albumArtUrl = playlistCoverUrl,
+                        previewUrl = previewUrl,
+                        popularity = 0,
+                        addedAtMs = 0L
+                    )
+                )
+                if (results.size >= maxTracks) break
+            }
+            if (results.isNotEmpty()) {
+                Log.i(TAG, "✅ Hydrated ${results.size} songs for followed/editorial Spotify playlist $cleanId via public embed")
+            }
+            results
+        } catch (e: Exception) {
+            Log.d(TAG, "Spotify embed hydration note for $cleanId: ${e.message}")
+            emptyList()
+        }
     }
 
     /**
