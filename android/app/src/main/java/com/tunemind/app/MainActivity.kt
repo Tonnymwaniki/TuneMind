@@ -218,7 +218,7 @@ open class MainActivity : ComponentActivity() {
                     }
 
                     // Auto-restore encrypted Spotify connection from TuneMind cloud on startup / sign-in
-                    LaunchedEffect(authSession.userId, authSession.isAuthenticated) {
+                    LaunchedEffect(authSession.userId, authSession.isSupabaseAuthenticated) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
