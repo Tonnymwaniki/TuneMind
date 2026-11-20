@@ -222,6 +222,13 @@ open class MainActivity : ComponentActivity() {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
+                            if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+                                com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                                    context = context,
+                                    forceRefresh = false,
+                                    minIntervalMs = 60 * 60 * 1000L
+                                )
+                            }
                         }
                     }
 
@@ -567,6 +574,29 @@ open class MainActivity : ComponentActivity() {
                                 openSpotifySetupInSettings = true
                                 showProfileScreen = true
                                 showSettingsScreen = true
+                            }
+                            "SYNC_SPOTIFY_LIBRARY" -> {
+                                if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+                                    vm.syncSpotifyLibraryNow(forceRefresh = true)
+                                    if (tool.open_playlist_screen == true) {
+                                        showSettingsScreen = false
+                                        showProfileScreen = false
+                                        showPlaylistsScreen = true
+                                    }
+                                } else {
+                                    openSpotifySetupInSettings = true
+                                    showProfileScreen = true
+                                    showSettingsScreen = true
+                                }
+                            }
+                            "EXPORT_PLAYLIST_TO_SPOTIFY" -> {
+                                if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+                                    vm.exportTuneMindPlaylistToSpotify(tool.playlist_name.orEmpty())
+                                } else {
+                                    openSpotifySetupInSettings = true
+                                    showProfileScreen = true
+                                    showSettingsScreen = true
+                                }
                             }
                             "NAVIGATE_SCREEN" -> {
                                 val screen = tool.target_screen?.uppercase() ?: ""

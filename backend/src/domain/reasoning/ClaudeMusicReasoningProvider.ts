@@ -54,6 +54,8 @@ export interface AgentToolCall {
     | 'OPEN_MUSIC_PLAYER_APP'
     | 'OPEN_SETTINGS'
     | 'OPEN_SPOTIFY_CONNECT_GUIDE'
+    | 'SYNC_SPOTIFY_LIBRARY'
+    | 'EXPORT_PLAYLIST_TO_SPOTIFY'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
     | 'CREATE_TUNEMIND_PLAYLIST'
@@ -995,6 +997,8 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'OPEN_MUSIC_PLAYER_APP',
                 'OPEN_SETTINGS',
                 'OPEN_SPOTIFY_CONNECT_GUIDE',
+                'SYNC_SPOTIFY_LIBRARY',
+                'EXPORT_PLAYLIST_TO_SPOTIFY',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE',
                 'CREATE_TUNEMIND_PLAYLIST',
@@ -1273,13 +1277,15 @@ FULL APP-WIDE CONTROL ACTIONS:
 - Refresh For You: action="REFRESH_FOR_YOU_PICKS".
 - Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).
 - Open Spotify guided setup / troubleshooting: action="OPEN_SPOTIFY_CONNECT_GUIDE".
+- Sync Spotify Liked Songs, Playlists, Recently Played & Top Artists into TuneMind (works for BOTH Free & Premium connected Spotify users): action="SYNC_SPOTIFY_LIBRARY" (set "open_playlist_screen": true if the user asked to see their synced playlists).
+- Export any TuneMind playlist directly into the user's real Spotify account (works for BOTH Free & Premium connected Spotify users): action="EXPORT_PLAYLIST_TO_SPOTIFY" with "playlist_name".
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
 - Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
 - Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE".
 - Volume & Sleep Timer: action="SET_VOLUME_PERCENT" (volume_percent: 10-100), action="SET_SLEEP_TIMER" (sleep_timer_minutes: 0-240).
 - Navigation: action="NAVIGATE_SCREEN" with target_screen in:
   "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
-- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE".
+- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", "SYNC_SPOTIFY_LIBRARY", "EXPORT_PLAYLIST_TO_SPOTIFY".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
 - East African & Global Genre Precision: Never misclassify local or international tracks! Know East African genres fluently (e.g. Gikuyu / Mugithi & Benga like Samidoh, Salim, De'Mathew, Joyce Wa Mamaa, Jose Gatutura; Bongo Flava like Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Kusah, Jay Melody; Kenyan Pop & Gengetone like Sauti Sol, Nyashinski, Bien, Wakadinali, Khaligraph Jones, Mejja; Kenyan & East African Gospel like Mercy Masika, Guardian Angel, Evelyn Wanjiru, Christina Shusho, Reuben Kigame; Ohangla like Prince Indah; Lingala/Rumba like Fally Ipupa, Koffi Olomide; plus Afrobeats, Amapiano, Hip-Hop, R&B, Dancehall, Pop, Nu-Jazz, Bossa Nova). Use the inferred 'genre' labels on tracks accurately when asked or recommending.
@@ -2930,7 +2936,7 @@ Reason naturally about what the user actually said and maintain clear, honest bo
    - Queue tracks up next -> "QUEUE_TRACKS" ("queue_tracks": [{"title": "...", "artist": "..."}])
    - Sleep timer -> "SET_SLEEP_TIMER" ("sleep_timer_minutes": N or 0 to cancel)
    - If user asks to play without opening an external app OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true.
-   - Screens -> "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
+   - Screens -> "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", "SYNC_SPOTIFY_LIBRARY", "EXPORT_PLAYLIST_TO_SPOTIFY", or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
    - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
    - Optionally include "extra_actions": [...] to combine actions in one turn.
 
@@ -2939,7 +2945,7 @@ Respond ONLY with a single valid JSON object:
   "voice_agent_tts": "Your natural, warm, unscripted spoken reply (1-3 sentences)",
   "flow_state_analysis": "Short 1-line studio HUD note",
   "calculated_satiety_percentage": 24,
-  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "OPEN_SPOTIFY_CONNECT_GUIDE" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
+  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "OPEN_SPOTIFY_CONNECT_GUIDE" | "SYNC_SPOTIFY_LIBRARY" | "EXPORT_PLAYLIST_TO_SPOTIFY" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
   "track_id": "",
@@ -3298,7 +3304,70 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    // 3. Spotify Connect Co-Pilot / Settings / Autonomous DJ / Stay-in-TuneMind / Accent Theme Color commands
+    // 3. Spotify Library Sync, Playlist Export & Connect Co-Pilot / Settings / Autonomous DJ / Stay-in-TuneMind / Accent Theme Color commands
+    if (
+      userCommandLower.includes('spotify') &&
+      /\b(sync|import|bring|pull|fetch|load|refresh)\s+(my\s+|all\s+)?(spotify\s+)?(liked\s+songs?|playlists?|spotify\s+library|spotify\s+music|spotify\s+tracks?|spotify)\b/i.test(userCommandLower)
+    ) {
+      const isConnected = Boolean(context.app_state?.spotify_connected);
+      if (isConnected) {
+        return {
+          calculated_satiety_percentage: 24,
+          reasoning_mode: 'DIRECT_EXECUTION',
+          flow_state_analysis: 'Syncing Spotify Liked Songs & Playlists into TuneMind.',
+          voice_agent_tts: 'Syncing your Spotify Liked Songs and Playlists into TuneMind right now. Give it a few seconds and everything will show up in your Library and Playlists.',
+          agent_tool_call: {
+            action: 'SYNC_SPOTIFY_LIBRARY',
+            open_playlist_screen: userCommandLower.includes('playlist'),
+            expect_follow_up: false
+          },
+          os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+          database_tags: ['sync-spotify-library']
+        };
+      }
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: 'Spotify not connected yet — opening Spotify Connect Guide.',
+        voice_agent_tts: 'Connect your Spotify account first and I will immediately pull in your Liked Songs and Playlists. Opening the 60-second Spotify Connect guide now.',
+        agent_tool_call: { action: 'OPEN_SPOTIFY_CONNECT_GUIDE', expect_follow_up: false },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['open-spotify-connect-guide']
+      };
+    }
+
+    if (/\b(export|push|send|save|copy)\b.*\bplaylist\b.*\b(to|into)\s+spotify\b/i.test(userCommandLower)) {
+      const isConnected = Boolean(context.app_state?.spotify_connected);
+      const match = userCommandRaw.match(/(?:export|push|send|save|copy)\s+(?:my\s+)?(?:playlist\s+)?([a-z0-9 '&-]+?)\s+(?:playlist\s+)?(?:to|into)\s+spotify/i);
+      const extractedName = (match?.[1] || '').replace(/^(my|the|this|a)\s+/i, '').trim();
+      if (isConnected) {
+        return {
+          calculated_satiety_percentage: 24,
+          reasoning_mode: 'DIRECT_EXECUTION',
+          flow_state_analysis: `Exporting TuneMind playlist${extractedName ? ` "${extractedName}"` : ''} to Spotify.`,
+          voice_agent_tts: extractedName
+            ? `Exporting your ${extractedName} playlist straight into your Spotify account right now.`
+            : 'Exporting your TuneMind playlist straight into your Spotify account right now.',
+          agent_tool_call: {
+            action: 'EXPORT_PLAYLIST_TO_SPOTIFY',
+            playlist_name: extractedName,
+            expect_follow_up: false
+          },
+          os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+          database_tags: ['export-playlist-to-spotify']
+        };
+      }
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: 'Spotify not connected yet — opening Spotify Connect Guide.',
+        voice_agent_tts: 'Connect your Spotify account first so I can export playlists directly into Spotify. Opening the quick setup guide now.',
+        agent_tool_call: { action: 'OPEN_SPOTIFY_CONNECT_GUIDE', expect_follow_up: false },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['open-spotify-connect-guide']
+      };
+    }
+
     if (/\b(connect|link|setup|set\s+up|fix|reconnect|troubleshoot)\s+(my\s+)?spotify\b|\bhelp\s+(me\s+)?(connect|link|set\s+up)\s+spotify\b/i.test(userCommandLower)) {
       const appState = context.app_state;
       const isPremiumConnected = Boolean(appState?.spotify_premium_connected);

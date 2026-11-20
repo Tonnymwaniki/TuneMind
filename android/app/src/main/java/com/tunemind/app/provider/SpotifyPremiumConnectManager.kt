@@ -87,6 +87,47 @@ sealed class SpotifyPlayResult {
     data class Failed(val reason: String) : SpotifyPlayResult()
 }
 
+data class SpotifySyncedTrack(
+    val spotifyId: String,
+    val spotifyUri: String,
+    val title: String,
+    val artist: String,
+    val album: String = "",
+    val durationMs: Long = 0L,
+    val albumArtUrl: String? = null,
+    val previewUrl: String? = null,
+    val popularity: Int = 0,
+    val addedAtMs: Long = 0L
+)
+
+data class SpotifySyncedArtist(
+    val spotifyId: String,
+    val name: String,
+    val imageUrl: String? = null,
+    val genres: List<String> = emptyList(),
+    val popularity: Int = 0,
+    val followersTotal: Long = 0L
+)
+
+data class SpotifySyncedPlaylist(
+    val spotifyId: String,
+    val name: String,
+    val description: String = "",
+    val ownerName: String = "",
+    val imageUrl: String? = null,
+    val totalTracks: Int = 0,
+    val tracks: List<SpotifySyncedTrack> = emptyList()
+)
+
+data class SpotifyExportPlaylistResult(
+    val success: Boolean,
+    val spotifyPlaylistId: String? = null,
+    val spotifyUrl: String? = null,
+    val addedCount: Int = 0,
+    val totalCount: Int = 0,
+    val message: String = ""
+)
+
 /**
  * Spotify Premium Direct Connect manager (OAuth 2.0 Authorization Code + PKCE).
  *
@@ -118,7 +159,8 @@ object SpotifyPremiumConnectManager {
     const val SCOPES =
         "user-modify-playback-state user-read-playback-state user-read-currently-playing " +
             "user-library-modify user-library-read playlist-modify-public playlist-modify-private " +
-            "playlist-read-private user-read-private"
+            "playlist-read-private playlist-read-collaborative user-read-private " +
+            "user-top-read user-read-recently-played"
 
     private const val KEY_CLIENT_ID = "client_id"
     private const val KEY_APP_DEFAULT_CLIENT_ID = "app_default_client_id"
@@ -126,6 +168,7 @@ object SpotifyPremiumConnectManager {
     private const val KEY_ACCESS_TOKEN = "access_token"
     private const val KEY_REFRESH_TOKEN = "refresh_token"
     private const val KEY_EXPIRES_AT_MS = "expires_at_ms"
+    private const val KEY_SPOTIFY_USER_ID = "spotify_user_id"
     private const val KEY_DISPLAY_NAME = "display_name"
     private const val KEY_PRODUCT = "product"
     private const val KEY_IS_PREMIUM = "is_premium"
@@ -807,10 +850,12 @@ object SpotifyPremiumConnectManager {
                 runCatching { Thread.sleep(350L) }
                 fetchSpotifyProfile(accessToken)
             }
-            val displayName = profile?.first?.ifBlank { "Spotify Listener" }
+            val displayName = profile?.second?.ifBlank { "Spotify Listener" }
                 ?: prefs.getString(KEY_DISPLAY_NAME, "")?.ifBlank { "Spotify Listener" }
                 ?: "Spotify Listener"
-            val product = profile?.second?.trim().orEmpty()
+            val spotifyUserId = profile?.first?.trim().orEmpty()
+                .ifBlank { prefs.getString(KEY_SPOTIFY_USER_ID, "")?.trim().orEmpty() }
+            val product = profile?.third?.trim().orEmpty()
                 .ifBlank { prefs.getString(KEY_PRODUCT, "")?.trim().orEmpty() }
             val explicitlyFree = product.equals("free", ignoreCase = true) || product.equals("open", ignoreCase = true)
             val isPremium = !explicitlyFree && (product.equals("premium", ignoreCase = true) || product.isBlank())
@@ -821,6 +866,7 @@ object SpotifyPremiumConnectManager {
                 .putString(KEY_ACTIVE_AUTH_CLIENT_ID, clientId)
                 .putString(KEY_ACCESS_TOKEN, accessToken)
                 .putLong(KEY_EXPIRES_AT_MS, expiresAtMs)
+                .putString(KEY_SPOTIFY_USER_ID, spotifyUserId)
                 .putString(KEY_DISPLAY_NAME, displayName)
                 .putString(KEY_PRODUCT, product)
                 .putBoolean(KEY_IS_PREMIUM, isPremium)
@@ -874,6 +920,7 @@ object SpotifyPremiumConnectManager {
             .remove(KEY_ACCESS_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
             .remove(KEY_EXPIRES_AT_MS)
+            .remove(KEY_SPOTIFY_USER_ID)
             .remove(KEY_DISPLAY_NAME)
             .remove(KEY_PRODUCT)
             .remove(KEY_IS_PREMIUM)
@@ -924,7 +971,7 @@ object SpotifyPremiumConnectManager {
         }
     }
 
-    private fun fetchSpotifyProfile(accessToken: String): Pair<String, String>? {
+    private fun fetchSpotifyProfile(accessToken: String): Triple<String, String, String>? {
         return try {
             val req = Request.Builder()
                 .url("$API_BASE/me")
@@ -938,14 +985,28 @@ object SpotifyPremiumConnectManager {
                     return null
                 }
                 val json = JSONObject(resp.body?.string().orEmpty())
-                val name = json.optString("display_name").ifBlank { json.optString("id") }
+                val userId = json.optString("id").trim()
+                val name = json.optString("display_name").ifBlank { userId }
                 val product = json.optString("product").trim()
-                name to product
+                Triple(userId, name, product)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to fetch Spotify /v1/me profile: ${e.message}")
             null
         }
+    }
+
+    fun getSpotifyUserId(context: Context): String? {
+        val prefs = getPrefs(context)
+        val cached = prefs.getString(KEY_SPOTIFY_USER_ID, "")?.trim().orEmpty()
+        if (cached.isNotBlank()) return cached
+        val token = refreshAccessTokenIfNeeded(context) ?: return null
+        val profile = fetchSpotifyProfile(token) ?: return null
+        if (profile.first.isNotBlank()) {
+            prefs.edit().putString(KEY_SPOTIFY_USER_ID, profile.first).apply()
+            return profile.first
+        }
+        return null
     }
 
     /**
@@ -1031,11 +1092,12 @@ object SpotifyPremiumConnectManager {
                     }
                     editor.apply()
 
-                    // Re-verify profile if product wasn't known yet
-                    if (prefs.getString(KEY_PRODUCT, "").isNullOrBlank()) {
-                        fetchSpotifyProfile(newToken)?.let { (name, product) ->
+                    // Re-verify profile if product or userId wasn't known yet
+                    if (prefs.getString(KEY_PRODUCT, "").isNullOrBlank() || prefs.getString(KEY_SPOTIFY_USER_ID, "").isNullOrBlank()) {
+                        fetchSpotifyProfile(newToken)?.let { (uid, name, product) ->
                             val isPrem = product.equals("premium", ignoreCase = true)
                             prefs.edit()
+                                .putString(KEY_SPOTIFY_USER_ID, uid)
                                 .putString(KEY_DISPLAY_NAME, name)
                                 .putString(KEY_PRODUCT, product)
                                 .putBoolean(KEY_IS_PREMIUM, isPrem)
@@ -1206,10 +1268,11 @@ object SpotifyPremiumConnectManager {
 
         // If /v1/me product was unknown when token was saved, verify it once now.
         if (status.product.isBlank()) {
-            fetchSpotifyProfile(token)?.let { (name, prod) ->
+            fetchSpotifyProfile(token)?.let { (uid, name, prod) ->
                 val prefs = getPrefs(context)
                 val verifiedPremium = prod.equals("premium", ignoreCase = true)
                 prefs.edit()
+                    .putString(KEY_SPOTIFY_USER_ID, uid)
                     .putString(KEY_DISPLAY_NAME, name)
                     .putString(KEY_PRODUCT, prod)
                     .putBoolean(KEY_IS_PREMIUM, verifiedPremium)
@@ -1395,6 +1458,537 @@ object SpotifyPremiumConnectManager {
         )
     }
 
+    /**
+     * Removes a track from the user's Spotify Liked Songs (`DELETE /v1/me/tracks`).
+     */
+    fun unlikeTrackOnSpotify(
+        context: Context,
+        title: String,
+        artist: String = "",
+        spotifyUri: String? = null
+    ): Boolean {
+        if (!isConnected(context)) return false
+        val token = refreshAccessTokenIfNeeded(context) ?: return false
+        val resolvedUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
+            ?: searchExactTrackUri(context, title, artist)
+            ?: return false
+        val trackId = extractTrackIdFromUri(resolvedUri) ?: return false
+
+        val bodyJson = JSONObject().put("ids", JSONArray().put(trackId)).toString()
+        return executeSimpleSpotifyCommand(
+            context = context,
+            initialToken = token,
+            method = "DELETE",
+            url = "$API_BASE/me/tracks?ids=$trackId",
+            jsonBody = bodyJson
+        )
+    }
+
+    /**
+     * Plays an entire Spotify playlist context silently on the user's active Spotify Connect device (Premium).
+     */
+    fun playPlaylistContextSilently(
+        context: Context,
+        spotifyPlaylistId: String
+    ): SpotifyPlayResult {
+        val cleanId = spotifyPlaylistId.trim()
+        if (cleanId.isBlank()) return SpotifyPlayResult.Failed("Invalid Spotify playlist ID.")
+        val status = ensureLoaded(context)
+        if (!status.isConnected) return SpotifyPlayResult.NotConnected
+        if (!status.isPremium) {
+            return SpotifyPlayResult.PremiumRequired("Spotify Premium is required for silent playlist playback.")
+        }
+        var token = refreshAccessTokenIfNeeded(context)
+            ?: return SpotifyPlayResult.Failed("Spotify token unavailable — reconnect in Settings.")
+        val device = findBestConnectDevice(token)
+        val contextUri = "spotify:playlist:$cleanId"
+
+        fun executePlay(activeToken: String, targetDeviceId: String?): okhttp3.Response {
+            val url = buildString {
+                append("$API_BASE/me/player/play")
+                if (!targetDeviceId.isNullOrBlank()) {
+                    append("?device_id=").append(URLEncoder.encode(targetDeviceId, "UTF-8"))
+                }
+            }
+            val payload = JSONObject().apply {
+                put("context_uri", contextUri)
+            }.toString()
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $activeToken")
+                .header("Content-Type", "application/json")
+                .put(payload.toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            return httpClient.newCall(req).execute()
+        }
+
+        return try {
+            var response = executePlay(token, device?.first)
+            if (response.code == 401) {
+                response.close()
+                token = refreshAccessTokenIfNeeded(context, forceRefresh = true)
+                    ?: return SpotifyPlayResult.Failed("Spotify session expired.")
+                response = executePlay(token, findBestConnectDevice(token)?.first)
+            }
+            response.use { resp ->
+                if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
+                    SpotifyPlayResult.Success(contextUri, device?.second ?: "Spotify")
+                } else if (resp.code == 404) {
+                    SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", contextUri)
+                } else {
+                    SpotifyPlayResult.Failed("Spotify playlist playback returned HTTP ${resp.code}")
+                }
+            }
+        } catch (e: Exception) {
+            SpotifyPlayResult.Failed("Spotify playlist playback error: ${e.message}")
+        }
+    }
+
+    // ── FULL SPOTIFY LIBRARY SYNC & 2-WAY PLAYLIST EXPORT (WORKS FOR FREE & PREMIUM!) ────────
+
+    private fun parseIso8601ToMillis(raw: String?): Long {
+        if (raw.isNullOrBlank()) return 0L
+        val clean = raw.trim()
+        val formats = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ssXXX"
+        )
+        for (pattern in formats) {
+            try {
+                val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }
+                val parsed = sdf.parse(clean)
+                if (parsed != null) return parsed.time
+            } catch (_: Throwable) {}
+        }
+        return 0L
+    }
+
+    private fun parseSpotifyTrackObject(trackObj: JSONObject?, addedAtMs: Long = 0L): SpotifySyncedTrack? {
+        if (trackObj == null) return null
+        if (trackObj.optBoolean("is_local", false)) return null
+        val type = trackObj.optString("type", "track")
+        if (type.isNotBlank() && !type.equals("track", ignoreCase = true)) return null
+
+        val title = trackObj.optString("name").trim()
+        if (title.isBlank()) return null
+        val id = trackObj.optString("id").trim()
+        val uri = trackObj.optString("uri").trim().ifBlank {
+            if (id.isNotBlank()) "spotify:track:$id" else ""
+        }
+        if (!uri.startsWith("spotify:track:")) return null
+
+        val artistsArr = trackObj.optJSONArray("artists")
+        val artistNames = mutableListOf<String>()
+        if (artistsArr != null) {
+            for (i in 0 until artistsArr.length()) {
+                val n = artistsArr.optJSONObject(i)?.optString("name")?.trim().orEmpty()
+                if (n.isNotBlank()) artistNames.add(n)
+            }
+        }
+        val artist = artistNames.joinToString(", ").ifBlank { "Unknown Artist" }
+        val albumObj = trackObj.optJSONObject("album")
+        val albumName = albumObj?.optString("name")?.trim().orEmpty()
+        val imagesArr = albumObj?.optJSONArray("images")
+        val albumArtUrl = if (imagesArr != null && imagesArr.length() > 0) {
+            imagesArr.optJSONObject(0)?.optString("url")?.trim()?.takeIf { it.isNotBlank() }
+        } else null
+        val durationMs = trackObj.optLong("duration_ms", 0L).coerceAtLeast(0L)
+        val previewUrl = trackObj.optString("preview_url").trim().takeIf { it.isNotBlank() && it != "null" }
+        val popularity = trackObj.optInt("popularity", 0).coerceIn(0, 100)
+
+        return SpotifySyncedTrack(
+            spotifyId = id.ifBlank { uri.substringAfter("spotify:track:") },
+            spotifyUri = uri,
+            title = title,
+            artist = artist,
+            album = albumName,
+            durationMs = durationMs,
+            albumArtUrl = albumArtUrl,
+            previewUrl = previewUrl,
+            popularity = popularity,
+            addedAtMs = addedAtMs
+        )
+    }
+
+    private fun executeAuthorizedGetJson(context: Context, url: String): Pair<Int, JSONObject?> {
+        var token = refreshAccessTokenIfNeeded(context) ?: return 401 to null
+        fun runOnce(activeToken: String): okhttp3.Response {
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $activeToken")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            return httpClient.newCall(req).execute()
+        }
+        return try {
+            var resp = runOnce(token)
+            if (resp.code == 401) {
+                resp.close()
+                token = refreshAccessTokenIfNeeded(context, forceRefresh = true) ?: return 401 to null
+                resp = runOnce(token)
+            }
+            resp.use { r ->
+                val body = r.body?.string().orEmpty()
+                if (!r.isSuccessful) {
+                    Log.w(TAG, "Spotify GET $url returned HTTP ${r.code}")
+                    r.code to null
+                } else {
+                    r.code to runCatching { JSONObject(body) }.getOrNull()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Spotify GET $url failed: ${e.message}")
+            0 to null
+        }
+    }
+
+    /**
+     * Fetches the user's Spotify Liked Songs (`GET /v1/me/tracks`, paginated up to [maxTracks]).
+     * Works on both Spotify Free and Spotify Premium connected accounts.
+     */
+    fun fetchLikedTracks(
+        context: Context,
+        maxTracks: Int = 300,
+        onProgress: ((fetchedCount: Int) -> Unit)? = null
+    ): List<SpotifySyncedTrack> {
+        if (!isConnected(context)) return emptyList()
+        val results = mutableListOf<SpotifySyncedTrack>()
+        var nextUrl: String? = "$API_BASE/me/tracks?limit=50&offset=0"
+        var pages = 0
+        while (!nextUrl.isNullOrBlank() && results.size < maxTracks && pages < 10) {
+            pages++
+            val (_, json) = executeAuthorizedGetJson(context, nextUrl)
+            if (json == null) break
+            val items = json.optJSONArray("items") ?: break
+            for (i in 0 until items.length()) {
+                val entry = items.optJSONObject(i) ?: continue
+                val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
+                val parsed = parseSpotifyTrackObject(entry.optJSONObject("track"), addedAt)
+                if (parsed != null) {
+                    results.add(parsed)
+                    if (results.size >= maxTracks) break
+                }
+            }
+            onProgress?.invoke(results.size)
+            val rawNext = json.optString("next").trim()
+            nextUrl = rawNext.takeIf { it.startsWith("https://") }
+        }
+        return results
+    }
+
+    /**
+     * Fetches the user's Spotify playlists and their tracks (`GET /v1/me/playlists` + tracks).
+     * Works on both Spotify Free and Spotify Premium connected accounts.
+     */
+    fun fetchUserPlaylistsWithTracks(
+        context: Context,
+        maxPlaylists: Int = 30,
+        maxTracksPerPlaylist: Int = 100,
+        onProgress: ((completedPlaylists: Int, totalDiscovered: Int) -> Unit)? = null
+    ): List<SpotifySyncedPlaylist> {
+        if (!isConnected(context)) return emptyList()
+        val playlistMeta = mutableListOf<SpotifySyncedPlaylist>()
+        var nextUrl: String? = "$API_BASE/me/playlists?limit=50&offset=0"
+        var pages = 0
+
+        while (!nextUrl.isNullOrBlank() && playlistMeta.size < maxPlaylists && pages < 4) {
+            pages++
+            val (_, json) = executeAuthorizedGetJson(context, nextUrl)
+            if (json == null) break
+            val items = json.optJSONArray("items") ?: break
+            for (i in 0 until items.length()) {
+                val pl = items.optJSONObject(i) ?: continue
+                val plId = pl.optString("id").trim()
+                val plName = pl.optString("name").trim()
+                if (plId.isBlank() || plName.isBlank()) continue
+                val desc = pl.optString("description").trim()
+                val ownerName = pl.optJSONObject("owner")?.optString("display_name")?.trim().orEmpty()
+                val imgs = pl.optJSONArray("images")
+                val imageUrl = if (imgs != null && imgs.length() > 0) {
+                    imgs.optJSONObject(0)?.optString("url")?.trim()?.takeIf { it.isNotBlank() }
+                } else null
+                val totalTracks = pl.optJSONObject("tracks")?.optInt("total", 0) ?: 0
+                playlistMeta.add(
+                    SpotifySyncedPlaylist(
+                        spotifyId = plId,
+                        name = plName,
+                        description = desc,
+                        ownerName = ownerName,
+                        imageUrl = imageUrl,
+                        totalTracks = totalTracks
+                    )
+                )
+                if (playlistMeta.size >= maxPlaylists) break
+            }
+            val rawNext = json.optString("next").trim()
+            nextUrl = rawNext.takeIf { it.startsWith("https://") }
+        }
+
+        val hydrated = mutableListOf<SpotifySyncedPlaylist>()
+        playlistMeta.forEachIndexed { idx, pl ->
+            val tracks = fetchPlaylistTracks(context, pl.spotifyId, maxTracks = maxTracksPerPlaylist)
+            hydrated.add(pl.copy(tracks = tracks, totalTracks = maxOf(pl.totalTracks, tracks.size)))
+            onProgress?.invoke(idx + 1, playlistMeta.size)
+        }
+        return hydrated
+    }
+
+    fun fetchPlaylistTracks(
+        context: Context,
+        spotifyPlaylistId: String,
+        maxTracks: Int = 100
+    ): List<SpotifySyncedTrack> {
+        val cleanId = spotifyPlaylistId.trim()
+        if (cleanId.isBlank()) return emptyList()
+        val tracks = mutableListOf<SpotifySyncedTrack>()
+        var nextUrl: String? = "$API_BASE/playlists/$cleanId/tracks?limit=100&offset=0"
+        var pages = 0
+        while (!nextUrl.isNullOrBlank() && tracks.size < maxTracks && pages < 3) {
+            pages++
+            val (_, json) = executeAuthorizedGetJson(context, nextUrl)
+            if (json == null) break
+            val items = json.optJSONArray("items") ?: break
+            for (i in 0 until items.length()) {
+                val entry = items.optJSONObject(i) ?: continue
+                val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
+                val parsed = parseSpotifyTrackObject(entry.optJSONObject("track"), addedAt)
+                if (parsed != null) {
+                    tracks.add(parsed)
+                    if (tracks.size >= maxTracks) break
+                }
+            }
+            val rawNext = json.optString("next").trim()
+            nextUrl = rawNext.takeIf { it.startsWith("https://") }
+        }
+        return tracks
+    }
+
+    /**
+     * Fetches Spotify Recently Played (`GET /v1/me/player/recently-played`).
+     * Gracefully returns empty + `scopeMissing = true` if an older token doesn't have `user-read-recently-played`.
+     */
+    fun fetchRecentlyPlayedTracks(
+        context: Context,
+        limit: Int = 50
+    ): Pair<List<SpotifySyncedTrack>, Boolean> {
+        if (!isConnected(context)) return emptyList<SpotifySyncedTrack>() to false
+        val clamped = limit.coerceIn(1, 50)
+        val (code, json) = executeAuthorizedGetJson(context, "$API_BASE/me/player/recently-played?limit=$clamped")
+        if (code == 403) return emptyList<SpotifySyncedTrack>() to true
+        if (json == null) return emptyList<SpotifySyncedTrack>() to false
+        val items = json.optJSONArray("items") ?: return emptyList<SpotifySyncedTrack>() to false
+        val results = mutableListOf<SpotifySyncedTrack>()
+        for (i in 0 until items.length()) {
+            val entry = items.optJSONObject(i) ?: continue
+            val playedAt = parseIso8601ToMillis(entry.optString("played_at"))
+            val parsed = parseSpotifyTrackObject(entry.optJSONObject("track"), playedAt)
+            if (parsed != null) results.add(parsed)
+        }
+        return results to false
+    }
+
+    /**
+     * Fetches the user's Spotify Top Tracks (`GET /v1/me/top/tracks`).
+     * Gracefully returns empty + `scopeMissing = true` if an older token doesn't have `user-top-read`.
+     */
+    fun fetchTopTracks(
+        context: Context,
+        limit: Int = 40
+    ): Pair<List<SpotifySyncedTrack>, Boolean> {
+        if (!isConnected(context)) return emptyList<SpotifySyncedTrack>() to false
+        val clamped = limit.coerceIn(1, 50)
+        val (code, json) = executeAuthorizedGetJson(context, "$API_BASE/me/top/tracks?limit=$clamped&time_range=medium_term")
+        if (code == 403) return emptyList<SpotifySyncedTrack>() to true
+        if (json == null) return emptyList<SpotifySyncedTrack>() to false
+        val items = json.optJSONArray("items") ?: return emptyList<SpotifySyncedTrack>() to false
+        val results = mutableListOf<SpotifySyncedTrack>()
+        for (i in 0 until items.length()) {
+            val parsed = parseSpotifyTrackObject(items.optJSONObject(i))
+            if (parsed != null) results.add(parsed)
+        }
+        return results to false
+    }
+
+    /**
+     * Fetches the user's Spotify Top Artists (`GET /v1/me/top/artists`).
+     * Gracefully returns empty + `scopeMissing = true` if an older token doesn't have `user-top-read`.
+     */
+    fun fetchTopArtists(
+        context: Context,
+        limit: Int = 25
+    ): Pair<List<SpotifySyncedArtist>, Boolean> {
+        if (!isConnected(context)) return emptyList<SpotifySyncedArtist>() to false
+        val clamped = limit.coerceIn(1, 50)
+        val (code, json) = executeAuthorizedGetJson(context, "$API_BASE/me/top/artists?limit=$clamped&time_range=medium_term")
+        if (code == 403) return emptyList<SpotifySyncedArtist>() to true
+        if (json == null) return emptyList<SpotifySyncedArtist>() to false
+        val items = json.optJSONArray("items") ?: return emptyList<SpotifySyncedArtist>() to false
+        val results = mutableListOf<SpotifySyncedArtist>()
+        for (i in 0 until items.length()) {
+            val a = items.optJSONObject(i) ?: continue
+            val id = a.optString("id").trim()
+            val name = a.optString("name").trim()
+            if (id.isBlank() || name.isBlank()) continue
+            val imgs = a.optJSONArray("images")
+            val imageUrl = if (imgs != null && imgs.length() > 0) {
+                imgs.optJSONObject(0)?.optString("url")?.trim()?.takeIf { it.isNotBlank() }
+            } else null
+            val genresArr = a.optJSONArray("genres")
+            val genres = mutableListOf<String>()
+            if (genresArr != null) {
+                for (g in 0 until genresArr.length()) {
+                    val gv = genresArr.optString(g).trim()
+                    if (gv.isNotBlank()) genres.add(gv)
+                }
+            }
+            val popularity = a.optInt("popularity", 0).coerceIn(0, 100)
+            val followers = a.optJSONObject("followers")?.optLong("total", 0L) ?: 0L
+            results.add(
+                SpotifySyncedArtist(
+                    spotifyId = id,
+                    name = name,
+                    imageUrl = imageUrl,
+                    genres = genres,
+                    popularity = popularity,
+                    followersTotal = followers
+                )
+            )
+        }
+        return results to false
+    }
+
+    /**
+     * Exports any TuneMind playlist straight into the user's real Spotify account!
+     * Works for BOTH Spotify Free and Spotify Premium connected users.
+     *
+     * @param tracks List of Triple(title, artist, optionalExistingExternalUri)
+     */
+    fun exportPlaylistToSpotify(
+        context: Context,
+        playlistName: String,
+        description: String = "",
+        tracks: List<Triple<String, String, String?>>,
+        isPublic: Boolean = false
+    ): SpotifyExportPlaylistResult {
+        if (!isConnected(context)) {
+            return SpotifyExportPlaylistResult(
+                success = false,
+                totalCount = tracks.size,
+                message = "Connect Spotify in Settings first to export playlists."
+            )
+        }
+        val token = refreshAccessTokenIfNeeded(context)
+            ?: return SpotifyExportPlaylistResult(
+                success = false,
+                totalCount = tracks.size,
+                message = "Spotify session expired — reconnect in Settings."
+            )
+        val userId = getSpotifyUserId(context)
+            ?: return SpotifyExportPlaylistResult(
+                success = false,
+                totalCount = tracks.size,
+                message = "Could not load your Spotify profile ID. Please try again."
+            )
+
+        val cleanName = playlistName.trim().ifBlank { "TuneMind Playlist" }
+        val cleanDesc = description.trim().ifBlank { "Exported from TuneMind" }
+
+        // 1. Create the playlist in the user's Spotify account
+        val createBody = JSONObject().apply {
+            put("name", cleanName)
+            put("description", cleanDesc)
+            put("public", isPublic)
+        }.toString()
+
+        val createReq = Request.Builder()
+            .url("$API_BASE/users/${URLEncoder.encode(userId, "UTF-8")}/playlists")
+            .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .post(createBody.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+        val (createdPlaylistId, createdSpotifyUrl) = try {
+            httpClient.newCall(createReq).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    val code = resp.code
+                    return SpotifyExportPlaylistResult(
+                        success = false,
+                        totalCount = tracks.size,
+                        message = if (code == 403) {
+                            "Spotify permission needed to create playlists — reconnect Spotify once in Settings."
+                        } else {
+                            "Could not create Spotify playlist (HTTP $code)."
+                        }
+                    )
+                }
+                val json = JSONObject(resp.body?.string().orEmpty())
+                val pid = json.optString("id").trim()
+                val url = json.optJSONObject("external_urls")?.optString("spotify")?.trim()
+                pid to url
+            }
+        } catch (e: Exception) {
+            return SpotifyExportPlaylistResult(
+                success = false,
+                totalCount = tracks.size,
+                message = "Network error creating Spotify playlist: ${e.message}"
+            )
+        }
+
+        if (createdPlaylistId.isBlank()) {
+            return SpotifyExportPlaylistResult(
+                success = false,
+                totalCount = tracks.size,
+                message = "Spotify did not return a playlist ID."
+            )
+        }
+
+        // 2. Resolve exact spotify:track:<id> URIs for every song
+        val resolvedUris = mutableListOf<String>()
+        tracks.forEach { (title, artist, existingUri) ->
+            val direct = MusicPlayerAutoLauncher.extractSpotifyTrackUri(existingUri)
+            val uri = direct ?: searchExactTrackUri(context, title, artist)
+            if (!uri.isNullOrBlank() && uri.startsWith("spotify:track:") && !resolvedUris.contains(uri)) {
+                resolvedUris.add(uri)
+            }
+        }
+
+        // 3. Push tracks in batches of 100 (Spotify API limit per request)
+        var addedTotal = 0
+        resolvedUris.chunked(100).forEach { batch ->
+            val payload = JSONObject().apply {
+                put("uris", JSONArray(batch))
+            }.toString()
+            val ok = executeSimpleSpotifyCommand(
+                context = context,
+                initialToken = token,
+                method = "POST",
+                url = "$API_BASE/playlists/$createdPlaylistId/tracks",
+                jsonBody = payload
+            )
+            if (ok) addedTotal += batch.size
+        }
+
+        val summary = if (tracks.isEmpty()) {
+            "Created \"$cleanName\" in your Spotify account."
+        } else {
+            "Exported \"$cleanName\" to Spotify ($addedTotal/${tracks.size} songs matched)."
+        }
+        Log.i(TAG, "✅ $summary (id=$createdPlaylistId)")
+        return SpotifyExportPlaylistResult(
+            success = true,
+            spotifyPlaylistId = createdPlaylistId,
+            spotifyUrl = createdSpotifyUrl,
+            addedCount = addedTotal,
+            totalCount = tracks.size,
+            message = summary
+        )
+    }
+
     fun pausePlayback(context: Context): Boolean {
         if (!isConnectedAndPremium(context)) return false
         val token = refreshAccessTokenIfNeeded(context) ?: return false
@@ -1444,6 +2038,7 @@ object SpotifyPremiumConnectManager {
             when (method.uppercase()) {
                 "POST" -> builder.post(body)
                 "PUT" -> builder.put(body)
+                "DELETE" -> builder.delete(body)
                 else -> builder.get()
             }
             return builder.build()

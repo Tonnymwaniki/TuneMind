@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -91,6 +93,7 @@ fun SettingsScreen(
     val cloakingSession by com.tunemind.app.domain.voice.AgentSettingsStore.privateSessionEnabled.collectAsState()
     val deduplicateLogs by com.tunemind.app.domain.voice.AgentSettingsStore.mergeDuplicatePlaysEnabled.collectAsState()
     val spotifyConnectStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
+    val spotifyLibrarySyncState by vm.spotifyLibrarySyncState.collectAsState()
     var spotifyClientIdInput by remember { mutableStateOf(spotifyConnectStatus.clientId) }
     var detectedClipboardClientId by remember { mutableStateOf<String?>(null) }
     var copiedRedirectUri by remember { mutableStateOf(false) }
@@ -122,6 +125,7 @@ fun SettingsScreen(
         {
             com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
             com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+            com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
             vm.checkBatteryOptimization(context)
             hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
             hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
@@ -507,6 +511,63 @@ fun SettingsScreen(
                     }
 
                     if (spotifyConnectStatus.isConnected) {
+                        // 1-Tap Full Spotify Library & Playlists Sync (works for both Premium & Free!)
+                        Button(
+                            onClick = { vm.syncSpotifyLibraryNow(forceRefresh = true) },
+                            enabled = !spotifyLibrarySyncState.isSyncing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = safeGreen,
+                                contentColor = Color(0xFF04100B)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (spotifyLibrarySyncState.isSyncing) {
+                                    spotifyLibrarySyncState.progressMessage.ifBlank { "Syncing Spotify Library..." }
+                                } else if (spotifyLibrarySyncState.hasSyncedBefore) {
+                                    "Re-sync Spotify Library & Playlists"
+                                } else {
+                                    "Sync Spotify Liked Songs & Playlists"
+                                },
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Text(
+                            text = spotifyLibrarySyncState.lastError ?: spotifyLibrarySyncState.summaryLabel,
+                            fontSize = 12.sp,
+                            color = when {
+                                !spotifyLibrarySyncState.lastError.isNullOrBlank() -> warnAmber
+                                spotifyLibrarySyncState.hasSyncedBefore -> safeGreen.copy(alpha = 0.9f)
+                                else -> Color.White.copy(alpha = 0.62f)
+                            },
+                            lineHeight = 16.sp
+                        )
+
+                        if (spotifyLibrarySyncState.optionalInsightsNeedReconnect) {
+                            Text(
+                                text = "Tip: Reconnect Spotify once to also unlock Recently Played & Top Artists sync.",
+                                fontSize = 11.5.sp,
+                                color = colors.primaryAccent.copy(alpha = 0.85f),
+                                lineHeight = 15.sp,
+                                modifier = Modifier.clickable {
+                                    com.tunemind.app.provider.SpotifyPremiumConnectManager.startDefaultAuthorization(context)
+                                }
+                            )
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)

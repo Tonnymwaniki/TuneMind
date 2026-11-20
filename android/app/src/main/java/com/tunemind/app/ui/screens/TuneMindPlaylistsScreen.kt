@@ -43,9 +43,19 @@ fun TuneMindPlaylistsScreen(
     onAskAgentForPlaylist: (prompt: String) -> Unit
 ) {
     val colors = LocalAdaptiveTheme.current
+    val context = LocalContext.current
     val playlists by vm.tuneMindPlaylists.collectAsState()
     val homeState by vm.homeState.collectAsState()
+    val spotifyStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
+    val spotifySyncState by vm.spotifyLibrarySyncState.collectAsState()
+    val isExportingToSpotify by vm.isExportingSpotifyPlaylist.collectAsState()
+    val libraryActionFeedback by vm.libraryActionFeedback.collectAsState()
     val nowPlaying = homeState.nowPlaying
+
+    LaunchedEffect(Unit) {
+        com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+        com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
+    }
 
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -160,7 +170,28 @@ fun TuneMindPlaylistsScreen(
 
             StudioHairlineDivider()
 
+            if (!libraryActionFeedback.isNullOrBlank()) {
+                Surface(
+                    color = Color(0xFF10B981).copy(alpha = 0.14f),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.35f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = libraryActionFeedback.orEmpty(),
+                        color = Color(0xFFA7F3D0),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+
             if (activePlaylist != null) {
+                val isSyncedFromSpotify = com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
+                    .isSpotifySyncedPlaylistId(activePlaylist.playlist.playlistId)
                 PlaylistDetailContent(
                     playlistWithTracks = activePlaylist,
                     nowPlayingTitle = nowPlaying?.title,
@@ -168,8 +199,19 @@ fun TuneMindPlaylistsScreen(
                     selectedTargetPlayer = selectedTargetPlayer,
                     accentColor = colors.primaryAccent,
                     cardSurface = colors.cardSurface,
+                    isSpotifyConnected = spotifyStatus.isConnected,
+                    isSyncedFromSpotify = isSyncedFromSpotify,
+                    isExportingToSpotify = isExportingToSpotify,
+                    isSyncingSpotify = spotifySyncState.isSyncing,
                     onPlayAll = {
                         vm.playTuneMindPlaylist(activePlaylist, selectedTargetPlayer, onPlayTrack)
+                    },
+                    onExportOrResyncSpotify = {
+                        if (isSyncedFromSpotify) {
+                            vm.syncSpotifyLibraryNow(forceRefresh = true)
+                        } else {
+                            vm.exportTuneMindPlaylistToSpotify(activePlaylist.playlist.playlistId)
+                        }
                     },
                     onAddCurrentTrack = if (!nowPlaying?.title.isNullOrBlank() && nowPlaying?.title != "Standing By") {
                         { vm.addCurrentTrackToTuneMindPlaylist(activePlaylist.playlist.playlistId) }
@@ -192,6 +234,10 @@ fun TuneMindPlaylistsScreen(
                     accentColor = colors.primaryAccent,
                     cardSurface = colors.cardSurface,
                     selectedTargetPlayer = selectedTargetPlayer,
+                    isSpotifyConnected = spotifyStatus.isConnected,
+                    isSyncingSpotify = spotifySyncState.isSyncing,
+                    spotifySyncSummary = spotifySyncState.summaryLabel,
+                    onSyncFromSpotify = { vm.syncSpotifyLibraryNow(forceRefresh = true) },
                     onSelectPlaylist = { selectedPlaylistId = it.playlist.playlistId },
                     onPlayPlaylist = { pl -> vm.playTuneMindPlaylist(pl, selectedTargetPlayer, onPlayTrack) },
                     onDeletePlaylist = { vm.deleteTuneMindPlaylist(it.playlist.playlistId) },
@@ -308,6 +354,10 @@ private fun PlaylistDirectoryContent(
     accentColor: Color,
     cardSurface: Color,
     selectedTargetPlayer: String,
+    isSpotifyConnected: Boolean,
+    isSyncingSpotify: Boolean,
+    spotifySyncSummary: String,
+    onSyncFromSpotify: () -> Unit,
     onSelectPlaylist: (TuneMindPlaylistWithTracks) -> Unit,
     onPlayPlaylist: (TuneMindPlaylistWithTracks) -> Unit,
     onDeletePlaylist: (TuneMindPlaylistWithTracks) -> Unit,
@@ -331,16 +381,16 @@ private fun PlaylistDirectoryContent(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Built by Voice, Played Anywhere",
+                        text = "Built by Voice, Synced with Spotify",
                         color = Color(0xFFF8FAFC),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = if (!nowPlayingTitle.isNullOrBlank() && nowPlayingTitle != "Standing By") {
-                            "While \"$nowPlayingTitle\" is playing, say \"Hi TuneMind, add this song to a new playlist\" — TuneMind pauses, negotiates the name with you, saves it here, and resumes your track."
+                            "While \"$nowPlayingTitle\" is playing, say \"Hi TuneMind, add this song to a new playlist\" — or sync all your Spotify playlists & liked songs right here."
                         } else {
-                            "Say \"Hi TuneMind, create a kids bedtime playlist\" or \"add the current song to a new playlist\". Saved inside TuneMind and played natively or across your favorite player."
+                            "Say \"Hi TuneMind, sync my Spotify playlists\" or \"create a late night playlist\". Saved inside TuneMind and exportable back to Spotify anytime."
                         },
                         color = Color.White.copy(alpha = 0.72f),
                         fontSize = 12.5.sp,
@@ -367,6 +417,35 @@ private fun PlaylistDirectoryContent(
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
                         ) {
                             Text("+ New Playlist", color = Color(0xFFF8FAFC), fontSize = 13.sp)
+                        }
+                    }
+
+                    if (isSpotifyConnected) {
+                        OutlinedButton(
+                            onClick = onSyncFromSpotify,
+                            enabled = !isSyncingSpotify,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.55f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (isSyncingSpotify) {
+                                    spotifySyncSummary.ifBlank { "Syncing from Spotify..." }
+                                } else {
+                                    "Sync Spotify Playlists & Liked Songs"
+                                },
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
@@ -512,7 +591,12 @@ private fun PlaylistDetailContent(
     selectedTargetPlayer: String,
     accentColor: Color,
     cardSurface: Color,
+    isSpotifyConnected: Boolean,
+    isSyncedFromSpotify: Boolean,
+    isExportingToSpotify: Boolean,
+    isSyncingSpotify: Boolean,
     onPlayAll: () -> Unit,
+    onExportOrResyncSpotify: () -> Unit,
     onAddCurrentTrack: (() -> Unit)?,
     onAskAgentAddMore: () -> Unit,
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
@@ -573,6 +657,34 @@ private fun PlaylistDetailContent(
                         )
                         Spacer(Modifier.width(5.dp))
                         Text("Add with AI", color = Color(0xFFF8FAFC), fontSize = 12.5.sp)
+                    }
+                }
+
+                if (isSpotifyConnected) {
+                    OutlinedButton(
+                        onClick = onExportOrResyncSpotify,
+                        enabled = if (isSyncedFromSpotify) !isSyncingSpotify else (!isExportingToSpotify && playlistWithTracks.tracks.isNotEmpty()),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.55f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = if (isSyncedFromSpotify) Icons.Rounded.Sync else Icons.Rounded.CloudUpload,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = when {
+                                isSyncedFromSpotify && isSyncingSpotify -> "Refreshing from Spotify..."
+                                isSyncedFromSpotify -> "Refresh Playlist from Spotify"
+                                isExportingToSpotify -> "Exporting to Spotify..."
+                                else -> "Export Playlist to Spotify"
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
 

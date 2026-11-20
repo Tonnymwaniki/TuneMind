@@ -31,15 +31,20 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +111,15 @@ fun CrossAppLibrarySection(
     onOpenPlaylistsManager: () -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val spotifyStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
+    val spotifySyncState by com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+        com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
+    }
 
     // Key: "ALL", "LIKED", "PLAYLISTS", or a real player packageName e.g. "com.afmobi.boomplaymusic"
     var selectedTabKey by rememberSaveable { mutableStateOf("ALL") }
@@ -250,16 +264,74 @@ fun CrossAppLibrarySection(
                 }
 
                 if (selectedTabKey == "PLAYLISTS") {
-                    Text(
-                        text = "Manage",
-                        color = activeTabMeta.third,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (spotifyStatus.isConnected) {
+                            Text(
+                                text = if (spotifySyncState.isSyncing) "Syncing..." else "Sync Spotify",
+                                color = Color(0xFF34D399),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(enabled = !spotifySyncState.isSyncing) {
+                                        scope.launch {
+                                            com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                                                context = context,
+                                                forceRefresh = true
+                                            )
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
+                        }
+                        Text(
+                            text = "Manage",
+                            color = activeTabMeta.third,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onOpenPlaylistsManager() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                } else if (
+                    spotifyStatus.isConnected &&
+                    (selectedTabKey == "ALL" || selectedTabKey == "LIKED" || selectedTabKey == "com.spotify.music")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { onOpenPlaylistsManager() }
+                            .background(Color(0xFF10B981).copy(alpha = 0.16f))
+                            .border(1.dp, Color(0xFF10B981).copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+                            .clickable(enabled = !spotifySyncState.isSyncing) {
+                                scope.launch {
+                                    com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                                        context = context,
+                                        forceRefresh = true
+                                    )
+                                }
+                            }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null,
+                            tint = Color(0xFF34D399),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (spotifySyncState.isSyncing) "Syncing..." else "Sync Spotify",
+                            color = Color(0xFF34D399),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

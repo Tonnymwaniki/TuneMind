@@ -49,8 +49,16 @@ class AuthCallbackActivity : ComponentActivity() {
 
         if (uri.host == "spotify-callback") {
             lifecycleScope.launch {
-                withContext(Dispatchers.IO) {
+                val connected = withContext(Dispatchers.IO) {
                     SpotifyPremiumConnectManager.handleCallbackUri(applicationContext, uri)
+                }
+                if (connected) {
+                    val appCtx = applicationContext
+                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                        runCatching {
+                            SpotifyLibrarySyncEngine.syncAll(appCtx, forceRefresh = true)
+                        }
+                    }
                 }
                 navigateBackToMain()
             }

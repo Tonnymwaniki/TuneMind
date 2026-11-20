@@ -24,6 +24,13 @@ class SpotifyTokenKeepAliveWorker(
             if (!status.isConnected) {
                 val restored = SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(applicationContext)
                 Log.d(TAG, "Spotify cloud restore check completed (restored=$restored)")
+                if (restored) {
+                    com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                        context = applicationContext,
+                        forceRefresh = false,
+                        minIntervalMs = 6 * 60 * 60 * 1000L
+                    )
+                }
             } else {
                 val refreshed = SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(
                     context = applicationContext,
@@ -31,7 +38,12 @@ class SpotifyTokenKeepAliveWorker(
                 )
                 if (refreshed != null) {
                     SpotifyPremiumConnectManager.backupConnectionToCloud(applicationContext)
-                    Log.i(TAG, "Spotify PKCE keep-alive token refresh + cloud sync succeeded.")
+                    com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                        context = applicationContext,
+                        forceRefresh = false,
+                        minIntervalMs = 12 * 60 * 60 * 1000L
+                    )
+                    Log.i(TAG, "Spotify PKCE keep-alive token refresh + library sync succeeded.")
                 }
             }
             Result.success()

@@ -3550,7 +3550,87 @@ class AgentVoiceManager(
             }
         }
 
-        // 6. Custom Theme Color / Atmosphere Shift / Spotify Connect Co-Pilot / App Settings Control
+        // 6. Custom Theme Color / Atmosphere Shift / Spotify Library Sync & Export / Spotify Connect Co-Pilot
+        if (Regex("\\b(sync|import|bring|pull|fetch|load|refresh)\\s+(my\\s+|all\\s+)?(spotify\\s+)?(liked\\s+songs?|playlists?|spotify\\s+library|spotify\\s+music|spotify\\s+tracks?|spotify)\\b").containsMatchIn(lower) &&
+            lower.contains("spotify")
+        ) {
+            val spStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+            return if (spStatus.isConnected) {
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Syncing Spotify Liked Songs, Playlists & Top Artists.")
+                    put("voice_agent_tts", "Syncing your Spotify Liked Songs and Playlists into TuneMind right now. They'll appear in your Library and Playlists in just a few seconds.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "SYNC_SPOTIFY_LIBRARY")
+                        put("open_playlist_screen", lower.contains("playlist"))
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
+            } else {
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Spotify not connected yet — opening Spotify Connect Guide.")
+                    put("voice_agent_tts", "Connect your Spotify account first and I'll import all your Liked Songs and Playlists right away. Opening the quick Spotify Connect guide now.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "OPEN_SPOTIFY_CONNECT_GUIDE")
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
+            }
+        }
+        if (Regex("\\b(export|push|send|save|copy)\\b.*\\bplaylist\\b.*\\b(to|into)\\s+spotify\\b").containsMatchIn(lower)) {
+            val spStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+            val extractedName = Regex("(?:export|push|send|save|copy)\\s+(?:my\\s+)?(?:playlist\\s+)?([a-z0-9 '&-]+?)\\s+(?:playlist\\s+)?(?:to|into)\\s+spotify", RegexOption.IGNORE_CASE)
+                .find(transcript)?.groupValues?.getOrNull(1)?.trim()
+                ?.replace(Regex("^(my|the|this|a)\\s+", RegexOption.IGNORE_CASE), "")
+                ?.trim().orEmpty()
+            return if (spStatus.isConnected) {
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Exporting TuneMind playlist to Spotify.")
+                    put("voice_agent_tts", if (extractedName.isNotBlank()) "Exporting your $extractedName playlist straight to your Spotify account now." else "Exporting your TuneMind playlist straight to your Spotify account now.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "EXPORT_PLAYLIST_TO_SPOTIFY")
+                        put("playlist_name", extractedName)
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
+            } else {
+                JSONObject().apply {
+                    put("calculated_satiety_percentage", 22)
+                    put("reasoning_mode", "DIRECT_EXECUTION")
+                    put("flow_state_analysis", "Spotify not connected yet — opening Spotify Connect Guide.")
+                    put("voice_agent_tts", "Connect your Spotify account first so I can export your playlist directly into Spotify. Opening the quick setup guide now.")
+                    put("agent_tool_call", JSONObject().apply {
+                        put("action", "OPEN_SPOTIFY_CONNECT_GUIDE")
+                        put("expect_follow_up", false)
+                    })
+                    put("os_execution_command", JSONObject().apply {
+                        put("intent", "NONE")
+                        put("target_player", targetPlayer)
+                        put("search_query", "")
+                    })
+                }
+            }
+        }
         if (Regex("\\b(connect|link|setup|set up|fix|reconnect|troubleshoot)\\s+(my\\s+)?spotify\\b|\\bhelp\\s+(me\\s+)?(connect|link|set up)\\s+spotify\\b").containsMatchIn(lower)) {
             val spStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
             val spoken = when {

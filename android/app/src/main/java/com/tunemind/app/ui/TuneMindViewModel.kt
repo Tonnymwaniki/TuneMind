@@ -685,9 +685,37 @@ class TuneMindViewModel : ViewModel() {
         )
     }
 
+    val spotifyLibrarySyncState: StateFlow<com.tunemind.app.data.ingestion.SpotifyLibrarySyncUiState> =
+        com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncState
+
+    private val _isExportingSpotifyPlaylist = MutableStateFlow(false)
+    val isExportingSpotifyPlaylist: StateFlow<Boolean> = _isExportingSpotifyPlaylist.asStateFlow()
+
     fun toggleLibraryTrackLike(canonicalTrackKey: String, liked: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { crossAppDao?.setTrackLiked(canonicalTrackKey, liked) }
+            runCatching {
+                val existing = crossAppDao?.getTrackByKey(canonicalTrackKey)
+                crossAppDao?.setTrackLiked(canonicalTrackKey, liked)
+                val ctx = AppHolder.context
+                if (ctx != null && existing != null && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(ctx)) {
+                    val spotifyUri = existing.trackId.takeIf { it.startsWith("spotify:track:") }
+                    if (liked) {
+                        com.tunemind.app.provider.SpotifyPremiumConnectManager.likeTrackOnSpotify(
+                            context = ctx,
+                            title = existing.title,
+                            artist = existing.artist,
+                            spotifyUri = spotifyUri
+                        )
+                    } else {
+                        com.tunemind.app.provider.SpotifyPremiumConnectManager.unlikeTrackOnSpotify(
+                            context = ctx,
+                            title = existing.title,
+                            artist = existing.artist,
+                            spotifyUri = spotifyUri
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -700,9 +728,10 @@ class TuneMindViewModel : ViewModel() {
                 val dao = crossAppDao ?: return@launch
                 val key = TrackIdentityResolver.buildNormalizedMatchKey(cleanTitle, cleanArtist)
                 val existing = dao.getTrackByKey(key)
+                val newLikedState = if (existing != null) !existing.isLiked else true
                 if (existing != null) {
-                    dao.setTrackLiked(key, !existing.isLiked)
-                    _libraryActionFeedback.value = if (!existing.isLiked) {
+                    dao.setTrackLiked(key, newLikedState)
+                    _libraryActionFeedback.value = if (newLikedState) {
                         "Saved \"$cleanTitle\" to Liked"
                     } else {
                         "Removed \"$cleanTitle\" from Liked"
@@ -728,6 +757,106 @@ class TuneMindViewModel : ViewModel() {
                     visualRepo?.enqueueVisualEnrichment(listOf(cleanTitle to cleanArtist))
                     _libraryActionFeedback.value = "Saved \"$cleanTitle\" to Liked"
                 }
+
+                // 2-way sync with Spotify Liked Songs when Spotify is connected
+                val ctx = AppHolder.context
+                if (ctx != null && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(ctx)) {
+                    val spotifyUri = (trackId ?: existing?.trackId)?.takeIf { it.startsWith("spotify:track:") }
+                    if (newLikedState) {
+                        com.tunemind.app.provider.SpotifyPremiumConnectManager.likeTrackOnSpotify(
+                            context = ctx,
+                            title = cleanTitle,
+                            artist = cleanArtist,
+                            spotifyUri = spotifyUri
+                        )
+                    } else {
+                        com.tunemind.app.provider.SpotifyPremiumConnectManager.unlikeTrackOnSpotify(
+                            context = ctx,
+                            title = cleanTitle,
+                            artist = cleanArtist,
+                            spotifyUri = spotifyUri
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun syncSpotifyLibraryNow(
+        forceRefresh: Boolean = true,
+        onComplete: ((com.tunemind.app.data.ingestion.SpotifyLibrarySyncResult) -> Unit)? = null
+    ) {
+        val ctx = AppHolder.context ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                context = ctx,
+                forceRefresh = forceRefresh
+            )
+            if (result.message.isNotBlank()) {
+                _libraryActionFeedback.value = result.message
+                postNowPlayingStatus(result.message)
+            }
+            if (result.success) {
+                runCatching { com.tunemind.app.sync.SyncScheduler.schedule(ctx) }
+            }
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onComplete?.invoke(result)
+            }
+        }
+    }
+
+    fun exportTuneMindPlaylistToSpotify(
+        playlistIdOrName: String,
+        onComplete: ((com.tunemind.app.provider.SpotifyExportPlaylistResult) -> Unit)? = null
+    ) {
+        val ctx = AppHolder.context ?: return
+        val query = playlistIdOrName.trim()
+        val playlists = _tuneMindPlaylists.value
+        val target = playlists.firstOrNull { it.playlist.playlistId == query }
+            ?: playlists.firstOrNull { it.playlist.name.equals(query, ignoreCase = true) }
+            ?: if (query.isNotBlank()) {
+                playlists.firstOrNull { it.playlist.name.contains(query, ignoreCase = true) }
+            } else {
+                playlists.firstOrNull { !com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
+                    ?: playlists.firstOrNull()
+            }
+
+        if (target == null) {
+            val res = com.tunemind.app.provider.SpotifyExportPlaylistResult(
+                success = false,
+                message = if (query.isBlank()) "Create a TuneMind playlist first to export to Spotify."
+                else "Could not find a TuneMind playlist matching \"$query\"."
+            )
+            _libraryActionFeedback.value = res.message
+            postNowPlayingStatus(res.message)
+            onComplete?.invoke(res)
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _isExportingSpotifyPlaylist.value = true
+            try {
+                _libraryActionFeedback.value = "Exporting \"${target.playlist.name}\" to Spotify..."
+                val trackInputs = target.tracks.map { tr ->
+                    Triple(
+                        tr.title,
+                        tr.artist,
+                        tr.externalUri.takeIf { it.isNotBlank() } ?: tr.trackId.takeIf { it.startsWith("spotify:track:") }
+                    )
+                }
+                val result = com.tunemind.app.provider.SpotifyPremiumConnectManager.exportPlaylistToSpotify(
+                    context = ctx,
+                    playlistName = target.playlist.name,
+                    description = target.playlist.description.ifBlank { "Curated in TuneMind" },
+                    tracks = trackInputs
+                )
+                _libraryActionFeedback.value = result.message
+                postNowPlayingStatus(result.message)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    onComplete?.invoke(result)
+                }
+            } finally {
+                _isExportingSpotifyPlaylist.value = false
             }
         }
     }
@@ -5074,6 +5203,48 @@ class TuneMindViewModel : ViewModel() {
             postNowPlayingStatus("\"${playlistWithTracks.playlist.name}\" has no songs yet.")
             return
         }
+
+        // If this is a synced Spotify playlist and the user has Spotify Premium Direct Connect,
+        // try launching the full Spotify playlist context silently on their active device first!
+        val ctx = AppHolder.context
+        val spotifyPlaylistId = com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
+            .extractSpotifyPlaylistId(playlistWithTracks.playlist.playlistId)
+        val prefersSpotify = targetPlayerPkg.isBlank() ||
+            targetPlayerPkg == com.tunemind.app.provider.SpotifyMusicProvider.SPOTIFY_PACKAGE ||
+            targetPlayerPkg == "spotify" ||
+            targetPlayerPkg == "tunemind_inapp"
+
+        if (ctx != null && spotifyPlaylistId != null && prefersSpotify &&
+            com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(ctx)
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val res = com.tunemind.app.provider.SpotifyPremiumConnectManager
+                    .playPlaylistContextSilently(ctx, spotifyPlaylistId)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    if (res is com.tunemind.app.provider.SpotifyPlayResult.Success) {
+                        postNowPlayingStatus("Playing Spotify playlist \"${playlistWithTracks.playlist.name}\" on ${res.deviceName}")
+                    } else {
+                        // Seamless fallback to TuneMind track-by-track + Up Next queue playback
+                        items.drop(1).reversed().forEach { tr ->
+                            enqueueUpNextTrack(
+                                title = tr.title,
+                                artist = tr.artist,
+                                spotifyUri = tr.externalUri.takeIf { it.isNotBlank() },
+                                reason = "From ${playlistWithTracks.playlist.name}",
+                                freshnessPercent = 96,
+                                playNext = true
+                            )
+                        }
+                        val first = items.first()
+                        val chosenPkg = targetPlayerPkg.ifBlank { first.sourcePlayer.ifBlank { "tunemind_inapp" } }
+                        playTrack(first.title, first.artist, first.externalUri.takeIf { it.isNotBlank() }, chosenPkg)
+                        postNowPlayingStatus("Playing \"${playlistWithTracks.playlist.name}\" (${items.size} tracks)")
+                    }
+                }
+            }
+            return
+        }
+
         items.drop(1).reversed().forEach { tr ->
             enqueueUpNextTrack(
                 title = tr.title,
