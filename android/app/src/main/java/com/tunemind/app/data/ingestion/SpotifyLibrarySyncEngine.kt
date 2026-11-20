@@ -72,7 +72,7 @@ data class SpotifyLibrarySyncResult(
  * 1. Spotify Liked Songs (`GET /v1/me/tracks`) -> `cross_app_track_library` (`is_liked = true`)
  * 2. Spotify User Playlists + Tracks (`GET /v1/me/playlists`) -> `tunemind_playlists` & `tunemind_playlist_tracks`
  * 3. Spotify Recently Played (`GET /v1/me/player/recently-played`) -> `cross_app_track_library`
- * 4. Spotify Top Tracks & Top Artists (`GET /v1/me/top/*`) -> library + `universal_artist_profile_cache`
+ * 4. Spotify Top Tracks & Top Artists (`GET /v1/me/top/tracks` and `artists`) -> library + `universal_artist_profile_cache`
  * 5. High-res Spotify artwork -> `universal_track_visual_cache` for instant visuals across all screens.
  */
 object SpotifyLibrarySyncEngine {
