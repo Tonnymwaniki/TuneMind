@@ -52,7 +52,9 @@ fun SettingsScreen(
     onOpenWeeklyReport: () -> Unit,
     onOpenAccountAuth: () -> Unit = {},
     onOpenSupport: () -> Unit = {},
-    onOpenLegal: (Int) -> Unit = {}
+    onOpenLegal: (Int) -> Unit = {},
+    openSpotifySetupInitially: Boolean = false,
+    onSpotifySetupSheetConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -79,6 +81,7 @@ fun SettingsScreen(
     val preferInAppPlayerEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.preferInAppPlayerEnabled.collectAsState()
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
     val kidsModeEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.kidsModeEnabled.collectAsState()
+    val spotifyFreeOpenInSpotify by com.tunemind.app.domain.voice.AgentSettingsStore.spotifyFreeOpenInSpotify.collectAsState()
 
     var hasNotificationAccess by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)) }
     var hasAudioPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)) }
@@ -89,11 +92,19 @@ fun SettingsScreen(
     val deduplicateLogs by com.tunemind.app.domain.voice.AgentSettingsStore.mergeDuplicatePlaysEnabled.collectAsState()
     val spotifyConnectStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
     var spotifyClientIdInput by remember { mutableStateOf(spotifyConnectStatus.clientId) }
+    var detectedClipboardClientId by remember { mutableStateOf<String?>(null) }
     var copiedRedirectUri by remember { mutableStateOf(false) }
-    var showSpotifySetupSheet by remember { mutableStateOf(false) }
+    var showSpotifySetupSheet by remember { mutableStateOf(openSpotifySetupInitially) }
     var isCheckingSpotifyDevice by remember { mutableStateOf(false) }
     var spotifyDeviceCheckResult by remember { mutableStateOf<com.tunemind.app.provider.SpotifyDeviceCheckResult?>(null) }
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(openSpotifySetupInitially) {
+        if (openSpotifySetupInitially) {
+            showSpotifySetupSheet = true
+            onSpotifySetupSheetConsumed()
+        }
+    }
 
     LaunchedEffect(spotifyConnectStatus.clientId) {
         if (spotifyClientIdInput.isBlank() && spotifyConnectStatus.clientId.isNotBlank()) {
@@ -130,6 +141,7 @@ fun SettingsScreen(
         refreshAllSystemStates()
         withContext(Dispatchers.IO) {
             com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
+            com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
         }
     }
 
@@ -137,6 +149,15 @@ fun SettingsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshAllSystemStates()
+                val clipCandidate = clipboardManager.getText()?.text?.trim().orEmpty()
+                detectedClipboardClientId = if (
+                    com.tunemind.app.provider.SpotifyPremiumConnectManager.isValidClientIdFormat(clipCandidate) &&
+                    clipCandidate != spotifyClientIdInput.trim()
+                ) {
+                    clipCandidate
+                } else {
+                    null
+                }
                 coroutineScope.launch {
                     delay(350L)
                     refreshAllSystemStates()
@@ -326,9 +347,9 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            // 1b. Spotify Premium Direct Connect (1-Tap Consumer Connect + Guided BYOC)
+            // 1b. Spotify Connect (Premium Silent Playback + Free Smart Mode + Encrypted Cloud Persistence)
             Column(modifier = Modifier.fillMaxWidth()) {
-                StudioSectionHeader(title = "Spotify Premium Direct Connect")
+                StudioSectionHeader(title = "Spotify Connect (Premium & Free)")
                 Spacer(modifier = Modifier.height(6.dp))
                 StudioHairlineDivider()
 
@@ -345,7 +366,14 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
                             Text(
-                                text = "Agent Full-Track Spotify Control",
+                                text = when {
+                                    spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium ->
+                                        "Spotify Premium · Full Silent Control"
+                                    spotifyConnectStatus.isFreeTier ->
+                                        "Spotify Free · Smart Full-Track Mode"
+                                    else ->
+                                        "Connect Spotify Once, Stay Linked"
+                                },
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFFF8FAFC)
@@ -355,17 +383,20 @@ fun SettingsScreen(
                                     spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium -> {
                                         val who = spotifyConnectStatus.displayName.ifBlank { "Spotify Premium" }
                                         val dev = spotifyConnectStatus.lastDeviceName
-                                        if (dev.isNotBlank()) "Signed in as $who · Device: $dev"
-                                        else "Signed in as $who · Silent play, queue & likes unlocked"
+                                        val cloudNote = if (spotifyConnectStatus.cloudBackedUp) " · Cloud synced" else ""
+                                        if (dev.isNotBlank()) "Signed in as $who · Device: $dev$cloudNote"
+                                        else "Signed in as $who · Silent full songs, queue & likes$cloudNote"
                                     }
-                                    spotifyConnectStatus.isConnected -> {
-                                        "Signed in as ${spotifyConnectStatus.displayName.ifBlank { "Spotify user" }} · Free plan (Premium required for silent play)"
+                                    spotifyConnectStatus.isFreeTier -> {
+                                        val who = spotifyConnectStatus.displayName.ifBlank { "Spotify listener" }
+                                        val cloudNote = if (spotifyConnectStatus.cloudBackedUp) " · Cloud synced" else ""
+                                        "Signed in as $who$cloudNote · Likes sync to Spotify. Full tracks play in TuneMind when available or open directly in Spotify (no 30s previews)."
                                     }
                                     spotifyConnectStatus.isReadyForOneTapConnect -> {
-                                        "Sign in with Spotify Premium in one tap so TuneMind can play full songs silently, queue tracks, and save likes without leaving the app."
+                                        "Connect once (Premium or Free). TuneMind saves an encrypted cloud backup so you won't have to reconnect again."
                                     }
                                     else -> {
-                                        "Link Spotify Premium in 60 seconds so TuneMind's agent can play full songs silently, queue tracks, and save likes without leaving the app."
+                                        "Link Spotify in 60 seconds (Premium gets silent in-app full tracks & queue; Free gets Likes sync & direct full-song handoff). Ask the voice agent anytime for help."
                                     }
                                 },
                                 fontSize = 12.sp,
@@ -375,15 +406,16 @@ fun SettingsScreen(
                         }
                         val statusLabel = when {
                             spotifyConnectStatus.isAuthorizing -> "Connecting..."
+                            spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium && spotifyConnectStatus.cloudBackedUp -> "Synced"
                             spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium -> "Premium"
-                            spotifyConnectStatus.isConnected -> "Free Plan"
+                            spotifyConnectStatus.isFreeTier -> "Free Smart"
                             spotifyConnectStatus.isReadyForOneTapConnect -> "Ready"
                             else -> "Setup"
                         }
                         val statusColor = when {
                             spotifyConnectStatus.isAuthorizing -> colors.primaryAccent
                             spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium -> safeGreen
-                            spotifyConnectStatus.isConnected -> warnAmber
+                            spotifyConnectStatus.isFreeTier -> colors.primaryAccent
                             spotifyConnectStatus.isReadyForOneTapConnect -> colors.primaryAccent
                             else -> Color.White.copy(alpha = 0.56f)
                         }
@@ -396,12 +428,73 @@ fun SettingsScreen(
                     }
 
                     spotifyConnectStatus.lastError?.takeIf { it.isNotBlank() }?.let { errMsg ->
-                        Text(
-                            text = errMsg,
-                            fontSize = 12.sp,
-                            color = warnAmber,
-                            lineHeight = 16.sp
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = errMsg,
+                                fontSize = 12.sp,
+                                color = warnAmber,
+                                lineHeight = 16.sp
+                            )
+                            when (spotifyConnectStatus.errorHintType) {
+                                com.tunemind.app.provider.SpotifyErrorHintType.REDIRECT_URI -> {
+                                    OutlinedButton(
+                                        onClick = {
+                                            clipboardManager.setText(AnnotatedString(com.tunemind.app.provider.SpotifyPremiumConnectManager.REDIRECT_URI))
+                                            copiedRedirectUri = true
+                                        },
+                                        modifier = Modifier.height(38.dp),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.primaryAccent)
+                                    ) {
+                                        Text(
+                                            text = if (copiedRedirectUri) "Copied Redirect URI" else "Copy tunemind://spotify-callback",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                com.tunemind.app.provider.SpotifyErrorHintType.DEV_MODE_ALLOWLIST -> {
+                                    OutlinedButton(
+                                        onClick = {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.openSpotifyDeveloperDashboard(context)
+                                        },
+                                        modifier = Modifier.height(38.dp),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.primaryAccent)
+                                    ) {
+                                        Text("Open Spotify Dashboard", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                com.tunemind.app.provider.SpotifyErrorHintType.NO_ACTIVE_DEVICE -> {
+                                    OutlinedButton(
+                                        onClick = {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.openSpotifyAppToWakeDevice(context)
+                                        },
+                                        modifier = Modifier.height(38.dp),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.primaryAccent)
+                                    ) {
+                                        Text("Wake Spotify", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                com.tunemind.app.provider.SpotifyErrorHintType.INVALID_CLIENT,
+                                com.tunemind.app.provider.SpotifyErrorHintType.REVOKED -> {
+                                    OutlinedButton(
+                                        onClick = { showSpotifySetupSheet = true },
+                                        modifier = Modifier.height(38.dp),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, colors.primaryAccent.copy(alpha = 0.55f)),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.primaryAccent)
+                                    ) {
+                                        Text("Open Setup Guide", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                                else -> Unit
+                            }
+                        }
                     }
 
                     spotifyDeviceCheckResult?.let { check ->
@@ -545,10 +638,23 @@ fun SettingsScreen(
                         }
                     }
 
+                    // Spotify Free Smart Mode toggle (visible for Free users & unconnected listeners)
+                    if (!spotifyConnectStatus.isPremium) {
+                        StudioHairlineDivider()
+                        SettingsSwitchRow(
+                            title = "Spotify Free: Never Play 30s Previews",
+                            description = "When a full track can't play inside TuneMind, open it straight in Spotify for the full song instead of a 30-second preview.",
+                            checked = spotifyFreeOpenInSpotify,
+                            onCheckedChange = {
+                                com.tunemind.app.domain.voice.AgentSettingsStore.setSpotifyFreeOpenInSpotifyEnabled(context, it)
+                            }
+                        )
+                    }
+
                     Text(
-                        text = "Secured with OAuth 2.0 PKCE. No Spotify password or secret key is ever stored in TuneMind.",
+                        text = "Secured with OAuth 2.0 PKCE + encrypted cloud backup so you never have to reconnect. Works alongside MediaSession tracking for YouTube Music, Boomplay, Audiomack, Deezer, SoundCloud, and local audio.",
                         fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.44f),
+                        color = Color.White.copy(alpha = 0.46f),
                         lineHeight = 16.sp
                     )
                 }
@@ -1085,6 +1191,25 @@ fun SettingsScreen(
                         color = Color.White.copy(alpha = 0.62f),
                         lineHeight = 17.sp
                     )
+                    detectedClipboardClientId?.let { detected ->
+                        OutlinedButton(
+                            onClick = {
+                                spotifyClientIdInput = detected
+                                detectedClipboardClientId = null
+                            },
+                            modifier = Modifier.fillMaxWidth().height(40.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, safeGreen.copy(alpha = 0.65f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = safeGreen)
+                        ) {
+                            Text(
+                                text = "Use Detected Client ID from Clipboard (••••${detected.takeLast(4)})",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1119,6 +1244,7 @@ fun SettingsScreen(
                                 val pasted = clipboardManager.getText()?.text?.trim().orEmpty()
                                 if (pasted.isNotBlank()) {
                                     spotifyClientIdInput = pasted
+                                    detectedClipboardClientId = null
                                 }
                             },
                             modifier = Modifier.height(52.dp),
@@ -1162,8 +1288,15 @@ fun SettingsScreen(
                         contentColor = Color(0xFF061018)
                     )
                 ) {
-                    Text("Connect Spotify Premium", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Connect Spotify (Premium or Free)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
+
+                Text(
+                    text = "Done once — TuneMind stores an encrypted backup tied to your TuneMind account so you won't need to set this up again.",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.50f),
+                    lineHeight = 16.sp
+                )
 
                 if (spotifyConnectStatus.hasAppDefaultClientId && spotifyConnectStatus.usesCustomClientId) {
                     TextButton(

@@ -92,6 +92,21 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
         }
       }
 
+      // Delete UUID-keyed Spotify encrypted connection row
+      try {
+        const { error } = await dbClient
+          .from('user_spotify_connections')
+          .delete()
+          .eq('user_id', user.id);
+        if (error) {
+          tableErrors.push({ table: 'user_spotify_connections', error: error.message });
+        } else {
+          wipedTables.push('user_spotify_connections');
+        }
+      } catch (err: any) {
+        tableErrors.push({ table: 'user_spotify_connections', error: err?.message || 'Unknown error' });
+      }
+
       // Delete UUID-keyed profile row
       try {
         const { error } = await dbClient

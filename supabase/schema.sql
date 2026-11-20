@@ -522,10 +522,43 @@ CREATE POLICY "Users can manage own cross_app_track_library"
     USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
     WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
 
--- ─── 10. Legacy Spotify Web API Cleanup (Preserves Google/Email Profiles) ────
-UPDATE public.profiles
-SET spotify_connected = FALSE
-WHERE spotify_connected = TRUE;
+-- ─── 10. Encrypted Spotify PKCE Cloud Persistence (Never Reconnect Again) ─────
+CREATE TABLE IF NOT EXISTS public.user_spotify_connections (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    spotify_client_id TEXT NOT NULL DEFAULT '',
+    encrypted_refresh_token TEXT NOT NULL,
+    spotify_display_name TEXT NOT NULL DEFAULT '',
+    spotify_product TEXT NOT NULL DEFAULT '',
+    last_device_name TEXT NOT NULL DEFAULT '',
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-DELETE FROM public.listening_events
-WHERE media_source = 'spotify_web_api_ingestion';
+ALTER TABLE public.user_spotify_connections
+    ADD COLUMN IF NOT EXISTS spotify_client_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS encrypted_refresh_token TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS spotify_display_name TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS spotify_product TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS last_device_name TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS last_refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+DROP TRIGGER IF EXISTS on_user_spotify_connections_updated_at ON public.user_spotify_connections;
+CREATE TRIGGER on_user_spotify_connections_updated_at
+    BEFORE UPDATE ON public.user_spotify_connections
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_profiles_updated_at();
+
+ALTER TABLE public.user_spotify_connections ENABLE ROW LEVEL SECURITY;
+
+-- Strict security: encrypted refresh tokens are NEVER directly readable via client anon keys.
+-- Only the TuneMind backend (using SUPABASE_SERVICE_ROLE_KEY after verifying the user's JWT)
+-- reads/writes encrypted rows. Authenticated owners may still delete their own row directly.
+DROP POLICY IF EXISTS "Users can delete own spotify connection" ON public.user_spotify_connections;
+CREATE POLICY "Users can delete own spotify connection"
+    ON public.user_spotify_connections FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);
+

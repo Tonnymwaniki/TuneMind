@@ -10,6 +10,7 @@ import discoveryRouter from './api/v1/discovery';
 import musicProfilesRouter from './api/v1/musicProfiles';
 import supportRouter from './api/v1/support';
 import accountRouter from './api/v1/account';
+import spotifyRouter from './api/v1/spotify';
 import legalRouter from './api/v1/legalRoutes';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 import { RestingVaultEngine } from './domain/vault/RestingVaultEngine';
@@ -60,17 +61,7 @@ export function createApp(): express.Express {
   app.use('/api/v1/music', musicProfilesRouter);
   app.use('/api/v1/support', sensitiveOpsLimiter, supportRouter);
   app.use('/api/v1/account', sensitiveOpsLimiter, accountRouter);
-
-  // ─── Public Spotify PKCE Client Config (Client ID is public; never exposes secret) ──
-  app.get('/api/v1/spotify/client-config', (_req: Request, res: Response) => {
-    const rawClientId = String(process.env.SPOTIFY_CLIENT_ID || '').trim();
-    const isValid = /^[A-Za-z0-9]{16,64}$/.test(rawClientId);
-    res.json({
-      configured: isValid,
-      client_id: isValid ? rawClientId : null,
-      redirect_uri: 'tunemind://spotify-callback'
-    });
-  });
+  app.use('/api/v1/spotify', spotifyRouter);
 
   // ─── Live Supabase Intelligence Sync & Long-Term Growth Endpoints ──────────
   app.post('/api/v1/intelligence/sync', async (req: Request, res: Response) => {

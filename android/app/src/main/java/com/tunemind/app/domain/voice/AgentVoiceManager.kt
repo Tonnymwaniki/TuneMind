@@ -3550,7 +3550,33 @@ class AgentVoiceManager(
             }
         }
 
-        // 6. Custom Theme Color / Atmosphere Shift / App Settings Control
+        // 6. Custom Theme Color / Atmosphere Shift / Spotify Connect Co-Pilot / App Settings Control
+        if (Regex("\\b(connect|link|setup|set up|fix|reconnect|troubleshoot)\\s+(my\\s+)?spotify\\b|\\bhelp\\s+(me\\s+)?(connect|link|set up)\\s+spotify\\b").containsMatchIn(lower)) {
+            val spStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+            val spoken = when {
+                spStatus.isConnected && spStatus.isPremium ->
+                    "You're already linked to Spotify Premium as ${spStatus.displayName.ifBlank { "your account" }}. I'm opening the Spotify Connect guide in case you want to check your active device."
+                spStatus.isFreeTier ->
+                    "You're connected in Spotify Free Smart Mode. Your likes sync to Spotify, and full songs open directly in Spotify when needed so you never get 30-second previews. Opening Spotify settings now."
+                else ->
+                    "I'm opening the 60-second Spotify Connect guide right now. Copy the redirect URI, paste your Client ID from Spotify Dashboard, and tap Connect—TuneMind backs it up encrypted so you won't have to reconnect again."
+            }
+            return JSONObject().apply {
+                put("calculated_satiety_percentage", 22)
+                put("reasoning_mode", "DIRECT_EXECUTION")
+                put("flow_state_analysis", "Opening Spotify Connect Guide.")
+                put("voice_agent_tts", spoken)
+                put("agent_tool_call", JSONObject().apply {
+                    put("action", "OPEN_SPOTIFY_CONNECT_GUIDE")
+                    put("expect_follow_up", false)
+                })
+                put("os_execution_command", JSONObject().apply {
+                    put("intent", "NONE")
+                    put("target_player", targetPlayer)
+                    put("search_query", "")
+                })
+            }
+        }
         if (Regex("\\b(open settings|go to settings|show settings|settings page|settings screen)\\b").containsMatchIn(lower)) {
             return JSONObject().apply {
                 put("calculated_satiety_percentage", 22)

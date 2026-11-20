@@ -351,6 +351,14 @@ object MusicPlayerAutoLauncher {
         // TIER 1S: Spotify Premium Direct Connect (1-Tap / PKCE)
         // Plays the exact full Spotify track silently in the background with ZERO app switch.
         val spotifyPremiumReady = SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+        val spotifyInstalled = SpotifyMusicProvider().isInstalled(context)
+        val isSpotifyTarget = targetPkg.equals(SpotifyMusicProvider.SPOTIFY_PACKAGE, ignoreCase = true) ||
+            providerId.equals(SpotifyMusicProvider.PROVIDER_ID, ignoreCase = true)
+        val isSpotifyFreeSmartMode = !spotifyPremiumReady &&
+            spotifyInstalled &&
+            AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(context) &&
+            (SpotifyPremiumConnectManager.isConnectedAsFreeTier(context) || isSpotifyTarget)
+
         var spotifyResolvedUriFromConnect: String? = null
         var spotifyHadNoActiveDevice = false
         if (shouldTrySpotifyPremiumConnect(
@@ -504,22 +512,23 @@ object MusicPlayerAutoLauncher {
             )
         }
 
-        // TIER 3 (Strict Never-Leave Mode): Full track inside TuneMind's Built-In YouTube Player first,
-        // then 30s Preview inside TuneMind only if no full in-app stream is available.
-        if (strictNoSwitch) {
-            if (shouldFallbackToBuiltInYouTubeInStrictMode(strictNoSwitch, ytmVideoId)) {
+        // TIER 3 (Strict Never-Leave Mode OR Spotify Free Smart Mode):
+        // First try full-length built-in YouTube player inside TuneMind.
+        // NEVER trap Spotify Free users in 30-second previews — open the full song in Spotify instead!
+        if (strictNoSwitch || isSpotifyFreeSmartMode) {
+            if (ytmVideoId != null && (strictNoSwitch || preferInAppPlayer)) {
                 val startedFullInApp = TuneMindYouTubeEmbedController.startVideo(
                     context = context,
-                    videoId = ytmVideoId!!,
+                    videoId = ytmVideoId,
                     title = cleanTitle.ifBlank { track.title },
                     artist = cleanArtist.ifBlank { track.artist },
                     album = resolvedLinks?.albumName,
-                    previewFallback = resolvedLinks?.previewUrl,
-                    fallbackExternalPkg = targetPkg,
-                    fallbackExternalName = displayName
+                    previewFallback = if (isSpotifyFreeSmartMode) null else resolvedLinks?.previewUrl,
+                    fallbackExternalPkg = if (isSpotifyFreeSmartMode) SpotifyMusicProvider.SPOTIFY_PACKAGE else targetPkg,
+                    fallbackExternalName = if (isSpotifyFreeSmartMode) "Spotify" else displayName
                 )
                 if (startedFullInApp) {
-                    Log.i(TAG, "✅ Tier-3 Strict Never-Leave Full In-App Playback started via Built-In YouTube Player for '$cleanTitle' ($ytmVideoId)")
+                    Log.i(TAG, "✅ Tier-3 Full In-App Playback started via Built-In YouTube Player for '$cleanTitle' ($ytmVideoId)")
                     return LaunchOutcome(
                         launched = true,
                         usedInAppPlayer = true,
@@ -527,6 +536,33 @@ object MusicPlayerAutoLauncher {
                         detailMessage = "Playing full track '$cleanTitle' inside TuneMind without leaving the app."
                     )
                 }
+            }
+
+            // SPOTIFY FREE SMART MODE (Zero 30-second previews!):
+            // If TuneMind could not play the FULL song in-app, immediately open Spotify directly to the exact track.
+            if (isSpotifyFreeSmartMode) {
+                val exactUriForSpotify = extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
+                    ?: if (SpotifyPremiumConnectManager.isConnected(context)) {
+                        SpotifyPremiumConnectManager.searchExactTrackUri(
+                            context = context,
+                            title = cleanTitle.ifBlank { track.title },
+                            artist = cleanArtist.ifBlank { track.artist },
+                            query = fullSearchQuery
+                        )
+                    } else null
+                Log.i(TAG, "✅ Spotify Free Smart Mode: skipping 30s preview and opening full track '$cleanTitle' directly in Spotify ($exactUriForSpotify)")
+                return launchExternalColdHandoff(
+                    context = context,
+                    targetPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                    displayName = "Spotify",
+                    track = track,
+                    cleanTitle = cleanTitle,
+                    cleanArtist = cleanArtist,
+                    fullSearchQuery = fullSearchQuery,
+                    deepLinkUri = exactUriForSpotify ?: deepLinkUri,
+                    previousTitle = previousTitle,
+                    resolvedLinks = resolvedLinks
+                )
             }
 
             val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
@@ -571,6 +607,17 @@ object MusicPlayerAutoLauncher {
         }
 
         // TIER 4 (Hybrid Cold Handoff): Precision deep-link / MEDIA_PLAY_FROM_SEARCH + Heads-Up Return Banner
+        val enrichedSpotifyUri = if (isSpotifyTarget && SpotifyPremiumConnectManager.isConnected(context)) {
+            extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
+                ?: SpotifyPremiumConnectManager.searchExactTrackUri(
+                    context = context,
+                    title = cleanTitle.ifBlank { track.title },
+                    artist = cleanArtist.ifBlank { track.artist },
+                    query = fullSearchQuery
+                )
+        } else {
+            deepLinkUri
+        }
         return launchExternalColdHandoff(
             context = context,
             targetPkg = targetPkg,
@@ -579,7 +626,7 @@ object MusicPlayerAutoLauncher {
             cleanTitle = cleanTitle,
             cleanArtist = cleanArtist,
             fullSearchQuery = fullSearchQuery,
-            deepLinkUri = deepLinkUri,
+            deepLinkUri = enrichedSpotifyUri ?: deepLinkUri,
             previousTitle = previousTitle,
             resolvedLinks = resolvedLinks
         )

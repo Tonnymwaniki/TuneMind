@@ -26,6 +26,16 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
+enum class SpotifyErrorHintType {
+    NONE,
+    REDIRECT_URI,
+    DEV_MODE_ALLOWLIST,
+    NO_ACTIVE_DEVICE,
+    INVALID_CLIENT,
+    NETWORK,
+    REVOKED
+}
+
 data class SpotifyPremiumStatus(
     val isConnected: Boolean = false,
     val isPremium: Boolean = false,
@@ -36,9 +46,22 @@ data class SpotifyPremiumStatus(
     val usesCustomClientId: Boolean = false,
     val lastDeviceName: String = "",
     val lastError: String? = null,
+    val errorHintType: SpotifyErrorHintType = SpotifyErrorHintType.NONE,
     val isAuthorizing: Boolean = false,
-    val connectedAtMs: Long = 0L
+    val connectedAtMs: Long = 0L,
+    val cloudBackedUp: Boolean = false,
+    val lastCloudSyncMs: Long = 0L
 ) {
+    val isFreeTier: Boolean
+        get() = isConnected && !isPremium
+
+    val accountTierLabel: String
+        get() = when {
+            isConnected && isPremium -> "PREMIUM_CONNECTED"
+            isConnected -> "FREE_CONNECTED"
+            else -> "DISCONNECTED"
+        }
+
     val hasAppDefaultClientId: Boolean
         get() = SpotifyPremiumConnectManager.isValidClientIdFormat(appDefaultClientId)
 
@@ -108,6 +131,7 @@ object SpotifyPremiumConnectManager {
     private const val KEY_IS_PREMIUM = "is_premium"
     private const val KEY_CONNECTED_AT_MS = "connected_at_ms"
     private const val KEY_LAST_DEVICE_NAME = "last_device_name"
+    private const val KEY_CLOUD_SYNCED_MS = "cloud_synced_ms"
     private const val KEY_PENDING_VERIFIER = "pending_pkce_verifier"
     private const val KEY_PENDING_STATE = "pending_oauth_state"
 
@@ -172,10 +196,12 @@ object SpotifyPremiumConnectManager {
 
     fun ensureLoaded(context: Context): SpotifyPremiumStatus {
         val prefs = getPrefs(context)
+        val prev = _statusFlow.value
         val status = readStatusFromPrefs(
             prefs = prefs,
-            currentError = _statusFlow.value.lastError,
-            isAuthorizing = _statusFlow.value.isAuthorizing
+            currentError = prev.lastError,
+            errorHintType = prev.errorHintType,
+            isAuthorizing = prev.isAuthorizing
         )
         _statusFlow.value = status
         return status
@@ -234,6 +260,7 @@ object SpotifyPremiumConnectManager {
     private fun readStatusFromPrefs(
         prefs: SharedPreferences,
         currentError: String? = null,
+        errorHintType: SpotifyErrorHintType = SpotifyErrorHintType.NONE,
         isAuthorizing: Boolean = false
     ): SpotifyPremiumStatus {
         val customClientId = prefs.getString(KEY_CLIENT_ID, "")?.trim().orEmpty()
@@ -252,6 +279,7 @@ object SpotifyPremiumConnectManager {
                 product.equals("premium", ignoreCase = true) ||
                 product.isBlank()
             )
+        val cloudSyncMs = prefs.getLong(KEY_CLOUD_SYNCED_MS, 0L)
         return SpotifyPremiumStatus(
             isConnected = hasSession,
             isPremium = isPremium,
@@ -262,8 +290,11 @@ object SpotifyPremiumConnectManager {
             usesCustomClientId = isValidClientIdFormat(customClientId),
             lastDeviceName = prefs.getString(KEY_LAST_DEVICE_NAME, "")?.trim().orEmpty(),
             lastError = currentError,
+            errorHintType = if (currentError.isNullOrBlank()) SpotifyErrorHintType.NONE else errorHintType,
             isAuthorizing = isAuthorizing,
-            connectedAtMs = prefs.getLong(KEY_CONNECTED_AT_MS, 0L)
+            connectedAtMs = prefs.getLong(KEY_CONNECTED_AT_MS, 0L),
+            cloudBackedUp = hasSession && cloudSyncMs > 0L,
+            lastCloudSyncMs = cloudSyncMs
         )
     }
 
@@ -274,6 +305,216 @@ object SpotifyPremiumConnectManager {
     fun isConnectedAndPremium(context: Context): Boolean {
         val status = ensureLoaded(context)
         return status.isConnected && status.isPremium
+    }
+
+    fun isConnectedAsFreeTier(context: Context): Boolean {
+        val status = ensureLoaded(context)
+        return status.isConnected && !status.isPremium
+    }
+
+    /**
+     * Maps cryptic Spotify OAuth / API errors into plain-English guidance + 1-tap fix hints.
+     */
+    private fun mapFriendlyError(
+        rawMessage: String,
+        httpCode: Int = 0
+    ): Pair<String, SpotifyErrorHintType> {
+        val lower = rawMessage.lowercase()
+        return when {
+            lower.contains("redirect_uri") || lower.contains("invalid_redirect") -> {
+                "Redirect URI mismatch — make sure '$REDIRECT_URI' is added and saved in your Spotify Developer app settings." to SpotifyErrorHintType.REDIRECT_URI
+            }
+            lower.contains("invalid_client") -> {
+                "That Spotify Client ID was not recognized. Double-check the 32-character Client ID from Spotify Dashboard." to SpotifyErrorHintType.INVALID_CLIENT
+            }
+            httpCode == 403 || lower.contains("user not registered") || lower.contains("developer dashboard") || lower.contains("forbidden") -> {
+                "Spotify Dev Mode blocked this account — open Spotify Developer Dashboard → User Management and add your Spotify email, or use your own Client ID." to SpotifyErrorHintType.DEV_MODE_ALLOWLIST
+            }
+            lower.contains("invalid_grant") -> {
+                "Spotify access was revoked or expired. Tap Connect Spotify to relink in one step." to SpotifyErrorHintType.REVOKED
+            }
+            lower.contains("no_active_device") || httpCode == 404 -> {
+                "Spotify is asleep on this phone. Tap 'Wake Spotify' once so TuneMind can play full tracks silently." to SpotifyErrorHintType.NO_ACTIVE_DEVICE
+            }
+            lower.contains("network") || lower.contains("timeout") || lower.contains("unable to resolve host") -> {
+                "Temporary network issue reaching Spotify. Your connection is still saved — try again in a moment." to SpotifyErrorHintType.NETWORK
+            }
+            else -> {
+                rawMessage.ifBlank { "Could not reach Spotify (HTTP $httpCode). Please try again." } to SpotifyErrorHintType.NONE
+            }
+        }
+    }
+
+    /**
+     * Uploads the user's Spotify PKCE refresh token & Client ID to TuneMind's backend where it is
+     * encrypted at rest (AES-256-GCM) and linked to their authenticated TuneMind account so they
+     * never need to reconnect after reinstalling or switching phones.
+     * Call from a background/IO thread.
+     */
+    fun backupConnectionToCloud(context: Context): Boolean {
+        return try {
+            val appCtx = context.applicationContext
+            val authToken = com.tunemind.app.data.auth.TuneMindAuthSessionManager
+                .getInstance(appCtx)
+                .getAccessToken()
+                .trim()
+            if (authToken.isBlank()) {
+                Log.d(TAG, "Skipping Spotify cloud backup (guest / unauthenticated session).")
+                return false
+            }
+
+            val prefs = getPrefs(appCtx)
+            val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, "")?.trim().orEmpty()
+            if (refreshToken.isBlank()) return false
+
+            val activeClientId = prefs.getString(KEY_ACTIVE_AUTH_CLIENT_ID, "")?.trim().orEmpty()
+                .ifBlank { prefs.getString(KEY_CLIENT_ID, "")?.trim().orEmpty() }
+            val baseUrl = runCatching { BackendEndpointManager.getActiveHttpBaseUrl(appCtx) }.getOrDefault("")
+            if (baseUrl.isBlank()) return false
+
+            val payload = JSONObject().apply {
+                put("client_id", activeClientId)
+                put("refresh_token", refreshToken)
+                put("display_name", prefs.getString(KEY_DISPLAY_NAME, "")?.trim().orEmpty())
+                put("product", prefs.getString(KEY_PRODUCT, "")?.trim().orEmpty())
+                put("last_device_name", prefs.getString(KEY_LAST_DEVICE_NAME, "")?.trim().orEmpty())
+            }.toString()
+
+            val req = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/api/v1/spotify/connection")
+                .header("Authorization", "Bearer $authToken")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .post(payload.toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "Spotify encrypted cloud backup returned HTTP ${resp.code}")
+                    return false
+                }
+                val now = System.currentTimeMillis()
+                prefs.edit().putLong(KEY_CLOUD_SYNCED_MS, now).apply()
+                _statusFlow.value = readStatusFromPrefs(
+                    prefs = prefs,
+                    currentError = _statusFlow.value.lastError,
+                    errorHintType = _statusFlow.value.errorHintType,
+                    isAuthorizing = _statusFlow.value.isAuthorizing
+                )
+                Log.i(TAG, "✅ Encrypted Spotify connection synced to TuneMind cloud.")
+                true
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Spotify cloud backup skipped: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Restores the user's encrypted Spotify connection from TuneMind cloud if local tokens are
+     * missing (e.g., fresh install, app data cleared, or new phone) and refreshes an access token.
+     * Call from a background/IO thread.
+     */
+    fun restoreConnectionFromCloudIfNeeded(context: Context): Boolean {
+        return try {
+            val appCtx = context.applicationContext
+            val current = ensureLoaded(appCtx)
+            if (current.isConnected) {
+                if (!current.cloudBackedUp) {
+                    backupConnectionToCloud(appCtx)
+                }
+                return true
+            }
+
+            val authToken = com.tunemind.app.data.auth.TuneMindAuthSessionManager
+                .getInstance(appCtx)
+                .getAccessToken()
+                .trim()
+            if (authToken.isBlank()) return false
+
+            val baseUrl = runCatching { BackendEndpointManager.getActiveHttpBaseUrl(appCtx) }.getOrDefault("")
+            if (baseUrl.isBlank()) return false
+
+            val req = Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/api/v1/spotify/connection")
+                .header("Authorization", "Bearer $authToken")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+
+            val restoredConn = httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return false
+                val root = JSONObject(resp.body?.string().orEmpty())
+                if (!root.optBoolean("connected", false)) return false
+                root.optJSONObject("connection")
+            } ?: return false
+
+            val restoredRefresh = restoredConn.optString("refresh_token").trim()
+            if (restoredRefresh.isBlank()) return false
+
+            val restoredClientId = restoredConn.optString("client_id").trim()
+            val restoredName = restoredConn.optString("display_name").trim().ifBlank { "Spotify Listener" }
+            val restoredProduct = restoredConn.optString("product").trim()
+            val restoredDevice = restoredConn.optString("last_device_name").trim()
+            val isPremium = !restoredProduct.equals("free", ignoreCase = true) &&
+                !restoredProduct.equals("open", ignoreCase = true)
+
+            val prefs = getPrefs(appCtx)
+            val editor = prefs.edit()
+                .putString(KEY_REFRESH_TOKEN, restoredRefresh)
+                .putString(KEY_DISPLAY_NAME, restoredName)
+                .putString(KEY_PRODUCT, restoredProduct)
+                .putBoolean(KEY_IS_PREMIUM, isPremium)
+                .putLong(KEY_CONNECTED_AT_MS, System.currentTimeMillis())
+                .putLong(KEY_CLOUD_SYNCED_MS, System.currentTimeMillis())
+            if (isValidClientIdFormat(restoredClientId)) {
+                editor.putString(KEY_ACTIVE_AUTH_CLIENT_ID, restoredClientId)
+                val bundledDefault = getBundledBuildClientId().ifBlank {
+                    prefs.getString(KEY_APP_DEFAULT_CLIENT_ID, "")?.trim().orEmpty()
+                }
+                if (restoredClientId != bundledDefault) {
+                    editor.putString(KEY_CLIENT_ID, restoredClientId)
+                }
+            }
+            if (restoredDevice.isNotBlank()) {
+                editor.putString(KEY_LAST_DEVICE_NAME, restoredDevice)
+            }
+            editor.apply()
+
+            _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
+            // Immediately mint a fresh access token so playback is instant on first tap
+            val freshToken = refreshAccessTokenIfNeeded(appCtx, forceRefresh = true)
+            com.tunemind.app.sync.SyncScheduler.scheduleSpotifyTokenKeepAlive(appCtx)
+            Log.i(TAG, "✅ Auto-restored Spotify connection from TuneMind cloud for '$restoredName' (tokenReady=${freshToken != null})")
+            freshToken != null || ensureLoaded(appCtx).isConnected
+        } catch (e: Exception) {
+            Log.d(TAG, "Spotify cloud restore skipped: ${e.message}")
+            false
+        }
+    }
+
+    private fun deleteCloudConnectionAsync(context: Context) {
+        val appCtx = context.applicationContext
+        Thread {
+            try {
+                val authToken = com.tunemind.app.data.auth.TuneMindAuthSessionManager
+                    .getInstance(appCtx)
+                    .getAccessToken()
+                    .trim()
+                val baseUrl = runCatching { BackendEndpointManager.getActiveHttpBaseUrl(appCtx) }.getOrDefault("")
+                if (authToken.isBlank() || baseUrl.isBlank()) return@Thread
+
+                val req = Request.Builder()
+                    .url("${baseUrl.trimEnd('/')}/api/v1/spotify/connection")
+                    .header("Authorization", "Bearer $authToken")
+                    .delete()
+                    .build()
+                httpClient.newCall(req).execute().close()
+                Log.i(TAG, "Removed encrypted Spotify backup from TuneMind cloud.")
+            } catch (e: Exception) {
+                Log.d(TAG, "Cloud Spotify disconnect notice: ${e.message}")
+            }
+        }.start()
     }
 
     fun saveClientId(context: Context, rawClientId: String) {
@@ -536,10 +777,15 @@ object SpotifyPremiumConnectManager {
                         JSONObject(bodyStr).optString("error_description")
                             .ifBlank { JSONObject(bodyStr).optString("error") }
                     }.getOrDefault("")
-                    val msg = "Spotify token exchange failed (${response.code})${if (errDesc.isNotBlank()) ": $errDesc" else ""}"
-                    Log.e(TAG, msg)
+                    val (friendlyMsg, hintType) = mapFriendlyError(errDesc.ifBlank { bodyStr }, response.code)
+                    Log.e(TAG, "Spotify token exchange failed (${response.code}): $errDesc")
                     clearPendingAuth(prefs)
-                    _statusFlow.value = readStatusFromPrefs(prefs, currentError = msg, isAuthorizing = false)
+                    _statusFlow.value = readStatusFromPrefs(
+                        prefs = prefs,
+                        currentError = friendlyMsg,
+                        errorHintType = hintType,
+                        isAuthorizing = false
+                    )
                     return false
                 }
                 JSONObject(bodyStr)
@@ -549,17 +795,25 @@ object SpotifyPremiumConnectManager {
             val refreshToken = tokenJson.optString("refresh_token").trim()
             val expiresInSec = tokenJson.optLong("expires_in", 3600L).coerceAtLeast(60L)
             if (accessToken.isBlank()) {
-                val msg = "Spotify returned an empty access token."
+                val msg = "Spotify returned an empty access token. Please retry connecting."
                 clearPendingAuth(prefs)
                 _statusFlow.value = readStatusFromPrefs(prefs, currentError = msg, isAuthorizing = false)
                 return false
             }
 
             val expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
-            val profile = fetchSpotifyProfile(accessToken)
-            val displayName = profile?.first?.ifBlank { "Spotify Listener" } ?: "Spotify Listener"
-            val product = profile?.second.orEmpty()
-            val isPremium = product.equals("premium", ignoreCase = true)
+            // Retry /v1/me once on transient hiccup so Premium users are never falsely demoted
+            val profile = fetchSpotifyProfile(accessToken) ?: run {
+                runCatching { Thread.sleep(350L) }
+                fetchSpotifyProfile(accessToken)
+            }
+            val displayName = profile?.first?.ifBlank { "Spotify Listener" }
+                ?: prefs.getString(KEY_DISPLAY_NAME, "")?.ifBlank { "Spotify Listener" }
+                ?: "Spotify Listener"
+            val product = profile?.second?.trim().orEmpty()
+                .ifBlank { prefs.getString(KEY_PRODUCT, "")?.trim().orEmpty() }
+            val explicitlyFree = product.equals("free", ignoreCase = true) || product.equals("open", ignoreCase = true)
+            val isPremium = !explicitlyFree && (product.equals("premium", ignoreCase = true) || product.isBlank())
 
             val activeDevice = if (isPremium) findBestConnectDevice(accessToken) else null
 
@@ -581,20 +835,26 @@ object SpotifyPremiumConnectManager {
             }
             editor.apply()
 
-            val warningIfFree = if (!isPremium && product.isNotBlank()) {
-                "Connected as $displayName (${product.replaceFirstChar { it.uppercase() }}). Silent Spotify playback requires Spotify Premium, but liking tracks works."
-            } else {
-                null
-            }
-            _statusFlow.value = readStatusFromPrefs(prefs, currentError = warningIfFree, isAuthorizing = false)
+            // Treat Spotify Free as a clean first-class connected tier (no scary error warning!)
+            _statusFlow.value = readStatusFromPrefs(
+                prefs = prefs,
+                currentError = null,
+                errorHintType = SpotifyErrorHintType.NONE,
+                isAuthorizing = false
+            )
+            // Persist encrypted refresh token to TuneMind cloud + schedule periodic keep-alive
+            backupConnectionToCloud(context)
+            com.tunemind.app.sync.SyncScheduler.scheduleSpotifyTokenKeepAlive(context)
             Log.i(TAG, "✅ Spotify Direct Connect authorized for '$displayName' (product=$product, premium=$isPremium)")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Spotify OAuth callback exchange error: ${e.message}", e)
             clearPendingAuth(prefs)
+            val (friendly, hint) = mapFriendlyError("Network error completing Spotify sign-in: ${e.message}")
             _statusFlow.value = readStatusFromPrefs(
-                prefs,
-                currentError = "Network error completing Spotify sign-in: ${e.message}",
+                prefs = prefs,
+                currentError = friendly,
+                errorHintType = hint,
                 isAuthorizing = false
             )
             false
@@ -619,11 +879,13 @@ object SpotifyPremiumConnectManager {
             .remove(KEY_IS_PREMIUM)
             .remove(KEY_CONNECTED_AT_MS)
             .remove(KEY_LAST_DEVICE_NAME)
+            .remove(KEY_CLOUD_SYNCED_MS)
             .remove(KEY_PENDING_VERIFIER)
             .remove(KEY_PENDING_STATE)
             .apply()
         _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
-        Log.i(TAG, "Disconnected Spotify Direct Connect session.")
+        deleteCloudConnectionAsync(context)
+        Log.i(TAG, "Disconnected Spotify Direct Connect session (local + cloud).")
     }
 
     /**
@@ -725,16 +987,31 @@ object SpotifyPremiumConnectManager {
                 httpClient.newCall(req).execute().use { resp ->
                     val bodyStr = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
-                        Log.w(TAG, "Spotify token refresh failed (HTTP ${resp.code}): $bodyStr")
-                        if (resp.code == 400 || resp.code == 401) {
+                        val errCode = runCatching { JSONObject(bodyStr).optString("error").trim() }.getOrDefault("")
+                        val errDesc = runCatching { JSONObject(bodyStr).optString("error_description").trim() }.getOrDefault("")
+                        Log.w(TAG, "Spotify token refresh failed (HTTP ${resp.code}, error=$errCode): $bodyStr")
+
+                        // CRITICAL: Only wipe stored refresh token when Spotify explicitly reports
+                        // invalid_grant (revoked by user). Never wipe on transient network / 429 / 5xx / hiccups!
+                        val isExplicitlyRevoked = errCode.equals("invalid_grant", ignoreCase = true) ||
+                            errDesc.contains("revoked", ignoreCase = true)
+                        if (isExplicitlyRevoked) {
                             prefs.edit()
                                 .remove(KEY_ACCESS_TOKEN)
                                 .remove(KEY_REFRESH_TOKEN)
                                 .remove(KEY_EXPIRES_AT_MS)
                                 .apply()
                             _statusFlow.value = readStatusFromPrefs(
-                                prefs,
-                                currentError = "Spotify session expired — reconnect in Settings.",
+                                prefs = prefs,
+                                currentError = "Spotify access was revoked or expired. Tap Connect Spotify to relink.",
+                                errorHintType = SpotifyErrorHintType.REVOKED,
+                                isAuthorizing = false
+                            )
+                        } else if (errCode.equals("invalid_client", ignoreCase = true)) {
+                            _statusFlow.value = readStatusFromPrefs(
+                                prefs = prefs,
+                                currentError = "Spotify Client ID mismatch — review your Client ID in Settings.",
+                                errorHintType = SpotifyErrorHintType.INVALID_CLIENT,
                                 isAuthorizing = false
                             )
                         }
@@ -757,19 +1034,26 @@ object SpotifyPremiumConnectManager {
                     // Re-verify profile if product wasn't known yet
                     if (prefs.getString(KEY_PRODUCT, "").isNullOrBlank()) {
                         fetchSpotifyProfile(newToken)?.let { (name, product) ->
+                            val isPrem = product.equals("premium", ignoreCase = true)
                             prefs.edit()
                                 .putString(KEY_DISPLAY_NAME, name)
                                 .putString(KEY_PRODUCT, product)
-                                .putBoolean(KEY_IS_PREMIUM, product.equals("premium", ignoreCase = true))
+                                .putBoolean(KEY_IS_PREMIUM, isPrem)
                                 .apply()
                         }
                     }
 
                     _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
+
+                    // Keep encrypted cloud backup updated whenever Spotify rotates the refresh token
+                    if (rotatedRefresh.isNotBlank()) {
+                        val appCtx = context.applicationContext
+                        Thread { backupConnectionToCloud(appCtx) }.start()
+                    }
                     newToken
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Spotify token refresh exception: ${e.message}")
+                Log.w(TAG, "Spotify token refresh exception (preserving saved session): ${e.message}")
                 null
             }
         }
@@ -1035,17 +1319,22 @@ object SpotifyPremiumConnectManager {
                         )
                     }
                     resp.code == 403 && reason.equals("PREMIUM_REQUIRED", ignoreCase = true) -> {
+                        // Cleanly switch to Spotify Free Smart Mode without scary error banners
                         val prefs = getPrefs(context)
                         prefs.edit().putBoolean(KEY_IS_PREMIUM, false).putString(KEY_PRODUCT, "free").apply()
                         _statusFlow.value = readStatusFromPrefs(
-                            prefs,
-                            currentError = "Spotify Premium is required for silent background control.",
+                            prefs = prefs,
+                            currentError = null,
+                            errorHintType = SpotifyErrorHintType.NONE,
                             isAuthorizing = false
                         )
-                        SpotifyPlayResult.PremiumRequired("Spotify Premium is required for silent background playback.")
+                        val appCtx = context.applicationContext
+                        Thread { backupConnectionToCloud(appCtx) }.start()
+                        SpotifyPlayResult.PremiumRequired("Spotify Free Smart Mode active — opening full track in Spotify.")
                     }
                     else -> {
-                        SpotifyPlayResult.Failed(message.ifBlank { "Spotify Connect returned HTTP ${resp.code}" })
+                        val (friendly, _) = mapFriendlyError(message.ifBlank { "Spotify Connect returned HTTP ${resp.code}" }, resp.code)
+                        SpotifyPlayResult.Failed(friendly)
                     }
                 }
             }

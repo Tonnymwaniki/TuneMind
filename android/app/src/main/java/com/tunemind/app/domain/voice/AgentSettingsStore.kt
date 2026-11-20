@@ -34,6 +34,7 @@ object AgentSettingsStore {
     private const val KEY_ALERTS_HEARING = "alerts_hearing_enabled"
     private const val KEY_ALERTS_SYNC_STATUS = "alerts_sync_status_enabled"
     private const val KEY_KIDS_MODE = "kids_mode_enabled"
+    private const val KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY = "spotify_free_open_in_spotify"
 
     @Volatile
     private var initialized = false
@@ -86,6 +87,9 @@ object AgentSettingsStore {
     private val _kidsModeEnabled = MutableStateFlow(false)
     val kidsModeEnabled: StateFlow<Boolean> = _kidsModeEnabled.asStateFlow()
 
+    private val _spotifyFreeOpenInSpotify = MutableStateFlow(true)
+    val spotifyFreeOpenInSpotify: StateFlow<Boolean> = _spotifyFreeOpenInSpotify.asStateFlow()
+
     private fun prefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -111,6 +115,7 @@ object AgentSettingsStore {
             _hearingAlertsEnabled.value = p.getBoolean(KEY_ALERTS_HEARING, true)
             _syncStatusAlertsEnabled.value = p.getBoolean(KEY_ALERTS_SYNC_STATUS, true)
             _kidsModeEnabled.value = p.getBoolean(KEY_KIDS_MODE, false)
+            _spotifyFreeOpenInSpotify.value = p.getBoolean(KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY, true)
             initialized = true
         }
     }
@@ -290,5 +295,16 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_KIDS_MODE, enabled).apply()
         _kidsModeEnabled.value = enabled
+    }
+
+    fun isSpotifyFreeOpenInSpotifyEnabled(context: Context): Boolean {
+        ensureLoaded(context)
+        return _spotifyFreeOpenInSpotify.value
+    }
+
+    fun setSpotifyFreeOpenInSpotifyEnabled(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        prefs(context).edit().putBoolean(KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY, enabled).apply()
+        _spotifyFreeOpenInSpotify.value = enabled
     }
 }

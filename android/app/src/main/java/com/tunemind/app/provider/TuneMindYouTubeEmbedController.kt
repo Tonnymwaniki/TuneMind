@@ -434,23 +434,65 @@ object TuneMindYouTubeEmbedController {
                                 _statusNoticeFlow.value =
                                     "Playing full track '$title' silently on Spotify (${spotifyRes.deviceName})."
                             }
-                        } else if (!fallbackPreview.isNullOrBlank()) {
+                        } else if (SpotifyMusicProvider().isInstalled(ctx)) {
+                            val trackUri = (spotifyRes as? SpotifyPlayResult.NoActiveDevice)?.trackUri
+                            val rec = com.tunemind.app.domain.recommendation.RecommendedTrack(
+                                id = trackUri ?: title,
+                                title = title,
+                                artist = artist,
+                                reason = "Opening full track in Spotify",
+                                confidence = 0.95f,
+                                spotifyUri = trackUri
+                            )
+                            MusicPlayerAutoLauncher.launchWithAutoPlay(
+                                context = ctx,
+                                providerId = SpotifyMusicProvider.PROVIDER_ID,
+                                displayName = "Spotify",
+                                packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                                track = rec,
+                                query = "$artist $title".trim(),
+                                deepLinkUri = trackUri,
+                                neverOpenExternalApp = false
+                            )
                             mainHandler.post {
-                                _statusNoticeFlow.value =
-                                    "Open Spotify briefly once to wake your phone for full silent Spotify playback (playing 30s preview for now)."
-                                TuneMindInAppPlayer.playStreamUrl(
-                                    context = ctx,
-                                    streamUrl = fallbackPreview,
-                                    title = title,
-                                    artist = artist,
-                                    album = album,
-                                    expectedDurationMs = 30_000L,
-                                    isPreview = true,
-                                    fallbackExternalPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
-                                    fallbackExternalName = "Spotify"
-                                )
+                                _statusNoticeFlow.value = "Opened full track '$title' in Spotify."
                             }
                         }
+                    }.start()
+                    return@post
+                }
+
+                // Spotify Free Smart Mode: never drop into a 30s preview when YouTube blocks embedding!
+                val preferSpotifyHandoff = ctx != null &&
+                    title.isNotBlank() &&
+                    SpotifyMusicProvider().isInstalled(ctx) &&
+                    com.tunemind.app.domain.voice.AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(ctx) &&
+                    (fallbackPkg == SpotifyMusicProvider.SPOTIFY_PACKAGE || SpotifyPremiumConnectManager.isConnectedAsFreeTier(ctx))
+
+                if (preferSpotifyHandoff && ctx != null) {
+                    _statusNoticeFlow.value = "Opening full track '$title' in Spotify..."
+                    Thread {
+                        val exactUri = if (SpotifyPremiumConnectManager.isConnected(ctx)) {
+                            SpotifyPremiumConnectManager.searchExactTrackUri(ctx, title, artist)
+                        } else null
+                        val rec = com.tunemind.app.domain.recommendation.RecommendedTrack(
+                            id = exactUri ?: title,
+                            title = title,
+                            artist = artist,
+                            reason = "Opening full track in Spotify instead of 30s preview",
+                            confidence = 0.95f,
+                            spotifyUri = exactUri
+                        )
+                        MusicPlayerAutoLauncher.launchWithAutoPlay(
+                            context = ctx,
+                            providerId = SpotifyMusicProvider.PROVIDER_ID,
+                            displayName = "Spotify",
+                            packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
+                            track = rec,
+                            query = "$artist $title".trim(),
+                            deepLinkUri = exactUri,
+                            neverOpenExternalApp = false
+                        )
                     }.start()
                     return@post
                 }

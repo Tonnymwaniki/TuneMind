@@ -53,6 +53,7 @@ export interface AgentToolCall {
     | 'SELECT_MUSIC_PLAYER'
     | 'OPEN_MUSIC_PLAYER_APP'
     | 'OPEN_SETTINGS'
+    | 'OPEN_SPOTIFY_CONNECT_GUIDE'
     | 'NAVIGATE_SCREEN'
     | 'LAUNCH_DOPAMINE_CAPSULE'
     | 'CREATE_TUNEMIND_PLAYLIST'
@@ -256,7 +257,12 @@ export interface TuneMindTelemetryContext {
     has_overlay_permission?: boolean;
     spotify_connected?: boolean;
     spotify_premium_connected?: boolean;
+    spotify_account_tier?: string;
     spotify_user_name?: string;
+    spotify_last_device_name?: string;
+    spotify_cloud_backup_synced?: boolean;
+    spotify_last_error?: string;
+    spotify_free_open_in_spotify?: boolean;
     app_remote_connected?: boolean;
     inapp_player_active?: boolean;
     inapp_youtube_active?: boolean;
@@ -988,6 +994,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'SELECT_MUSIC_PLAYER',
                 'OPEN_MUSIC_PLAYER_APP',
                 'OPEN_SETTINGS',
+                'OPEN_SPOTIFY_CONNECT_GUIDE',
                 'NAVIGATE_SCREEN',
                 'LAUNCH_DOPAMINE_CAPSULE',
                 'CREATE_TUNEMIND_PLAYLIST',
@@ -1240,32 +1247,39 @@ DIRECT PLAY vs. TWO-STEP PROPOSAL vs. REJECTION:
   -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_tracks' or 'search_music_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
-HONEST IN-APP vs. EXTERNAL PLAYER GUIDANCE:
-- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled', 'spotify_connected', 'spotify_premium_connected') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
+HONEST IN-APP vs. EXTERNAL PLAYER & SPOTIFY CO-PILOT GUIDANCE:
+- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled', 'spotify_connected', 'spotify_premium_connected', 'spotify_account_tier', 'spotify_last_device_name', 'spotify_cloud_backup_synced', 'spotify_last_error') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
+- **SPOTIFY CONNECT CO-PILOT** (action="OPEN_SPOTIFY_CONNECT_GUIDE"):
+  - Whenever the user asks *"help me connect Spotify"*, *"set up Spotify"*, *"link my Spotify"*, *"why isn't Spotify playing full songs?"*, *"my Spotify disconnected"*, or *"check my Spotify connection"*:
+    - If NOT connected ('spotify_connected !== true'): call action="OPEN_SPOTIFY_CONNECT_GUIDE" and walk them warmly through the 60-second 3-step setup guide that just opened (Step 1: create free app on Spotify Developer Dashboard, Step 2: paste the copied Redirect URI 'tunemind://spotify-callback', Step 3: paste the 32-character Client ID and tap Connect — and reassure them TuneMind backs it up encrypted to their account so they never have to reconnect again!).
+    - If connected as **Premium** ('spotify_premium_connected === true'): confirm they are connected as 'spotify_user_name' (mention 'spotify_last_device_name' if present and that cloud persistence is active if 'spotify_cloud_backup_synced' is true). If 'spotify_last_error' mentions no active device, explain they can tap Wake Spotify once or open Spotify briefly so their phone registers.
+    - If connected as **Spotify Free** ('spotify_account_tier === "FREE_CONNECTED"'): never make them feel broken! Reassure them they are cleanly connected in **Spotify Free Smart Mode**: TuneMind syncs their Liked Songs to Spotify, tracks every song they listen to via MediaSession, and plays full songs inside TuneMind when available or opens Spotify directly to play the full track — never trapping them in 30-second previews!
 - Users with **Spotify Premium Direct Connect** ('app_state.spotify_premium_connected === true'):
-  - TuneMind has direct Spotify Connect Web API control via their personal Spotify Client ID!
+  - TuneMind has direct Spotify Connect Web API control!
   - You CAN play full-length Spotify tracks silently in the background **without leaving TuneMind** (set "never_open_external_app": true and target_player="com.spotify.music" with action="PLAY_TRACK_NOW"), push tracks straight into their live Spotify queue (action="QUEUE_TRACKS"), save tracks directly to their Spotify Liked Songs (action="LIKE_TRACK"), and control Pause/Resume/Skip silently.
-  - Note: If Spotify has been completely closed for a long time and has no active Connect device, TuneMind automatically falls back cleanly to its warm MediaSession or full built-in player.
+- Users on **Spotify Free** ('spotify_account_tier === "FREE_CONNECTED"' or targeting Spotify without Premium):
+  - TuneMind NEVER traps them in 30-second previews! If a full-length track cannot play inside TuneMind, TuneMind automatically opens Spotify directly to that exact song so they hear the full track while MediaSession tracks their listening seamlessly.
 - Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') can play full tracks via our built-in **visible official YouTube player right inside TuneMind** without switching apps.
-- Users whose default player is **Spotify (without Premium Direct Connect), Boomplay, Audiomack, Deezer, or SoundCloud**:
-  - Normally, playing a song opens their chosen music app directly to that track and posts a Heads-Up **"Back to TuneMind"** notification banner so they can return with 1 tap.
-  - Whenever the user asks to play a song **"without leaving TuneMind"** or **"without opening Spotify/Boomplay"**: set "never_open_external_app": true and call action="PLAY_TRACK_NOW" (or PROPOSE_TRACK if recommending). TuneMind will first try controlling their active background session silently, and otherwise plays the **full track inside TuneMind's built-in player** while keeping their default player unchanged — only falling back to a 30-second preview if no full in-app stream is available. For Spotify users without 'spotify_premium_connected', you may briefly mention they can link their Spotify Premium Client ID in **Settings → Spotify Premium Direct Connect** for silent full-track Spotify playback, queueing, and liked-song sync.
+- Users whose default player is **Boomplay, Audiomack, Deezer, SoundCloud, or Local Files**:
+  - Normally, playing a song uses TuneMind's full-track in-app player when available or opens their chosen music app directly with a Heads-Up **"Back to TuneMind"** notification banner.
+  - Whenever the user asks to play a song **"without leaving TuneMind"** or **"without opening Spotify/Boomplay"**: set "never_open_external_app": true and call action="PLAY_TRACK_NOW" (or PROPOSE_TRACK if recommending). For Spotify users who haven't connected yet, you may briefly offer to open the 1-minute Spotify Connect guide with action="OPEN_SPOTIFY_CONNECT_GUIDE" if they ask for help connecting.
   - If they reply explicitly asking to use YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
   - If they say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
 
 FULL APP-WIDE CONTROL ACTIONS:
-- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track — also syncs to Spotify Liked Songs when 'app_state.spotify_connected' is true!).
+- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track — also syncs to Spotify Liked Songs when 'app_state.spotify_connected' is true, for both Premium and Free accounts!).
 - Up Next Queue: action="QUEUE_TRACKS" (with queue_tracks=[...] — also pushes straight into the user's live Spotify queue when 'app_state.spotify_premium_connected' is true!), action="PLAY_NEXT_IN_QUEUE", or action="CLEAR_UP_NEXT_QUEUE".
 - Dopamine Capsule: action="LAUNCH_DOPAMINE_CAPSULE".
 - Refresh For You: action="REFRESH_FOR_YOU_PICKS".
 - Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).
+- Open Spotify guided setup / troubleshooting: action="OPEN_SPOTIFY_CONNECT_GUIDE".
 - Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
 - Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
 - Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE".
 - Volume & Sleep Timer: action="SET_VOLUME_PERCENT" (volume_percent: 10-100), action="SET_SLEEP_TIMER" (sleep_timer_minutes: 0-240).
 - Navigation: action="NAVIGATE_SCREEN" with target_screen in:
   "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
-- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS".
+- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE".
 - Use 'extra_actions' to combine multiple commands seamlessly in one turn!
 
 - East African & Global Genre Precision: Never misclassify local or international tracks! Know East African genres fluently (e.g. Gikuyu / Mugithi & Benga like Samidoh, Salim, De'Mathew, Joyce Wa Mamaa, Jose Gatutura; Bongo Flava like Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Kusah, Jay Melody; Kenyan Pop & Gengetone like Sauti Sol, Nyashinski, Bien, Wakadinali, Khaligraph Jones, Mejja; Kenyan & East African Gospel like Mercy Masika, Guardian Angel, Evelyn Wanjiru, Christina Shusho, Reuben Kigame; Ohangla like Prince Indah; Lingala/Rumba like Fally Ipupa, Koffi Olomide; plus Afrobeats, Amapiano, Hip-Hop, R&B, Dancehall, Pop, Nu-Jazz, Bossa Nova). Use the inferred 'genre' labels on tracks accurately when asked or recommending.
@@ -2916,7 +2930,7 @@ Reason naturally about what the user actually said and maintain clear, honest bo
    - Queue tracks up next -> "QUEUE_TRACKS" ("queue_tracks": [{"title": "...", "artist": "..."}])
    - Sleep timer -> "SET_SLEEP_TIMER" ("sleep_timer_minutes": N or 0 to cancel)
    - If user asks to play without opening an external app OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true.
-   - Screens -> "OPEN_SETTINGS" or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
+   - Screens -> "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
    - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
    - Optionally include "extra_actions": [...] to combine actions in one turn.
 
@@ -2925,7 +2939,7 @@ Respond ONLY with a single valid JSON object:
   "voice_agent_tts": "Your natural, warm, unscripted spoken reply (1-3 sentences)",
   "flow_state_analysis": "Short 1-line studio HUD note",
   "calculated_satiety_percentage": 24,
-  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
+  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "OPEN_SPOTIFY_CONNECT_GUIDE" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
   "track_id": "",
@@ -3284,7 +3298,28 @@ Respond ONLY with a single valid JSON object:
       };
     }
 
-    // 3. Settings / Autonomous DJ / Stay-in-TuneMind / Accent Theme Color commands
+    // 3. Spotify Connect Co-Pilot / Settings / Autonomous DJ / Stay-in-TuneMind / Accent Theme Color commands
+    if (/\b(connect|link|setup|set\s+up|fix|reconnect|troubleshoot)\s+(my\s+)?spotify\b|\bhelp\s+(me\s+)?(connect|link|set\s+up)\s+spotify\b/i.test(userCommandLower)) {
+      const appState = context.app_state;
+      const isPremiumConnected = Boolean(appState?.spotify_premium_connected);
+      const isFreeConnected = Boolean(appState?.spotify_connected && !isPremiumConnected);
+      const userName = appState?.spotify_user_name || 'your Spotify account';
+      const tts = isPremiumConnected
+        ? `You're already connected to Spotify Premium as ${userName}${appState?.spotify_cloud_backup_synced ? ' with encrypted cloud sync active' : ''}. I'm opening the Spotify Connect guide in case you want to check your active device or switch Client ID.`
+        : isFreeConnected
+          ? `You're connected in Spotify Free Smart Mode as ${userName}. Your likes sync to Spotify, and whenever a full track can't play inside TuneMind, I open Spotify directly so you never get stuck in 30-second previews. I'm opening your Spotify settings now.`
+          : `I'm opening the 60-second Spotify Connect setup guide right now. Copy the redirect link, paste your Client ID from Spotify Dashboard, and tap Connect—TuneMind saves it encrypted to your account so you won't have to set it up again.`;
+      return {
+        calculated_satiety_percentage: 24,
+        reasoning_mode: 'DIRECT_EXECUTION',
+        flow_state_analysis: 'Opening TuneMind Spotify Connect Guide.',
+        voice_agent_tts: tts,
+        agent_tool_call: { action: 'OPEN_SPOTIFY_CONNECT_GUIDE', expect_follow_up: false },
+        os_execution_command: { intent: 'NONE', target_player: targetPlayer, search_query: '', suggested_bpm_target: 105 },
+        database_tags: ['open-spotify-connect-guide']
+      };
+    }
+
     if (/\b(open|show|go\s+to)\s+(the\s+)?settings\b/i.test(userCommandLower)) {
       return {
         calculated_satiety_percentage: 24,

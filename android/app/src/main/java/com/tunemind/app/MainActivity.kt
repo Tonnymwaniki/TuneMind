@@ -188,6 +188,7 @@ open class MainActivity : ComponentActivity() {
                     var requestedDopamineSubTab by remember { mutableStateOf<Int?>(null) }
                     var requestedRhythmSubDeck by remember { mutableStateOf<Int?>(null) }
                     var showSettingsScreen by remember { mutableStateOf(false) }
+                    var openSpotifySetupInSettings by remember { mutableStateOf(false) }
                     var showProfileScreen by remember { mutableStateOf(false) }
                     var showStatsScreen by remember { mutableStateOf(false) }
                     var showWeeklyReportScreen by remember { mutableStateOf(false) }
@@ -213,6 +214,15 @@ open class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(Unit) {
                         com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
+                        com.tunemind.app.sync.SyncScheduler.scheduleSpotifyTokenKeepAlive(context)
+                    }
+
+                    // Auto-restore encrypted Spotify connection from TuneMind cloud on startup / sign-in
+                    LaunchedEffect(authSession.userId, authSession.isAuthenticated) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
+                            com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
+                        }
                     }
 
                     fun applyPlayerPreferenceUpdate(rawPlayer: String?, rememberDefault: Boolean) {
@@ -553,6 +563,11 @@ open class MainActivity : ComponentActivity() {
                                 showProfileScreen = true
                                 showSettingsScreen = true
                             }
+                            "OPEN_SPOTIFY_CONNECT_GUIDE" -> {
+                                openSpotifySetupInSettings = true
+                                showProfileScreen = true
+                                showSettingsScreen = true
+                            }
                             "NAVIGATE_SCREEN" -> {
                                 val screen = tool.target_screen?.uppercase() ?: ""
                                 when {
@@ -721,7 +736,12 @@ open class MainActivity : ComponentActivity() {
                                     val spotifyConnectStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
                                     put("spotify_connected", spotifyConnectStatus.isConnected)
                                     put("spotify_premium_connected", spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium)
+                                    put("spotify_account_tier", spotifyConnectStatus.accountTierLabel)
                                     put("spotify_user_name", spotifyConnectStatus.displayName)
+                                    put("spotify_last_device_name", spotifyConnectStatus.lastDeviceName)
+                                    put("spotify_cloud_backup_synced", spotifyConnectStatus.cloudBackedUp)
+                                    put("spotify_last_error", spotifyConnectStatus.lastError ?: "")
+                                    put("spotify_free_open_in_spotify", AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(context))
                                     put("inapp_youtube_active", com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying())
                                     put("detected_players_count", vm.detectedPlayerTabs.value.size)
                                 }
@@ -1657,17 +1677,23 @@ open class MainActivity : ComponentActivity() {
                                 if (showSettingsScreen) {
                                     com.tunemind.app.ui.screens.SettingsScreen(
                                         vm = vm,
-                                        onBack = { showSettingsScreen = false },
+                                        onBack = {
+                                            openSpotifySetupInSettings = false
+                                            showSettingsScreen = false
+                                        },
                                         onOpenCrossApp = {
+                                            openSpotifySetupInSettings = false
                                             showSettingsScreen = false
                                             showProfileScreen = false
                                             showStatsScreen = true
                                         },
                                         onOpenWeeklyReport = {
+                                            openSpotifySetupInSettings = false
                                             showSettingsScreen = false
                                             showWeeklyReportScreen = true
                                         },
                                         onOpenAccountAuth = {
+                                            openSpotifySetupInSettings = false
                                             showSettingsScreen = false
                                             showProfileScreen = true
                                         },
@@ -1675,7 +1701,9 @@ open class MainActivity : ComponentActivity() {
                                         onOpenLegal = { tab ->
                                             legalInitialTab = tab
                                             showLegalScreen = true
-                                        }
+                                        },
+                                        openSpotifySetupInitially = openSpotifySetupInSettings,
+                                        onSpotifySetupSheetConsumed = { openSpotifySetupInSettings = false }
                                     )
                                 }
 
