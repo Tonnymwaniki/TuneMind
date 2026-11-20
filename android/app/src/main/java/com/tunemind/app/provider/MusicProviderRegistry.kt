@@ -266,6 +266,28 @@ class TuneMindInAppProvider : MusicProvider {
             )
         }
 
+        val ytmVideoId = resolved?.ytmVideoId?.takeIf { it.isNotBlank() }
+            ?: match.providerTrackId?.trim()?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
+        if (ytmVideoId != null && TuneMindYouTubeEmbedController.startVideo(
+                context = context,
+                videoId = ytmVideoId,
+                title = match.title,
+                artist = match.artist,
+                album = resolved?.albumName,
+                previewFallback = resolved?.previewUrl,
+                fallbackExternalPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                fallbackExternalName = "YouTube Music"
+            )
+        ) {
+            return PlaybackLaunchResult.DirectPlaybackLaunched(
+                providerId = providerId,
+                providerDisplayName = displayName,
+                trackTitle = match.title,
+                destinationUri = "https://music.youtube.com/watch?v=$ytmVideoId",
+                message = "Playing full track '${match.title}' inside TuneMind."
+            )
+        }
+
         val previewUrl = resolved?.previewUrl?.takeIf { it.startsWith("http") }
         if (previewUrl != null && TuneMindInAppPlayer.playStreamUrl(
                 context = context,

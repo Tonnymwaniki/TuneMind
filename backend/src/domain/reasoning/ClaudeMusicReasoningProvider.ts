@@ -255,6 +255,8 @@ export interface TuneMindTelemetryContext {
     prefer_in_app_player_enabled?: boolean;
     has_overlay_permission?: boolean;
     spotify_connected?: boolean;
+    spotify_premium_connected?: boolean;
+    spotify_user_name?: string;
     app_remote_connected?: boolean;
     inapp_player_active?: boolean;
     inapp_youtube_active?: boolean;
@@ -1239,17 +1241,21 @@ DIRECT PLAY vs. TWO-STEP PROPOSAL vs. REJECTION:
 - ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
 
 HONEST IN-APP vs. EXTERNAL PLAYER GUIDANCE:
-- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
+- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled', 'spotify_connected', 'spotify_premium_connected') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
+- Users with **Spotify Premium Direct Connect** ('app_state.spotify_premium_connected === true'):
+  - TuneMind has direct Spotify Connect Web API control via their personal Spotify Client ID!
+  - You CAN play full-length Spotify tracks silently in the background **without leaving TuneMind** (set "never_open_external_app": true and target_player="com.spotify.music" with action="PLAY_TRACK_NOW"), push tracks straight into their live Spotify queue (action="QUEUE_TRACKS"), save tracks directly to their Spotify Liked Songs (action="LIKE_TRACK"), and control Pause/Resume/Skip silently.
+  - Note: If Spotify has been completely closed for a long time and has no active Connect device, TuneMind automatically falls back cleanly to its warm MediaSession or full built-in player.
 - Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') can play full tracks via our built-in **visible official YouTube player right inside TuneMind** without switching apps.
-- Users whose default player is **Spotify, Boomplay, Audiomack, Deezer, or SoundCloud**:
+- Users whose default player is **Spotify (without Premium Direct Connect), Boomplay, Audiomack, Deezer, or SoundCloud**:
   - Normally, playing a song opens their chosen music app directly to that track and posts a Heads-Up **"Back to TuneMind"** notification banner so they can return with 1 tap.
-  - Whenever the user asks to play "without leaving TuneMind" or "without opening Spotify/Boomplay": set "never_open_external_app": true, and explain honestly that because Spotify/Boomplay/Audiomack restrict silent background streaming inside third-party apps (requiring restricted enterprise API keys), TuneMind normally opens your chosen player to play the full track with a 1-tap **"Back to TuneMind"** banner — or if 'player_preferences.youtube_music_installed' is true, offer to use TuneMind's built-in YouTube player temporarily for full in-app playback while keeping their default player unchanged!
-  - If they reply allowing YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
+  - Whenever the user asks to play a song **"without leaving TuneMind"** or **"without opening Spotify/Boomplay"**: set "never_open_external_app": true and call action="PLAY_TRACK_NOW" (or PROPOSE_TRACK if recommending). TuneMind will first try controlling their active background session silently, and otherwise plays the **full track inside TuneMind's built-in player** while keeping their default player unchanged — only falling back to a 30-second preview if no full in-app stream is available. For Spotify users without 'spotify_premium_connected', you may briefly mention they can link their Spotify Premium Client ID in **Settings → Spotify Premium Direct Connect** for silent full-track Spotify playback, queueing, and liked-song sync.
+  - If they reply explicitly asking to use YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
   - If they say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
 
 FULL APP-WIDE CONTROL ACTIONS:
-- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track).
-- Up Next Queue: action="QUEUE_TRACKS" (with queue_tracks=[...]), action="PLAY_NEXT_IN_QUEUE", or action="CLEAR_UP_NEXT_QUEUE".
+- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track — also syncs to Spotify Liked Songs when 'app_state.spotify_connected' is true!).
+- Up Next Queue: action="QUEUE_TRACKS" (with queue_tracks=[...] — also pushes straight into the user's live Spotify queue when 'app_state.spotify_premium_connected' is true!), action="PLAY_NEXT_IN_QUEUE", or action="CLEAR_UP_NEXT_QUEUE".
 - Dopamine Capsule: action="LAUNCH_DOPAMINE_CAPSULE".
 - Refresh For You: action="REFRESH_FOR_YOU_PICKS".
 - Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).

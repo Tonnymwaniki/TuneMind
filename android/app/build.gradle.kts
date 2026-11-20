@@ -64,6 +64,8 @@ val supabaseUrl: String = resolveBuildProp("SUPABASE_URL", "VITE_SUPABASE_URL", 
 
 val supabaseAnonKey: String = resolveBuildProp("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_KEY")
 
+val spotifyClientId: String = resolveBuildProp("SPOTIFY_CLIENT_ID", "VITE_SPOTIFY_CLIENT_ID")
+
 val keystoreProps = Properties()
 val keystorePropsFile = rootProject.file("keystore.properties")
 if (keystorePropsFile.exists()) {
@@ -102,6 +104,7 @@ android {
         buildConfigField("String", "TUNEMIND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
     }
 
     if (hasReleaseSigning) {

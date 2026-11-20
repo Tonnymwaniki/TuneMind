@@ -86,7 +86,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Dedicated Supabase Google OAuth Callback Activity -->
+        <!-- Dedicated OAuth Callback Activity (Supabase Google + Spotify Premium Direct Connect PKCE) -->
         <activity
             android:name=".data.ingestion.AuthCallbackActivity"
             android:exported="true"
@@ -99,6 +99,9 @@
                 <data
                     android:scheme="tunemind"
                     android:host="supabase-auth-callback" />
+                <data
+                    android:scheme="tunemind"
+                    android:host="spotify-callback" />
             </intent-filter>
         </activity>
 

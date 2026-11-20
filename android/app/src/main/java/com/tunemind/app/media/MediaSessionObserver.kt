@@ -113,22 +113,28 @@ class MediaSessionObserver(
         }
     }
 
+    private fun matchesTargetPackage(controllerPkg: String?, targetPackage: String?): Boolean {
+        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" } ?: return true
+        val actual = controllerPkg?.trim()?.takeIf { it.isNotBlank() } ?: return false
+        if (actual.equals(cleanPkg, ignoreCase = true)) return true
+        if (cleanPkg.contains("spotify", ignoreCase = true) && actual.contains("spotify", ignoreCase = true)) {
+            return true
+        }
+        return false
+    }
+
     fun isPlaying(targetPackage: String? = null): Boolean {
         refreshSessions()
-        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         return controllers.values.any { entry ->
-            val pkgOk = cleanPkg == null ||
-                sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
-            pkgOk && entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            matchesTargetPackage(sourcePackage(entry.controller), targetPackage) &&
+                entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         }
     }
 
     fun isPlayingOrBuffering(targetPackage: String? = null): Boolean {
         refreshSessions()
-        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         return controllers.values.any { entry ->
-            val pkgOk = cleanPkg == null ||
-                sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
+            val pkgOk = matchesTargetPackage(sourcePackage(entry.controller), targetPackage)
             val state = entry.controller.playbackState?.state
             pkgOk && (
                 state == android.media.session.PlaybackState.STATE_PLAYING ||
@@ -140,9 +146,8 @@ class MediaSessionObserver(
 
     fun hasActiveSession(targetPackage: String? = null): Boolean {
         refreshSessions()
-        val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         return controllers.values.any { entry ->
-            cleanPkg == null || sourcePackage(entry.controller)?.equals(cleanPkg, ignoreCase = true) == true
+            matchesTargetPackage(sourcePackage(entry.controller), targetPackage)
         }
     }
 
@@ -152,10 +157,10 @@ class MediaSessionObserver(
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         val entry = if (cleanPkg != null) {
             entries.firstOrNull { e ->
-                sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true &&
+                matchesTargetPackage(sourcePackage(e.controller), cleanPkg) &&
                     e.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
             } ?: entries.firstOrNull { e ->
-                sourcePackage(e.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                matchesTargetPackage(sourcePackage(e.controller), cleanPkg)
             }
         } else {
             entries.firstOrNull { e ->
@@ -367,11 +372,11 @@ class MediaSessionObserver(
             refreshSessions()
             val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
             val entry = if (cleanPkg != null) {
-                controllers.values.firstOrNull { candidate ->
-                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                orderedEntries().firstOrNull { candidate ->
+                    matchesTargetPackage(sourcePackage(candidate.controller), cleanPkg)
                 } ?: return false
             } else {
-                controllers.values.firstOrNull() ?: return false
+                orderedEntries().firstOrNull() ?: return false
             }
 
             val tc = entry.controller.transportControls ?: return false
@@ -388,11 +393,11 @@ class MediaSessionObserver(
             refreshSessions()
             val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
             val entry = if (cleanPkg != null) {
-                controllers.values.firstOrNull { candidate ->
-                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                orderedEntries().firstOrNull { candidate ->
+                    matchesTargetPackage(sourcePackage(candidate.controller), cleanPkg)
                 } ?: return false
             } else {
-                controllers.values.firstOrNull() ?: return false
+                orderedEntries().firstOrNull() ?: return false
             }
 
             val tc = entry.controller.transportControls ?: return false
@@ -409,11 +414,11 @@ class MediaSessionObserver(
             refreshSessions()
             val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
             val entry = if (cleanPkg != null) {
-                controllers.values.firstOrNull { candidate ->
-                    sourcePackage(candidate.controller)?.equals(cleanPkg, ignoreCase = true) == true
+                orderedEntries().firstOrNull { candidate ->
+                    matchesTargetPackage(sourcePackage(candidate.controller), cleanPkg)
                 } ?: return false
             } else {
-                controllers.values.firstOrNull() ?: return false
+                orderedEntries().firstOrNull() ?: return false
             }
 
             val tc = entry.controller.transportControls ?: return false

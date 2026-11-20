@@ -149,6 +149,36 @@ class ProviderModelTest {
     }
 
     @Test
+    fun testStrictNeverLeaveFallsBackToFullInAppYouTubeBeforePreview() {
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldFallbackToBuiltInYouTubeInStrictMode(
+                strictNoSwitch = true,
+                ytmVideoId = "WcIcVapfqXw"
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldFallbackToBuiltInYouTubeInStrictMode(
+                strictNoSwitch = false,
+                ytmVideoId = "WcIcVapfqXw"
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldFallbackToBuiltInYouTubeInStrictMode(
+                strictNoSwitch = true,
+                ytmVideoId = null
+            )
+        )
+        assertEquals(
+            "WcIcVapfqXw",
+            UniversalTrackResolver.extractYouTubeVideoIdFromUrl("https://music.youtube.com/watch?v=WcIcVapfqXw&feature=share")
+        )
+        assertEquals(
+            "dQw4w9WgXcQ",
+            UniversalTrackResolver.extractYouTubeVideoIdFromUrl("https://youtu.be/dQw4w9WgXcQ")
+        )
+    }
+
+    @Test
     fun testStalledRecoveryBannerSuppressedWhenExternalPlayerIsActivelyPlaying() {
         val attempt = MusicPlayerAutoLauncher.StalledPlaybackAttempt(
             title = "Calm Down",
@@ -212,5 +242,95 @@ class ProviderModelTest {
         assertEquals("OS_MEDIA_NEXT_AND_DEEP_LINK", osCmd.intent)
         assertEquals("spotify:track:4iV5W9uYEdYUVa79Axb7Rh", osCmd.spotify_uri)
         assertEquals("WcIcVapfqXw", osCmd.ytm_video_id)
+    }
+
+    @Test
+    fun testSpotifyPremiumConnectPkceAndAuthorizeUrl() {
+        // RFC 7636 Appendix B known test vector for S256 code challenge
+        val verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        val expectedChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        assertEquals(expectedChallenge, SpotifyPremiumConnectManager.generateCodeChallenge(verifier))
+
+        assertTrue(SpotifyPremiumConnectManager.isValidClientIdFormat("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"))
+        assertFalse(SpotifyPremiumConnectManager.isValidClientIdFormat(""))
+        assertFalse(SpotifyPremiumConnectManager.isValidClientIdFormat("short"))
+        assertFalse(SpotifyPremiumConnectManager.isValidClientIdFormat("has spaces inside id 123456"))
+
+        // Effective Client ID: personal BYOC overrides app default; falls back to app default for 1-Tap consumer connect
+        assertEquals(
+            "11112222333344445555666677778888",
+            SpotifyPremiumConnectManager.resolveEffectiveClientId(
+                customClientId = "11112222333344445555666677778888",
+                appDefaultClientId = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+            )
+        )
+        assertEquals(
+            "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            SpotifyPremiumConnectManager.resolveEffectiveClientId(
+                customClientId = "",
+                appDefaultClientId = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+            )
+        )
+        assertEquals(
+            "",
+            SpotifyPremiumConnectManager.resolveEffectiveClientId(
+                customClientId = "bad",
+                appDefaultClientId = ""
+            )
+        )
+
+        val authUrl = SpotifyPremiumConnectManager.buildAuthorizeUrl(
+            clientId = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+            codeChallenge = expectedChallenge,
+            state = "state123"
+        )
+        assertTrue(authUrl.startsWith("https://accounts.spotify.com/authorize?"))
+        assertTrue(authUrl.contains("client_id=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"))
+        assertTrue(authUrl.contains("response_type=code"))
+        assertTrue(authUrl.contains("code_challenge_method=S256"))
+        assertTrue(authUrl.contains("code_challenge=$expectedChallenge"))
+        assertTrue(authUrl.contains("redirect_uri=tunemind%3A%2F%2Fspotify-callback"))
+        assertTrue(authUrl.contains("user-modify-playback-state"))
+        assertTrue(authUrl.contains("user-library-modify"))
+    }
+
+    @Test
+    fun testSpotifyPremiumConnectTierRouting() {
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = "com.spotify.music",
+                providerId = "spotify",
+                stayInTuneMind = true,
+                strictNoSwitch = false,
+                isSpotifyPremiumConnected = true
+            )
+        )
+        assertTrue(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = "com.spotify.lite",
+                providerId = "spotify",
+                stayInTuneMind = false,
+                strictNoSwitch = true,
+                isSpotifyPremiumConnected = true
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = "com.spotify.music",
+                providerId = "spotify",
+                stayInTuneMind = true,
+                strictNoSwitch = true,
+                isSpotifyPremiumConnected = false
+            )
+        )
+        assertFalse(
+            MusicPlayerAutoLauncher.shouldTrySpotifyPremiumConnect(
+                targetPkg = "com.afmobi.boomplaymusic",
+                providerId = "boomplay",
+                stayInTuneMind = true,
+                strictNoSwitch = true,
+                isSpotifyPremiumConnected = true
+            )
+        )
     }
 }

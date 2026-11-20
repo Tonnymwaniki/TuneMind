@@ -127,7 +127,7 @@ object UniversalTrackResolver {
                 popularity = deezer?.popularity ?: 74,
                 previewUrl = deezer?.previewUrl ?: itunes?.previewUrl,
                 audiusStreamUrl = audiusStream,
-                ytmVideoId = null,
+                ytmVideoId = songlink?.ytmVideoId,
                 deezerUrl = deezer?.deezerUrl,
                 spotifyUri = songlink?.spotifyUri,
                 spotifyUrl = songlink?.spotifyUrl,
@@ -261,15 +261,16 @@ object UniversalTrackResolver {
                     }
                 }
                 val deezerLink = resolvedObj.optString("deezerUrl").takeIf { it.startsWith("http") }
-                val ytmId = resolvedObj.optString("ytmVideoId").takeIf { it.isNotBlank() && it != "null" }
+                var ytmId = resolvedObj.optString("ytmVideoId").takeIf { it.isNotBlank() && it != "null" }
                 val ytmWatchUrl = ytmId?.let { "https://music.youtube.com/watch?v=$it" }
                 var spUri = resolvedObj.optString("spotifyUri").takeIf { it.startsWith("spotify:track:") }
                 var spUrl = resolvedObj.optString("spotifyUrl").takeIf { it.startsWith("http") }
                 var audiomackUrl: String? = null
-                if (spUri == null) {
+                if (spUri == null || ytmId == null) {
                     val songlink = resolveLinksViaSonglink(listOfNotNull(deezerLink, ytmWatchUrl))
-                    spUri = songlink?.spotifyUri
-                    spUrl = songlink?.spotifyUrl ?: spUrl
+                    spUri = spUri ?: songlink?.spotifyUri
+                    spUrl = spUrl ?: songlink?.spotifyUrl
+                    ytmId = ytmId ?: songlink?.ytmVideoId
                     audiomackUrl = songlink?.audiomackUrl
                 }
                 ResolvedPlayableLinks(
@@ -430,16 +431,39 @@ object UniversalTrackResolver {
     private data class SonglinkResult(
         val spotifyUri: String?,
         val spotifyUrl: String?,
-        val audiomackUrl: String?
+        val audiomackUrl: String?,
+        val ytmVideoId: String? = null
     )
 
     private val songlinkCache = ConcurrentHashMap<String, SonglinkResult>()
 
+    internal fun extractYouTubeVideoIdFromUrl(rawUrl: String?): String? {
+        val clean = rawUrl?.trim().orEmpty()
+        if (clean.isBlank()) return null
+        Regex("[?&]v=([A-Za-z0-9_-]{11})", RegexOption.IGNORE_CASE).find(clean)?.groupValues?.getOrNull(1)?.let { return it }
+        Regex("youtu\\.be/([A-Za-z0-9_-]{11})", RegexOption.IGNORE_CASE).find(clean)?.groupValues?.getOrNull(1)?.let { return it }
+        Regex("/(?:embed|shorts)/([A-Za-z0-9_-]{11})", RegexOption.IGNORE_CASE).find(clean)?.groupValues?.getOrNull(1)?.let { return it }
+        return null
+    }
+
     private fun resolveLinksViaSonglink(sourceUrls: List<String?>): SonglinkResult? {
+        var bestSpotifyUri: String? = null
+        var bestSpotifyUrl: String? = null
+        var bestAudiomackUrl: String? = null
+        var bestYtmVideoId: String? = null
+
         for (rawUrl in sourceUrls) {
             val clean = rawUrl?.trim()?.takeIf { it.startsWith("http") } ?: continue
-            songlinkCache[clean]?.let { cached ->
-                if (cached.spotifyUri != null || cached.spotifyUrl != null) return cached
+            val cached = songlinkCache[clean]
+            if (cached != null) {
+                bestSpotifyUri = bestSpotifyUri ?: cached.spotifyUri
+                bestSpotifyUrl = bestSpotifyUrl ?: cached.spotifyUrl
+                bestAudiomackUrl = bestAudiomackUrl ?: cached.audiomackUrl
+                bestYtmVideoId = bestYtmVideoId ?: cached.ytmVideoId
+                if ((bestSpotifyUri != null || bestSpotifyUrl != null) && bestYtmVideoId != null) {
+                    return SonglinkResult(bestSpotifyUri, bestSpotifyUrl, bestAudiomackUrl, bestYtmVideoId)
+                }
+                continue
             }
             try {
                 val url = "https://api.song.link/v1-alpha.1/links?url=${Uri.encode(clean)}"
@@ -456,19 +480,34 @@ object UniversalTrackResolver {
                         ?.optString("url")
                         ?.trim()
                         ?.takeIf { it.startsWith("http") }
+                    val ytmId = extractYouTubeVideoIdFromUrl(
+                        platforms?.optJSONObject("youtubeMusic")?.optString("url")
+                    ) ?: extractYouTubeVideoIdFromUrl(
+                        platforms?.optJSONObject("youtube")?.optString("url")
+                    )
                     val idMatch = spUrl?.let { Regex("/track/([A-Za-z0-9]{22})", RegexOption.IGNORE_CASE).find(it) }
                     val spUri = idMatch?.groupValues?.getOrNull(1)?.let { "spotify:track:$it" }
                     val canonicalUrl = idMatch?.groupValues?.getOrNull(1)?.let { "https://open.spotify.com/track/$it" } ?: spUrl
-                    val result = SonglinkResult(spUri, canonicalUrl, audiomackUrl)
-                    if (spUri != null || canonicalUrl != null || audiomackUrl != null) {
+                    val result = SonglinkResult(spUri, canonicalUrl, audiomackUrl, ytmId)
+                    if (spUri != null || canonicalUrl != null || audiomackUrl != null || ytmId != null) {
                         songlinkCache[clean] = result
                     }
-                    if (spUri != null || canonicalUrl != null) return result
+                    bestSpotifyUri = bestSpotifyUri ?: spUri
+                    bestSpotifyUrl = bestSpotifyUrl ?: canonicalUrl
+                    bestAudiomackUrl = bestAudiomackUrl ?: audiomackUrl
+                    bestYtmVideoId = bestYtmVideoId ?: ytmId
+                    if ((bestSpotifyUri != null || bestSpotifyUrl != null) && bestYtmVideoId != null) {
+                        return SonglinkResult(bestSpotifyUri, bestSpotifyUrl, bestAudiomackUrl, bestYtmVideoId)
+                    }
                 }
             } catch (_: Exception) {
                 // Transient error: never cache negative result forever so next attempt succeeds.
             }
         }
-        return null
+        return if (bestSpotifyUri != null || bestSpotifyUrl != null || bestAudiomackUrl != null || bestYtmVideoId != null) {
+            SonglinkResult(bestSpotifyUri, bestSpotifyUrl, bestAudiomackUrl, bestYtmVideoId)
+        } else {
+            null
+        }
     }
 }

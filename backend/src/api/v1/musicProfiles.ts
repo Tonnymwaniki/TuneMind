@@ -64,7 +64,10 @@ const AUDIUS_HOST_TTL_MS = 30 * 60 * 1000;
 
 const trackProfileCache = new Map<string, CachedEntry<UniversalTrackProfile | null>>();
 const ytmVideoCache = new Map<string, CachedEntry<string | null>>();
-const songlinkSpotifyCache = new Map<string, CachedEntry<{ spotifyUri: string | null; spotifyUrl: string | null }>>();
+const songlinkSpotifyCache = new Map<
+  string,
+  CachedEntry<{ spotifyUri: string | null; spotifyUrl: string | null; ytmVideoId: string | null }>
+>();
 const catalogSearchCache = new Map<string, CachedEntry<OpenCatalogSearchResult>>();
 const lastFmTagsCache = new Map<string, CachedEntry<string[]>>();
 let cachedAudiusHost: CachedEntry<string | null> | null = null;
@@ -368,6 +371,18 @@ async function fetchLastFmArtistTags(artistName: string): Promise<string[]> {
   return tags;
 }
 
+export function extractYouTubeVideoIdFromUrl(rawUrl: string | null | undefined): string | null {
+  const clean = String(rawUrl || '').trim();
+  if (!clean) return null;
+  const watchMatch = /[?&]v=([A-Za-z0-9_-]{11})/i.exec(clean);
+  if (watchMatch) return watchMatch[1];
+  const shortMatch = /youtu\.be\/([A-Za-z0-9_-]{11})/i.exec(clean);
+  if (shortMatch) return shortMatch[1];
+  const embedMatch = /\/(?:embed|shorts)\/([A-Za-z0-9_-]{11})/i.exec(clean);
+  if (embedMatch) return embedMatch[1];
+  return null;
+}
+
 export async function resolveYouTubeMusicVideoId(rawTitle: string, rawArtist: string): Promise<string | null> {
   const apiKey = getYoutubeApiKey();
   if (!apiKey) return null;
@@ -384,7 +399,7 @@ export async function resolveYouTubeMusicVideoId(rawTitle: string, rawArtist: st
 
   const query = cleanArtist ? `${cleanTitle} ${cleanArtist} official audio` : `${cleanTitle} official audio`;
   const data = await fetchJsonWithTimeout(
-    `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=3&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`,
+    `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoCategoryId=10&maxResults=3&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`,
     3500
   );
 
@@ -402,20 +417,27 @@ export async function resolveYouTubeMusicVideoId(rawTitle: string, rawArtist: st
 
 export async function resolveSpotifyUriViaSonglink(
   sourceUrls: Array<string | null | undefined>
-): Promise<{ spotifyUri: string | null; spotifyUrl: string | null }> {
+): Promise<{ spotifyUri: string | null; spotifyUrl: string | null; ytmVideoId: string | null }> {
   const candidates = sourceUrls
     .map(u => String(u || '').trim())
     .filter(u => u.startsWith('http'));
   if (candidates.length === 0) {
-    return { spotifyUri: null, spotifyUrl: null };
+    return { spotifyUri: null, spotifyUrl: null, ytmVideoId: null };
   }
 
   const now = Date.now();
+  let bestSpotifyUri: string | null = null;
+  let bestSpotifyUrl: string | null = null;
+  let bestYtmVideoId: string | null = null;
+
   for (const sourceUrl of candidates) {
     const cached = songlinkSpotifyCache.get(sourceUrl);
     if (cached && cached.expiresAtMs > now) {
-      if (cached.value.spotifyUri || cached.value.spotifyUrl) {
-        return cached.value;
+      bestSpotifyUri = bestSpotifyUri || cached.value.spotifyUri;
+      bestSpotifyUrl = bestSpotifyUrl || cached.value.spotifyUrl;
+      bestYtmVideoId = bestYtmVideoId || cached.value.ytmVideoId;
+      if ((bestSpotifyUri || bestSpotifyUrl) && bestYtmVideoId) {
+        return { spotifyUri: bestSpotifyUri, spotifyUrl: bestSpotifyUrl, ytmVideoId: bestYtmVideoId };
       }
       continue;
     }
@@ -424,25 +446,32 @@ export async function resolveSpotifyUriViaSonglink(
       `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(sourceUrl)}`,
       3200
     );
-    const spUrlRaw: string | null = data?.linksByPlatform?.spotify?.url
-      ? String(data.linksByPlatform.spotify.url).trim()
+    const platforms = data?.linksByPlatform;
+    const spUrlRaw: string | null = platforms?.spotify?.url
+      ? String(platforms.spotify.url).trim()
       : null;
     const match = spUrlRaw ? /\/track\/([A-Za-z0-9]{22})/i.exec(spUrlRaw) : null;
     const spotifyUri = match ? `spotify:track:${match[1]}` : null;
     const spotifyUrl = match ? `https://open.spotify.com/track/${match[1]}` : spUrlRaw;
-    const result = { spotifyUri, spotifyUrl };
+    const ytmVideoId =
+      extractYouTubeVideoIdFromUrl(platforms?.youtubeMusic?.url) ||
+      extractYouTubeVideoIdFromUrl(platforms?.youtube?.url);
+    const result = { spotifyUri, spotifyUrl, ytmVideoId };
 
     songlinkSpotifyCache.set(sourceUrl, {
       value: result,
-      expiresAtMs: now + (spotifyUri || spotifyUrl ? YTM_CACHE_TTL_MS : NEGATIVE_CACHE_TTL_MS)
+      expiresAtMs: now + (spotifyUri || spotifyUrl || ytmVideoId ? YTM_CACHE_TTL_MS : NEGATIVE_CACHE_TTL_MS)
     });
     trimMapIfNeeded(songlinkSpotifyCache, 2500);
-    if (spotifyUri || spotifyUrl) {
-      return result;
+    bestSpotifyUri = bestSpotifyUri || spotifyUri;
+    bestSpotifyUrl = bestSpotifyUrl || spotifyUrl;
+    bestYtmVideoId = bestYtmVideoId || ytmVideoId;
+    if ((bestSpotifyUri || bestSpotifyUrl) && bestYtmVideoId) {
+      return { spotifyUri: bestSpotifyUri, spotifyUrl: bestSpotifyUrl, ytmVideoId: bestYtmVideoId };
     }
   }
 
-  return { spotifyUri: null, spotifyUrl: null };
+  return { spotifyUri: bestSpotifyUri, spotifyUrl: bestSpotifyUrl, ytmVideoId: bestYtmVideoId };
 }
 
 export async function resolveUniversalTrackProfile(
@@ -496,11 +525,12 @@ export async function resolveUniversalTrackProfile(
 
   const sourcesUsed = [dz ? 'deezer' : '', it ? 'itunes' : '', au ? 'audius' : ''].filter(Boolean);
   const ytmWatchUrl = ytmVideoId ? `https://music.youtube.com/watch?v=${ytmVideoId}` : null;
-  const { spotifyUri, spotifyUrl } = await resolveSpotifyUriViaSonglink([
+  const { spotifyUri, spotifyUrl, ytmVideoId: songlinkYtmVideoId } = await resolveSpotifyUriViaSonglink([
     dz?.deezerUrl || null,
     it?.itunesUrl || null,
     ytmWatchUrl
   ]);
+  const finalYtmVideoId = ytmVideoId || songlinkYtmVideoId || null;
 
   const profile: UniversalTrackProfile = {
     trackId: canonical.trackId,
@@ -516,7 +546,7 @@ export async function resolveUniversalTrackProfile(
     previewUrl: dz?.previewUrl || it?.previewUrl || null,
     audiusTrackId: au?.audiusTrackId || null,
     audiusStreamUrl: au?.audiusStreamUrl || null,
-    ytmVideoId,
+    ytmVideoId: finalYtmVideoId,
     deezerUrl: dz?.deezerUrl || null,
     spotifyUri,
     spotifyUrl,
@@ -633,8 +663,14 @@ export async function searchOpenMusicCatalog(
   for (const h of auHits) addOrMerge(h);
 
   const tracks = Array.from(mergedMap.values()).slice(0, boundedLimit);
-  if (tracks[0] && !tracks[0].ytmVideoId && getYoutubeApiKey()) {
-    tracks[0].ytmVideoId = await resolveYouTubeMusicVideoId(tracks[0].title, tracks[0].artist);
+  if (tracks[0] && !tracks[0].ytmVideoId) {
+    if (getYoutubeApiKey()) {
+      tracks[0].ytmVideoId = await resolveYouTubeMusicVideoId(tracks[0].title, tracks[0].artist);
+    }
+    if (!tracks[0].ytmVideoId && (tracks[0].deezerUrl || tracks[0].itunesUrl)) {
+      const songlink = await resolveSpotifyUriViaSonglink([tracks[0].deezerUrl, tracks[0].itunesUrl]);
+      tracks[0].ytmVideoId = songlink.ytmVideoId;
+    }
   }
 
   const result: OpenCatalogSearchResult = { search_type: searchType, tracks };

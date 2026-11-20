@@ -7,11 +7,15 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.tunemind.app.MainActivity
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
+import com.tunemind.app.provider.SpotifyPremiumConnectManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Dedicated OAuth Callback Activity registered in `AndroidManifest.xml` to intercept
- * `tunemind://supabase-auth-callback` (Supabase Google OAuth redirect flow) and route
+ * `tunemind://supabase-auth-callback` (Supabase Google OAuth redirect flow) and
+ * `tunemind://spotify-callback` (Spotify Premium Direct Connect PKCE flow) and route
  * the user back into [MainActivity].
  */
 class AuthCallbackActivity : ComponentActivity() {
@@ -38,6 +42,16 @@ class AuthCallbackActivity : ComponentActivity() {
             val sessionManager = TuneMindAuthSessionManager.getInstance(applicationContext)
             lifecycleScope.launch {
                 sessionManager.handleSupabaseRedirectUri(uri)
+                navigateBackToMain()
+            }
+            return
+        }
+
+        if (uri.host == "spotify-callback") {
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    SpotifyPremiumConnectManager.handleCallbackUri(applicationContext, uri)
+                }
                 navigateBackToMain()
             }
             return

@@ -294,6 +294,25 @@ object MusicPlayerAutoLauncher {
             !ytmVideoId.isNullOrBlank()
     }
 
+    internal fun shouldFallbackToBuiltInYouTubeInStrictMode(
+        strictNoSwitch: Boolean,
+        ytmVideoId: String?
+    ): Boolean {
+        return strictNoSwitch && !ytmVideoId.isNullOrBlank()
+    }
+
+    internal fun shouldTrySpotifyPremiumConnect(
+        targetPkg: String?,
+        providerId: String?,
+        stayInTuneMind: Boolean,
+        strictNoSwitch: Boolean,
+        isSpotifyPremiumConnected: Boolean
+    ): Boolean {
+        val isSpotifyTarget = targetPkg?.contains("spotify", ignoreCase = true) == true ||
+            providerId.equals("spotify", ignoreCase = true)
+        return isSpotifyTarget && (stayInTuneMind || strictNoSwitch) && isSpotifyPremiumConnected
+    }
+
     private fun launchHybridPlayback(
         context: Context,
         providerId: String,
@@ -312,6 +331,49 @@ object MusicPlayerAutoLauncher {
         val strictNoSwitch = neverOpenExternalApp ||
             AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
         val isYtmTarget = isYouTubeMusicTarget(targetPkg, providerId)
+
+        // TIER 1S: Spotify Premium Direct Connect (Bring-Your-Own Client ID via PKCE)
+        // Plays the exact full Spotify track silently in the background with ZERO app switch.
+        val spotifyPremiumReady = SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+        if (shouldTrySpotifyPremiumConnect(
+                targetPkg = targetPkg,
+                providerId = providerId,
+                stayInTuneMind = stayInTuneMind,
+                strictNoSwitch = strictNoSwitch,
+                isSpotifyPremiumConnected = spotifyPremiumReady
+            )
+        ) {
+            val candidateSpotifyUri = extractSpotifyTrackUri(deepLinkUri)
+            when (
+                val connectRes = SpotifyPremiumConnectManager.playTrackSilently(
+                    context = context,
+                    title = cleanTitle.ifBlank { track.title },
+                    artist = cleanArtist.ifBlank { track.artist },
+                    query = fullSearchQuery,
+                    spotifyUri = candidateSpotifyUri
+                )
+            ) {
+                is SpotifyPlayResult.Success -> {
+                    Log.i(TAG, "✅ Tier-1S Spotify Premium Direct Connect started '${cleanTitle}' on ${connectRes.deviceName}")
+                    return LaunchOutcome(
+                        launched = true,
+                        usedInAppPlayer = false,
+                        destinationUri = connectRes.trackUri,
+                        detailMessage = "Playing '${cleanTitle.ifBlank { track.title }}' silently on Spotify (${connectRes.deviceName}) without leaving TuneMind."
+                    )
+                }
+                is SpotifyPlayResult.NoActiveDevice -> {
+                    Log.w(TAG, "Tier-1S Spotify Connect: ${connectRes.message} Falling through to warm MediaSession / in-app full stream.")
+                }
+                is SpotifyPlayResult.PremiumRequired -> {
+                    Log.w(TAG, "Tier-1S Spotify Connect requires Premium: ${connectRes.message}")
+                }
+                is SpotifyPlayResult.Failed -> {
+                    Log.w(TAG, "Tier-1S Spotify Connect attempt fell through: ${connectRes.reason}")
+                }
+                SpotifyPlayResult.NotConnected -> Unit
+            }
+        }
 
         // TIER 1A: Local Audio Match inside TuneMind (full length, zero app switch)
         if ((preferInAppPlayer || strictNoSwitch) && TuneMindInAppPlayer.playLocalMatch(context, cleanTitle, cleanArtist)) {
@@ -357,16 +419,17 @@ object MusicPlayerAutoLauncher {
         }
 
         // TIER 1C (Option A — Audience-Gated): Visible Official YouTube IFrame Player inside TuneMind
-        // Activates specifically for YouTube Music users (or when user explicitly opted to allow YouTube in-app).
+        // Activates immediately for YouTube Music users (Spotify/Boomplay/Audiomack still try warm MediaSession first).
         val ytmVideoId = resolvedLinks?.ytmVideoId?.takeIf { it.isNotBlank() }
+            ?: track.providerTrackId?.trim()?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
         if (shouldActivateBuiltInYouTubeTier(targetPkg, providerId, ytmVideoId, preferInAppPlayer, strictNoSwitch)) {
             val started = TuneMindYouTubeEmbedController.startVideo(
                 context = context,
                 videoId = ytmVideoId!!,
                 title = cleanTitle.ifBlank { track.title },
                 artist = cleanArtist.ifBlank { track.artist },
-                album = resolvedLinks.albumName,
-                previewFallback = resolvedLinks.previewUrl,
+                album = resolvedLinks?.albumName,
+                previewFallback = resolvedLinks?.previewUrl,
                 fallbackExternalPkg = targetPkg ?: YouTubeMusicProvider.YTM_PACKAGE,
                 fallbackExternalName = displayName
             )
@@ -404,8 +467,31 @@ object MusicPlayerAutoLauncher {
             )
         }
 
-        // TIER 3 (Strict Never-Leave Mode): 30s Preview inside TuneMind (with external player metadata + YouTube hint)
+        // TIER 3 (Strict Never-Leave Mode): Full track inside TuneMind's Built-In YouTube Player first,
+        // then 30s Preview inside TuneMind only if no full in-app stream is available.
         if (strictNoSwitch) {
+            if (shouldFallbackToBuiltInYouTubeInStrictMode(strictNoSwitch, ytmVideoId)) {
+                val startedFullInApp = TuneMindYouTubeEmbedController.startVideo(
+                    context = context,
+                    videoId = ytmVideoId!!,
+                    title = cleanTitle.ifBlank { track.title },
+                    artist = cleanArtist.ifBlank { track.artist },
+                    album = resolvedLinks?.albumName,
+                    previewFallback = resolvedLinks?.previewUrl,
+                    fallbackExternalPkg = targetPkg,
+                    fallbackExternalName = displayName
+                )
+                if (startedFullInApp) {
+                    Log.i(TAG, "✅ Tier-3 Strict Never-Leave Full In-App Playback started via Built-In YouTube Player for '$cleanTitle' ($ytmVideoId)")
+                    return LaunchOutcome(
+                        launched = true,
+                        usedInAppPlayer = true,
+                        destinationUri = "https://music.youtube.com/watch?v=$ytmVideoId",
+                        detailMessage = "Playing full track '$cleanTitle' inside TuneMind without leaving the app."
+                    )
+                }
+            }
+
             val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
             val previewUrl = resolvedLinks?.previewUrl?.takeIf { it.startsWith("http") }
             if (previewUrl != null && TuneMindInAppPlayer.playStreamUrl(
@@ -413,7 +499,7 @@ object MusicPlayerAutoLauncher {
                     streamUrl = previewUrl,
                     title = cleanTitle.ifBlank { track.title },
                     artist = cleanArtist.ifBlank { track.artist },
-                    album = resolvedLinks.albumName,
+                    album = resolvedLinks?.albumName,
                     expectedDurationMs = 30_000L,
                     isPreview = true,
                     fallbackExternalPkg = targetPkg,
@@ -480,24 +566,31 @@ object MusicPlayerAutoLauncher {
                     listener.playFromUri(targetPkg, Uri.parse(spotifyUri), sessionExtras)
                 }.getOrDefault(false)
                 if (uriSent) {
-                    try {
-                        Thread.sleep(500L)
-                    } catch (_: InterruptedException) {}
-                    val uriActiveTitle = listener.getActiveTitle(targetPkg)?.trim().orEmpty()
-                    val normUriActive = UniversalTrackResolver.normalizeTitleForExactMatch(uriActiveTitle)
-                    val uriSwitched = normUriActive.isNotBlank() && (
-                        normUriActive == normExpected ||
-                            (normExpected.length >= 4 && (normUriActive.contains(normExpected) || normExpected.contains(normUriActive))) ||
-                            (!previousTitle.isNullOrBlank() && !uriActiveTitle.equals(previousTitle, ignoreCase = true))
-                        )
-                    if (uriSwitched) {
-                        if (!listener.isPlaying(targetPkg)) {
-                            listener.play(targetPkg)
-                            try { Thread.sleep(220L) } catch (_: InterruptedException) {}
+                    var nudgedUriPlay = false
+                    for (poll in 0 until 3) {
+                        val waitMs = when (poll) {
+                            0 -> 550L
+                            1 -> 650L
+                            else -> 750L
                         }
-                        if (listener.isPlaying(targetPkg)) {
-                            Log.i(TAG, "✅ Tier-2 Warm MediaSession playFromUri switched for '$cleanTitle' in $displayName")
-                            return true
+                        try {
+                            Thread.sleep(waitMs)
+                        } catch (_: InterruptedException) {}
+                        val uriActiveTitle = listener.getActiveTitle(targetPkg)?.trim().orEmpty()
+                        val normUriActive = UniversalTrackResolver.normalizeTitleForExactMatch(uriActiveTitle)
+                        val uriSwitched = normUriActive.isNotBlank() && (
+                            normUriActive == normExpected ||
+                                (normExpected.length >= 4 && (normUriActive.contains(normExpected) || normExpected.contains(normUriActive))) ||
+                                (!previousTitle.isNullOrBlank() && !uriActiveTitle.equals(previousTitle, ignoreCase = true))
+                            )
+                        if (uriSwitched) {
+                            if (listener.isPlayingOrBuffering(targetPkg)) {
+                                Log.i(TAG, "✅ Tier-2 Warm MediaSession playFromUri switched for '$cleanTitle' in $displayName")
+                                return true
+                            } else if (!nudgedUriPlay) {
+                                nudgedUriPlay = true
+                                listener.play(targetPkg)
+                            }
                         }
                     }
                 }
@@ -511,9 +604,9 @@ object MusicPlayerAutoLauncher {
 
             for (attempt in 0 until 3) {
                 val waitMs = when (attempt) {
-                    0 -> 450L
-                    1 -> 500L
-                    else -> 550L
+                    0 -> 550L
+                    1 -> 650L
+                    else -> 700L
                 }
                 try {
                     Thread.sleep(waitMs)
@@ -527,7 +620,7 @@ object MusicPlayerAutoLauncher {
                         (!previousTitle.isNullOrBlank() && !activeTitle.equals(previousTitle, ignoreCase = true))
                     )
                 if (switched) {
-                    if (listener.isPlaying(targetPkg)) {
+                    if (listener.isPlayingOrBuffering(targetPkg)) {
                         Log.i(TAG, "✅ Tier-2 Warm MediaSession switched silently for '$cleanTitle' in $displayName")
                         return true
                     } else if (!nudgedPlay) {

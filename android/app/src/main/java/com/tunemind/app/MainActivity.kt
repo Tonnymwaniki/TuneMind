@@ -309,6 +309,17 @@ open class MainActivity : ComponentActivity() {
                                         spotifyUri = tool.spotify_uri ?: np?.spotifyUri,
                                         trackId = tool.track_id ?: np?.trackId
                                     )
+                                    if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+                                        val likeUri = tool.spotify_uri ?: np?.spotifyUri
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.likeTrackOnSpotify(
+                                                context = context,
+                                                title = lTitle,
+                                                artist = lArtist,
+                                                spotifyUri = likeUri
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             "LAUNCH_DOPAMINE_CAPSULE" -> {
@@ -498,6 +509,20 @@ open class MainActivity : ComponentActivity() {
                                         freshnessPercent = 96,
                                         playNext = true
                                     )
+                                }
+                                if (tracksToQueue.isNotEmpty() &&
+                                    com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+                                ) {
+                                    coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        tracksToQueue.forEach { qt ->
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.queueTrack(
+                                                context = context,
+                                                title = qt.title,
+                                                artist = qt.artist,
+                                                spotifyUri = qt.spotify_uri
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             "PLAY_NEXT_IN_QUEUE" -> {
@@ -693,6 +718,10 @@ open class MainActivity : ComponentActivity() {
                                         com.tunemind.app.provider.TuneMindInAppPlayer.isPlaying() ||
                                             com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying()
                                     )
+                                    val spotifyConnectStatus = com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+                                    put("spotify_connected", spotifyConnectStatus.isConnected)
+                                    put("spotify_premium_connected", spotifyConnectStatus.isConnected && spotifyConnectStatus.isPremium)
+                                    put("spotify_user_name", spotifyConnectStatus.displayName)
                                     put("inapp_youtube_active", com.tunemind.app.provider.TuneMindYouTubeEmbedController.isPlaying())
                                     put("detected_players_count", vm.detectedPlayerTabs.value.size)
                                 }

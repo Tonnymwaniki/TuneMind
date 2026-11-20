@@ -322,8 +322,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             com.tunemind.app.provider.TuneMindInAppPlayer.pause()
             com.tunemind.app.provider.TuneMindYouTubeEmbedController.pause()
         } catch (_: Throwable) {}
+        var handledBySession = false
         try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.pause()
+            handledBySession = com.tunemind.app.service.TuneMindListenerService.instance?.pause() == true
         } catch (e: Exception) {
             Log.w(TAG, "MediaController pause notice: ${e.message}")
         }
@@ -334,6 +335,11 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             audioManager.dispatchMediaKeyEvent(upEvent)
         } catch (e: Exception) {
             Log.w(TAG, "AudioManager pause dispatch notice: ${e.message}")
+        }
+        if (!handledBySession && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.tunemind.app.provider.SpotifyPremiumConnectManager.pausePlayback(context)
+            }
         }
         Log.d(TAG, "Executed Multi-Layer OS Media Pause")
     }
@@ -357,8 +363,9 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             Log.d(TAG, "Resumed native TuneMind In-App Player")
             return
         }
+        var handledBySession = false
         try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.play()
+            handledBySession = com.tunemind.app.service.TuneMindListenerService.instance?.play() == true
         } catch (e: Exception) {
             Log.w(TAG, "MediaController play notice: ${e.message}")
         }
@@ -370,12 +377,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         } catch (e: Exception) {
             Log.w(TAG, "AudioManager play dispatch notice: ${e.message}")
         }
+        if (!handledBySession && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.tunemind.app.provider.SpotifyPremiumConnectManager.resumePlayback(context)
+            }
+        }
         Log.d(TAG, "Executed Multi-Layer OS Media Resume")
     }
 
     fun skipToNextMedia() {
+        var handledBySession = false
         try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.skipNext()
+            handledBySession = com.tunemind.app.service.TuneMindListenerService.instance?.skipNext() == true
         } catch (e: Exception) {
             Log.w(TAG, "MediaController skipNext notice: ${e.message}")
         }
@@ -387,11 +400,17 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         } catch (e: Exception) {
             Log.w(TAG, "AudioManager next dispatch notice: ${e.message}")
         }
+        if (!handledBySession && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.tunemind.app.provider.SpotifyPremiumConnectManager.skipNext(context)
+            }
+        }
     }
 
     fun skipToPreviousMedia() {
+        var handledBySession = false
         try {
-            com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev()
+            handledBySession = com.tunemind.app.service.TuneMindListenerService.instance?.skipPrev() == true
         } catch (e: Exception) {
             Log.w(TAG, "MediaController skipPrev notice: ${e.message}")
         }
@@ -402,6 +421,11 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             audioManager.dispatchMediaKeyEvent(upEvent)
         } catch (e: Exception) {
             Log.w(TAG, "AudioManager prev dispatch notice: ${e.message}")
+        }
+        if (!handledBySession && com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.tunemind.app.provider.SpotifyPremiumConnectManager.skipPrevious(context)
+            }
         }
     }
 
@@ -488,10 +512,19 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 val isAudiomackTarget = finalPackageName.contains("audiomack", ignoreCase = true)
                 val directBackendSpotifyUri = com.tunemind.app.provider.MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
 
-                // Resolve clean cross-app playable metadata (no Spotify Developer API needed)
+                // Resolve clean cross-app playable metadata (skip pre-fetch when Spotify Premium Direct Connect is active)
+                val spotifyPremiumDirectReady = isSpotifyTarget &&
+                    com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+                val needsInAppFullStreamId = neverOpenExternalApp && ytmVideoId.isNullOrBlank() && !spotifyPremiumDirectReady
                 val openResolved = if (
-                    (isSpotifyTarget && !directBackendSpotifyUri.isNullOrBlank()) ||
-                    (isYouTubeTarget && !ytmVideoId.isNullOrBlank())
+                    spotifyPremiumDirectReady ||
+                    (
+                        !needsInAppFullStreamId &&
+                        (
+                            (isSpotifyTarget && !directBackendSpotifyUri.isNullOrBlank()) ||
+                            (isYouTubeTarget && !ytmVideoId.isNullOrBlank())
+                        )
+                    )
                 ) {
                     null
                 } else {
