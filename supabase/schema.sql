@@ -562,3 +562,185 @@ CREATE POLICY "Users can delete own spotify connection"
     TO authenticated
     USING (auth.uid() = user_id);
 
+-- ─── 11. Permanent Relational Track Cards, Verified Play Ledger & Playlists ────
+-- Every song TuneMind encounters across ANY player (Spotify, YouTube Music, Boomplay,
+-- Audiomack, Local Audio, or TuneMind) is stored ONCE as a canonical Track Card.
+-- Play counts are derived strictly from permanent `track_play_events` via trigger so
+-- every Track Card across Library, History, and Playlists displays 100% accurate plays.
+
+CREATE TABLE IF NOT EXISTS public.track_cards (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    canonical_track_key TEXT NOT NULL,
+    track_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL DEFAULT '',
+    album TEXT NOT NULL DEFAULT '',
+    genre TEXT NOT NULL DEFAULT 'Music',
+    duration_ms BIGINT NOT NULL DEFAULT 0,
+    spotify_uri TEXT,
+    ytm_video_id TEXT,
+    album_art_url TEXT,
+    preview_url TEXT,
+    primary_source_package TEXT NOT NULL DEFAULT 'unknown_player',
+    source_packages TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    verified_play_count INTEGER NOT NULL DEFAULT 0,
+    total_listened_ms BIGINT NOT NULL DEFAULT 0,
+    first_played_at TIMESTAMPTZ,
+    last_played_at TIMESTAMPTZ,
+    is_liked BOOLEAN NOT NULL DEFAULT FALSE,
+    is_in_vault BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, canonical_track_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_cards_user_plays
+    ON public.track_cards (user_id, verified_play_count DESC);
+
+CREATE INDEX IF NOT EXISTS idx_track_cards_user_recent
+    ON public.track_cards (user_id, last_played_at DESC NULLS LAST);
+
+CREATE INDEX IF NOT EXISTS idx_track_cards_user_liked
+    ON public.track_cards (user_id, is_liked) WHERE is_liked = TRUE;
+
+CREATE TABLE IF NOT EXISTS public.track_play_events (
+    play_event_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    track_card_id UUID NOT NULL REFERENCES public.track_cards(id) ON DELETE CASCADE,
+    source_package TEXT NOT NULL DEFAULT 'unknown_player',
+    source_app_name TEXT NOT NULL DEFAULT 'Music Player',
+    played_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    listened_ms BIGINT NOT NULL DEFAULT 0,
+    track_duration_ms BIGINT NOT NULL DEFAULT 0,
+    completion_ratio DOUBLE PRECISION NOT NULL DEFAULT 0,
+    was_skipped BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_play_events_card
+    ON public.track_play_events (track_card_id, played_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_track_play_events_user_time
+    ON public.track_play_events (user_id, played_at DESC);
+
+CREATE OR REPLACE FUNCTION public.sync_track_card_play_stats()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    target_card_id UUID;
+BEGIN
+    target_card_id := COALESCE(NEW.track_card_id, OLD.track_card_id);
+    IF target_card_id IS NULL THEN
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+
+    UPDATE public.track_cards tc
+    SET
+        verified_play_count = stats.play_cnt,
+        total_listened_ms = stats.total_ms,
+        first_played_at = stats.first_at,
+        last_played_at = COALESCE(stats.last_at, tc.last_played_at),
+        updated_at = NOW()
+    FROM (
+        SELECT
+            COUNT(*)::INTEGER AS play_cnt,
+            COALESCE(SUM(listened_ms), 0)::BIGINT AS total_ms,
+            MIN(played_at) AS first_at,
+            MAX(played_at) AS last_at
+        FROM public.track_play_events
+        WHERE track_card_id = target_card_id
+          AND was_skipped = FALSE
+    ) AS stats
+    WHERE tc.id = target_card_id;
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_track_card_play_stats ON public.track_play_events;
+CREATE TRIGGER trg_sync_track_card_play_stats
+    AFTER INSERT OR UPDATE OR DELETE ON public.track_play_events
+    FOR EACH ROW
+    EXECUTE FUNCTION public.sync_track_card_play_stats();
+
+CREATE TABLE IF NOT EXISTS public.user_playlists (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    playlist_origin TEXT NOT NULL DEFAULT 'TUNEMIND',
+    external_playlist_id TEXT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    mood_or_audience TEXT NOT NULL DEFAULT '',
+    cover_image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_playlists_user_origin
+    ON public.user_playlists (user_id, playlist_origin, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.user_playlist_items (
+    entry_id TEXT PRIMARY KEY,
+    playlist_id TEXT NOT NULL REFERENCES public.user_playlists(id) ON DELETE CASCADE,
+    track_card_id UUID NOT NULL REFERENCES public.track_cards(id) ON DELETE CASCADE,
+    position_index INTEGER NOT NULL DEFAULT 0,
+    source_player TEXT NOT NULL DEFAULT 'unknown_player',
+    added_by TEXT NOT NULL DEFAULT 'USER',
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_playlist_items_playlist_pos
+    ON public.user_playlist_items (playlist_id, position_index ASC);
+
+CREATE INDEX IF NOT EXISTS idx_user_playlist_items_track_card
+    ON public.user_playlist_items (track_card_id);
+
+ALTER TABLE public.track_cards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.track_play_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_playlists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_playlist_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can manage own track_cards" ON public.track_cards;
+CREATE POLICY "Users can manage own track_cards"
+    ON public.track_cards FOR ALL
+    TO authenticated
+    USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
+    WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
+
+DROP POLICY IF EXISTS "Users can manage own track_play_events" ON public.track_play_events;
+CREATE POLICY "Users can manage own track_play_events"
+    ON public.track_play_events FOR ALL
+    TO authenticated
+    USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
+    WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
+
+DROP POLICY IF EXISTS "Users can manage own user_playlists" ON public.user_playlists;
+CREATE POLICY "Users can manage own user_playlists"
+    ON public.user_playlists FOR ALL
+    TO authenticated
+    USING (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id))
+    WITH CHECK (auth.uid()::text = user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(user_id));
+
+DROP POLICY IF EXISTS "Users can manage own user_playlist_items" ON public.user_playlist_items;
+CREATE POLICY "Users can manage own user_playlist_items"
+    ON public.user_playlist_items FOR ALL
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.user_playlists p
+            WHERE p.id = playlist_id
+              AND (auth.uid()::text = p.user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(p.user_id))
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.user_playlists p
+            WHERE p.id = playlist_id
+              AND (auth.uid()::text = p.user_id OR LOWER(COALESCE(auth.jwt() ->> 'email', '')) = LOWER(p.user_id))
+        )
+    );
+
+

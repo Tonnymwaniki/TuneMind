@@ -3,11 +3,13 @@ package com.tunemind.app.data.ingestion
 import android.content.Context
 import android.util.Log
 import com.tunemind.app.data.local.ArtistProfileCacheEntity
+import com.tunemind.app.data.local.CrossAppPlayLogEntity
 import com.tunemind.app.data.local.CrossAppTrackEntity
 import com.tunemind.app.data.local.TrackVisualCacheEntity
 import com.tunemind.app.data.local.TuneMindDatabase
 import com.tunemind.app.data.local.TuneMindPlaylistEntity
 import com.tunemind.app.data.local.TuneMindPlaylistTrackEntity
+import com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
 import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.provider.SpotifyMusicProvider
 import com.tunemind.app.provider.SpotifyPremiumConnectManager
@@ -219,6 +221,8 @@ object SpotifyLibrarySyncEngine {
             }
 
             // 3. Optional enrichment: Recently Played & Top Tracks / Top Artists (gracefully skipped if older token lacks scope)
+            // DATA INTEGRITY RULE: Never invent fake play counts (`seedPlayCountIfNew = 0` always!).
+            // Only real timestamped Spotify Recently Played events create idempotent verified play logs.
             _syncState.value = _syncState.value.copy(progressMessage = "Syncing recent plays & top artists...")
             val (recentTracks, recentScopeMissing) = SpotifyPremiumConnectManager.fetchRecentlyPlayedTracks(appCtx, limit = 50)
             if (recentTracks.isNotEmpty()) {
@@ -226,7 +230,11 @@ object SpotifyLibrarySyncEngine {
                     dao = crossAppDao,
                     tracks = recentTracks,
                     markAsLiked = false,
-                    seedPlayCountIfNew = 1
+                    seedPlayCountIfNew = 0
+                )
+                recordIdempotentSpotifyRecentPlays(
+                    dao = crossAppDao,
+                    recentTracks = recentTracks
                 )
             }
 
@@ -236,13 +244,19 @@ object SpotifyLibrarySyncEngine {
                     dao = crossAppDao,
                     tracks = topTracks,
                     markAsLiked = false,
-                    seedPlayCountIfNew = 1
+                    seedPlayCountIfNew = 0
                 )
             }
 
             val (topArtists, topArtistScopeMissing) = SpotifyPremiumConnectManager.fetchTopArtists(appCtx, limit = 25)
             if (topArtists.isNotEmpty()) {
                 upsertTopArtistsToVisualCache(crossAppDao, topArtists)
+            }
+
+            // 4. Sync all permanent Track Cards, Verified Play Events & Relational Playlists to Supabase backend
+            _syncState.value = _syncState.value.copy(progressMessage = "Saving Track Cards & Playlists to cloud...")
+            runCatching {
+                SupabaseIntelligenceSyncManager.syncTrackCardsAndPlaylistsToBackend(appCtx)
             }
 
             val needsInsightsScope = recentScopeMissing || topTrackScopeMissing || topArtistScopeMissing
@@ -412,6 +426,55 @@ object SpotifyLibrarySyncEngine {
         }
     }
 
+    private suspend fun recordIdempotentSpotifyRecentPlays(
+        dao: com.tunemind.app.data.local.CrossAppLibraryDao,
+        recentTracks: List<SpotifySyncedTrack>
+    ) {
+        val existingLogIds = dao.getPlayLogsOnce(1500).map { it.playLogId }.toHashSet()
+        val spotifyPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE
+        val touchedKeys = mutableSetOf<String>()
+
+        recentTracks.forEach { st ->
+            if (st.addedAtMs <= 0L) return@forEach
+            val key = TrackIdentityResolver.buildNormalizedMatchKey(st.title, st.artist)
+            if (key.isBlank()) return@forEach
+            val deterministicId = "sp_recent_${st.spotifyId}_${st.addedAtMs}"
+            if (existingLogIds.contains(deterministicId)) return@forEach
+
+            val durMs = st.durationMs.coerceAtLeast(30_000L)
+            dao.insertPlayLog(
+                CrossAppPlayLogEntity(
+                    playLogId = deterministicId,
+                    canonicalTrackKey = key,
+                    trackId = st.spotifyUri,
+                    title = st.title,
+                    artist = st.artist,
+                    album = st.album,
+                    sourcePackage = spotifyPkg,
+                    sourceAppName = "Spotify",
+                    playedAtMs = st.addedAtMs,
+                    listenedMs = durMs,
+                    trackDurationMs = durMs,
+                    completionRatio = 1.0f,
+                    wasSkipped = false,
+                    syncedToCloud = false
+                )
+            )
+            existingLogIds.add(deterministicId)
+            touchedKeys.add(key)
+        }
+
+        // Reconcile local track card play_count strictly against real verified play logs
+        val now = System.currentTimeMillis()
+        touchedKeys.forEach { key ->
+            val verifiedCount = dao.getPlayLogCountForTrack(key)
+            val existing = dao.getTrackByKey(key)
+            if (existing != null && verifiedCount > existing.playCount) {
+                dao.updateVerifiedPlayCount(key, verifiedCount, now)
+            }
+        }
+    }
+
     private suspend fun upsertSpotifyPlaylists(
         playlistDao: com.tunemind.app.data.local.TuneMindPlaylistDao,
         crossAppDao: com.tunemind.app.data.local.CrossAppLibraryDao,
@@ -419,14 +482,19 @@ object SpotifyLibrarySyncEngine {
     ): Int {
         val now = System.currentTimeMillis()
         val visualsToUpsert = mutableListOf<TrackVisualCacheEntity>()
+        val allPlaylistTracks = mutableListOf<SpotifySyncedTrack>()
         var totalTracksInserted = 0
 
         playlists.forEachIndexed { plIndex, pl ->
             val localPlaylistId = "$SPOTIFY_PLAYLIST_ID_PREFIX${pl.spotifyId}"
-            val cleanDesc = pl.description.replace(Regex("<[^>]*>"), "").trim()
-                .ifBlank {
-                    if (pl.ownerName.isNotBlank()) "Synced from Spotify · by ${pl.ownerName}" else "Synced from Spotify"
-                }
+            val rawDesc = pl.description.replace(Regex("<[^>]*>"), "").trim()
+            val cleanDesc = when {
+                !pl.isOwnedOrCollaborative && pl.tracks.isEmpty() ->
+                    "Followed Spotify playlist · Spotify restricts third-party track lists on editorial/other-user playlists"
+                rawDesc.isNotBlank() -> rawDesc
+                pl.ownerName.isNotBlank() -> "Synced from Spotify · by ${pl.ownerName}"
+                else -> "Synced from Spotify"
+            }
 
             val playlistEntity = TuneMindPlaylistEntity(
                 playlistId = localPlaylistId,
@@ -441,6 +509,7 @@ object SpotifyLibrarySyncEngine {
             // Replace track entries for this synced Spotify playlist cleanly so re-syncing stays 100% duplicate-free
             playlistDao.deleteTracksByPlaylistId(localPlaylistId)
             val trackEntities = pl.tracks.mapIndexed { idx, tr ->
+                allPlaylistTracks.add(tr)
                 val visualKey = TrackIdentityResolver.buildNormalizedMatchKey(tr.title, tr.artist)
                 if (!tr.albumArtUrl.isNullOrBlank() && visualKey.isNotBlank()) {
                     visualsToUpsert.add(
@@ -475,6 +544,16 @@ object SpotifyLibrarySyncEngine {
                 playlistDao.upsertPlaylistTracks(trackEntities)
                 totalTracksInserted += trackEntities.size
             }
+        }
+
+        // Also register every song from synced Spotify playlists as a canonical Track Card (with 0 fake plays!)
+        if (allPlaylistTracks.isNotEmpty()) {
+            mergeTracksIntoCrossAppLibrary(
+                dao = crossAppDao,
+                tracks = allPlaylistTracks,
+                markAsLiked = false,
+                seedPlayCountIfNew = 0
+            )
         }
 
         if (visualsToUpsert.isNotEmpty()) {

@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Headphones
@@ -44,7 +46,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,13 +55,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
 import com.tunemind.app.data.local.CrossAppPlayRecorder
 import com.tunemind.app.data.local.CrossAppTrackEntity
 import com.tunemind.app.data.local.DetectedPlayerTab
 import com.tunemind.app.data.local.TuneMindPlaylistWithTracks
+import com.tunemind.app.provider.SpotifyMusicProvider
+import com.tunemind.app.provider.SpotifyPremiumConnectManager
 import com.tunemind.app.ui.components.LayeredSongArtistBadge
 import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 private fun playerAccentColor(packageName: String): Color {
@@ -89,48 +94,90 @@ private fun formatDurationLabel(ms: Long): String {
     }
 }
 
+private fun formatTruePlayCount(plays: Int): String = when {
+    plays <= 0 -> "Not played yet"
+    plays == 1 -> "1 play"
+    else -> "$plays plays"
+}
+
 /**
- * Dynamic Cross-App Music Library inside Flow -> Library.
+ * Clean, Player-Scoped Cross-App Music Library inside Flow -> Library.
  *
- * Automatically creates a tab for every music app the user has played songs with
- * (Boomplay, YouTube Music, Spotify Passive, Audiomack, Deezer, SoundCloud,
- * Phone Audio, TuneMind), alongside "All Apps", "Liked", and "Playlists" tabs —
- * stored permanently in Room and synced to Supabase with zero data pruning.
+ * Keeps every player cleanly organized with zero confusion:
+ * - "All Music": unified permanent Track Cards across every player
+ * - "Spotify": dedicated Spotify hub with clean sub-tabs (Songs | Liked | Playlists)
+ * - Other detected players (YouTube Music, Boomplay, Audiomack, Phone Audio, etc.)
+ * - "Liked": all favorited Track Cards across apps
+ * - "TuneMind Playlists": ONLY custom cross-app TuneMind playlists (manual + AI voice)
+ *
+ * Every song card displays its exact verified play count resolved from TuneMind's
+ * permanent relational play ledger.
  */
 @Composable
 fun CrossAppLibrarySection(
     libraryTracks: List<CrossAppTrackEntity>,
     detectedPlayerTabs: List<DetectedPlayerTab>,
     playlists: List<TuneMindPlaylistWithTracks>,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String, artist: String) -> Boolean,
     resolveTrackVaultStatus: (title: String, artist: String) -> Pair<Boolean, Int>,
     onPlayTrack: (title: String, artist: String, preferredPackage: String?) -> Unit,
     onToggleLike: (canonicalTrackKey: String, liked: Boolean) -> Unit,
     onToggleTrackVault: (title: String, artist: String, sourcePackage: String) -> Unit,
     onAskAgentAboutTrack: (title: String, artist: String) -> Unit,
-    onOpenPlaylistsManager: () -> Unit
+    onOpenPlaylistsManager: () -> Unit,
+    onOpenPlaylistByName: ((String) -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
-    val spotifyStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
-    val spotifySyncState by com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncState.collectAsState()
+    val spotifyStatus by SpotifyPremiumConnectManager.statusFlow.collectAsState()
+    val spotifySyncState by SpotifyLibrarySyncEngine.syncState.collectAsState()
 
     LaunchedEffect(Unit) {
-        com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
-        com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
+        SpotifyPremiumConnectManager.ensureLoaded(context)
+        SpotifyLibrarySyncEngine.ensureLoaded(context)
     }
 
-    // Key: "ALL", "LIKED", "PLAYLISTS", or a real player packageName e.g. "com.afmobi.boomplaymusic"
+    val spotifyPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE
+
+    // Key: "ALL", "com.spotify.music", other player packageName, "LIKED", or "TUNEMIND_PLAYLISTS"
     var selectedTabKey by rememberSaveable { mutableStateOf("ALL") }
+    // Sub-tab inside Spotify Hub: "SONGS", "LIKED", "PLAYLISTS"
+    var spotifySubTab by rememberSaveable { mutableStateOf("SONGS") }
+    var expandedSpotifyPlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val spotifyPlaylists = remember(playlists) {
+        playlists.filter { SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
+    }
+    val customTuneMindPlaylists = remember(playlists) {
+        playlists.filter { !SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
+    }
 
     val likedTracks = remember(libraryTracks) { libraryTracks.filter { it.isLiked } }
+    val spotifyTracks = remember(libraryTracks) {
+        libraryTracks.filter { track ->
+            track.primarySourcePackage.equals(spotifyPkg, ignoreCase = true) ||
+                track.sourcePackagesCsv.split(",").any { it.trim().equals(spotifyPkg, ignoreCase = true) }
+        }
+    }
+    val spotifyLikedTracks = remember(spotifyTracks) { spotifyTracks.filter { it.isLiked } }
 
-    val visibleTracks = remember(libraryTracks, likedTracks, selectedTabKey) {
+    val showSpotifyTab = spotifyStatus.isConnected || spotifyTracks.isNotEmpty() || spotifyPlaylists.isNotEmpty()
+    val nonSpotifyPlayerTabs = remember(detectedPlayerTabs) {
+        detectedPlayerTabs.filter { !it.packageName.equals(spotifyPkg, ignoreCase = true) }
+    }
+
+    val visibleTracks = remember(libraryTracks, likedTracks, spotifyTracks, spotifyLikedTracks, selectedTabKey, spotifySubTab) {
         when (selectedTabKey) {
             "ALL" -> libraryTracks
             "LIKED" -> likedTracks
-            "PLAYLISTS" -> emptyList()
+            "TUNEMIND_PLAYLISTS" -> emptyList()
+            spotifyPkg -> when (spotifySubTab) {
+                "LIKED" -> spotifyLikedTracks
+                "PLAYLISTS" -> emptyList()
+                else -> spotifyTracks
+            }
             else -> libraryTracks.filter { track ->
                 track.primarySourcePackage.equals(selectedTabKey, ignoreCase = true) ||
                     track.sourcePackagesCsv.split(",").any { it.trim().equals(selectedTabKey, ignoreCase = true) }
@@ -138,21 +185,39 @@ fun CrossAppLibrarySection(
         }
     }
 
-    val activeTabMeta = remember(detectedPlayerTabs, selectedTabKey, libraryTracks, likedTracks, playlists) {
+    val activeTabMeta = remember(
+        detectedPlayerTabs,
+        selectedTabKey,
+        spotifySubTab,
+        libraryTracks,
+        likedTracks,
+        spotifyTracks,
+        spotifyLikedTracks,
+        spotifyPlaylists,
+        customTuneMindPlaylists
+    ) {
         when (selectedTabKey) {
             "ALL" -> Triple(
-                "All Music Apps",
-                "${libraryTracks.size} permanent tracks across ${detectedPlayerTabs.size.coerceAtLeast(1)} app(s)",
+                "All Music Library",
+                "${libraryTracks.size} permanent Track Cards across ${detectedPlayerTabs.size.coerceAtLeast(1)} player(s)",
                 theme.primaryAccent
             )
+            spotifyPkg -> {
+                val subSummary = when (spotifySubTab) {
+                    "PLAYLISTS" -> "${spotifyPlaylists.size} synced Spotify playlist(s)"
+                    "LIKED" -> "${spotifyLikedTracks.size} Spotify liked song(s)"
+                    else -> "${spotifyTracks.size} Spotify song(s) · ${spotifyPlaylists.size} playlist(s)"
+                }
+                Triple("Spotify Library", subSummary, Color(0xFF1DB954))
+            }
             "LIKED" -> Triple(
                 "Liked Songs",
-                "${likedTracks.size} favorited track(s) saved permanently",
+                "${likedTracks.size} favorited track(s) across all players",
                 Color(0xFFFB7185)
             )
-            "PLAYLISTS" -> Triple(
+            "TUNEMIND_PLAYLISTS" -> Triple(
                 "TuneMind Playlists",
-                "${playlists.size} playlist(s) built locally in TuneMind",
+                "${customTuneMindPlaylists.size} universal cross-app playlist(s)",
                 Color(0xFF38BDF8)
             )
             else -> {
@@ -160,7 +225,7 @@ fun CrossAppLibrarySection(
                 val accent = playerAccentColor(selectedTabKey)
                 val name = tab?.displayName ?: CrossAppPlayRecorder.resolveFriendlyPlayerName(selectedTabKey)
                 val summary = if (tab != null) {
-                    "${tab.trackCount} songs · ${tab.totalPlays} plays · ${formatDurationLabel(tab.totalListenedMs)}"
+                    "${tab.trackCount} songs · ${tab.totalPlays} verified plays · ${formatDurationLabel(tab.totalListenedMs)}"
                 } else {
                     "${visibleTracks.size} songs in $name"
                 }
@@ -170,7 +235,7 @@ fun CrossAppLibrarySection(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Horizontal dynamic per-player tabs
+        // 1. Clean Top-Level Player Navigation Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -179,13 +244,22 @@ fun CrossAppLibrarySection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             PlayerFilterPill(
-                label = "All Apps (${libraryTracks.size})",
+                label = "All Music (${libraryTracks.size})",
                 accent = theme.primaryAccent,
                 selected = selectedTabKey == "ALL",
                 onClick = { selectedTabKey = "ALL" }
             )
 
-            detectedPlayerTabs.forEach { tab ->
+            if (showSpotifyTab) {
+                PlayerFilterPill(
+                    label = "Spotify (${spotifyTracks.size})",
+                    accent = Color(0xFF1DB954),
+                    selected = selectedTabKey == spotifyPkg,
+                    onClick = { selectedTabKey = spotifyPkg }
+                )
+            }
+
+            nonSpotifyPlayerTabs.forEach { tab ->
                 PlayerFilterPill(
                     label = "${tab.displayName} (${tab.trackCount})",
                     accent = playerAccentColor(tab.packageName),
@@ -202,14 +276,14 @@ fun CrossAppLibrarySection(
             )
 
             PlayerFilterPill(
-                label = "Playlists (${playlists.size})",
+                label = "TuneMind Playlists (${customTuneMindPlaylists.size})",
                 accent = Color(0xFF38BDF8),
-                selected = selectedTabKey == "PLAYLISTS",
-                onClick = { selectedTabKey = "PLAYLISTS" }
+                selected = selectedTabKey == "TUNEMIND_PLAYLISTS",
+                onClick = { selectedTabKey = "TUNEMIND_PLAYLISTS" }
             )
         }
 
-        // Active tab summary banner
+        // 2. Active Player / Section Banner
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -239,7 +313,11 @@ fun CrossAppLibrarySection(
                             .background(activeTabMeta.third.copy(alpha = 0.2f))
                     ) {
                         Icon(
-                            imageVector = if (selectedTabKey == "LIKED") Icons.Rounded.Favorite else Icons.Rounded.LibraryMusic,
+                            imageVector = when (selectedTabKey) {
+                                "LIKED" -> Icons.Rounded.Favorite
+                                "TUNEMIND_PLAYLISTS" -> Icons.Rounded.QueueMusic
+                                else -> Icons.Rounded.LibraryMusic
+                            },
                             contentDescription = null,
                             tint = activeTabMeta.third,
                             modifier = Modifier.size(18.dp)
@@ -254,7 +332,11 @@ fun CrossAppLibrarySection(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = activeTabMeta.second,
+                            text = if (selectedTabKey == spotifyPkg && spotifySyncState.isSyncing && spotifySyncState.progressMessage.isNotBlank()) {
+                                spotifySyncState.progressMessage
+                            } else {
+                                activeTabMeta.second
+                            },
                             color = Color.White.copy(alpha = 0.72f),
                             fontSize = 11.5.sp,
                             maxLines = 1,
@@ -263,45 +345,19 @@ fun CrossAppLibrarySection(
                     }
                 }
 
-                if (selectedTabKey == "PLAYLISTS") {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        if (spotifyStatus.isConnected) {
-                            Text(
-                                text = if (spotifySyncState.isSyncing) "Syncing..." else "Sync Spotify",
-                                color = Color(0xFF34D399),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable(enabled = !spotifySyncState.isSyncing) {
-                                        scope.launch {
-                                            com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
-                                                context = context,
-                                                forceRefresh = true
-                                            )
-                                        }
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                            )
-                        }
-                        Text(
-                            text = "Manage",
-                            color = activeTabMeta.third,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onOpenPlaylistsManager() }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                } else if (
-                    spotifyStatus.isConnected &&
-                    (selectedTabKey == "ALL" || selectedTabKey == "LIKED" || selectedTabKey == "com.spotify.music")
-                ) {
+                if (selectedTabKey == "TUNEMIND_PLAYLISTS") {
+                    Text(
+                        text = "Open Manager",
+                        color = activeTabMeta.third,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(activeTabMeta.third.copy(alpha = 0.14f))
+                            .clickable { onOpenPlaylistsManager() }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                } else if (spotifyStatus.isConnected && (selectedTabKey == spotifyPkg || selectedTabKey == "ALL" || selectedTabKey == "LIKED")) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -310,7 +366,7 @@ fun CrossAppLibrarySection(
                             .border(1.dp, Color(0xFF10B981).copy(alpha = 0.42f), RoundedCornerShape(10.dp))
                             .clickable(enabled = !spotifySyncState.isSyncing) {
                                 scope.launch {
-                                    com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.syncAll(
+                                    SpotifyLibrarySyncEngine.syncAll(
                                         context = context,
                                         forceRefresh = true
                                     )
@@ -336,74 +392,217 @@ fun CrossAppLibrarySection(
             }
         }
 
+        // 3. Clean Spotify Hub Sub-Tabs (Songs | Liked | Playlists)
+        if (selectedTabKey == spotifyPkg) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PlayerFilterPill(
+                    label = "Songs (${spotifyTracks.size})",
+                    accent = Color(0xFF1DB954),
+                    selected = spotifySubTab == "SONGS",
+                    onClick = { spotifySubTab = "SONGS" }
+                )
+                PlayerFilterPill(
+                    label = "Liked (${spotifyLikedTracks.size})",
+                    accent = Color(0xFFFB7185),
+                    selected = spotifySubTab == "LIKED",
+                    onClick = { spotifySubTab = "LIKED" }
+                )
+                PlayerFilterPill(
+                    label = "Playlists (${spotifyPlaylists.size})",
+                    accent = Color(0xFF1DB954),
+                    selected = spotifySubTab == "PLAYLISTS",
+                    onClick = { spotifySubTab = "PLAYLISTS" }
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
-        if (selectedTabKey == "PLAYLISTS") {
-            if (playlists.isEmpty()) {
-                LibraryEmptyCard(
-                    title = "No TuneMind Playlists Yet",
-                    body = "Create smart cross-app playlists from songs you play in Boomplay, YouTube Music, Spotify, or phone audio.",
-                    ctaLabel = "Create Playlist",
-                    onCtaClick = onOpenPlaylistsManager
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 110.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(playlists, key = { it.playlist.playlistId }) { pl ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFF101726))
-                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-                                .clickable { onOpenPlaylistsManager() }
-                                .padding(14.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.QueueMusic,
-                                        contentDescription = null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(22.dp)
+        // 4. Scoped Content Body
+        when {
+            selectedTabKey == spotifyPkg && spotifySubTab == "PLAYLISTS" -> {
+                if (spotifyPlaylists.isEmpty()) {
+                    LibraryEmptyCard(
+                        title = "No Spotify Playlists Synced Yet",
+                        body = if (spotifyStatus.isConnected) {
+                            "Tap Sync Spotify above to pull your Spotify playlists and all their songs directly into this Spotify tab."
+                        } else {
+                            "Connect Spotify in Settings to sync your Spotify playlists and songs here."
+                        },
+                        ctaLabel = if (spotifyStatus.isConnected && !spotifySyncState.isSyncing) "Sync Spotify Now" else null,
+                        onCtaClick = {
+                            scope.launch {
+                                SpotifyLibrarySyncEngine.syncAll(context = context, forceRefresh = true)
+                            }
+                        }
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 110.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(spotifyPlaylists, key = { it.playlist.playlistId }) { pl ->
+                            val isExpanded = expandedSpotifyPlaylistId == pl.playlist.playlistId
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF101726))
+                                    .border(
+                                        1.dp,
+                                        if (isExpanded) Color(0xFF1DB954).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
+                                        RoundedCornerShape(16.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = pl.playlist.name,
-                                            color = Color.White,
-                                            fontSize = 14.5.sp,
-                                            fontWeight = FontWeight.SemiBold
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            expandedSpotifyPlaylistId = if (isExpanded) null else pl.playlist.playlistId
+                                        }
+                                        .padding(14.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.QueueMusic,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1DB954),
+                                            modifier = Modifier.size(22.dp)
                                         )
-                                        Text(
-                                            text = "${pl.tracks.size} songs · ${pl.playlist.moodOrAudience.ifBlank { "Mixed Apps" }}",
-                                            color = Color.White.copy(alpha = 0.64f),
-                                            fontSize = 12.sp
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = pl.playlist.name,
+                                                color = Color.White,
+                                                fontSize = 14.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${pl.tracks.size} song${if (pl.tracks.size == 1) "" else "s"} · Spotify Playlist",
+                                                color = Color.White.copy(alpha = 0.64f),
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        pl.tracks.firstOrNull()?.let { firstTrack ->
+                                            IconButton(
+                                                onClick = {
+                                                    onPlayTrack(firstTrack.title, firstTrack.artist, spotifyPkg)
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.PlayArrow,
+                                                    contentDescription = "Play Spotify playlist",
+                                                    tint = Color(0xFF1DB954)
+                                                )
+                                            }
+                                        }
+                                        Icon(
+                                            imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                            contentDescription = if (isExpanded) "Collapse tracks" else "Show tracks",
+                                            tint = Color.White.copy(alpha = 0.65f)
                                         )
                                     }
                                 }
-                                pl.tracks.firstOrNull()?.let { firstTrack ->
-                                    IconButton(
-                                        onClick = {
-                                            onPlayTrack(
-                                                firstTrack.title,
-                                                firstTrack.artist,
-                                                firstTrack.sourcePlayer.takeIf { it != "unknown_player" }
-                                            )
-                                        }
+
+                                if (isExpanded) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF0A0F1A))
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.PlayArrow,
-                                            contentDescription = "Play playlist",
-                                            tint = Color(0xFF38BDF8)
-                                        )
+                                        if (pl.tracks.isEmpty()) {
+                                            Text(
+                                                text = pl.playlist.description.ifBlank {
+                                                    "No tracks returned yet — tap Sync Spotify above to fetch songs."
+                                                },
+                                                color = Color.White.copy(alpha = 0.65f),
+                                                fontSize = 12.sp,
+                                                lineHeight = 17.sp,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                                            )
+                                        } else {
+                                            pl.tracks.take(25).forEachIndexed { idx, tr ->
+                                                val truePlays = resolvePlayCount(
+                                                    tr.title,
+                                                    tr.artist,
+                                                    tr.externalUri.takeIf { it.isNotBlank() }
+                                                )
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(Color.White.copy(alpha = 0.03f))
+                                                        .clickable {
+                                                            onPlayTrack(tr.title, tr.artist, spotifyPkg)
+                                                        }
+                                                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "${idx + 1}",
+                                                        color = Color.White.copy(alpha = 0.45f),
+                                                        fontSize = 11.5.sp,
+                                                        modifier = Modifier.width(22.dp)
+                                                    )
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = tr.title,
+                                                            color = Color.White,
+                                                            fontSize = 13.sp,
+                                                            fontWeight = FontWeight.Medium,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "${tr.artist.ifBlank { "Artist" }} · ${formatTruePlayCount(truePlays)}",
+                                                            color = Color.White.copy(alpha = 0.6f),
+                                                            fontSize = 11.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.PlayArrow,
+                                                        contentDescription = "Play",
+                                                        tint = Color(0xFF1DB954),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (pl.tracks.size > 25 || onOpenPlaylistByName != null) {
+                                                Text(
+                                                    text = if (pl.tracks.size > 25) {
+                                                        "Open all ${pl.tracks.size} songs →"
+                                                    } else {
+                                                        "Open full playlist view →"
+                                                    },
+                                                    color = Color(0xFF1DB954),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clickable {
+                                                            onOpenPlaylistByName?.invoke(pl.playlist.name)
+                                                                ?: onOpenPlaylistsManager()
+                                                        }
+                                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -411,144 +610,244 @@ fun CrossAppLibrarySection(
                     }
                 }
             }
-        } else if (visibleTracks.isEmpty()) {
-            LibraryEmptyCard(
-                title = if (selectedTabKey == "LIKED") "No Liked Tracks Yet" else "Listening Across Your Music Apps",
-                body = if (selectedTabKey == "LIKED") {
-                    "Tap the heart icon on any song you listen to and it stays saved permanently in your TuneMind vault."
-                } else {
-                    "Play a song in Boomplay, YouTube Music, Spotify, Audiomack, or your phone's player — TuneMind detects the player and creates a permanent tab here automatically."
-                },
-                ctaLabel = null,
-                onCtaClick = {}
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(visibleTracks, key = { it.canonicalTrackKey }) { track ->
-                    val resolvedVisual = rememberResolvedTrackMedia(
-                        title = track.title,
-                        artist = track.artist,
-                        fallbackAlbumArtUrl = track.albumArtUrl
-                    )
-                    val isPlaying = isTrackCurrentlyPlaying(track.title, track.artist)
-                    val (inVault, freshness) = resolveTrackVaultStatus(track.title, track.artist)
-                    val playerPkg = if (selectedTabKey != "ALL" && selectedTabKey != "LIKED") {
-                        selectedTabKey
-                    } else {
-                        track.primarySourcePackage
-                    }
-                    val playerLabel = CrossAppPlayRecorder.resolveFriendlyPlayerName(playerPkg)
-                    val accent = if (isPlaying) Color(0xFF1DB954) else playerAccentColor(playerPkg)
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(
-                                if (isPlaying) accent.copy(alpha = 0.14f) else Color(0xFF0E1422)
-                            )
-                            .border(
-                                width = if (isPlaying) 1.2.dp else 1.dp,
-                                color = if (isPlaying) accent.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.07f),
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .clickable {
-                                onPlayTrack(
-                                    track.title,
-                                    track.artist,
-                                    playerPkg.takeIf { it != "unknown_player" }
-                                )
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
+            selectedTabKey == "TUNEMIND_PLAYLISTS" -> {
+                if (customTuneMindPlaylists.isEmpty()) {
+                    LibraryEmptyCard(
+                        title = "No TuneMind Playlists Yet",
+                        body = "Create universal playlists in TuneMind and add songs manually or by voice from Spotify, YouTube Music, Boomplay, Audiomack, or phone audio.",
+                        ctaLabel = "Create TuneMind Playlist",
+                        onCtaClick = onOpenPlaylistsManager
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 110.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LayeredSongArtistBadge(
-                            albumArtUrl = resolvedVisual.albumArtUrl ?: track.albumArtUrl,
-                            artistImageUrl = resolvedVisual.artistImageUrl,
+                        items(customTuneMindPlaylists, key = { it.playlist.playlistId }) { pl ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF101726))
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        onOpenPlaylistByName?.invoke(pl.playlist.name)
+                                            ?: onOpenPlaylistsManager()
+                                    }
+                                    .padding(14.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.QueueMusic,
+                                            contentDescription = null,
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = pl.playlist.name,
+                                                color = Color.White,
+                                                fontSize = 14.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${pl.tracks.size} song${if (pl.tracks.size == 1) "" else "s"} · ${pl.playlist.moodOrAudience.ifBlank { "Universal Cross-App" }}",
+                                                color = Color.White.copy(alpha = 0.64f),
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    pl.tracks.firstOrNull()?.let { firstTrack ->
+                                        IconButton(
+                                            onClick = {
+                                                onPlayTrack(
+                                                    firstTrack.title,
+                                                    firstTrack.artist,
+                                                    firstTrack.sourcePlayer.takeIf { it != "unknown_player" }
+                                                )
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.PlayArrow,
+                                                contentDescription = "Play playlist",
+                                                tint = Color(0xFF38BDF8)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            visibleTracks.isEmpty() -> {
+                LibraryEmptyCard(
+                    title = when {
+                        selectedTabKey == "LIKED" -> "No Liked Songs Yet"
+                        selectedTabKey == spotifyPkg -> "No Spotify Songs Yet"
+                        else -> "Listening Across Your Music Apps"
+                    },
+                    body = when {
+                        selectedTabKey == "LIKED" -> "Tap the heart icon on any song you listen to and it stays saved permanently in your TuneMind vault."
+                        selectedTabKey == spotifyPkg -> "Tap Sync Spotify above to import your Spotify Liked Songs and Playlist tracks, or play any song on Spotify."
+                        else -> "Play a song in YouTube Music, Boomplay, Spotify, Audiomack, or your phone's player — TuneMind creates a permanent player tab here automatically."
+                    },
+                    ctaLabel = if (selectedTabKey == spotifyPkg && spotifyStatus.isConnected && !spotifySyncState.isSyncing) "Sync Spotify Now" else null,
+                    onCtaClick = {
+                        scope.launch {
+                            SpotifyLibrarySyncEngine.syncAll(context = context, forceRefresh = true)
+                        }
+                    }
+                )
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 110.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(visibleTracks, key = { it.canonicalTrackKey }) { track ->
+                        val resolvedVisual = rememberResolvedTrackMedia(
                             title = track.title,
                             artist = track.artist,
-                            accentColor = accent,
-                            size = 48.dp
+                            fallbackAlbumArtUrl = track.albumArtUrl
                         )
+                        val isPlaying = isTrackCurrentlyPlaying(track.title, track.artist)
+                        val (inVault, freshness) = resolveTrackVaultStatus(track.title, track.artist)
+                        val playerPkg = if (selectedTabKey != "ALL" && selectedTabKey != "LIKED") {
+                            selectedTabKey
+                        } else {
+                            track.primarySourcePackage
+                        }
+                        val playerLabel = CrossAppPlayRecorder.resolveFriendlyPlayerName(playerPkg)
+                        val accent = if (isPlaying) Color(0xFF1DB954) else playerAccentColor(playerPkg)
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        // Exact verified play count resolved across permanent relational Track Cards & Play Ledger
+                        val resolvedPlays = resolvePlayCount(
+                            track.title,
+                            track.artist,
+                            track.trackId.takeIf { it.startsWith("spotify:track:") }
+                        )
+                        val truePlayCount = maxOf(resolvedPlays, track.playCount)
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = track.title,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${track.artist} · ${track.playCount}x",
-                                color = Color.White.copy(alpha = 0.68f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = playerLabel,
-                                    color = accent,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(accent.copy(alpha = 0.14f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (isPlaying) accent.copy(alpha = 0.14f) else Color(0xFF0E1422)
                                 )
-                                if (track.genre.isNotBlank() && track.genre != "Music") {
-                                    Text(
-                                        text = track.genre,
-                                        color = Color.White.copy(alpha = 0.52f),
-                                        fontSize = 10.5.sp,
-                                        maxLines = 1
+                                .border(
+                                    width = if (isPlaying) 1.2.dp else 1.dp,
+                                    color = if (isPlaying) accent.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.07f),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .clickable {
+                                    onPlayTrack(
+                                        track.title,
+                                        track.artist,
+                                        playerPkg.takeIf { it != "unknown_player" }
                                     )
                                 }
-                                if (inVault) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Lock,
-                                        contentDescription = "In Resting Vault ($freshness% fresh)",
-                                        tint = Color(0xFFF59E0B),
-                                        modifier = Modifier.size(12.dp)
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            LayeredSongArtistBadge(
+                                albumArtUrl = resolvedVisual.albumArtUrl ?: track.albumArtUrl,
+                                artistImageUrl = resolvedVisual.artistImageUrl,
+                                title = track.title,
+                                artist = track.artist,
+                                accentColor = accent,
+                                size = 48.dp
+                            )
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = track.title,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${track.artist} · ${formatTruePlayCount(truePlayCount)}",
+                                    color = Color.White.copy(alpha = 0.68f),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = playerLabel,
+                                        color = accent,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(accent.copy(alpha = 0.14f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
+                                    if (track.genre.isNotBlank() && track.genre != "Music") {
+                                        Text(
+                                            text = track.genre,
+                                            color = Color.White.copy(alpha = 0.52f),
+                                            fontSize = 10.5.sp,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    if (inVault) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Lock,
+                                            contentDescription = "In Resting Vault ($freshness% fresh)",
+                                            tint = Color(0xFFF59E0B),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        IconButton(
-                            onClick = { onToggleLike(track.canonicalTrackKey, !track.isLiked) },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                contentDescription = "Favorite",
-                                tint = if (track.isLiked) Color(0xFFFB7185) else Color.White.copy(alpha = 0.45f),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                            IconButton(
+                                onClick = { onToggleLike(track.canonicalTrackKey, !track.isLiked) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                    contentDescription = "Favorite",
+                                    tint = if (track.isLiked) Color(0xFFFB7185) else Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
 
-                        IconButton(
-                            onClick = { onAskAgentAboutTrack(track.title, track.artist) },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = "Ask TuneMind",
-                                tint = theme.primaryAccent.copy(alpha = 0.85f),
-                                modifier = Modifier.size(18.dp)
-                            )
+                            IconButton(
+                                onClick = { onAskAgentAboutTrack(track.title, track.artist) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = "Ask TuneMind",
+                                    tint = theme.primaryAccent.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }

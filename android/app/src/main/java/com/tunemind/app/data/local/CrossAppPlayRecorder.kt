@@ -280,6 +280,10 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
                 )
 
                 visualRepo.enqueueVisualEnrichment(listOf(session.title to session.artist))
+                if (shouldIncrementCount) {
+                    com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                        .triggerRelationalTrackCardsSyncAsync(appContext)
+                }
                 Log.i(TAG, "✅ Permanent library recorded '$session.title' (${appName}) [completion=$isCompletion]")
             }.onFailure { err ->
                 Log.w(TAG, "CrossAppPlayRecorder persist warning: ${err.message}")

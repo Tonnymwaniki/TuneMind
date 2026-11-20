@@ -3,17 +3,19 @@ package com.tunemind.app.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,13 +28,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
+import com.tunemind.app.data.local.CrossAppPlayRecorder
+import com.tunemind.app.data.local.CrossAppTrackEntity
 import com.tunemind.app.data.local.TuneMindPlaylistWithTracks
+import com.tunemind.app.domain.execution.PlaylistTrackInput
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
+import com.tunemind.app.provider.SpotifyPremiumConnectManager
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.rememberResolvedTrackMedia
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
+private fun formatPlaylistPlayCount(plays: Int): String = when {
+    plays <= 0 -> "Not played yet"
+    plays == 1 -> "1 play"
+    else -> "$plays plays"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TuneMindPlaylistsScreen(
     vm: TuneMindViewModel,
@@ -45,20 +59,24 @@ fun TuneMindPlaylistsScreen(
     val colors = LocalAdaptiveTheme.current
     val context = LocalContext.current
     val playlists by vm.tuneMindPlaylists.collectAsState()
+    val libraryTracks by vm.crossAppLibraryTracks.collectAsState()
     val homeState by vm.homeState.collectAsState()
-    val spotifyStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
+    val spotifyStatus by SpotifyPremiumConnectManager.statusFlow.collectAsState()
     val spotifySyncState by vm.spotifyLibrarySyncState.collectAsState()
     val isExportingToSpotify by vm.isExportingSpotifyPlaylist.collectAsState()
     val libraryActionFeedback by vm.libraryActionFeedback.collectAsState()
     val nowPlaying = homeState.nowPlaying
 
     LaunchedEffect(Unit) {
-        com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
-        com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
+        SpotifyPremiumConnectManager.ensureLoaded(context)
+        SpotifyLibrarySyncEngine.ensureLoaded(context)
     }
 
     var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    // 0 = TuneMind Playlists (universal cross-app), 1 = Spotify Playlists (synced)
+    var activeDirectoryTab by rememberSaveable { mutableStateOf(0) }
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showAddSongsSheet by remember { mutableStateOf(false) }
     var showRenameDialogForId by remember { mutableStateOf<String?>(null) }
     var newPlaylistName by remember { mutableStateOf("") }
     var newPlaylistDescription by remember { mutableStateOf("") }
@@ -71,12 +89,22 @@ fun TuneMindPlaylistsScreen(
             }
             if (matched != null) {
                 selectedPlaylistId = matched.playlist.playlistId
+                if (SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(matched.playlist.playlistId)) {
+                    activeDirectoryTab = 1
+                }
             }
         }
     }
 
     val activePlaylist = remember(playlists, selectedPlaylistId) {
         selectedPlaylistId?.let { id -> playlists.firstOrNull { it.playlist.playlistId == id } }
+    }
+
+    val tuneMindOwnedPlaylists = remember(playlists) {
+        playlists.filter { !SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
+    }
+    val spotifySyncedPlaylists = remember(playlists) {
+        playlists.filter { SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(it.playlist.playlistId) }
     }
 
     Surface(
@@ -119,7 +147,7 @@ fun TuneMindPlaylistsScreen(
                     }
                     Column {
                         Text(
-                            text = activePlaylist?.playlist?.name ?: "TuneMind Playlists",
+                            text = activePlaylist?.playlist?.name ?: "Playlists",
                             color = Color(0xFFF8FAFC),
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
@@ -128,9 +156,14 @@ fun TuneMindPlaylistsScreen(
                         )
                         Text(
                             text = if (activePlaylist != null) {
-                                "${activePlaylist.tracks.size} song${if (activePlaylist.tracks.size == 1) "" else "s"} · Plays via ${ListeningPlayDeduplicator.resolveAppDisplayName(selectedTargetPlayer)}"
+                                val originLabel = if (SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(activePlaylist.playlist.playlistId)) {
+                                    "Spotify Playlist"
+                                } else {
+                                    "TuneMind Universal Playlist"
+                                }
+                                "${activePlaylist.tracks.size} song${if (activePlaylist.tracks.size == 1) "" else "s"} · $originLabel"
                             } else {
-                                "Stored inside TuneMind · Plays on your chosen player"
+                                "TuneMind Universal Playlists & Synced Spotify Playlists"
                             },
                             color = Color.White.copy(alpha = 0.58f),
                             fontSize = 12.sp,
@@ -149,11 +182,11 @@ fun TuneMindPlaylistsScreen(
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Add,
-                                contentDescription = "New Playlist",
+                                contentDescription = "New TuneMind Playlist",
                                 tint = colors.primaryAccent
                             )
                         }
-                    } else {
+                    } else if (!SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(activePlaylist.playlist.playlistId)) {
                         IconButton(onClick = {
                             renameDraft = activePlaylist.playlist.name
                             showRenameDialogForId = activePlaylist.playlist.playlistId
@@ -190,21 +223,27 @@ fun TuneMindPlaylistsScreen(
             }
 
             if (activePlaylist != null) {
-                val isSyncedFromSpotify = com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
+                val isSyncedFromSpotify = SpotifyLibrarySyncEngine
                     .isSpotifySyncedPlaylistId(activePlaylist.playlist.playlistId)
                 PlaylistDetailContent(
                     playlistWithTracks = activePlaylist,
                     nowPlayingTitle = nowPlaying?.title,
                     nowPlayingArtist = nowPlaying?.artist,
                     selectedTargetPlayer = selectedTargetPlayer,
-                    accentColor = colors.primaryAccent,
+                    accentColor = if (isSyncedFromSpotify) Color(0xFF1DB954) else colors.primaryAccent,
                     cardSurface = colors.cardSurface,
                     isSpotifyConnected = spotifyStatus.isConnected,
                     isSyncedFromSpotify = isSyncedFromSpotify,
                     isExportingToSpotify = isExportingToSpotify,
                     isSyncingSpotify = spotifySyncState.isSyncing,
+                    resolvePlayCount = { title, artist, uri, trackId ->
+                        vm.resolvePlayCount(title, artist, uri, trackId)
+                    },
                     onPlayAll = {
                         vm.playTuneMindPlaylist(activePlaylist, selectedTargetPlayer, onPlayTrack)
+                    },
+                    onAddSongsManual = {
+                        showAddSongsSheet = true
                     },
                     onExportOrResyncSpotify = {
                         if (isSyncedFromSpotify) {
@@ -213,14 +252,19 @@ fun TuneMindPlaylistsScreen(
                             vm.exportTuneMindPlaylistToSpotify(activePlaylist.playlist.playlistId)
                         }
                     },
-                    onAddCurrentTrack = if (!nowPlaying?.title.isNullOrBlank() && nowPlaying?.title != "Standing By") {
+                    onAddCurrentTrack = if (!isSyncedFromSpotify && !nowPlaying?.title.isNullOrBlank() && nowPlaying?.title != "Standing By") {
                         { vm.addCurrentTrackToTuneMindPlaylist(activePlaylist.playlist.playlistId) }
                     } else null,
                     onAskAgentAddMore = {
                         onAskAgentForPlaylist("Suggest 3 songs that fit my TuneMind playlist called ${activePlaylist.playlist.name}")
                     },
                     onPlayTrack = { title, artist, uri, srcPkg ->
-                        val pkg = selectedTargetPlayer.ifBlank { srcPkg.ifBlank { "unknown_player" } }
+                        val pkg = if (isSyncedFromSpotify) {
+                            com.tunemind.app.provider.SpotifyMusicProvider.SPOTIFY_PACKAGE
+                        } else {
+                            srcPkg.takeIf { it.isNotBlank() && it != "unknown_player" }
+                                ?: selectedTargetPlayer.ifBlank { "unknown_player" }
+                        }
                         onPlayTrack(title, artist, uri, pkg)
                     },
                     onRemoveTrack = { entryId ->
@@ -229,11 +273,13 @@ fun TuneMindPlaylistsScreen(
                 )
             } else {
                 PlaylistDirectoryContent(
-                    playlists = playlists,
+                    activeTab = activeDirectoryTab,
+                    onSelectTab = { activeDirectoryTab = it },
+                    tuneMindPlaylists = tuneMindOwnedPlaylists,
+                    spotifyPlaylists = spotifySyncedPlaylists,
                     nowPlayingTitle = nowPlaying?.title,
                     accentColor = colors.primaryAccent,
                     cardSurface = colors.cardSurface,
-                    selectedTargetPlayer = selectedTargetPlayer,
                     isSpotifyConnected = spotifyStatus.isConnected,
                     isSyncingSpotify = spotifySyncState.isSyncing,
                     spotifySyncSummary = spotifySyncState.summaryLabel,
@@ -254,6 +300,38 @@ fun TuneMindPlaylistsScreen(
         }
     }
 
+    // Manual Cross-App Song Picker Bottom Sheet for TuneMind Universal Playlists
+    if (showAddSongsSheet && activePlaylist != null) {
+        AddSongsToPlaylistSheet(
+            playlist = activePlaylist,
+            allLibraryTracks = libraryTracks,
+            accentColor = colors.primaryAccent,
+            cardSurface = colors.cardSurface,
+            resolvePlayCount = { title, artist, uri, trackId ->
+                maxOf(vm.resolvePlayCount(title, artist, uri, trackId), 0)
+            },
+            onAddTrack = { track ->
+                vm.createOrAddToTuneMindPlaylistAsync(
+                    name = activePlaylist.playlist.name,
+                    tracks = listOf(
+                        PlaylistTrackInput(
+                            title = track.title,
+                            artist = track.artist,
+                            spotify_uri = track.trackId.takeIf { it.startsWith("spotify:track:") },
+                            track_id = track.trackId,
+                            source_player = track.primarySourcePackage
+                        )
+                    ),
+                    appendIfExists = true
+                )
+            },
+            onRemoveEntry = { entryId ->
+                vm.removeTrackFromTuneMindPlaylist(activePlaylist.playlist.playlistId, entryId)
+            },
+            onDismiss = { showAddSongsSheet = false }
+        )
+    }
+
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
@@ -263,6 +341,11 @@ fun TuneMindPlaylistsScreen(
             title = { Text("New TuneMind Playlist", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Add songs manually or by voice from Spotify, YouTube Music, Boomplay, Audiomack, or phone audio.",
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 12.sp
+                    )
                     OutlinedTextField(
                         value = newPlaylistName,
                         onValueChange = { newPlaylistName = it },
@@ -290,6 +373,7 @@ fun TuneMindPlaylistsScreen(
                                 appendIfExists = false
                             ) { created ->
                                 if (created != null) {
+                                    activeDirectoryTab = 0
                                     selectedPlaylistId = created.playlistId
                                 }
                             }
@@ -349,11 +433,13 @@ fun TuneMindPlaylistsScreen(
 
 @Composable
 private fun PlaylistDirectoryContent(
-    playlists: List<TuneMindPlaylistWithTracks>,
+    activeTab: Int,
+    onSelectTab: (Int) -> Unit,
+    tuneMindPlaylists: List<TuneMindPlaylistWithTracks>,
+    spotifyPlaylists: List<TuneMindPlaylistWithTracks>,
     nowPlayingTitle: String?,
     accentColor: Color,
     cardSurface: Color,
-    selectedTargetPlayer: String,
     isSpotifyConnected: Boolean,
     isSyncingSpotify: Boolean,
     spotifySyncSummary: String,
@@ -364,95 +450,205 @@ private fun PlaylistDirectoryContent(
     onCreateManual: () -> Unit,
     onCreateWithVoice: () -> Unit
 ) {
+    val visiblePlaylists = if (activeTab == 1) spotifyPlaylists else tuneMindPlaylists
+    val tabAccent = if (activeTab == 1) Color(0xFF1DB954) else accentColor
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Clean 2-Tab Switcher separating TuneMind Universal Playlists vs Spotify Synced Playlists
         item {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = accentColor.copy(alpha = 0.08f),
-                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.28f)),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (activeTab == 0) accentColor.copy(alpha = 0.2f) else Color(0xFF101726),
+                    border = BorderStroke(
+                        1.dp,
+                        if (activeTab == 0) accentColor else Color.White.copy(alpha = 0.12f)
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelectTab(0) }
                 ) {
-                    Text(
-                        text = "Built by Voice, Synced with Spotify",
-                        color = Color(0xFFF8FAFC),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (!nowPlayingTitle.isNullOrBlank() && nowPlayingTitle != "Standing By") {
-                            "While \"$nowPlayingTitle\" is playing, say \"Hi TuneMind, add this song to a new playlist\" — or sync all your Spotify playlists & liked songs right here."
-                        } else {
-                            "Say \"Hi TuneMind, sync my Spotify playlists\" or \"create a late night playlist\". Saved inside TuneMind and exportable back to Spotify anytime."
-                        },
-                        color = Color.White.copy(alpha = 0.72f),
-                        fontSize = 12.5.sp,
-                        lineHeight = 18.sp
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = onCreateWithVoice,
-                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Mic,
-                                contentDescription = null,
-                                tint = Color(0xFF05080E),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Create by Voice", color = Color(0xFF05080E), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                        OutlinedButton(
-                            onClick = onCreateManual,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
-                        ) {
-                            Text("+ New Playlist", color = Color(0xFFF8FAFC), fontSize = 13.sp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp)
+                    ) {
+                        Text(
+                            text = "TuneMind (${tuneMindPlaylists.size})",
+                            color = if (activeTab == 0) Color.White else Color.White.copy(alpha = 0.65f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Cross-App · Manual & AI",
+                            color = Color.White.copy(alpha = 0.52f),
+                            fontSize = 10.5.sp
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (activeTab == 1) Color(0xFF1DB954).copy(alpha = 0.2f) else Color(0xFF101726),
+                    border = BorderStroke(
+                        1.dp,
+                        if (activeTab == 1) Color(0xFF1DB954) else Color.White.copy(alpha = 0.12f)
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelectTab(1) }
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp)
+                    ) {
+                        Text(
+                            text = "Spotify (${spotifyPlaylists.size})",
+                            color = if (activeTab == 1) Color.White else Color.White.copy(alpha = 0.65f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Synced Spotify Library",
+                            color = Color.White.copy(alpha = 0.52f),
+                            fontSize = 10.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Contextual Header Card for the selected tab
+        item {
+            if (activeTab == 0) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = accentColor.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.28f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Universal TuneMind Playlists",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (!nowPlayingTitle.isNullOrBlank() && nowPlayingTitle != "Standing By") {
+                                "Mix songs from Spotify, YouTube Music, Boomplay, Audiomack, or phone audio. Add manually with '+ Add Songs' or say \"Hi TuneMind, add $nowPlayingTitle to a playlist\"."
+                            } else {
+                                "Mix songs from ANY music player into one playlist — add tracks manually from your library or let TuneMind Voice Agent curate them for you."
+                            },
+                            color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = onCreateManual,
+                                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = null,
+                                    tint = Color(0xFF05080E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text("New Playlist", color = Color(0xFF05080E), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            OutlinedButton(
+                                onClick = onCreateWithVoice,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mic,
+                                    contentDescription = null,
+                                    tint = accentColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text("Create by Voice", color = Color(0xFFF8FAFC), fontSize = 13.sp)
+                            }
                         }
                     }
-
-                    if (isSpotifyConnected) {
-                        OutlinedButton(
-                            onClick = onSyncFromSpotify,
-                            enabled = !isSyncingSpotify,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.55f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Sync,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = if (isSyncingSpotify) {
-                                    spotifySyncSummary.ifBlank { "Syncing from Spotify..." }
-                                } else {
-                                    "Sync Spotify Playlists & Liked Songs"
-                                },
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF1DB954).copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, Color(0xFF1DB954).copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Synced Spotify Playlists",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isSpotifyConnected) {
+                                spotifySyncSummary.ifBlank { "Your personal Spotify playlists and tracks stay cleanly organized here." }
+                            } else {
+                                "Connect your Spotify Free or Premium account in Settings to sync all your Spotify playlists & liked songs."
+                            },
+                            color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp
+                        )
+                        if (isSpotifyConnected) {
+                            Button(
+                                onClick = onSyncFromSpotify,
+                                enabled = !isSyncingSpotify,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Sync,
+                                    contentDescription = null,
+                                    tint = Color(0xFF04070B),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = if (isSyncingSpotify) {
+                                        spotifySyncSummary.ifBlank { "Syncing Spotify playlists..." }
+                                    } else {
+                                        "Sync Spotify Playlists & Songs Now"
+                                    },
+                                    color = Color(0xFF04070B),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        if (playlists.isEmpty()) {
+        if (visiblePlaylists.isEmpty()) {
             item {
                 Column(
                     modifier = Modifier
@@ -468,20 +664,24 @@ private fun PlaylistDirectoryContent(
                         modifier = Modifier.size(44.dp)
                     )
                     Text(
-                        text = "No TuneMind playlists yet",
+                        text = if (activeTab == 1) "No Spotify playlists synced yet" else "No TuneMind playlists yet",
                         color = Color(0xFFF8FAFC),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Your voice-curated playlists and songs will appear right here.",
+                        text = if (activeTab == 1) {
+                            "Tap 'Sync Spotify Playlists & Songs Now' above to import your Spotify playlists."
+                        } else {
+                            "Tap 'New Playlist' to build a universal playlist from any song across all your apps."
+                        },
                         color = Color.White.copy(alpha = 0.55f),
                         fontSize = 13.sp
                     )
                 }
             }
         } else {
-            items(playlists, key = { it.playlist.playlistId }) { pl ->
+            items(visiblePlaylists, key = { it.playlist.playlistId }) { pl ->
                 val count = pl.tracks.size
                 val previewArtists = pl.tracks.map { it.artist }.filter { it.isNotBlank() }.distinct().take(3).joinToString(" · ")
                 Surface(
@@ -504,13 +704,13 @@ private fun PlaylistDirectoryContent(
                             modifier = Modifier
                                 .size(50.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(accentColor.copy(alpha = 0.16f)),
+                                .background(tabAccent.copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.QueueMusic,
                                 contentDescription = null,
-                                tint = accentColor,
+                                tint = tabAccent,
                                 modifier = Modifier.size(26.dp)
                             )
                         }
@@ -519,37 +719,17 @@ private fun PlaylistDirectoryContent(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = pl.playlist.name,
-                                    color = Color(0xFFF8FAFC),
-                                    fontSize = 15.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                                if (pl.playlist.moodOrAudience.isNotBlank()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = accentColor.copy(alpha = 0.14f)
-                                    ) {
-                                        Text(
-                                            text = pl.playlist.moodOrAudience,
-                                            color = accentColor,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                            }
+                            Text(
+                                text = pl.playlist.name,
+                                color = Color(0xFFF8FAFC),
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Text(
                                 text = "$count song${if (count == 1) "" else "s"}" +
-                                    if (previewArtists.isNotBlank()) " · $previewArtists" else " · Tap to inspect",
+                                    if (previewArtists.isNotBlank()) " · $previewArtists" else " · Tap to open",
                                 color = Color.White.copy(alpha = 0.62f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
@@ -562,19 +742,21 @@ private fun PlaylistDirectoryContent(
                                 Icon(
                                     imageVector = Icons.Rounded.PlayArrow,
                                     contentDescription = "Play Playlist",
-                                    tint = accentColor,
+                                    tint = tabAccent,
                                     modifier = Modifier.size(26.dp)
                                 )
                             }
                         }
 
-                        IconButton(onClick = { onDeletePlaylist(pl) }) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = "Delete Playlist",
-                                tint = Color.White.copy(alpha = 0.45f),
-                                modifier = Modifier.size(20.dp)
-                            )
+                        if (activeTab == 0) {
+                            IconButton(onClick = { onDeletePlaylist(pl) }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Delete Playlist",
+                                    tint = Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -595,7 +777,9 @@ private fun PlaylistDetailContent(
     isSyncedFromSpotify: Boolean,
     isExportingToSpotify: Boolean,
     isSyncingSpotify: Boolean,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?, trackId: String?) -> Int,
     onPlayAll: () -> Unit,
+    onAddSongsManual: () -> Unit,
     onExportOrResyncSpotify: () -> Unit,
     onAddCurrentTrack: (() -> Unit)?,
     onAskAgentAddMore: () -> Unit,
@@ -614,9 +798,12 @@ private fun PlaylistDetailContent(
                     Text(
                         text = playlistWithTracks.playlist.description,
                         color = Color.White.copy(alpha = 0.72f),
-                        fontSize = 13.sp
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
                     )
                 }
+
+                // Primary Actions Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -636,7 +823,11 @@ private fun PlaylistDetailContent(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "Play on ${ListeningPlayDeduplicator.resolveAppDisplayName(selectedTargetPlayer)}",
+                            text = if (isSyncedFromSpotify) {
+                                "Play on Spotify"
+                            } else {
+                                "Play All"
+                            },
                             color = Color(0xFF04070B),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
@@ -644,47 +835,77 @@ private fun PlaylistDetailContent(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    OutlinedButton(
-                        onClick = onAskAgentAddMore,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
-                            contentDescription = null,
-                            tint = accentColor,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text("Add with AI", color = Color(0xFFF8FAFC), fontSize = 12.5.sp)
+
+                    if (!isSyncedFromSpotify) {
+                        Button(
+                            onClick = onAddSongsManual,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.55f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.LibraryAdd,
+                                contentDescription = null,
+                                tint = accentColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text("+ Add Songs", color = Color(0xFFF8FAFC), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
 
-                if (isSpotifyConnected) {
-                    OutlinedButton(
-                        onClick = onExportOrResyncSpotify,
-                        enabled = if (isSyncedFromSpotify) !isSyncingSpotify else (!isExportingToSpotify && playlistWithTracks.tracks.isNotEmpty()),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.55f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = if (isSyncedFromSpotify) Icons.Rounded.Sync else Icons.Rounded.CloudUpload,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = when {
-                                isSyncedFromSpotify && isSyncingSpotify -> "Refreshing from Spotify..."
-                                isSyncedFromSpotify -> "Refresh Playlist from Spotify"
-                                isExportingToSpotify -> "Exporting to Spotify..."
-                                else -> "Export Playlist to Spotify"
-                            },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                // Secondary Actions Row (Voice AI + Spotify Sync/Export)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (!isSyncedFromSpotify) {
+                        OutlinedButton(
+                            onClick = onAskAgentAddMore,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = accentColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text("Add with AI", color = Color(0xFFF8FAFC), fontSize = 12.sp, maxLines = 1)
+                        }
+                    }
+
+                    if (isSpotifyConnected) {
+                        OutlinedButton(
+                            onClick = onExportOrResyncSpotify,
+                            enabled = if (isSyncedFromSpotify) !isSyncingSpotify else (!isExportingToSpotify && playlistWithTracks.tracks.isNotEmpty()),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.55f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (isSyncedFromSpotify) Icons.Rounded.Sync else Icons.Rounded.CloudUpload,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = when {
+                                    isSyncedFromSpotify && isSyncingSpotify -> "Syncing..."
+                                    isSyncedFromSpotify -> "Refresh Songs"
+                                    isExportingToSpotify -> "Exporting..."
+                                    else -> "Export to Spotify"
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 
@@ -705,7 +926,7 @@ private fun PlaylistDetailContent(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "+ Add Current Song: $nowPlayingTitle",
+                                    text = "+ Add Now Playing: $nowPlayingTitle",
                                     color = accentColor,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -740,18 +961,23 @@ private fun PlaylistDetailContent(
                         .fillMaxWidth()
                         .padding(vertical = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "No songs in this playlist yet",
+                        text = if (isSyncedFromSpotify) "No songs loaded for this playlist" else "No songs in this playlist yet",
                         color = Color(0xFFF8FAFC),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Play any song and say \"Hi TuneMind, add this song to ${playlistWithTracks.playlist.name}\".",
+                        text = if (isSyncedFromSpotify) {
+                            "Tap 'Refresh Songs' above to sync the latest tracks from Spotify (note: Spotify only exposes tracks on playlists you own or collaborate on)."
+                        } else {
+                            "Tap '+ Add Songs' above to pick songs from Spotify, YouTube Music, Boomplay, or any player — or ask TuneMind Voice Agent to add songs."
+                        },
                         color = Color.White.copy(alpha = 0.56f),
-                        fontSize = 12.5.sp
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp
                     )
                 }
             }
@@ -761,6 +987,15 @@ private fun PlaylistDetailContent(
                     title = tr.title,
                     artist = tr.artist,
                     spotifyUri = tr.externalUri.takeIf { it.isNotBlank() }
+                )
+                val truePlays = resolvePlayCount(
+                    tr.title,
+                    tr.artist,
+                    tr.externalUri.takeIf { it.isNotBlank() },
+                    tr.trackId.takeIf { it.isNotBlank() }
+                )
+                val sourceAppLabel = ListeningPlayDeduplicator.resolveAppDisplayName(
+                    tr.sourcePlayer.ifBlank { selectedTargetPlayer }
                 )
                 Surface(
                     shape = RoundedCornerShape(14.dp),
@@ -831,21 +1066,309 @@ private fun PlaylistDetailContent(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = tr.artist.ifBlank { "Music Track" },
-                                color = Color.White.copy(alpha = 0.6f),
+                                text = "${tr.artist.ifBlank { "Music Track" }} · ${formatPlaylistPlayCount(truePlays)}",
+                                color = Color.White.copy(alpha = 0.62f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Text(
+                                text = sourceAppLabel,
+                                color = accentColor.copy(alpha = 0.9f),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1
+                            )
                         }
 
-                        IconButton(onClick = { onRemoveTrack(tr.entryId) }) {
+                        if (!isSyncedFromSpotify) {
+                            IconButton(onClick = { onRemoveTrack(tr.entryId) }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Remove from playlist",
+                                    tint = Color.White.copy(alpha = 0.45f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        } else {
                             Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "Remove from playlist",
-                                tint = Color.White.copy(alpha = 0.45f),
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = "Play song",
+                                tint = accentColor,
+                                modifier = Modifier.size(20.dp)
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddSongsToPlaylistSheet(
+    playlist: TuneMindPlaylistWithTracks,
+    allLibraryTracks: List<CrossAppTrackEntity>,
+    accentColor: Color,
+    cardSurface: Color,
+    resolvePlayCount: (title: String?, artist: String?, uri: String?, trackId: String?) -> Int,
+    onAddTrack: (CrossAppTrackEntity) -> Unit,
+    onRemoveEntry: (entryId: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilterPkg by remember { mutableStateOf("ALL") }
+
+    val existingEntryByKey = remember(playlist.tracks) {
+        playlist.tracks.associateBy {
+            ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist)
+        }
+    }
+
+    val availablePlayers = remember(allLibraryTracks) {
+        allLibraryTracks
+            .map { it.primarySourcePackage }
+            .filter { it.isNotBlank() && it != "unknown_player" }
+            .distinct()
+            .sortedBy { CrossAppPlayRecorder.resolveFriendlyPlayerName(it) }
+    }
+
+    val filteredTracks = remember(allLibraryTracks, searchQuery, selectedFilterPkg) {
+        val q = searchQuery.trim().lowercase()
+        allLibraryTracks.filter { track ->
+            val matchesPlayer = when (selectedFilterPkg) {
+                "ALL" -> true
+                "LIKED" -> track.isLiked
+                else -> track.primarySourcePackage.equals(selectedFilterPkg, ignoreCase = true) ||
+                    track.sourcePackagesCsv.split(",").any { it.trim().equals(selectedFilterPkg, ignoreCase = true) }
+            }
+            val matchesQuery = q.isBlank() ||
+                track.title.lowercase().contains(q) ||
+                track.artist.lowercase().contains(q) ||
+                track.album.lowercase().contains(q)
+            matchesPlayer && matchesQuery
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = cardSurface,
+        contentColor = Color(0xFFF8FAFC)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.84f)
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Add Songs to ${playlist.playlist.name}",
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Pick from ANY player — Spotify, YouTube Music, Boomplay, Audiomack & more",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.5.sp
+                    )
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Done", color = accentColor, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search songs or artists...", color = Color.White.copy(alpha = 0.45f)) },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.6f))
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Cross-App Player Filter Chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedFilterPkg == "ALL",
+                    onClick = { selectedFilterPkg = "ALL" },
+                    label = { Text("All (${allLibraryTracks.size})", fontSize = 11.5.sp) }
+                )
+                FilterChip(
+                    selected = selectedFilterPkg == "LIKED",
+                    onClick = { selectedFilterPkg = "LIKED" },
+                    label = { Text("Liked", fontSize = 11.5.sp) }
+                )
+                availablePlayers.forEach { pkg ->
+                    FilterChip(
+                        selected = selectedFilterPkg == pkg,
+                        onClick = { selectedFilterPkg = pkg },
+                        label = { Text(CrossAppPlayRecorder.resolveFriendlyPlayerName(pkg), fontSize = 11.5.sp) }
+                    )
+                }
+            }
+
+            if (filteredTracks.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 36.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (allLibraryTracks.isEmpty()) {
+                            "Play songs in any app or sync Spotify to see your music here."
+                        } else {
+                            "No matching tracks found."
+                        },
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 28.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredTracks, key = { it.canonicalTrackKey }) { track ->
+                        val dedupKey = ListeningPlayDeduplicator.canonicalTrackKey(track.title, track.artist)
+                        val existingEntry = existingEntryByKey[dedupKey]
+                        val isAdded = existingEntry != null
+                        val truePlays = maxOf(
+                            resolvePlayCount(
+                                track.title,
+                                track.artist,
+                                track.trackId.takeIf { it.startsWith("spotify:track:") },
+                                track.trackId
+                            ),
+                            track.playCount
+                        )
+                        val visuals = rememberResolvedTrackMedia(
+                            title = track.title,
+                            artist = track.artist,
+                            fallbackAlbumArtUrl = track.albumArtUrl
+                        )
+
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isAdded) accentColor.copy(alpha = 0.12f) else Color(0xFF0E1422),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isAdded) accentColor.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    if (isAdded && existingEntry != null) {
+                                        onRemoveEntry(existingEntry.entryId)
+                                    } else {
+                                        onAddTrack(track)
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                val art = visuals.albumArtUrl ?: track.albumArtUrl
+                                if (!art.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context).data(art).crossfade(true).build(),
+                                        contentDescription = track.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .background(accentColor.copy(alpha = 0.14f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.MusicNote,
+                                            contentDescription = null,
+                                            tint = accentColor,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = track.title,
+                                        color = Color.White,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${track.artist} · ${formatPlaylistPlayCount(truePlays)}",
+                                        color = Color.White.copy(alpha = 0.62f),
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = CrossAppPlayRecorder.resolveFriendlyPlayerName(track.primarySourcePackage),
+                                        color = accentColor.copy(alpha = 0.85f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isAdded) accentColor else Color.White.copy(alpha = 0.1f)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isAdded) Icons.Rounded.Check else Icons.Rounded.Add,
+                                            contentDescription = null,
+                                            tint = if (isAdded) Color(0xFF04070B) else Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isAdded) "Added" else "Add",
+                                            color = if (isAdded) Color(0xFF04070B) else Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

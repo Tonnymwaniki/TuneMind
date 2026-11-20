@@ -36,6 +36,8 @@ object SupabaseIntelligenceSyncManager {
     private const val TAG = "SupabaseIntelSync"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    @Volatile
+    private var lastRelationalSyncQueuedMs: Long = 0L
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -235,8 +237,185 @@ object SupabaseIntelligenceSyncManager {
 
             httpClient.newCall(req).execute().close()
             Log.i(TAG, "✅ Synced ${aggregated.size} cross-app library tracks to live Supabase for user=${identity.userId}")
+            syncTrackCardsAndPlaylistsToBackend(appCtx)
         } catch (e: Exception) {
             Log.d(TAG, "Cross-app -> Supabase sync note: ${e.message}")
+        }
+    }
+
+    /**
+     * Lightweight debounced trigger so rapid plays or playlist edits batch cleanly
+     * into a single relational Track Cards sync call.
+     */
+    fun triggerRelationalTrackCardsSyncAsync(context: Context) {
+        val appCtx = context.applicationContext
+        val now = System.currentTimeMillis()
+        if (now - lastRelationalSyncQueuedMs < 2500L) return
+        lastRelationalSyncQueuedMs = now
+        scope.launch {
+            kotlinx.coroutines.delay(1800L)
+            syncTrackCardsAndPlaylistsToBackend(appCtx)
+        }
+    }
+
+    /**
+     * Permanently syncs canonical Track Cards, verified Play Events, and relational Playlists
+     * to `/api/v1/track-cards/sync`, then reconciles authoritative Postgres `verified_play_count`
+     * values back into Room so frontend song cards ALWAYS show 100% accurate plays.
+     */
+    suspend fun syncTrackCardsAndPlaylistsToBackend(context: Context) = withContext(Dispatchers.IO) {
+        val appCtx = context.applicationContext
+        try {
+            val identity = resolveUserIdentity(appCtx)
+            val db = TuneMindDatabase.getInstance(appCtx)
+            val crossAppDao = db.crossAppLibraryDao()
+            val playlistDao = db.tuneMindPlaylistDao()
+
+            val allTracks = crossAppDao.getAllLibraryTracksOnce()
+            val playLogs = crossAppDao.getPlayLogsOnce(limit = 500)
+            val allPlaylists = playlistDao.getAllPlaylistsOnce()
+
+            if (allTracks.isEmpty() && playLogs.isEmpty() && allPlaylists.isEmpty()) return@withContext
+
+            val trackCardsArr = JSONArray()
+            for (t in allTracks) {
+                val pkgsArr = JSONArray()
+                t.sourcePackagesCsv
+                    .split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .forEach { pkgsArr.put(it) }
+
+                trackCardsArr.put(JSONObject().apply {
+                    put("canonical_track_key", t.canonicalTrackKey)
+                    put("track_id", t.trackId)
+                    put("title", t.title)
+                    put("artist", t.artist)
+                    put("album", t.album)
+                    put("genre", t.genre)
+                    put("duration_ms", t.durationMs)
+                    if (t.trackId.startsWith("spotify:track:")) {
+                        put("spotify_uri", t.trackId)
+                    }
+                    if (!t.ytmVideoId.isNullOrBlank()) put("ytm_video_id", t.ytmVideoId)
+                    if (!t.albumArtUrl.isNullOrBlank()) put("album_art_url", t.albumArtUrl)
+                    if (!t.previewUrl.isNullOrBlank()) put("preview_url", t.previewUrl)
+                    put("primary_source_package", t.primarySourcePackage)
+                    put("source_packages", pkgsArr)
+                    put("is_liked", t.isLiked)
+                    put("is_in_vault", t.isInVault)
+                    put("first_played_at_ms", t.firstPlayedAtMs)
+                    put("last_played_at_ms", t.lastPlayedAtMs)
+                })
+            }
+
+            val playEventsArr = JSONArray()
+            for (ev in playLogs) {
+                playEventsArr.put(JSONObject().apply {
+                    put("play_event_id", ev.playLogId)
+                    put("canonical_track_key", ev.canonicalTrackKey)
+                    put("track_id", ev.trackId)
+                    put("title", ev.title)
+                    put("artist", ev.artist)
+                    put("album", ev.album)
+                    put("source_package", ev.sourcePackage)
+                    put("source_app_name", ev.sourceAppName)
+                    put("played_at_ms", ev.playedAtMs)
+                    put("listened_ms", ev.listenedMs)
+                    put("track_duration_ms", ev.trackDurationMs)
+                    put("completion_ratio", ev.completionRatio.toDouble())
+                    put("was_skipped", ev.wasSkipped)
+                })
+            }
+
+            val playlistsArr = JSONArray()
+            for (pl in allPlaylists) {
+                val items = playlistDao.getTracksForPlaylistOnce(pl.playlistId)
+                val itemsArr = JSONArray()
+                for (tr in items) {
+                    val key = TrackIdentityResolver.buildNormalizedMatchKey(tr.title, tr.artist)
+                    if (key.isBlank()) continue
+                    itemsArr.put(JSONObject().apply {
+                        put("entry_id", tr.entryId)
+                        put("canonical_track_key", key)
+                        put("title", tr.title)
+                        put("artist", tr.artist)
+                        put("external_uri", tr.externalUri)
+                        put("track_id", tr.trackId)
+                        put("source_player", tr.sourcePlayer)
+                        put("position_index", tr.positionIndex)
+                        put("added_by", if (pl.playlistId.startsWith("spotify_pl_")) "SPOTIFY_SYNC" else "USER")
+                        put("added_at_ms", tr.addedAtMs)
+                    })
+                }
+                playlistsArr.put(JSONObject().apply {
+                    put("id", pl.playlistId)
+                    put("playlist_origin", if (pl.playlistId.startsWith("spotify_pl_")) "SPOTIFY" else "TUNEMIND")
+                    if (pl.playlistId.startsWith("spotify_pl_")) {
+                        put("external_playlist_id", pl.playlistId.removePrefix("spotify_pl_"))
+                    }
+                    put("name", pl.name)
+                    put("description", pl.description)
+                    put("mood_or_audience", pl.moodOrAudience)
+                    put("created_at_ms", pl.createdAtMs)
+                    put("updated_at_ms", pl.updatedAtMs)
+                    put("items", itemsArr)
+                })
+            }
+
+            val baseUrl = BackendEndpointManager.getActiveHttpBaseUrl(appCtx).trimEnd('/')
+            val payload = JSONObject().apply {
+                put("user_id", identity.userId)
+                put("user_email", identity.email)
+                put("track_cards", trackCardsArr)
+                put("play_events", playEventsArr)
+                put("playlists", playlistsArr)
+            }
+
+            val req = Request.Builder()
+                .url("$baseUrl/api/v1/track-cards/sync")
+                .apply {
+                    if (identity.accessToken.isNotBlank()) {
+                        addHeader("Authorization", "Bearer ${identity.accessToken}")
+                    }
+                }
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.d(TAG, "Relational Track Cards sync returned HTTP ${resp.code}")
+                    return@withContext
+                }
+                val bodyStr = resp.body?.string().orEmpty()
+                val json = runCatching { JSONObject(bodyStr) }.getOrNull() ?: return@withContext
+                val countsObj = json.optJSONObject("verified_play_counts") ?: return@withContext
+                val now = System.currentTimeMillis()
+                val existingByKey = allTracks.associateBy { it.canonicalTrackKey.lowercase() }
+
+                val keys = countsObj.keys()
+                var reconciledCount = 0
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val serverVerifiedPlays = countsObj.optInt(key, -1)
+                    if (serverVerifiedPlays < 0) continue
+                    val local = existingByKey[key.lowercase()] ?: continue
+                    if (serverVerifiedPlays != local.playCount && serverVerifiedPlays >= 0) {
+                        // Authoritative reconciliation: adopt exact Postgres verified play count when backed by events
+                        if (serverVerifiedPlays > local.playCount || local.playCount == 1 && serverVerifiedPlays == 0) {
+                            crossAppDao.updateVerifiedPlayCount(local.canonicalTrackKey, serverVerifiedPlays, now)
+                            reconciledCount++
+                        }
+                    }
+                }
+                Log.i(
+                    TAG,
+                    "✅ Relational Track Cards synced: cards=${allTracks.size}, plays=${playLogs.size}, playlists=${allPlaylists.size}, reconciled=$reconciledCount"
+                )
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Relational Track Cards sync note: ${e.message}")
         }
     }
 

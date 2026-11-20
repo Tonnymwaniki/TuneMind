@@ -92,6 +92,7 @@ fun RhythmDnaScreen(
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { _, _, _ -> false },
     onToggleLibraryLike: (canonicalTrackKey: String, liked: Boolean) -> Unit = { _, _ -> },
     onOpenPlaylistsManager: () -> Unit = {},
+    onOpenPlaylistByName: ((String) -> Unit)? = null,
     onOpenWeeklyReport: () -> Unit = {},
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
@@ -290,6 +291,7 @@ fun RhythmDnaScreen(
                             libraryTracks = crossAppLibraryTracks,
                             detectedPlayerTabs = detectedPlayerTabs,
                             playlists = tuneMindPlaylists,
+                            resolvePlayCount = resolvePlayCount,
                             isTrackCurrentlyPlaying = { t, a -> isTrackCurrentlyPlaying(t, a, null) },
                             resolveTrackVaultStatus = { t, a ->
                                 val st = resolveTrackVaultStatus(t, a, null, null)
@@ -309,7 +311,8 @@ fun RhythmDnaScreen(
                             onAskAgentAboutTrack = { title, artist ->
                                 onAskAgentAboutTrack(title, artist, 100, null)
                             },
-                            onOpenPlaylistsManager = onOpenPlaylistsManager
+                            onOpenPlaylistsManager = onOpenPlaylistsManager,
+                            onOpenPlaylistByName = onOpenPlaylistByName
                         )
                     }
 

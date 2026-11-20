@@ -45,6 +45,12 @@ interface CrossAppLibraryDao {
     @Query("UPDATE cross_app_track_library SET is_in_vault = :inVault, updated_at_ms = :updatedAtMs WHERE canonical_track_key = :canonicalTrackKey")
     suspend fun setTrackVaultState(canonicalTrackKey: String, inVault: Boolean, updatedAtMs: Long = System.currentTimeMillis())
 
+    @Query("UPDATE cross_app_track_library SET play_count = :playCount, updated_at_ms = :updatedAtMs WHERE canonical_track_key = :canonicalTrackKey")
+    suspend fun updateVerifiedPlayCount(canonicalTrackKey: String, playCount: Int, updatedAtMs: Long = System.currentTimeMillis())
+
+    @Query("SELECT COUNT(*) FROM cross_app_play_log WHERE canonical_track_key = :canonicalTrackKey AND was_skipped = 0")
+    suspend fun getPlayLogCountForTrack(canonicalTrackKey: String): Int
+
     @Query(
         """
         UPDATE cross_app_track_library SET

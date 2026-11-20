@@ -1282,6 +1282,10 @@ open class MainActivity : ComponentActivity() {
                                                     selectedPlaylistNavName = null
                                                     showPlaylistsScreen = true
                                                 },
+                                                onOpenPlaylistByName = { playlistName ->
+                                                    selectedPlaylistNavName = playlistName
+                                                    showPlaylistsScreen = true
+                                                },
                                                 onOpenWeeklyReport = { showWeeklyReportScreen = true },
                                                 onOpenHearingHealth = { showHearingScreen = true },
                                                 onOpenMusicProfile = { showMusicProfileScreen = true },

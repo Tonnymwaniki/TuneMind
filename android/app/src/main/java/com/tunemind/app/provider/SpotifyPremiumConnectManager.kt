@@ -116,6 +116,7 @@ data class SpotifySyncedPlaylist(
     val ownerName: String = "",
     val imageUrl: String? = null,
     val totalTracks: Int = 0,
+    val isOwnedOrCollaborative: Boolean = true,
     val tracks: List<SpotifySyncedTrack> = emptyList()
 )
 
@@ -1667,7 +1668,8 @@ object SpotifyPremiumConnectManager {
             for (i in 0 until items.length()) {
                 val entry = items.optJSONObject(i) ?: continue
                 val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
-                val parsed = parseSpotifyTrackObject(entry.optJSONObject("track"), addedAt)
+                val trackObj = entry.optJSONObject("track") ?: entry.optJSONObject("item")
+                val parsed = parseSpotifyTrackObject(trackObj, addedAt)
                 if (parsed != null) {
                     results.add(parsed)
                     if (results.size >= maxTracks) break
@@ -1681,8 +1683,9 @@ object SpotifyPremiumConnectManager {
     }
 
     /**
-     * Fetches the user's Spotify playlists and their tracks (`GET /v1/me/playlists` + tracks).
-     * Works on both Spotify Free and Spotify Premium connected accounts.
+     * Fetches the user's Spotify playlists and their tracks (GET /v1/me/playlists + /v1/playlists/{id}/items).
+     * Fully compatible with Spotify's Feb 2026 Web API migration (items field & /items path)
+     * and works on both Spotify Free and Spotify Premium connected accounts.
      */
     fun fetchUserPlaylistsWithTracks(
         context: Context,
@@ -1691,6 +1694,7 @@ object SpotifyPremiumConnectManager {
         onProgress: ((completedPlaylists: Int, totalDiscovered: Int) -> Unit)? = null
     ): List<SpotifySyncedPlaylist> {
         if (!isConnected(context)) return emptyList()
+        val currentUserId = getSpotifyUserId(context).orEmpty().trim()
         val playlistMeta = mutableListOf<SpotifySyncedPlaylist>()
         var nextUrl: String? = "$API_BASE/me/playlists?limit=50&offset=0"
         var pages = 0
@@ -1706,12 +1710,21 @@ object SpotifyPremiumConnectManager {
                 val plName = pl.optString("name").trim()
                 if (plId.isBlank() || plName.isBlank()) continue
                 val desc = pl.optString("description").trim()
-                val ownerName = pl.optJSONObject("owner")?.optString("display_name")?.trim().orEmpty()
+                val ownerObj = pl.optJSONObject("owner")
+                val ownerId = ownerObj?.optString("id")?.trim().orEmpty()
+                val ownerName = ownerObj?.optString("display_name")?.trim().orEmpty().ifBlank { ownerId }
+                val collaborative = pl.optBoolean("collaborative", false)
+                val isOwnedOrCollab = collaborative ||
+                    currentUserId.isBlank() ||
+                    ownerId.isBlank() ||
+                    ownerId.equals(currentUserId, ignoreCase = true)
                 val imgs = pl.optJSONArray("images")
                 val imageUrl = if (imgs != null && imgs.length() > 0) {
                     imgs.optJSONObject(0)?.optString("url")?.trim()?.takeIf { it.isNotBlank() }
                 } else null
-                val totalTracks = pl.optJSONObject("tracks")?.optInt("total", 0) ?: 0
+                // Feb 2026 Spotify API moved `tracks.total` -> `items.total`
+                val countContainer = pl.optJSONObject("items") ?: pl.optJSONObject("tracks")
+                val totalTracks = countContainer?.optInt("total", 0) ?: 0
                 playlistMeta.add(
                     SpotifySyncedPlaylist(
                         spotifyId = plId,
@@ -1719,7 +1732,8 @@ object SpotifyPremiumConnectManager {
                         description = desc,
                         ownerName = ownerName,
                         imageUrl = imageUrl,
-                        totalTracks = totalTracks
+                        totalTracks = totalTracks,
+                        isOwnedOrCollaborative = isOwnedOrCollab
                     )
                 )
                 if (playlistMeta.size >= maxPlaylists) break
@@ -1745,24 +1759,58 @@ object SpotifyPremiumConnectManager {
         val cleanId = spotifyPlaylistId.trim()
         if (cleanId.isBlank()) return emptyList()
         val tracks = mutableListOf<SpotifySyncedTrack>()
-        var nextUrl: String? = "$API_BASE/playlists/$cleanId/tracks?limit=100&offset=0"
-        var pages = 0
-        while (!nextUrl.isNullOrBlank() && tracks.size < maxTracks && pages < 3) {
-            pages++
-            val (_, json) = executeAuthorizedGetJson(context, nextUrl)
-            if (json == null) break
-            val items = json.optJSONArray("items") ?: break
-            for (i in 0 until items.length()) {
-                val entry = items.optJSONObject(i) ?: continue
-                val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
-                val parsed = parseSpotifyTrackObject(entry.optJSONObject("track"), addedAt)
-                if (parsed != null) {
-                    tracks.add(parsed)
-                    if (tracks.size >= maxTracks) break
+
+        fun drainPages(initialUrl: String): Pair<Int, Boolean> {
+            var nextUrl: String? = initialUrl
+            var pages = 0
+            var firstStatusCode = 0
+            while (!nextUrl.isNullOrBlank() && tracks.size < maxTracks && pages < 4) {
+                pages++
+                val (code, json) = executeAuthorizedGetJson(context, nextUrl)
+                if (pages == 1) firstStatusCode = code
+                if (json == null) return firstStatusCode to (pages > 1)
+                val items = json.optJSONArray("items") ?: return firstStatusCode to true
+                for (i in 0 until items.length()) {
+                    val entry = items.optJSONObject(i) ?: continue
+                    val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
+                    // Feb 2026 Spotify API renamed `track` -> `item` inside playlist items
+                    val trackObj = entry.optJSONObject("item") ?: entry.optJSONObject("track")
+                    val parsed = parseSpotifyTrackObject(trackObj, addedAt)
+                    if (parsed != null) {
+                        tracks.add(parsed)
+                        if (tracks.size >= maxTracks) break
+                    }
+                }
+                val rawNext = json.optString("next").trim()
+                nextUrl = rawNext.takeIf { it.startsWith("https://") }
+            }
+            return firstStatusCode to true
+        }
+
+        // Primary Feb 2026 endpoint: GET /v1/playlists/{id}/items
+        val (primaryCode, primaryOk) = drainPages("$API_BASE/playlists/$cleanId/items?limit=100&offset=0&additional_types=track")
+        if (!primaryOk && primaryCode == 404) {
+            // Legacy fallback if an older proxy/region still serves /tracks
+            drainPages("$API_BASE/playlists/$cleanId/tracks?limit=100&offset=0&additional_types=track")
+        }
+
+        // Extra fallback: read embedded items/tracks directly from GET /v1/playlists/{id} if empty
+        if (tracks.isEmpty() && primaryCode !in listOf(401, 403)) {
+            val (_, detailJson) = executeAuthorizedGetJson(context, "$API_BASE/playlists/$cleanId?additional_types=track")
+            val container = detailJson?.optJSONObject("items") ?: detailJson?.optJSONObject("tracks")
+            val embedded = container?.optJSONArray("items")
+            if (embedded != null) {
+                for (i in 0 until embedded.length()) {
+                    val entry = embedded.optJSONObject(i) ?: continue
+                    val addedAt = parseIso8601ToMillis(entry.optString("added_at"))
+                    val trackObj = entry.optJSONObject("item") ?: entry.optJSONObject("track")
+                    val parsed = parseSpotifyTrackObject(trackObj, addedAt)
+                    if (parsed != null) {
+                        tracks.add(parsed)
+                        if (tracks.size >= maxTracks) break
+                    }
                 }
             }
-            val rawNext = json.optString("next").trim()
-            nextUrl = rawNext.takeIf { it.startsWith("https://") }
         }
         return tracks
     }
@@ -1897,15 +1945,15 @@ object SpotifyPremiumConnectManager {
         val cleanName = playlistName.trim().ifBlank { "TuneMind Playlist" }
         val cleanDesc = description.trim().ifBlank { "Exported from TuneMind" }
 
-        // 1. Create the playlist in the user's Spotify account
+        // 1. Create the playlist in the user's Spotify account (Feb 2026 endpoint: POST /v1/me/playlists)
         val createBody = JSONObject().apply {
             put("name", cleanName)
             put("description", cleanDesc)
             put("public", isPublic)
         }.toString()
 
-        val createReq = Request.Builder()
-            .url("$API_BASE/users/${URLEncoder.encode(userId, "UTF-8")}/playlists")
+        fun buildCreateRequest(url: String): Request = Request.Builder()
+            .url(url)
             .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
@@ -1913,7 +1961,14 @@ object SpotifyPremiumConnectManager {
             .build()
 
         val (createdPlaylistId, createdSpotifyUrl) = try {
-            httpClient.newCall(createReq).execute().use { resp ->
+            var createResp = httpClient.newCall(buildCreateRequest("$API_BASE/me/playlists")).execute()
+            if (createResp.code == 404) {
+                createResp.close()
+                createResp = httpClient.newCall(
+                    buildCreateRequest("$API_BASE/users/${URLEncoder.encode(userId, "UTF-8")}/playlists")
+                ).execute()
+            }
+            createResp.use { resp ->
                 if (!resp.isSuccessful) {
                     val code = resp.code
                     return SpotifyExportPlaylistResult(
@@ -1957,13 +2012,20 @@ object SpotifyPremiumConnectManager {
             }
         }
 
-        // 3. Push tracks in batches of 100 (Spotify API limit per request)
+        // 3. Push tracks in batches of 100 (Feb 2026 endpoint: POST /v1/playlists/{id}/items)
         var addedTotal = 0
         resolvedUris.chunked(100).forEach { batch ->
             val payload = JSONObject().apply {
                 put("uris", JSONArray(batch))
             }.toString()
-            val ok = executeSimpleSpotifyCommand(
+            val okItems = executeSimpleSpotifyCommand(
+                context = context,
+                initialToken = token,
+                method = "POST",
+                url = "$API_BASE/playlists/$createdPlaylistId/items",
+                jsonBody = payload
+            )
+            val ok = okItems || executeSimpleSpotifyCommand(
                 context = context,
                 initialToken = token,
                 method = "POST",

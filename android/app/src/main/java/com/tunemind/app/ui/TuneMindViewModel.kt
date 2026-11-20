@@ -5130,6 +5130,10 @@ class TuneMindViewModel : ViewModel() {
                     pDao.upsertPlaylistTracks(newEntities)
                     pDao.touchPlaylist(playlistId, now)
                 }
+                AppHolder.context?.let { ctx ->
+                    com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                        .triggerRelationalTrackCardsSyncAsync(ctx)
+                }
                 postNowPlayingStatus(
                     if (existing == null) "Created \"$cleanName\" in TuneMind (${newEntities.size} track${if (newEntities.size == 1) "" else "s"})"
                     else "Added ${newEntities.size} song${if (newEntities.size == 1) "" else "s"} to \"$cleanName\""
@@ -5174,6 +5178,10 @@ class TuneMindViewModel : ViewModel() {
         if (clean.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             tuneMindPlaylistDao?.renamePlaylist(playlistId, clean)
+            AppHolder.context?.let { ctx ->
+                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                    .triggerRelationalTrackCardsSyncAsync(ctx)
+            }
         }
     }
 
@@ -5182,6 +5190,10 @@ class TuneMindViewModel : ViewModel() {
             val pDao = tuneMindPlaylistDao ?: return@launch
             pDao.deleteTracksByPlaylistId(playlistId)
             pDao.deletePlaylistById(playlistId)
+            AppHolder.context?.let { ctx ->
+                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                    .triggerRelationalTrackCardsSyncAsync(ctx)
+            }
         }
     }
 
@@ -5190,6 +5202,10 @@ class TuneMindViewModel : ViewModel() {
             val pDao = tuneMindPlaylistDao ?: return@launch
             pDao.deleteTrackByEntryId(entryId)
             pDao.touchPlaylist(playlistId)
+            AppHolder.context?.let { ctx ->
+                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                    .triggerRelationalTrackCardsSyncAsync(ctx)
+            }
         }
     }
 
