@@ -26,6 +26,13 @@ data class AgentToolCallPayload(
     val track_artist: String? = null,
     val track_id: String? = null,
     val spotify_uri: String? = null,
+    val context_uri: String? = null,
+    val shuffle_enabled: Boolean? = null,
+    val repeat_mode: String? = null,
+    val seek_position_ms: Long? = null,
+    val seek_delta_ms: Long? = null,
+    val device_id: String? = null,
+    val device_name: String? = null,
     val ytm_video_id: String? = null,
     val preview_url: String? = null,
     val audius_stream_url: String? = null,
@@ -55,7 +62,7 @@ data class AgentToolCallPayload(
 )
 
 data class OsExecutionCommand(
-    val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_MEDIA_PAUSE", "OS_MEDIA_RESUME", "OS_MEDIA_NEXT", "OS_MEDIA_PREV", "NONE"
+    val intent: String, // "OS_MEDIA_NEXT_AND_DEEP_LINK", "OS_SPOTIFY_CONTEXT", "OS_MEDIA_SEEK", "OS_MEDIA_PAUSE", "OS_MEDIA_RESUME", "OS_MEDIA_NEXT", "OS_MEDIA_PREV", "NONE"
     val target_player: String, // e.g., "com.spotify.music"
     val search_query: String,
     val suggested_bpm_target: Int? = null,
@@ -63,6 +70,10 @@ data class OsExecutionCommand(
     val track_artist: String? = null,
     val track_id: String? = null,
     val spotify_uri: String? = null,
+    val context_uri: String? = null,
+    val shuffle_enabled: Boolean? = null,
+    val seek_position_ms: Long? = null,
+    val seek_delta_ms: Long? = null,
     val ytm_video_id: String? = null,
     val preview_url: String? = null,
     val audius_stream_url: String? = null,
@@ -179,6 +190,32 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                             neverOpenExternalApp = response.os_execution_command.never_open_external_app,
                             onLaunchResult = onLaunchResult
                         )
+                        onFinished?.invoke()
+                    }
+                    "OS_SPOTIFY_CONTEXT" -> {
+                        val ctxUri = response.os_execution_command.context_uri
+                            ?: response.agent_tool_call?.context_uri
+                            ?: response.os_execution_command.spotify_uri
+                            ?: ""
+                        val shuffleFlag = response.os_execution_command.shuffle_enabled
+                            ?: response.agent_tool_call?.shuffle_enabled
+                        val label = response.agent_tool_call?.playlist_name
+                            ?: response.os_execution_command.track_title
+                            ?: "Spotify Mix"
+                        launchSpotifyContextSilently(
+                            contextUri = ctxUri,
+                            shuffleEnabled = shuffleFlag,
+                            label = label,
+                            onLaunchResult = onLaunchResult
+                        )
+                        onFinished?.invoke()
+                    }
+                    "OS_MEDIA_SEEK" -> {
+                        val posMs = response.os_execution_command.seek_position_ms
+                            ?: response.agent_tool_call?.seek_position_ms
+                        val deltaMs = response.os_execution_command.seek_delta_ms
+                            ?: response.agent_tool_call?.seek_delta_ms
+                        seekCurrentMedia(posMs, deltaMs)
                         onFinished?.invoke()
                     }
                     "OS_MEDIA_PAUSE" -> {
@@ -426,6 +463,77 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 com.tunemind.app.provider.SpotifyPremiumConnectManager.skipPrevious(context)
             }
+        }
+    }
+
+    fun seekCurrentMedia(positionMs: Long?, deltaMs: Long?) {
+        val targetDelta = deltaMs
+        val absPos = positionMs
+        val ytActive = runCatching { com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() }.getOrDefault(false)
+        if (ytActive) {
+            val cur = com.tunemind.app.provider.TuneMindYouTubeEmbedController.positionMsFlow.value
+            val dest = (absPos ?: (cur + (targetDelta ?: 0L))).coerceAtLeast(0L)
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.seekTo(dest)
+            return
+        }
+        val inAppActive = runCatching { com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack() }.getOrDefault(false)
+        if (inAppActive) {
+            val cur = com.tunemind.app.provider.TuneMindInAppPlayer.positionMsFlow.value
+            val dest = (absPos ?: (cur + (targetDelta ?: 0L))).coerceAtLeast(0L)
+            com.tunemind.app.provider.TuneMindInAppPlayer.seekTo(dest)
+            return
+        }
+        if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val ok = com.tunemind.app.provider.SpotifyPremiumConnectManager.seekPlayback(
+                    context = context,
+                    positionMs = absPos,
+                    deltaMs = targetDelta
+                )
+                if (!ok) {
+                    val snapPos = com.tunemind.app.service.TuneMindListenerService.instance
+                        ?.getActivePlaybackSnapshot()?.positionMs ?: 0L
+                    val dest = (absPos ?: (snapPos + (targetDelta ?: 0L))).coerceAtLeast(0L)
+                    runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.seekTo(positionMs = dest) }
+                }
+            }
+            return
+        }
+        val snapPos = com.tunemind.app.service.TuneMindListenerService.instance
+            ?.getActivePlaybackSnapshot()?.positionMs ?: 0L
+        val dest = (absPos ?: (snapPos + (targetDelta ?: 0L))).coerceAtLeast(0L)
+        runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.seekTo(positionMs = dest) }
+    }
+
+    fun launchSpotifyContextSilently(
+        contextUri: String,
+        shuffleEnabled: Boolean? = null,
+        label: String = "Spotify Mix",
+        onLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null
+    ) {
+        if (contextUri.isBlank()) return
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val res = com.tunemind.app.provider.SpotifyPremiumConnectManager.playSpotifyContextSilently(
+                context = context,
+                contextUri = contextUri,
+                shuffleEnabled = shuffleEnabled
+            )
+            val mapped = when (res) {
+                is com.tunemind.app.provider.SpotifyPlayResult.Success ->
+                    com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched(
+                        providerId = "spotify",
+                        providerDisplayName = "Spotify",
+                        trackTitle = label,
+                        destinationUri = res.trackUri,
+                        message = "Playing $label silently inside TuneMind via ${res.deviceName}"
+                    )
+                else ->
+                    com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed(
+                        providerId = "spotify",
+                        reason = res.toString()
+                    )
+            }
+            mainHandler.post { onLaunchResult?.invoke(mapped) }
         }
     }
 

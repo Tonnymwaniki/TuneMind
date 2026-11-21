@@ -1060,6 +1060,23 @@ object SpotifyPremiumConnectManager {
     }
 
     /**
+     * Fast-path access token lookup for attaching to agent reasoning requests.
+     * Avoids blocking the main thread while auto-refreshing transparently on IO threads.
+     */
+    fun getValidAccessTokenQuick(context: Context): String? {
+        val prefs = getPrefs(context)
+        val existingToken = prefs.getString(KEY_ACCESS_TOKEN, "")?.trim().orEmpty()
+        val expiresAtMs = prefs.getLong(KEY_EXPIRES_AT_MS, 0L)
+        if (existingToken.isNotBlank() && System.currentTimeMillis() < (expiresAtMs - 30_000L)) {
+            return existingToken
+        }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            return existingToken.takeIf { it.isNotBlank() }
+        }
+        return refreshAccessTokenIfNeeded(context, forceRefresh = false)
+    }
+
+    /**
      * Returns a valid Bearer access token, automatically refreshing via PKCE refresh_token if expired.
      */
     fun refreshAccessTokenIfNeeded(context: Context, forceRefresh: Boolean = false): String? {
@@ -1846,14 +1863,38 @@ object SpotifyPremiumConnectManager {
     ): SpotifyPlayResult {
         val cleanId = spotifyPlaylistId.trim()
         if (cleanId.isBlank()) return SpotifyPlayResult.Failed("Invalid Spotify playlist ID.")
+        val contextUri = if (cleanId.startsWith("spotify:", ignoreCase = true)) cleanId else "spotify:playlist:$cleanId"
+        return playSpotifyContextSilently(context = context, contextUri = contextUri)
+    }
+
+    /**
+     * Plays any Spotify context URI (`spotify:playlist:...`, `spotify:album:...`, `spotify:artist:...`)
+     * silently via Spotify Connect (Premium), with automatic silent cold-wake and optional shuffle state.
+     */
+    fun playSpotifyContextSilently(
+        context: Context,
+        contextUri: String,
+        shuffleEnabled: Boolean? = null
+    ): SpotifyPlayResult {
+        val cleanContextUri = contextUri.trim().let { raw ->
+            val urlMatch = Regex("https?://open\\.spotify\\.com/(playlist|album|artist)/([A-Za-z0-9]+)", RegexOption.IGNORE_CASE).find(raw)
+            if (urlMatch != null) {
+                "spotify:${urlMatch.groupValues[1].lowercase()}:${urlMatch.groupValues[2]}"
+            } else {
+                raw
+            }
+        }
+        if (!cleanContextUri.startsWith("spotify:", ignoreCase = true)) {
+            return SpotifyPlayResult.Failed("Invalid Spotify context URI.")
+        }
         val status = ensureLoaded(context)
         if (!status.isConnected) return SpotifyPlayResult.NotConnected
         if (!status.isPremium) {
-            return SpotifyPlayResult.PremiumRequired("Spotify Premium is required for silent playlist playback.")
+            return SpotifyPlayResult.PremiumRequired("Spotify Premium is required for silent context playback.")
         }
         var token = refreshAccessTokenIfNeeded(context)
             ?: return SpotifyPlayResult.Failed("Spotify token unavailable — reconnect in Settings.")
-        val contextUri = "spotify:playlist:$cleanId"
+
         var device = findBestConnectDevice(token)
         var wakeOutcome = SilentColdWakeOutcome()
 
@@ -1861,9 +1902,19 @@ object SpotifyPremiumConnectManager {
             wakeOutcome = coldWakeSpotifySilently(
                 context = context,
                 accessToken = token,
-                targetSpotifyUri = contextUri
+                targetSpotifyUri = cleanContextUri
             )
             device = wakeOutcome.device
+        }
+
+        if (shuffleEnabled != null) {
+            val devQuery = device?.first?.let { "&device_id=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+            executeSimpleSpotifyCommand(
+                context = context,
+                initialToken = token,
+                method = "PUT",
+                url = "$API_BASE/me/player/shuffle?state=$shuffleEnabled$devQuery"
+            )
         }
 
         fun executePlay(activeToken: String, targetDeviceId: String?): okhttp3.Response {
@@ -1874,7 +1925,7 @@ object SpotifyPremiumConnectManager {
                 }
             }
             val payload = JSONObject().apply {
-                put("context_uri", contextUri)
+                put("context_uri", cleanContextUri)
             }.toString()
             val req = Request.Builder()
                 .url(url)
@@ -1900,7 +1951,7 @@ object SpotifyPremiumConnectManager {
                     wakeOutcome = coldWakeSpotifySilently(
                         context = context,
                         accessToken = token,
-                        targetSpotifyUri = contextUri
+                        targetSpotifyUri = cleanContextUri
                     )
                     device = wakeOutcome.device
                 } else {
@@ -1912,19 +1963,19 @@ object SpotifyPremiumConnectManager {
                     if (wakeOutcome.sentMediaButtonPlay) {
                         runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
                     }
-                    return SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", contextUri)
+                    return SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", cleanContextUri)
                 }
             }
             response.use { resp ->
                 if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
-                    SpotifyPlayResult.Success(contextUri, device?.second ?: "Spotify")
+                    SpotifyPlayResult.Success(cleanContextUri, device?.second ?: "Spotify")
                 } else if (resp.code == 404) {
                     if (wakeOutcome.sentMediaButtonPlay) {
                         runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
                     }
-                    SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", contextUri)
+                    SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", cleanContextUri)
                 } else {
-                    SpotifyPlayResult.Failed("Spotify playlist playback returned HTTP ${resp.code}")
+                    SpotifyPlayResult.Failed("Spotify context playback returned HTTP ${resp.code}")
                 }
             }
         } catch (e: Exception) {
@@ -2570,6 +2621,122 @@ object SpotifyPremiumConnectManager {
         val token = refreshAccessTokenIfNeeded(context) ?: return false
         val clamped = percent.coerceIn(0, 100)
         return executeSimpleSpotifyCommand(context, token, "PUT", "$API_BASE/me/player/volume?volume_percent=$clamped")
+    }
+
+    fun setShuffle(context: Context, enabled: Boolean): Boolean {
+        if (!isConnectedAndPremium(context)) return false
+        val token = refreshAccessTokenIfNeeded(context) ?: return false
+        return executeSimpleSpotifyCommand(context, token, "PUT", "$API_BASE/me/player/shuffle?state=$enabled")
+    }
+
+    fun setRepeatMode(context: Context, mode: String): Boolean {
+        if (!isConnectedAndPremium(context)) return false
+        val token = refreshAccessTokenIfNeeded(context) ?: return false
+        val validMode = when (mode.lowercase().trim()) {
+            "track", "one", "single" -> "track"
+            "context", "all", "playlist" -> "context"
+            else -> "off"
+        }
+        return executeSimpleSpotifyCommand(context, token, "PUT", "$API_BASE/me/player/repeat?state=$validMode")
+    }
+
+    fun seekPlayback(context: Context, positionMs: Long? = null, deltaMs: Long? = null): Boolean {
+        if (!isConnectedAndPremium(context)) return false
+        var token = refreshAccessTokenIfNeeded(context) ?: return false
+        var targetMs = positionMs?.coerceAtLeast(0L)
+        if (targetMs == null && deltaMs != null) {
+            var currentPos = 0L
+            runCatching {
+                val req = Request.Builder()
+                    .url("$API_BASE/me/player")
+                    .header("Authorization", "Bearer $token")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.code == 401) {
+                        token = refreshAccessTokenIfNeeded(context, forceRefresh = true) ?: token
+                    } else if (resp.isSuccessful) {
+                        val json = JSONObject(resp.body?.string().orEmpty())
+                        currentPos = json.optLong("progress_ms", 0L)
+                    }
+                }
+            }
+            targetMs = (currentPos + deltaMs).coerceAtLeast(0L)
+        }
+        val finalPos = (targetMs ?: 0L).coerceAtLeast(0L)
+        return executeSimpleSpotifyCommand(context, token, "PUT", "$API_BASE/me/player/seek?position_ms=$finalPos")
+    }
+
+    fun transferPlaybackDevice(
+        context: Context,
+        deviceId: String? = null,
+        deviceName: String? = null
+    ): Pair<Boolean, String> {
+        if (!isConnectedAndPremium(context)) return false to "Spotify Premium Connect is not connected."
+        var token = refreshAccessTokenIfNeeded(context)
+            ?: return false to "Spotify token unavailable."
+        var resolvedId = deviceId?.trim().orEmpty()
+        var resolvedName = deviceName?.trim().orEmpty()
+
+        if (resolvedId.isBlank()) {
+            try {
+                val req = Request.Builder()
+                    .url("$API_BASE/me/player/devices")
+                    .header("Authorization", "Bearer $token")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val arr = JSONObject(resp.body?.string().orEmpty()).optJSONArray("devices") ?: JSONArray()
+                        val targetLower = resolvedName.lowercase()
+                        var fallbackId = ""
+                        var fallbackName = ""
+                        for (i in 0 until arr.length()) {
+                            val d = arr.optJSONObject(i) ?: continue
+                            val id = d.optString("id", "").trim()
+                            val name = d.optString("name", "").trim()
+                            val restricted = d.optBoolean("is_restricted", false)
+                            if (id.isBlank() || restricted) continue
+                            if (targetLower.isNotBlank() &&
+                                (name.lowercase() == targetLower || name.lowercase().contains(targetLower))
+                            ) {
+                                resolvedId = id
+                                resolvedName = name
+                                break
+                            }
+                            if (fallbackId.isBlank() && !d.optBoolean("is_active", false)) {
+                                fallbackId = id
+                                fallbackName = name
+                            }
+                        }
+                        if (resolvedId.isBlank() && fallbackId.isNotBlank()) {
+                            resolvedId = fallbackId
+                            resolvedName = fallbackName
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed listing Connect devices: ${e.message}")
+            }
+        }
+
+        if (resolvedId.isBlank()) {
+            return false to "No matching Spotify Connect device found."
+        }
+
+        val bodyJson = JSONObject()
+            .put("device_ids", JSONArray().put(resolvedId))
+            .put("play", true)
+            .toString()
+        val ok = executeSimpleSpotifyCommand(context, token, "PUT", "$API_BASE/me/player", bodyJson)
+        if (ok && resolvedName.isNotBlank()) {
+            val prefs = getPrefs(context)
+            prefs.edit().putString(KEY_LAST_DEVICE_NAME, resolvedName).apply()
+            _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
+        }
+        return ok to (if (resolvedName.isNotBlank()) resolvedName else "Spotify Connect device")
     }
 
     private fun executeSimpleSpotifyCommand(

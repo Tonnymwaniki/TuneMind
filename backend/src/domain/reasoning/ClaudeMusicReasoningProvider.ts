@@ -9,6 +9,8 @@ import { supabase } from '../../config/supabase';
 import { EventStore } from '../events/EventStore';
 import { SelfLearningDiscoveryEngine } from '../recommendation/SelfLearningDiscoveryEngine';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
+import { StoredTrackCardRecord, TrackCardStore } from '../storage/TrackCardStore';
+import { SpotifyUserApiClient } from '../spotify/SpotifyUserApiClient';
 import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import {
   coerceNonNegativePlayCount,
@@ -38,10 +40,15 @@ export interface AgentToolCall {
   action:
     | 'PLAY_TRACK_NOW'
     | 'PROPOSE_TRACK'
+    | 'PLAY_SPOTIFY_CONTEXT'
     | 'PAUSE_PLAYBACK'
     | 'RESUME_PLAYBACK'
     | 'SKIP_NEXT'
     | 'SKIP_PREVIOUS'
+    | 'SET_SHUFFLE'
+    | 'SET_REPEAT_MODE'
+    | 'SEEK_TO_POSITION'
+    | 'TRANSFER_SPOTIFY_DEVICE'
     | 'SET_VOLUME_PERCENT'
     | 'QUARANTINE_TO_VAULT'
     | 'RESTORE_FROM_VAULT'
@@ -68,6 +75,7 @@ export interface AgentToolCall {
     | 'PLAY_NEXT_IN_QUEUE'
     | 'CLEAR_UP_NEXT_QUEUE'
     | 'LIKE_TRACK'
+    | 'UNLIKE_TRACK'
     | 'REFRESH_FOR_YOU_PICKS'
     | 'SET_SLEEP_TIMER'
     | 'TOGGLE_KIDS_MODE'
@@ -76,6 +84,7 @@ export interface AgentToolCall {
   track_title?: string;
   track_artist?: string;
   spotify_uri?: string;
+  context_uri?: string;
   ytm_video_id?: string;
   preview_url?: string;
   audius_stream_url?: string;
@@ -83,6 +92,12 @@ export interface AgentToolCall {
   target_player?: string;
   remember_default_player?: boolean;
   volume_percent?: number;
+  shuffle_enabled?: boolean;
+  repeat_mode?: 'off' | 'context' | 'track';
+  seek_position_ms?: number;
+  seek_delta_ms?: number;
+  device_id?: string;
+  device_name?: string;
   palette_id?: string; // 'morning' | 'afternoon' | 'evening' | 'night' | 'auto'
   custom_accent_hex?: string; // e.g. '#00FFA3', '#FF2A85', or 'AUTO' to reset adaptive
   theme_behavior?: string; // 'ADAPTIVE' | 'STATIC'
@@ -98,6 +113,7 @@ export interface AgentToolCall {
   mood_or_audience?: string;
   playlist_tracks?: PlaylistTrackItem[];
   queue_tracks?: PlaylistTrackItem[];
+  candidate_tracks?: PlaylistTrackItem[];
   open_playlist_screen?: boolean;
   sleep_timer_minutes?: number;
   kids_mode_enabled?: boolean;
@@ -169,6 +185,8 @@ export interface TuneMindTelemetryContext {
   user_email?: string;
   supabase_url?: string;
   supabase_anon_key?: string;
+  spotify_access_token?: string;
+  spotify_device_name?: string;
   for_you_picks?: Array<{
     title: string;
     artist: string;
@@ -278,13 +296,25 @@ export interface TuneMindReasoningResponse {
   reasoning_mode?: 'JOURNEY_ADVISOR' | 'HEARING_GUARDIAN' | 'DOPAMINE_CAPSULE' | 'DIRECT_EXECUTION' | 'SONIC_CURATOR';
   agent_tool_call?: AgentToolCall;
   os_execution_command: {
-    intent: 'OS_MEDIA_NEXT_AND_DEEP_LINK' | 'OS_MEDIA_PAUSE' | 'OS_MEDIA_RESUME' | 'OS_MEDIA_NEXT' | 'OS_MEDIA_PREV' | 'NONE';
+    intent:
+      | 'OS_MEDIA_NEXT_AND_DEEP_LINK'
+      | 'OS_SPOTIFY_CONTEXT'
+      | 'OS_MEDIA_SEEK'
+      | 'OS_MEDIA_PAUSE'
+      | 'OS_MEDIA_RESUME'
+      | 'OS_MEDIA_NEXT'
+      | 'OS_MEDIA_PREV'
+      | 'NONE';
     target_player: string;
     search_query: string;
     track_id?: string;
     track_title?: string;
     track_artist?: string;
     spotify_uri?: string;
+    context_uri?: string;
+    shuffle_enabled?: boolean;
+    seek_position_ms?: number;
+    seek_delta_ms?: number;
     ytm_video_id?: string;
     preview_url?: string;
     audius_stream_url?: string;
@@ -454,28 +484,34 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     userCommandRaw: string;
     hasExplicitDefaultPlayer?: boolean;
     hasSpokenTargetPlayer?: boolean;
+    hasSpotifyPremiumConnected?: boolean;
     isApprovingPending?: boolean;
     isAutoCurateNextTrack?: boolean;
   }): boolean {
     if (params.isAutoCurateNextTrack || params.isApprovingPending) {
       return true;
     }
-    const playerKnown = Boolean(params.hasExplicitDefaultPlayer || params.hasSpokenTargetPlayer);
+    const playerKnown = Boolean(
+      params.hasExplicitDefaultPlayer ||
+      params.hasSpokenTargetPlayer ||
+      params.hasSpotifyPremiumConnected
+    );
     if (!playerKnown) {
       return false;
     }
     const raw = (params.userCommandRaw || '').trim();
     if (!raw) return false;
 
-    // Questions or open recommendation/suggestion requests should always propose first
+    // Conversational mood sharing, questions, or open recommendation requests should always converse / propose first
     if (
       /^\s*(?:what|which|who|how|why|where|when|can\s+you\s+suggest|can\s+you\s+recommend|do\s+you\s+have|tell\s+me|show\s+me)\b/i.test(raw) ||
-      /\b(?:recommend|recommendation|suggest|suggestion|what\s+is\s+my|what'?s\s+my|what\s+do\s+you\s+have)\b/i.test(raw)
+      /\b(?:recommend|recommendation|suggest|suggestion|what\s+is\s+my|what'?s\s+my|what\s+do\s+you\s+have|what\s+should\s+i)\b/i.test(raw) ||
+      /\b(?:i\s*(?:am|'m)\s+feeling|i\s+feel|feeling\s+(?:stressed|sad|down|tired|drained|anxious|happy|hyped|lonely|chill|romantic|heartbroken|bored|overwhelmed|focused))\b/i.test(raw)
     ) {
       return false;
     }
 
-    // Must contain a direct play verb and not just "play a song / any song / something new"
+    // Must contain a direct play verb and not just "play a song / any song / something chill"
     const hasPlayVerb = /\b(?:play|spin|put\s+on|start\s+playing|open\s+and\s+play)\b/i.test(raw);
     if (!hasPlayVerb) return false;
 
@@ -751,17 +787,114 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     return Boolean(this.cleanKey(rawKey) && !this.hasInvalidKey);
   }
 
-  /**
-   * Defines the 4 Native Anthropic Tools that allow Claude to autonomously inspect
-   * the user's listening stats, discover new songs on Spotify, search specific songs,
-   * and submit its final conversational turn decision.
-   */
   private getAutonomousAgentTools(): any[] {
     return [
       {
+        name: 'query_spotify_account',
+        description:
+          'Queries the user\'s live connected Spotify Web API account read-only: top_artists, top_tracks, liked_songs, user_playlists, playlist_tracks (reads tracks inside a Spotify playlist by playlist_id and returns its playable context_uri even for restricted editorial playlists), recently_played, playback_state_and_devices (active device, shuffle, repeat, position, available Connect devices), current_queue, or overview (parallel taste + playlists + recent + devices snapshot). Call whenever reasoning about the user\'s mood, Spotify library, playlists, devices, or live playback.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            query_type: {
+              type: 'string',
+              enum: [
+                'overview',
+                'top_artists',
+                'top_tracks',
+                'liked_songs',
+                'user_playlists',
+                'playlist_tracks',
+                'recently_played',
+                'playback_state_and_devices',
+                'current_queue'
+              ],
+              description: 'Which live Spotify account resource to inspect.'
+            },
+            time_range: {
+              type: 'string',
+              enum: ['short_term', 'medium_term', 'long_term'],
+              description: 'Affinity range for top_artists / top_tracks (short_term ~4 weeks, medium_term ~6 months, long_term years).'
+            },
+            playlist_id: {
+              type: 'string',
+              description: 'Spotify playlist ID or spotify:playlist:... URI when query_type is playlist_tracks.'
+            },
+            playlist_name: {
+              type: 'string',
+              description: 'Optional playlist name to resolve from the user\'s Spotify playlists when playlist_id is unknown.'
+            },
+            query: {
+              type: 'string',
+              description: 'Optional filter keyword for tracks, artists, or playlists.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum items to return (1-25, default 12).'
+            }
+          },
+          required: ['query_type']
+        }
+      },
+      {
+        name: 'search_spotify_live',
+        description:
+          'Searches Spotify\'s live Web API catalog (/v1/search) for real tracks (with exact spotify:track:<id> URIs), artists, Spotify playlists (with spotify:playlist:<id> URIs), and albums (with spotify:album:<id> URIs), automatically cross-referenced with TuneMind\'s Track Cards (verified_play_count and Resting Vault cooldown status) so you avoid proposing overplayed or vaulted tracks.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Song title, artist, album, playlist name, mood, or genre search query (e.g., "Calm Down Rema", "late night afro soul", "Samidoh").'
+            },
+            types: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['track', 'artist', 'playlist', 'album']
+              },
+              description: 'Spotify entity types to search (defaults to ["track", "artist", "playlist"]).'
+            },
+            kids_safe_only: {
+              type: 'boolean',
+              description: 'Set true in Kids Mode or for children/family/lullabies to exclude explicit tracks.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Results per type (1-10, default 6).'
+            }
+          },
+          required: ['query']
+        }
+      },
+      {
+        name: 'query_tunemind_track_cards',
+        description:
+          'Dynamically queries TuneMind\'s permanent relational backend Track Card storage (TrackCardStore) containing authoritative verified_play_count, total listening time, Spotify URIs, liked flags, Cooldown Vault status, genres, and TuneMind playlists across sessions.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            filter: {
+              type: 'string',
+              enum: ['all', 'fresh', 'overplayed', 'vaulted', 'liked', 'recent', 'playlists'],
+              description: 'Subset of permanent Track Cards or relational TuneMind playlists to query.'
+            },
+            keyword_or_mood: {
+              type: 'string',
+              description: 'Optional song title, artist, genre, or player keyword filter.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Max records to return (1-25, default 12).'
+            }
+          },
+          required: ['filter']
+        }
+      },
+      {
         name: 'query_user_listening_history',
         description:
-          'Queries the user\'s permanent cross-app listening history and play counts across all music apps (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, TuneMind In-App). Call whenever the user asks about their most played song, favorite song, or songs played on a specific player.',
+          'Queries the user\'s merged cross-app listening history and play counts across all music apps (Spotify, YouTube Music, Boomplay, Audiomack, Phone Audio, TuneMind In-App). Call whenever the user asks about their most played song, favorite song, or songs played on a specific player.',
         input_schema: {
           type: 'object',
           properties: {
@@ -776,7 +909,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             player_filter: {
               type: 'string',
-              description: 'Optional player app filter (e.g. "Boomplay", "YouTube Music", "Spotify", "Audiomack", "Phone Audio").'
+              description: 'Optional player app filter (e.g. "Spotify", "Boomplay", "YouTube Music", "Audiomack", "Phone Audio").'
             },
             limit: {
               type: 'number',
@@ -789,7 +922,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'discover_and_recommend_tracks',
         description:
-          'Discovers real, playable songs from open music catalogs (Deezer, iTunes, Audius, Last.fm, YouTube Music) tailored to the user\'s top artists, mood, or genre while filtering out songs they have already overplayed. Call whenever the user asks for a new song, recommendation, suggestion, or mood/genre.',
+          'Discovers fresh, playable songs tailored to the user\'s top artists, mood, or genre (combining live Spotify discovery when connected plus open catalogs) while filtering out tracks that are already overplayed or locked in TuneMind\'s Resting Vault.',
         input_schema: {
           type: 'object',
           properties: {
@@ -822,7 +955,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'search_music_catalog',
         description:
-          'Searches open music catalogs (Deezer, iTunes, Audius, YouTube Music) by track, artist, or mood/genre, returning playable metadata, 30s preview availability, full Audius stream availability, and YouTube Music videoIds. Supports kids-safe explicit filtering.',
+          'Searches open music catalogs (Deezer, iTunes, Audius, YouTube Music) alongside playable stream fallbacks (ytm_video_id, audius_stream_url, preview). Supports kids-safe explicit filtering.',
         input_schema: {
           type: 'object',
           properties: {
@@ -854,7 +987,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'inspect_tunemind_playlists',
         description:
-          'Inspects the user\'s TuneMind-owned local playlists (stored permanently inside TuneMind), including playlist names, descriptions, and songs inside each playlist.',
+          'Inspects the user\'s TuneMind-owned local playlists (the ONLY playlists the agent is allowed to edit/create/rename/delete in v1), plus synced playlist metadata.',
         input_schema: {
           type: 'object',
           properties: {
@@ -889,7 +1022,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'inspect_for_you_suggestions',
         description:
-          'Inspects today\'s personalized "For You" AI discovery suggestions screen inside TuneMind (daily curated picks, match percentages, categories, wildcard picks, saved status, and telemetry reasons). Call whenever the user asks "what do you have for me today", asks about the suggestion / For You screen, or wants to hear or play from today\'s suggestions.',
+          'Inspects today\'s personalized "For You" AI discovery suggestions screen inside TuneMind (daily curated picks, match percentages, categories, wildcard picks, saved status, and telemetry reasons).',
         input_schema: {
           type: 'object',
           properties: {
@@ -907,7 +1040,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'query_user_library',
         description:
-          'Inspects the user\'s permanent Cross-App Music Library (organized dynamically by the players they actually used such as Boomplay, YouTube Music, Spotify, Audiomack, Phone Audio, liked songs) and TuneMind Playlists. Call whenever the user asks about their library, wants a song they played in a specific app, asks which players they listen on, or asks about liked tracks.',
+          'Inspects the user\'s permanent Cross-App Music Library (organized dynamically by the players they actually used such as Spotify, YouTube Music, Boomplay, Audiomack, Phone Audio, liked songs) and TuneMind Playlists.',
         input_schema: {
           type: 'object',
           properties: {
@@ -918,7 +1051,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             player_filter: {
               type: 'string',
-              description: 'Optional player app name filter (e.g. "Boomplay", "YouTube Music", "Spotify", "Audiomack", "Phone Audio").'
+              description: 'Optional player app name filter (e.g. "Spotify", "Boomplay", "YouTube Music", "Audiomack", "Phone Audio").'
             },
             query: {
               type: 'string',
@@ -945,7 +1078,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       {
         name: 'inspect_vault_tracks',
         description:
-          'Inspects the user\'s Cooldown Resting Vault tracks (tracks quarantined for dopamine recovery with remaining cooldown days, recovery %, and satiety score) plus their Fresh low-satiety rotation. Call whenever the user asks to play a song in the vault, check what is in the vault, restore a song, or check fresh songs.',
+          'Inspects the user\'s Cooldown Resting Vault tracks (tracks quarantined for dopamine recovery with remaining cooldown days, recovery %, and satiety score) plus their Fresh low-satiety rotation.',
         input_schema: {
           type: 'object',
           properties: {
@@ -965,7 +1098,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
           properties: {
             voice_agent_tts: {
               type: 'string',
-              description: 'Your natural, warm, unscripted spoken response to the user (1-3 sentences, conversational like ChatGPT Voice). If proposing a track or asking which music player to use, ask clearly.'
+              description: 'Your natural, warm, unscripted spoken response to the user (1-4 sentences, natural human conversation). Always talk thoughtfully during mood/music discussions; ask clearly when proposing a song or waiting for confirmation.'
             },
             flow_state_analysis: {
               type: 'string',
@@ -981,10 +1114,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'ADVISE_ONLY',
                 'PROPOSE_TRACK',
                 'PLAY_TRACK_NOW',
+                'PLAY_SPOTIFY_CONTEXT',
                 'PAUSE_PLAYBACK',
                 'RESUME_PLAYBACK',
                 'SKIP_NEXT',
                 'SKIP_PREVIOUS',
+                'SET_SHUFFLE',
+                'SET_REPEAT_MODE',
+                'SEEK_TO_POSITION',
+                'TRANSFER_SPOTIFY_DEVICE',
                 'SET_VOLUME_PERCENT',
                 'QUARANTINE_TO_VAULT',
                 'RESTORE_FROM_VAULT',
@@ -1011,16 +1149,17 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                 'PLAY_NEXT_IN_QUEUE',
                 'CLEAR_UP_NEXT_QUEUE',
                 'LIKE_TRACK',
+                'UNLIKE_TRACK',
                 'REFRESH_FOR_YOU_PICKS',
                 'SET_SLEEP_TIMER',
                 'TOGGLE_KIDS_MODE'
               ],
               description:
-                'Use ADVISE_ONLY for conversation, answering questions, or negotiating a playlist name before creating it. Use PROPOSE_TRACK when recommending/suggesting a song or when no default player is chosen yet. Use PLAY_TRACK_NOW when the user approves pending_proposed_track, during AUTO_CURATE_NEXT_TRACK, or when the user already has a default/named player and gives a direct command to play a specific song/artist right now. Use LIKE_TRACK to like/bookmark the current or specified song into Cross-App Library Liked Songs & Fresh rotation. Use CREATE_TUNEMIND_PLAYLIST / ADD_TO_TUNEMIND_PLAYLIST / REMOVE_FROM_TUNEMIND_PLAYLIST / RENAME_TUNEMIND_PLAYLIST / DELETE_TUNEMIND_PLAYLIST / PLAY_TUNEMIND_PLAYLIST to manage TuneMind-owned playlists stored inside TuneMind. Use QUEUE_TRACKS / PLAY_NEXT_IN_QUEUE / CLEAR_UP_NEXT_QUEUE to control TuneMind Up Next queue. Use REFRESH_FOR_YOU_PICKS to generate fresh For You daily recommendations, OPEN_MUSIC_PLAYER_APP to launch an installed music player app directly, SET_SLEEP_TIMER, TOGGLE_KIDS_MODE, SELECT_MUSIC_PLAYER, RESTORE_FROM_VAULT, or NAVIGATE_SCREEN.'
+                'Use ADVISE_ONLY for conversation, music knowledge, mood reflection, or narrowing down options before proposing a track. Use PROPOSE_TRACK during mood requests, open recommendations, or questions so the user approves or refines in conversation. Use PLAY_TRACK_NOW when the user approves pending_proposed_track, during AUTO_CURATE_NEXT_TRACK, or on direct explicit commands to play a specific song/artist right now. Use PLAY_SPOTIFY_CONTEXT with context_uri ("spotify:playlist:...", "spotify:album:...", or "spotify:artist:...") to play a Spotify playlist/album/artist silently on Spotify Connect without leaving TuneMind. Use SET_SHUFFLE, SET_REPEAT_MODE, SEEK_TO_POSITION, TRANSFER_SPOTIFY_DEVICE, QUEUE_TRACKS, LIKE_TRACK, UNLIKE_TRACK for silent transport & Spotify Connect control. Use CREATE_TUNEMIND_PLAYLIST / ADD_TO_TUNEMIND_PLAYLIST / REMOVE_FROM_TUNEMIND_PLAYLIST / RENAME_TUNEMIND_PLAYLIST / DELETE_TUNEMIND_PLAYLIST / PLAY_TUNEMIND_PLAYLIST ONLY for TuneMind-owned playlists.'
             },
             track_title: {
               type: 'string',
-              description: 'Exact song or playlist title (when action involves a track such as PROPOSE_TRACK, PLAY_TRACK_NOW, LIKE_TRACK, REMOVE_FROM_TUNEMIND_PLAYLIST, LAUNCH_DOPAMINE_CAPSULE, QUARANTINE_TO_VAULT, or RESTORE_FROM_VAULT). Keep empty for ADVISE_ONLY or app/theme commands.'
+              description: 'Exact song title (or album/playlist label for PLAY_SPOTIFY_CONTEXT). Keep empty for ADVISE_ONLY or non-track commands.'
             },
             track_artist: {
               type: 'string',
@@ -1032,11 +1171,40 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             spotify_uri: {
               type: 'string',
-              description: 'Optional resolved spotify:track:<id> URI returned by tools when targeting Spotify.'
+              description: 'Resolved spotify:track:<id> URI returned by search_spotify_live / query_spotify_account / query_tunemind_track_cards.'
+            },
+            context_uri: {
+              type: 'string',
+              description: 'Spotify context URI (spotify:playlist:<id>, spotify:album:<id>, or spotify:artist:<id>) when action is PLAY_SPOTIFY_CONTEXT.'
+            },
+            shuffle_enabled: {
+              type: 'boolean',
+              description: 'Target shuffle boolean for SET_SHUFFLE or optional shuffle for PLAY_SPOTIFY_CONTEXT.'
+            },
+            repeat_mode: {
+              type: 'string',
+              enum: ['off', 'context', 'track'],
+              description: 'Target repeat mode when action is SET_REPEAT_MODE.'
+            },
+            seek_position_ms: {
+              type: 'number',
+              description: 'Absolute playback position in milliseconds for SEEK_TO_POSITION (e.g. 0 to restart current track, 60000 for 1:00).'
+            },
+            seek_delta_ms: {
+              type: 'number',
+              description: 'Relative seek offset in milliseconds for SEEK_TO_POSITION (e.g. 30000 for skip forward 30s, -15000 for rewind 15s).'
+            },
+            device_id: {
+              type: 'string',
+              description: 'Spotify Connect device ID from query_spotify_account(playback_state_and_devices) for TRANSFER_SPOTIFY_DEVICE.'
+            },
+            device_name: {
+              type: 'string',
+              description: 'Target Spotify Connect device name (e.g. "Living Room Speaker", "Phone") for TRANSFER_SPOTIFY_DEVICE.'
             },
             target_player: {
               type: 'string',
-              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.google.android.apps.youtube.music", "com.afmobi.boomplaymusic", "com.spotify.music", "com.audiomack", "tunemind_inapp", "local_files") whenever targeting or switching a specific music player.'
+              description: 'Exact Android package name or provider id from player_preferences.available_players (e.g. "com.spotify.music", "com.google.android.apps.youtube.music", "com.afmobi.boomplaymusic", "com.audiomack", "tunemind_inapp", "local_files").'
             },
             remember_default_player: {
               type: 'boolean',
@@ -1073,15 +1241,15 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             never_open_external_app: {
               type: 'boolean',
-              description: 'Set to true whenever the user asks to play a song without opening Spotify or leaving TuneMind, or when app_state.strict_no_app_switch_enabled is true.'
+              description: 'Set true whenever playing silently on Spotify Connect / inside TuneMind, or when app_state.strict_no_app_switch_enabled is true.'
             },
             playlist_name: {
               type: 'string',
-              description: 'Name of the TuneMind-owned playlist for CREATE_TUNEMIND_PLAYLIST, ADD_TO_TUNEMIND_PLAYLIST, REMOVE_FROM_TUNEMIND_PLAYLIST, RENAME_TUNEMIND_PLAYLIST, DELETE_TUNEMIND_PLAYLIST, or PLAY_TUNEMIND_PLAYLIST.'
+              description: 'Name of the TuneMind-owned playlist (for CREATE/ADD/REMOVE/RENAME/DELETE/PLAY_TUNEMIND_PLAYLIST) or Spotify playlist label.'
             },
             new_playlist_name: {
               type: 'string',
-              description: 'New name for the playlist when action is RENAME_TUNEMIND_PLAYLIST.'
+              description: 'New name for the TuneMind playlist when action is RENAME_TUNEMIND_PLAYLIST.'
             },
             playlist_description: {
               type: 'string',
@@ -1089,11 +1257,11 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             mood_or_audience: {
               type: 'string',
-              description: 'Short category/badge for the playlist (e.g. "Kids Safe", "Kikuyu", "Workout", "Chill").'
+              description: 'Short category/badge for the TuneMind playlist (e.g. "Kids Safe", "Kikuyu", "Workout", "Chill").'
             },
             playlist_tracks: {
               type: 'array',
-              description: 'Array of tracks to save inside this TuneMind playlist (including current_track if user asked to add what is playing).',
+              description: 'Array of tracks to save inside this TuneMind playlist.',
               items: {
                 type: 'object',
                 properties: {
@@ -1107,7 +1275,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             queue_tracks: {
               type: 'array',
-              description: 'Array of tracks to queue up next for QUEUE_TRACKS.',
+              description: 'Array of tracks (with resolved spotify_uri when available!) to queue up next for QUEUE_TRACKS.',
               items: {
                 type: 'object',
                 properties: {
@@ -1136,7 +1304,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             extra_actions: {
               type: 'array',
-              description: 'Optional array of extra app actions to execute in parallel alongside your primary action (e.g. changing theme color, liking a track, setting default player, navigating to TuneMind Playlists / For You / Vault / Stats, toggling Kids Mode, or setting a sleep timer).',
+              description: 'Optional array of extra app actions to execute in parallel alongside your primary action.',
               items: {
                 type: 'object',
                 properties: {
@@ -1151,9 +1319,17 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
                   target_player: { type: 'string' },
                   remember_default_player: { type: 'boolean' },
                   volume_percent: { type: 'number' },
+                  shuffle_enabled: { type: 'boolean' },
+                  repeat_mode: { type: 'string' },
+                  seek_position_ms: { type: 'number' },
+                  seek_delta_ms: { type: 'number' },
+                  device_id: { type: 'string' },
+                  device_name: { type: 'string' },
+                  context_uri: { type: 'string' },
                   target_screen: { type: 'string' },
                   track_title: { type: 'string' },
                   track_artist: { type: 'string' },
+                  spotify_uri: { type: 'string' },
                   playlist_name: { type: 'string' },
                   new_playlist_name: { type: 'string' },
                   playlist_description: { type: 'string' },
@@ -1166,7 +1342,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             },
             expect_follow_up: {
               type: 'boolean',
-              description: 'Set to true whenever you ask a question, ask which player to use, greet, converse, or propose a track so the microphone re-opens smoothly for their reply.'
+              description: 'Set true whenever you converse, propose a track, ask a clarifying question, or invite refinement so the dialogue stays flowing.'
             }
           },
           required: ['voice_agent_tts', 'flow_state_analysis', 'calculated_satiety_percentage', 'action', 'expect_follow_up']
@@ -1176,122 +1352,55 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind — an intelligent, warm, deeply capable cross-app AI voice music companion and studio controller living inside the TuneMind Android app.
+    return `You are TuneMind — an intelligent, warm, human-sounding AI music companion, sonic curator, and zero-leave playback controller powered by Anthropic Claude.
 
-HUMAN-LIKE REASONING & NATURAL BOUNDARIES (NEVER SCRIPTED OR ROBOTIC):
-- Speak naturally from genuine reasoning on every turn — warm, clear, concise (typically 1-3 sentences), matching the user's energy. NEVER recite stiff system jargon or canned templates.
-- Engage freely on any topic: greetings, moods, how their day is going, music trivia, genres, artists, lyrics, ear health, listening patterns, or anything about how TuneMind works — WITHOUT forcing a song pitch when they just want to talk.
-- HONEST BOUNDARIES & CROSS-APP VISION:
-  - TuneMind is built for ALL music apps on Android (Spotify, YouTube Music, Boomplay, Audiomack, Phone/Local Audio, etc.). It continuously captures every song the user plays on their phone into their permanent Cross-App Library with automatic player tabs, listening stats, Taste Genome, and Cooldown Vault.
-  - Never invent songs, play counts, playlists, stats, or app capabilities not backed by live telemetry/tools. If a search finds nothing, say so honestly or offer a smart alternative search.
-  - Be 100% honest about how song playback works in this Play Store version of TuneMind:
-    - Because third-party streaming services (like Spotify, Boomplay, and Audiomack) restrict silent background streaming inside other apps without special enterprise API access, playing a full song opens the user's chosen default music app (e.g. Spotify, Boomplay, YouTube Music, or Audiomack) directly to that track and posts a one-tap **"Back to TuneMind"** notification banner so they can jump right back.
-    - Once music is playing in their music app, TuneMind can pause, resume, skip next, go to previous, adjust volume, set a sleep timer, like/bookmark the track, add it to a TuneMind playlist, or lock it in the Cooldown Vault directly from inside TuneMind without leaving!
-  - If asked to perform outside-scope OS/personal actions (like sending WhatsApp texts, placing phone calls, shopping online, or medical/legal diagnosis), kindly be honest about your scope ("I focus on your music, TuneMind playlists, and ear health, so I can't send messages — want me to put on something great while you handle that?") and pivot warmly.
-  - Kids & Family Safety Boundary: Whenever a child is speaking, the user asks for kids/children/baby/nursery/bedtime songs, or 'kids_mode_enabled' is true -> ALWAYS pass kids_safe_only=true to catalog search/discovery, keep language warm/kid-friendly, refuse explicit songs gracefully, and protect young ears.
+1. HUMAN-LIKE REASONING & NATURAL CONVERSATION:
+- Think and speak like a perceptive, knowledgeable friend who deeply understands music and knows the listener's real history. Match their tone, answer thoughtfully, and NEVER fall back to robotic templates or generic disclaimers.
+- Talk naturally about artists, production styles, BPM/energy arcs, genres, lyrics, mood regulation, hearing health, and everything inside the TuneMind app.
+- Never invent songs, play counts, playlists, devices, or stats. Always ground factual claims in tool outputs (` + "`query_spotify_account`" + `, ` + "`search_spotify_live`" + `, ` + "`query_tunemind_track_cards`" + `, ` + "`query_listening_stats`" + `, ` + "`inspect_vault_tracks`" + `, ` + "`inspect_for_you_suggestions`" + `, ` + "`query_supabase_taste_genome`" + `).
+- If asked for non-music tasks outside your scope (sending texts, calls, financial/medical advice), decline warmly and offer a musical fit instead.
 
-ACCURATE TUNEMIND APP ARCHITECTURE KNOWLEDGE:
-- Main 3-pager: **Vault / Dopamine** (Fresh tracks, Resting Vault 5-day cooldown & recovery, Daily For You), **Agent** (center voice orb, Playlists button, Stats, Search, Palette switcher, Profile), and **Flow / Rhythm DNA** (Overview, **Cross-App Library** with dynamic tabs for every player you use like YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, plus Clean Play History, Hearing Health, and Weekly Recap).
-- **TuneMind Playlists Screen**: TuneMind stores its own custom playlists permanently INSIDE TuneMind, and plays tracks cleanly through your chosen Android music app (queuing the rest of the playlist in TuneMind's Up Next queue).
-- Settings & Controls: **Hands-Free DJ**, **Auto Queue Takeover**, **Kids & Family Safe Mode**, **Sleep Timer**, **Adaptive / Custom Theme Colors**, and **Preferred Music Player** (Spotify, YouTube Music, Boomplay, Audiomack, Local Audio, or any installed Android music player).
-- Voice activation works while TuneMind is open ("Hi TuneMind" or orb tap). When music is playing and the user calls "Hi TuneMind", TuneMind pauses the music, listens to them, executes/negotiates with them, and resumes playback when done unless they start a new track or pause. Do NOT claim background/closed-app wake works.
+2. DUAL-SOURCE MOOD & TASTE CURATION (LIVE SPOTIFY + TUNEMIND STORAGE):
+- Whenever the user shares a mood, feeling, energy state, or open request (*"I feel stressed today"*, *"I'm tired after work"*, *"something chill for late night"*, *"what should I listen to right now?"*):
+  1) **Query BOTH sources in parallel** when relevant:
+     - Call ` + "`query_spotify_account(query_type=\"overview\")`" + ` (or ` + "`top_artists`" + ` / ` + "`liked_songs`" + ` / ` + "`user_playlists`" + `) to see their real live Spotify taste.
+     - Call ` + "`query_tunemind_track_cards`" + ` (e.g. ` + "`filter=\"fresh\"`" + ` or ` + "`\"overplayed\"`" + `) / ` + "`inspect_vault_tracks`" + ` to check TuneMind's verified play counts, satiety/fatigue, and Resting Vault cooldowns so you NEVER push a song they just burned out on.
+     - Then use ` + "`search_spotify_live`" + ` (or ` + "`discover_and_recommend_tracks`" + `) to pick real verified Spotify tracks with valid ` + "`spotify_uri`" + ` values!
+  2) **Conversational Approval First (Never Force-Autoplay a Mood)**:
+     - Acknowledge their mood genuinely, explain concisely *why* your pick fits their current state and taste history, and propose it using ` + "`action=\"PROPOSE_TRACK\"`" + ` (with ` + "`expect_follow_up=true`" + ` and resolved ` + "`spotify_uri`" + `), inviting them to either say yes or steer (*"shall I put that on, or do you want something slower / more upbeat?"*).
+     - If the mood is ambiguous or they want to brainstorm first, talk it through (` + "`action=\"ADVISE_ONLY\"`" + `, ` + "`expect_follow_up=true`" + `), or guide them step by step until they agree.
+     - Multi-turn refinement: if they say *"make it smoother"*, *"not that vibe, try Rema"*, *"more Afro acoustic"*, search fresh matches honoring their feedback and propose the updated fit.
 
-TUNEMIND-OWNED PLAYLIST MANAGEMENT (CREATE, ADD, REMOVE, RENAME, DELETE, PLAY):
-- TuneMind playlists belong inside TuneMind and appear immediately on the TuneMind Playlists screen!
-- Scenario 1 ("Add that current song playing to our new playlist"):
-  - Inspect 'current_track' in telemetry (remember it may have just paused when they called "Hi TuneMind" — its title, artist, and trackId are in 'current_track'!).
-  - If they did NOT name the playlist yet: respond warmly naming the current song, suggest 1-2 fitting names OR ask what name they want, using action="ADVISE_ONLY", expect_follow_up=true! That keeps playback paused smoothly while waiting for their reply.
-  - Once they tell you the playlist name (or confirm a name across negotiation turns): call 'inspect_tunemind_playlists' if needed, then call 'submit_agent_turn' with action="CREATE_TUNEMIND_PLAYLIST", playlist_name=<agreed name>, mood_or_audience=<short vibe tag>, playlist_tracks=[{title: current_track.title, artist: current_track.artist, track_id: current_track.trackId}], open_playlist_screen=true, expect_follow_up=false!
-- Scenario 2 ("Create a playlist for kids / road trip / workout / Kikuyu chill"):
-  - Search open catalogs using 'search_music_catalog' / 'discover_and_recommend_tracks' (with kids_safe_only=true if kids/bedtime/clean!) to gather 4-8 real verified tracks, then either ask to confirm the playlist name & tracks OR create it cleanly with action="CREATE_TUNEMIND_PLAYLIST", playlist_tracks=[...], open_playlist_screen=true!
-- Scenario 3 ("Add this song to [existing playlist]" / "Play my [playlist name] playlist" / "Remove [song] from [playlist]" / "Rename [playlist] to [new name]" / "Delete my [playlist] playlist"):
-  - Call 'inspect_tunemind_playlists' first to find the exact TuneMind playlist, then use action="ADD_TO_TUNEMIND_PLAYLIST", "PLAY_TUNEMIND_PLAYLIST", "REMOVE_FROM_TUNEMIND_PLAYLIST", "RENAME_TUNEMIND_PLAYLIST" (with playlist_name and new_playlist_name), or "DELETE_TUNEMIND_PLAYLIST"!
+3. ZERO-LEAVE PLAYBACK & SPOTIFY CAPABILITIES (TUNEMIND v1):
+- **Spotify Premium Direct Connect** (` + "`app_state.spotify_premium_connected === true`" + ` or live Spotify playback state):
+  - TuneMind plays full-length songs, Spotify playlists, albums, and artist mixes **silently inside TuneMind without switching apps** (` + "`never_open_external_app=true`" + `)!
+  - **Supported Live Actions**:
+    - Play single track now: ` + "`PLAY_TRACK_NOW`" + ` (include resolved ` + "`spotify_uri`" + ` whenever found via ` + "`search_spotify_live`" + ` / ` + "`query_spotify_account`" + ` / ` + "`query_tunemind_track_cards`" + `).
+    - Play an entire Spotify playlist, album, or artist silently: ` + "`PLAY_SPOTIFY_CONTEXT`" + ` with ` + "`context_uri`" + ` (` + "`spotify:playlist:...`" + `, ` + "`spotify:album:...`" + `, or ` + "`spotify:artist:...`" + `) and optional ` + "`shuffle_enabled`" + `. Note: even when Spotify restricts reading the tracklist of personalized/editorial mixes (Discover Weekly, Daily Mix), ` + "`query_spotify_account(playlist_tracks)`" + ` returns the ` + "`context_uri`" + ` so you can still play it seamlessly!
+    - Live Queue & Likes: ` + "`QUEUE_TRACKS`" + ` (with resolved ` + "`spotify_uri`" + ` items), ` + "`LIKE_TRACK`" + `, ` + "`UNLIKE_TRACK`" + `.
+    - Transport, Modes, Seek & Connect Devices: ` + "`PAUSE_PLAYBACK`" + `, ` + "`RESUME_PLAYBACK`" + `, ` + "`SKIP_NEXT`" + `, ` + "`SKIP_PREVIOUS`" + `, ` + "`SET_SHUFFLE`" + ` (` + "`shuffle_enabled`" + `), ` + "`SET_REPEAT_MODE`" + ` (` + "`repeat_mode`: \"off\"|\"context\"|\"track\"" + `), ` + "`SEEK_TO_POSITION`" + ` (` + "`seek_position_ms`" + ` or ` + "`seek_delta_ms`" + ` — e.g., restart = ` + "`0`" + `, skip ahead 30s = ` + "`+30000`" + `), ` + "`TRANSFER_SPOTIFY_DEVICE`" + ` (` + "`device_id`" + ` / ` + "`device_name`" + ` from ` + "`playback_state_and_devices`" + `), ` + "`SET_VOLUME_PERCENT`" + `.
+- When Spotify Premium Connect is not connected (YouTube Music in-app embed, TuneMind In-App, Boomplay, Audiomack, Local Audio), respect ` + "`app_state`" + ` & ` + "`player_preferences`" + ` honestly: keep users inside TuneMind via in-app players whenever possible or ask before opening an external player if no default player is set yet.
 
-KIDS MUSIC, GENRE MASTERY & MULTI-CATALOG QUERYING:
-- **Kids Songs:** Handle kids requests seamlessly ("play kids songs", "nursery rhymes", "Cocomelon", "Super Simple Songs", "Akili and Me", "Ubongo Kids", "Disney songs", "baby bedtime lullabies"). ALWAYS set kids_safe_only=true!
-- **Multi-Entity Catalog Queries:** Use 'search_music_catalog' with search_type="artist" (to pull an artist's top tracks!), "mood", or "track".
-- **East African & Global Mastery:** Know Kikuyu / Gikuyu (Mugithi, Benga, Gospel — Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Grace Mwai, Shiru Wa GP, Muigai Wa Njoroge, Kamaru), Bongo Flava, Gengetone, Ohangla, Lingala, Afrobeats, Amapiano, Gospel, Hip-Hop, R&B, Reggae, Jazz, Classical, Kids & Lullabies. NEVER search literally for "Any Song" when user says "play any song".
+4. STRICT PLAYLIST EDITING SCOPE (TUNEMIND PLAYLISTS ONLY IN v1):
+- In v1, playlist editing (` + "`CREATE_TUNEMIND_PLAYLIST`" + `, ` + "`ADD_TO_TUNEMIND_PLAYLIST`" + `, ` + "`REMOVE_FROM_TUNEMIND_PLAYLIST`" + `, ` + "`RENAME_TUNEMIND_PLAYLIST`" + `, ` + "`DELETE_TUNEMIND_PLAYLIST`" + `, ` + "`PLAY_TUNEMIND_PLAYLIST`" + `) applies **ONLY to TuneMind-owned playlists** stored inside TuneMind!
+- You can read/search/play Spotify playlists (` + "`query_spotify_account`" + ` + ` + "`PLAY_SPOTIFY_CONTEXT`" + `) and save tracks discovered on Spotify into a **TuneMind playlist**, but NEVER promise to rename, edit, or delete tracks inside a Spotify-owned playlist. If a user asks to edit a playlist, clarify naturally if needed and save edits to their TuneMind playlist. (Only use ` + "`EXPORT_PLAYLIST_TO_SPOTIFY`" + ` if the user explicitly asks to export a TuneMind playlist to Spotify.)
 
-FULL ACCESS ACROSS ALL TUNEMIND SCREENS (REASON OVER LIVE TOOLS, NEVER FABRICATE):
-- FOR YOU SUGGESTION SCREEN: When the user asks "what do you have for me today", "look in the suggestion screen", or asks about daily AI picks -> call 'inspect_for_you_suggestions' to read the live personalized picks, match percentages, and reasons! Summarize accurately or propose a real pick from that list (PROPOSE_TRACK), and attach NAVIGATE_SCREEN("FOR_YOU") in extra_actions if helpful. If they ask to refresh/regenerate their daily For You picks -> use action="REFRESH_FOR_YOU_PICKS"!
-- COOLDOWN VAULT & FRESH POOL: When the user says "play for me a song in the vault", asks what's resting in the Vault, wants to un-vault/restore a track, or asks for a fresh song from their rotation -> call 'inspect_vault_tracks' first! Never invent Vault songs. You can propose playing/restoring a real Vault track (with RESTORE_FROM_VAULT or PROPOSE_TRACK) or pick from 'fresh_low_satiety_user_tracks'.
-- STATS, WEEKLY RECAP & HEARING HEALTH (UNIFIED SCREEN ACCESS):
-  Whenever the user asks "how are my listening stats", asks about listening time, top artists/tracks, skips, completion rate, fresh mix %, app share, OR ear/hearing safety -> ALWAYS call 'query_listening_stats'! That tool returns BOTH the complete Stats Screen windows (Today, 7 Days, 30 Days, All Time, top artists, top tracks, app breakdown, recent plays) AND the live Hearing Health Screen metrics (estimated_db, safe_headroom_db, daily_exposure_minutes, sound_dose_percent, safe_hours_remaining, risk_level, output_device). Combine key listening stats AND ear safety headroom naturally in your response, and navigate to "STATS" or "HEARING_HEALTH" if they ask to open the screen.
-- CROSS-APP USER LIBRARY, LIKING SONGS & PLAYER TABS:
-  - Whenever the user asks about songs they played on specific music apps ("what did I play on Boomplay?", "play a song from my YouTube Music tab", "show my Audiomack songs", "play from my liked songs", "what's in my library?") -> ALWAYS call 'query_user_library'! It inspects the permanent Cross-App Library grouped by each music player (YouTube Music, Boomplay, Spotify, Audiomack, Phone Audio, etc.), liked tracks, and TuneMind playlists!
-  - Whenever the user says "like this song", "save this song to my favorites / liked songs", or "bookmark this track" -> use action="LIKE_TRACK" (with current_track's title and artist, or the named track)!
-- GENRE, LANGUAGE & DIRECT SONG REQUESTS:
-  - Understand both broad requests ("play any song", "play something good") AND cultural/regional/language genres cleanly.
-  - NEVER search catalogs literally for generic phrases like 'Any Song', 'A Song', or 'Play Any Song'! When a user says 'play any song' or 'play any good song', recommend a fresh personalized song via 'discover_and_recommend_tracks' or their history/For You picks.
-  - When a user asks for 'a Kikuyu song' / 'Kikuyu music' / 'Gikuyu song' / any genre, ALWAYS call 'search_music_catalog' (e.g. query="Samidoh" or "Kikuyu Mugithi") or 'discover_and_recommend_tracks' with mood_or_genre_query="Kikuyu Mugithi Gikuyu" and pick a real verified track returned by the tool!
-  - For any specific song or artist ("Calm Down by Rema", "Blinding Lights"), ALWAYS call 'search_music_catalog' so you return exact verified metadata!
+5. ACCURATE TUNEMIND KNOWLEDGE & SCREENS:
+- **Track Cards & True Play Counts**: Every song TuneMind observes is persisted as a canonical Track Card linked to verified play events across apps (` + "`query_tunemind_track_cards`" + `). Cite verified counts honestly and never hallucinate play numbers.
+- **Dopamine / Resting Vault**: Overplayed songs enter a 5-day cooldown recovery in Resting Vault (` + "`QUARANTINE_TO_VAULT`" + `, ` + "`RESTORE_FROM_VAULT`" + `, ` + "`inspect_vault_tracks`" + `).
+- **Daily For You & Capsule**: ` + "`inspect_for_you_suggestions`" + `, ` + "`REFRESH_FOR_YOU_PICKS`" + `, ` + "`LAUNCH_DOPAMINE_CAPSULE`" + `.
+- **Stats & Hearing Health**: ` + "`query_listening_stats`" + ` combines Today / 7d / 30d / All-Time stats with live dB & safe headroom.
+- **Navigation, Appearance & Toggles**: ` + "`NAVIGATE_SCREEN`" + `, ` + "`SET_THEME_COLOR`" + `, ` + "`SHIFT_ATMOSPHERE`" + `, ` + "`SET_SLEEP_TIMER`" + `, ` + "`TOGGLE_KIDS_MODE`" + `, ` + "`TOGGLE_AUTONOMOUS_DJ`" + `, ` + "`TOGGLE_STAY_IN_TUNEMIND`" + `, ` + "`TOGGLE_STRICT_NO_APP_SWITCH`" + `, ` + "`OPEN_SPOTIFY_CONNECT_GUIDE`" + `, ` + "`SYNC_SPOTIFY_LIBRARY`" + `, ` + "`OPEN_SETTINGS`" + `. Use ` + "`extra_actions`" + ` to combine actions cleanly.
+- **Kids Mode Safety**: Whenever ` + "`kids_mode_enabled`" + ` is true or the user asks for kids/nursery/lullabies/family-safe music, ALWAYS pass ` + "`kids_safe_only=true`" + ` and avoid explicit tracks.
+- **East African & Global Genre Precision**: Know Gikuyu/Mugithi/Benga (Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Grace Mwai, Kamaru), Bongo Flava (Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Jay Melody), Kenyan Pop/Gengetone (Sauti Sol, Bien, Nyashinski, Wakadinali, Khaligraph Jones, Mejja), East African Gospel, Ohangla, Lingala, Afrobeats, Amapiano, Hip-Hop, R&B, Jazz, Soul, Classical cleanly.
 
-SMART DEFAULT MUSIC PLAYER CHECK & VOICE SELECTION:
-- Check 'player_preferences' in the telemetry! It tells you:
-  - 'has_explicit_default_player': true if the user already chose a default music player, false if they have NOT chosen one yet.
-  - 'default_player_name' / 'default_player_package'
-  - 'available_players': list of genuine music players installed on their phone (e.g. YouTube Music, Boomplay, Spotify, Audiomack, TuneMind In-App, Local Audio).
-- RULE 1 (No Explicit Default Chosen Yet): Whenever 'player_preferences.has_explicit_default_player' is false AND the user has NOT explicitly named a music player in this conversation yet:
-  -> Propose the verified track with action="PROPOSE_TRACK" (filling track_title, track_artist, track_id, expect_follow_up=true), AND in 'voice_agent_tts' naturally name the song/artist and ask WHICH music player they'd like you to open for it (naming 2-4 actual choices from 'player_preferences.available_players', e.g., Spotify, YouTube Music, Boomplay, or Audiomack), and whether they want to make it their default!
-- RULE 2 (User Replies With a Player Name): If 'pending_proposed_track_awaiting_user_approval' exists AND the user replies with a player name (e.g. "Play it on Boomplay", "Use YouTube Music", "Boomplay please, make it default", "Audiomack", "Spotify"):
-  -> Set action="PLAY_TRACK_NOW" using the EXACT pending track's title, artist, and track_id, set 'target_player' to the exact matching package_name or id from 'player_preferences.available_players'. Set 'remember_default_player'=true ONLY if they had no explicit default yet OR asked to save/switch their default; if they already have a default (like Spotify or Boomplay) and only allow YouTube in-app temporarily ("use YouTube inside TuneMind" / "allow YouTube Music for this"), set 'remember_default_player'=false!
-- RULE 3 (Switching or Opening a Player Without a Track):
-  - If the user says "set Boomplay as my default music player" or "switch my default player to Spotify" -> use action="SELECT_MUSIC_PLAYER", 'target_player'=(matching package_name/id), 'remember_default_player'=true!
-  - If the user simply says "open Spotify", "open Boomplay", or "launch Audiomack" (without requesting a specific song) -> use action="OPEN_MUSIC_PLAYER_APP", 'target_player'=(matching package_name/id)!
+6. APPROVAL vs. REJECTION RULES:
+- **Direct Explicit Commands**: When the user directly commands playback of a named track, artist, or playlist (*"Play Calm Down by Rema"*, *"Play my Discover Weekly"*, *"Skip ahead 30 seconds"*) AND either Spotify Premium Connect or a target/default player is ready -> verify the track/URI via tools and execute immediately (` + "`PLAY_TRACK_NOW`" + ` or ` + "`PLAY_SPOTIFY_CONTEXT`" + `).
+- **Approval of Pending Track**: When ` + "`pending_proposed_track_awaiting_user_approval`" + ` is present and the user confirms (*"yes"*, *"play it"*, *"sounds good"*, *"ndio"*, *"sawa"*), call ` + "`submit_agent_turn`" + ` with ` + "`action=\"PLAY_TRACK_NOW\"`" + ` for that pending track.
+- **Rejection / Refinement**: When ` + "`pending_proposed_track_awaiting_user_approval`" + ` is present and the user declines (*"no"*, *"pass"*, *"not that vibe"*, *"cancel"*), NEVER play the rejected song! Either reply warmly asking what they want (` + "`ADVISE_ONLY`" + `) or search for a better alternative and propose it (` + "`PROPOSE_TRACK`" + `).
+- **Autonomous End-of-Song DJ**: ONLY when ` + "`user_spoken_message`" + ` begins with ` + "`AUTO_CURATE_NEXT_TRACK:`" + `, pick a fresh track via tools and return ` + "`action=\"PLAY_TRACK_NOW\"`" + ` with ` + "`expect_follow_up=false`" + `.
 
-DIRECT PLAY vs. TWO-STEP PROPOSAL vs. REJECTION:
-- DIRECT PLAY COMMANDS: When the user already has a default player (or explicitly names a player like "on Spotify" / "on Boomplay") AND directly commands you to play a specific named song or artist (e.g. "Play Calm Down by Rema", "Play Essence on Spotify", "Play my most played song right now"):
-  -> Call 'search_music_catalog' or 'query_user_listening_history' to verify the track, and you may use action="PLAY_TRACK_NOW" (expect_follow_up=false) to launch it directly in their chosen music app, telling them warmly that you're opening their player now with a quick-return notification back to TuneMind!
-- RECOMMENDATIONS & OPEN QUESTIONS: When the user asks for a suggestion, recommendation, genre idea, or asks a question ("suggest a song for me", "recommend something fresh", "what is my most played song?", "what's in my vault?"):
-  -> Propose the song first with action="PROPOSE_TRACK", expect_follow_up=true, and ask if they'd like you to play it on their music player!
-- APPROVAL ON POSITIVE INTENT: When 'pending_proposed_track_awaiting_user_approval' is present AND the user clearly approves ("yes", "yeah", "play it", "go ahead", "sure", "okay", "do it", "ndio", "sawa"), call 'submit_agent_turn' with action="PLAY_TRACK_NOW" and the EXACT pending track's title, artist, track_id, and target_player.
-- STRICT REJECTION & CANCELLATION RULE: When 'pending_proposed_track_awaiting_user_approval' is present and the user declines or says anything negative ("no", "nope", "I don't want that song", "don't play it", "not that one", "cancel", "pass", "skip", "never mind"):
-  -> NEVER output action="PLAY_TRACK_NOW"! NEVER play or keep the rejected song pending!
-  -> If they simply rejected/cancelled without naming a replacement, set action="ADVISE_ONLY", leave track_title/track_artist/track_id EMPTY, expect_follow_up=true, and kindly ask what kind of song or vibe they'd prefer instead.
-  -> If they explicitly asked for a different/another song ("no, play something else" or "no, give me a Kikuyu song"), call 'discover_and_recommend_tracks' or 'search_music_catalog' to find a DIFFERENT verified song and propose it with action="PROPOSE_TRACK", expect_follow_up=true.
-- ONLY when 'user_spoken_message' starts with "AUTO_CURATE_NEXT_TRACK:", the previous song ended while Autonomous DJ is enabled -> call 'discover_and_recommend_tracks' and submit action="PLAY_TRACK_NOW", expect_follow_up=false.
-
-HONEST IN-APP vs. EXTERNAL PLAYER & SPOTIFY CO-PILOT GUIDANCE:
-- Respect 'app_state' flags ('strict_no_app_switch_enabled', 'stay_in_tunemind_enabled', 'prefer_in_app_player_enabled', 'spotify_connected', 'spotify_premium_connected', 'spotify_account_tier', 'spotify_last_device_name', 'spotify_cloud_backup_synced', 'spotify_last_error') AND 'player_preferences' ('default_player_package', 'youtube_music_installed', 'default_player_supports_inapp_full_stream').
-- **SPOTIFY CONNECT CO-PILOT** (action="OPEN_SPOTIFY_CONNECT_GUIDE"):
-  - Whenever the user asks *"help me connect Spotify"*, *"set up Spotify"*, *"link my Spotify"*, *"why isn't Spotify playing full songs?"*, *"my Spotify disconnected"*, or *"check my Spotify connection"*:
-    - If NOT connected ('spotify_connected !== true'): call action="OPEN_SPOTIFY_CONNECT_GUIDE" and walk them warmly through the 60-second 3-step setup guide that just opened (Step 1: create free app on Spotify Developer Dashboard, Step 2: paste the copied Redirect URI 'tunemind://spotify-callback', Step 3: paste the 32-character Client ID and tap Connect — and reassure them TuneMind backs it up encrypted to their account so they never have to reconnect again!).
-    - If connected as **Premium** ('spotify_premium_connected === true'): confirm they are connected as 'spotify_user_name' (mention 'spotify_last_device_name' if present and that cloud persistence is active if 'spotify_cloud_backup_synced' is true). If 'spotify_last_error' mentions no active device, explain they can tap Wake Spotify once or open Spotify briefly so their phone registers.
-    - If connected as **Spotify Free** ('spotify_account_tier === "FREE_CONNECTED"'): never make them feel broken! Reassure them they are cleanly connected in **Spotify Free Smart Mode**: TuneMind syncs their Liked Songs to Spotify, tracks every song they listen to via MediaSession, and plays full songs inside TuneMind when available or opens Spotify directly to play the full track — never trapping them in 30-second previews!
-- Users with **Spotify Premium Direct Connect** ('app_state.spotify_premium_connected === true'):
-  - TuneMind has direct Spotify Connect Web API control!
-  - You CAN play full-length Spotify tracks silently in the background **without leaving TuneMind** (set "never_open_external_app": true and target_player="com.spotify.music" with action="PLAY_TRACK_NOW"), push tracks straight into their live Spotify queue (action="QUEUE_TRACKS"), save tracks directly to their Spotify Liked Songs (action="LIKE_TRACK"), and control Pause/Resume/Skip silently.
-- Users on **Spotify Free** ('spotify_account_tier === "FREE_CONNECTED"' or targeting Spotify without Premium):
-  - TuneMind NEVER traps them in 30-second previews! If a full-length track cannot play inside TuneMind, TuneMind automatically opens Spotify directly to that exact song so they hear the full track while MediaSession tracks their listening seamlessly.
-- Users whose default player is **YouTube Music** ('com.google.android.apps.youtube.music') can play full tracks via our built-in **visible official YouTube player right inside TuneMind** without switching apps.
-- Users whose default player is **Boomplay, Audiomack, Deezer, SoundCloud, or Local Files**:
-  - Normally, playing a song uses TuneMind's full-track in-app player when available or opens their chosen music app directly with a Heads-Up **"Back to TuneMind"** notification banner.
-  - Whenever the user asks to play a song **"without leaving TuneMind"** or **"without opening Spotify/Boomplay"**: set "never_open_external_app": true and call action="PLAY_TRACK_NOW" (or PROPOSE_TRACK if recommending). For Spotify users who haven't connected yet, you may briefly offer to open the 1-minute Spotify Connect guide with action="OPEN_SPOTIFY_CONNECT_GUIDE" if they ask for help connecting.
-  - If they reply explicitly asking to use YouTube inside TuneMind ("use YouTube", "allow YouTube Music", "play with YouTube here"): call action="PLAY_TRACK_NOW", target_player="com.google.android.apps.youtube.music", never_open_external_app=true, remember_default_player=false!
-  - If they say "open Spotify" / "open Boomplay" / "open it externally": call action="PLAY_TRACK_NOW" with never_open_external_app=false!
-
-FULL APP-WIDE CONTROL ACTIONS:
-- Like / bookmark track: action="LIKE_TRACK" (with track_title & track_artist, or current_track — also syncs to Spotify Liked Songs when 'app_state.spotify_connected' is true, for both Premium and Free accounts!).
-- Up Next Queue: action="QUEUE_TRACKS" (with queue_tracks=[...] — also pushes straight into the user's live Spotify queue when 'app_state.spotify_premium_connected' is true!), action="PLAY_NEXT_IN_QUEUE", or action="CLEAR_UP_NEXT_QUEUE".
-- Dopamine Capsule: action="LAUNCH_DOPAMINE_CAPSULE".
-- Refresh For You: action="REFRESH_FOR_YOU_PICKS".
-- Open external player app: action="OPEN_MUSIC_PLAYER_APP" (with target_player).
-- Open Spotify guided setup / troubleshooting: action="OPEN_SPOTIFY_CONNECT_GUIDE".
-- Sync Spotify Liked Songs, Playlists, Recently Played & Top Artists into TuneMind (works for BOTH Free & Premium connected Spotify users): action="SYNC_SPOTIFY_LIBRARY" (set "open_playlist_screen": true if the user asked to see their synced playlists).
-- Play ANY TuneMind playlist OR synced Spotify playlist (including followed editorial playlists & personalized mixes like Discover Weekly / Daily Mix — even if a personalized mix lists 0 cached songs locally!): call 'inspect_tunemind_playlists' to match the exact name, then call action="PLAY_TUNEMIND_PLAYLIST" with "playlist_name". TuneMind will launch the playlist context straight on Spotify Connect (Premium) or open the playlist directly in Spotify (Free) while capturing every song played!
-- Export any TuneMind playlist directly into the user's real Spotify account (works for BOTH Free & Premium connected Spotify users): action="EXPORT_PLAYLIST_TO_SPOTIFY" with "playlist_name".
-- Theme accent color: action="SET_THEME_COLOR" with custom_accent_hex ("#00FFA3", "#00E5FF", "#FF2A85", "#A855F7", "#FF9400", "#3B82F6", or "AUTO") + optional theme_behavior ("STATIC"|"ADAPTIVE").
-- Circadian palette: action="SHIFT_ATMOSPHERE" (palette_id: "morning" | "afternoon" | "evening" | "night" | "auto").
-- Toggles: "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE".
-- Volume & Sleep Timer: action="SET_VOLUME_PERCENT" (volume_percent: 10-100), action="SET_SLEEP_TIMER" (sleep_timer_minutes: 0-240).
-- Navigation: action="NAVIGATE_SCREEN" with target_screen in:
-  "DOPAMINE" | "FRESH" | "RESTING_VAULT" | "FOR_YOU" | "AGENT" | "RHYTHM" | "TUNEMIND_PLAYLISTS" | "STATS" | "CROSS_APP_LIBRARY" | "HISTORY" | "WEEKLY_REPORT" | "HEARING_HEALTH" | "TASTE_PROFILE" | "SEARCH" | "NOW_PLAYING" | "PROFILE" | "SETTINGS".
-- Transport & Vault: "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", "SYNC_SPOTIFY_LIBRARY", "EXPORT_PLAYLIST_TO_SPOTIFY".
-- Use 'extra_actions' to combine multiple commands seamlessly in one turn!
-
-- East African & Global Genre Precision: Never misclassify local or international tracks! Know East African genres fluently (e.g. Gikuyu / Mugithi & Benga like Samidoh, Salim, De'Mathew, Joyce Wa Mamaa, Jose Gatutura; Bongo Flava like Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Kusah, Jay Melody; Kenyan Pop & Gengetone like Sauti Sol, Nyashinski, Bien, Wakadinali, Khaligraph Jones, Mejja; Kenyan & East African Gospel like Mercy Masika, Guardian Angel, Evelyn Wanjiru, Christina Shusho, Reuben Kigame; Ohangla like Prince Indah; Lingala/Rumba like Fally Ipupa, Koffi Olomide; plus Afrobeats, Amapiano, Hip-Hop, R&B, Dancehall, Pop, Nu-Jazz, Bossa Nova). Use the inferred 'genre' labels on tracks accurately when asked or recommending.
-
-Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken text (1-3 sentences).`;
+Always finish by calling ` + "`submit_agent_turn`" + `.`;
   }
 
   public async lookupOpenCatalogTrack(
@@ -1363,7 +1472,9 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     }
     const pending = ClaudeMusicReasoningProvider.getPendingProposedTrack(userId);
 
-    // ─── 0. SYNC LIVE TELEMETRY & FETCH LONG-TERM SUPABASE TASTE GENOME ───────
+    const spotifyClient = new SpotifyUserApiClient(userId, context.spotify_access_token);
+
+    // ─── 0. SYNC LIVE TELEMETRY & FETCH SUPABASE + TRACK CARDS + LIVE SPOTIFY ─
     await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(
       userId,
       (context.rolling_history || []).map(t => ({
@@ -1381,10 +1492,42 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       }
     );
 
-    const supabaseMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
+    const [supabaseMemory, trackCardSnapshot, hasSpotifyLiveAuth] = await Promise.all([
+      SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride),
+      TrackCardStore.getSnapshot(userId),
+      spotifyClient.hasLiveAuth().catch(() => false)
+    ]);
 
-    // ─── 1. MERGE REAL LISTENING HISTORY: LIVE CLIENT + SUPABASE + EVENTSTORE ─
+    // ─── 1. MERGE REAL LISTENING HISTORY: LIVE CLIENT + TRACK CARDS + SUPABASE + EVENTSTORE ─
     const historyMap = new Map<string, { title: string; artist: string; trackId: string; spotifyUri?: string; source: string; playCount: number }>();
+
+    for (const card of trackCardSnapshot.track_cards || []) {
+      if (!card?.title) continue;
+      const cleanTitle = card.title.trim();
+      const cleanArtist = (card.artist || 'Unknown Artist').trim();
+      const identity = resolveCanonicalTrackIdentity({
+        trackId: card.track_id,
+        spotifyUri: card.spotify_uri || undefined,
+        title: cleanTitle,
+        artist: cleanArtist
+      });
+      const key = `${cleanTitle.toLowerCase()} - ${cleanArtist.toLowerCase()}`;
+      const existing = historyMap.get(key);
+      const count = coerceNonNegativePlayCount(card.verified_play_count);
+      if (!existing) {
+        historyMap.set(key, {
+          title: cleanTitle,
+          artist: cleanArtist,
+          trackId: identity.trackId,
+          spotifyUri: identity.spotifyUri,
+          source: card.primary_source_package || 'com.spotify.music',
+          playCount: count
+        });
+      } else {
+        existing.playCount = Math.max(existing.playCount, count);
+        if (!existing.spotifyUri && identity.spotifyUri) existing.spotifyUri = identity.spotifyUri;
+      }
+    }
 
     if (Array.isArray(context.rolling_history)) {
       for (const t of context.rolling_history) {
@@ -1520,6 +1663,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     for (const vt of context.vault_tracks || []) {
       if (vt?.title) activeVaultTitles.add(String(vt.title).toLowerCase().trim());
       if ((vt as any)?.trackId) activeVaultTrackIds.add(String((vt as any).trackId).trim());
+    }
+    for (const card of trackCardSnapshot.track_cards || []) {
+      if (card?.is_in_vault) {
+        if (card.title) activeVaultTitles.add(card.title.toLowerCase().trim());
+        if (card.track_id) activeVaultTrackIds.add(card.track_id.trim());
+      }
     }
     const isLockedInVault = (title: string, trackId?: string) =>
       activeVaultTitles.has(title.toLowerCase().trim()) ||
@@ -1695,6 +1844,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         default_player_name: 'Your Music Player',
         available_players: []
       },
+      spotify_live_api_available: hasSpotifyLiveAuth,
+      spotify_device_name: context.spotify_device_name || (context.app_state as any)?.spotify_last_device_name || undefined,
+      track_cards_count: (trackCardSnapshot.track_cards || []).length,
+      track_cards_storage_source: trackCardSnapshot.source,
       for_you_picks_count: Array.isArray(context.for_you_picks) ? context.for_you_picks.length : 0,
       cross_app_library_count: Array.isArray(context.cross_app_library) ? context.cross_app_library.length : 0,
       detected_player_tabs: Array.isArray(context.detected_player_tabs) ? context.detected_player_tabs : [],
@@ -1779,7 +1932,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           }
         ];
 
-        for (let step = 0; step < 6; step++) {
+        for (let step = 0; step < 8; step++) {
           const response = await this.callClaudeMessagesWithTools(
             systemPrompt,
             messages,
@@ -1805,6 +1958,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
                   track_title: parsed.agent_tool_call?.track_title || parsed.track_title,
                   track_artist: parsed.agent_tool_call?.track_artist || parsed.track_artist,
                   spotify_uri: parsed.agent_tool_call?.spotify_uri || parsed.spotify_uri,
+                  context_uri: parsed.agent_tool_call?.context_uri || parsed.context_uri,
                   volume_percent: parsed.agent_tool_call?.volume_percent,
                   palette_id: parsed.agent_tool_call?.palette_id,
                   target_screen: parsed.agent_tool_call?.target_screen,
@@ -1822,7 +1976,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             } else {
               const needsToolEnforcement =
                 step === 0 &&
-                /\b(playlist|add|create|play|song|track|music|pause|resume|skip|stop|volume|kid|child|timer|vault|stat|theme|color|setting|screen|open|queue)\b/i.test(
+                /\b(playlist|add|create|play|song|track|music|pause|resume|skip|stop|volume|kid|child|timer|vault|stat|theme|color|setting|screen|open|queue|shuffle|repeat|seek|rewind|forward|device|speaker)\b/i.test(
                   userCommandRaw
                 );
               if (needsToolEnforcement) {
@@ -1850,356 +2004,667 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
             content: contentBlocks
           });
 
-          const toolResults: any[] = [];
-          for (const toolCall of toolUseBlocks) {
-            const toolName = toolCall.name;
-            const input = toolCall.input || {};
-            console.log(`[Claude Agent] 🛠️ Executing Tool: ${toolName}`, JSON.stringify(input));
+          const submitBlock = toolUseBlocks.find((b: any) => b.name === 'submit_agent_turn');
+          if (submitBlock) {
+            submittedTurnDecision = submitBlock.input || {};
+            break;
+          }
 
-            if (toolName === 'submit_agent_turn') {
-              submittedTurnDecision = input;
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({ status: 'turn_submitted' })
-              });
-              break;
-            }
+          const toolResults = await Promise.all(
+            toolUseBlocks.map(async (toolCall: any) => {
+              const toolName = toolCall.name;
+              const input = toolCall.input || {};
+              console.log(`[Claude Agent] 🛠️ Executing Tool: ${toolName}`, JSON.stringify(input));
 
-            if (toolName === 'query_supabase_taste_genome') {
-              const refreshedMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  user_id: refreshedMemory.userId,
-                  live_supabase_connected: refreshedMemory.isLiveSupabaseConnected,
-                  intelligence_maturity_level: refreshedMemory.intelligenceMaturityLevel,
-                  total_historical_interventions: refreshedMemory.totalHistoricalInterventions,
-                  total_tracks_learned: refreshedMemory.totalTracksLearned,
-                  approved_tracks: refreshedMemory.approvedTracks,
-                  rejected_tracks: refreshedMemory.rejectedTracks,
-                  top_artists_over_time: refreshedMemory.topArtistsOverTime,
-                  top_tracks_over_time: refreshedMemory.topTracksOverTime.slice(0, 12),
-                  recent_interventions: refreshedMemory.recentInterventions.slice(0, 8),
-                  circadian_pattern_notes: refreshedMemory.circadianPatternNotes
-                })
-              });
-            } else if (toolName === 'query_user_listening_history') {
-              const sortBy = String(input.sort_by || 'most_played');
-              const filterKeyword = String(input.artist_or_keyword || '').toLowerCase().trim();
-              const playerFilter = String(input.player_filter || '').toLowerCase().trim();
-              const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
+              if (toolName === 'query_spotify_account') {
+                const queryType = String(input.query_type || 'overview');
+                const timeRange = (['short_term', 'medium_term', 'long_term'].includes(String(input.time_range || ''))
+                  ? String(input.time_range)
+                  : 'medium_term') as 'short_term' | 'medium_term' | 'long_term';
+                const limit = Math.min(30, Math.max(1, Number(input.limit || 15)));
 
-              let combinedPool = [...allUserTracks];
-              for (const lib of context.cross_app_library || []) {
-                const exists = combinedPool.find(
-                  p => p.title.toLowerCase() === String(lib.title || '').toLowerCase()
-                );
-                if (!exists && lib.title) {
-                  combinedPool.push({
-                    title: lib.title,
-                    artist: lib.artist || 'Unknown Artist',
-                    trackId: lib.track_id || '',
-                    spotifyUri: undefined,
-                    source: lib.primary_source_package || 'unknown_player',
-                    playCount: coerceNonNegativePlayCount(lib.play_count ?? 0)
-                  });
+                if (queryType === 'overview') {
+                  const [topArtistsRes, topTracksRes, likedRes, playlistsRes, recentRes, playbackRes] = await Promise.all([
+                    spotifyClient.getTopArtists(timeRange, Math.min(limit, 10)),
+                    spotifyClient.getTopTracks(timeRange, Math.min(limit, 10)),
+                    spotifyClient.getSavedLikedTracks(Math.min(limit, 15), 0),
+                    spotifyClient.getUserPlaylists(Math.min(limit, 15)),
+                    spotifyClient.getRecentlyPlayed(Math.min(limit, 12)),
+                    spotifyClient.getPlaybackStateAndDevices()
+                  ]);
+                  return {
+                    type: 'tool_result',
+                    tool_use_id: toolCall.id,
+                    content: JSON.stringify({
+                      connected: topArtistsRes.connected || playbackRes.connected || playlistsRes.connected,
+                      top_artists: topArtistsRes.artists.map(a => ({ name: a.name, genres: a.genres.slice(0, 3), spotify_uri: a.spotify_uri })),
+                      top_tracks: topTracksRes.tracks.map(t => ({ title: t.title, artist: t.artist, spotify_uri: t.spotify_uri, explicit: t.explicit })),
+                      liked_songs_total: likedRes.total,
+                      liked_songs_sample: likedRes.tracks.map(t => ({ title: t.title, artist: t.artist, spotify_uri: t.spotify_uri })),
+                      user_playlists: playlistsRes.playlists.map(p => ({ spotify_id: p.spotify_id, context_uri: p.spotify_uri, name: p.name, owner: p.owner, track_count: p.track_count })),
+                      recently_played: recentRes.items.map(it => ({ played_at: it.played_at, title: it.track.title, artist: it.track.artist, spotify_uri: it.track.spotify_uri })),
+                      playback: playbackRes
+                    })
+                  };
                 }
+
+                if (queryType === 'top_artists') {
+                  const res = await spotifyClient.getTopArtists(timeRange, limit);
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'top_tracks') {
+                  const res = await spotifyClient.getTopTracks(timeRange, limit);
+                  if (res.tracks[0]) {
+                    lastDiscoveredOrSearchedTrack = { title: res.tracks[0].title, artist: res.tracks[0].artist, uri: res.tracks[0].spotify_uri };
+                  }
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'liked_songs') {
+                  const res = await spotifyClient.getSavedLikedTracks(limit, 0);
+                  if (res.tracks[0]) {
+                    lastDiscoveredOrSearchedTrack = { title: res.tracks[0].title, artist: res.tracks[0].artist, uri: res.tracks[0].spotify_uri };
+                  }
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'user_playlists') {
+                  const res = await spotifyClient.getUserPlaylists(limit);
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'playlist_tracks') {
+                  let pid = String(input.playlist_id || '').trim();
+                  const pname = String(input.playlist_name || '').trim().toLowerCase();
+                  if (!pid && pname) {
+                    const pls = await spotifyClient.getUserPlaylists(35);
+                    const matchedPl = pls.playlists.find(p => p.name.toLowerCase() === pname)
+                      || pls.playlists.find(p => p.name.toLowerCase().includes(pname));
+                    if (matchedPl) pid = matchedPl.spotify_id;
+                  }
+                  const res = await spotifyClient.getPlaylistTracks(pid, limit);
+                  if (res.tracks[0]) {
+                    lastDiscoveredOrSearchedTrack = { title: res.tracks[0].title, artist: res.tracks[0].artist, uri: res.tracks[0].spotify_uri };
+                  }
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'recently_played') {
+                  const res = await spotifyClient.getRecentlyPlayed(limit);
+                  return { type: 'tool_result', tool_use_id: toolCall.id, content: JSON.stringify(res) };
+                }
+                if (queryType === 'playback_state_and_devices' || queryType === 'current_queue') {
+                  const snap = await spotifyClient.getPlaybackStateAndDevices();
+                  return {
+                    type: 'tool_result',
+                    tool_use_id: toolCall.id,
+                    content: JSON.stringify(queryType === 'current_queue' ? { connected: snap.connected, current_track: snap.current_track, queue: snap.queue } : snap)
+                  };
+                }
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({ error: `Unsupported Spotify query_type: ${queryType}` })
+                };
               }
 
-              if (playerFilter) {
-                combinedPool = combinedPool.filter(t => {
-                  const srcLower = String(t.source || '').toLowerCase();
-                  return srcLower.includes(playerFilter);
-                });
-              }
-
-              if (filterKeyword) {
-                combinedPool = combinedPool.filter(
-                  t =>
-                    t.title.toLowerCase().includes(filterKeyword) ||
-                    t.artist.toLowerCase().includes(filterKeyword)
+              if (toolName === 'search_spotify_live') {
+                const q = String(input.query || '').trim();
+                const validTypes = Array.isArray(input.types) && input.types.length > 0
+                  ? input.types.map(String)
+                  : ['track', 'artist', 'playlist'];
+                const limitNum = Math.min(10, Math.max(1, Number(input.limit || 6)));
+                const kidsSafeOnly = Boolean(
+                  input.kids_safe_only ||
+                  context.kids_mode_enabled ||
+                  (context.app_state as any)?.kids_mode_enabled ||
+                  /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(`${q} ${userCommandRaw}`)
                 );
-              }
 
-              if (sortBy === 'most_played' || sortBy === 'overplayed_fatigued') {
-                combinedPool.sort((a, b) => coerceNonNegativePlayCount(b.playCount) - coerceNonNegativePlayCount(a.playCount));
-              } else if (sortBy === 'least_played_fresh') {
-                combinedPool.sort((a, b) => coerceNonNegativePlayCount(a.playCount) - coerceNonNegativePlayCount(b.playCount));
-              }
-
-              const topSlice = combinedPool.slice(0, limit);
-              if (topSlice[0]) {
-                const enrichedTop = await this.lookupOpenCatalogTrack(topSlice[0].title, topSlice[0].artist);
-                lastDiscoveredOrSearchedTrack = {
-                  title: topSlice[0].title,
-                  artist: topSlice[0].artist,
-                  uri: '',
-                  trackId: enrichedTop?.trackId || topSlice[0].trackId,
-                  ytmVideoId: enrichedTop?.ytmVideoId,
-                  previewUrl: enrichedTop?.previewUrl,
-                  audiusStreamUrl: enrichedTop?.audiusStreamUrl,
-                  deezerUrl: enrichedTop?.deezerUrl
-                };
-              }
-
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  sort_by: sortBy,
-                  total_matched: combinedPool.length,
-                  tracks: topSlice.map((t, idx) => {
-                    const plays = coerceNonNegativePlayCount(t.playCount);
-                    return {
-                      rank: idx + 1,
-                      track_id: t.trackId,
-                      title: t.title,
-                      artist: t.artist,
-                      source_player: t.source,
-                      play_count: plays,
-                      freshness_percent: Math.max(15, 96 - plays * 8)
-                    };
-                  })
-                })
-              });
-            } else if (toolName === 'discover_and_recommend_tracks' || toolName === 'discover_and_recommend_spotify_tracks') {
-              const seedArtists: string[] = Array.isArray(input.seed_artists) && input.seed_artists.length > 0
-                ? input.seed_artists.map(String)
-                : topUserArtists.slice(0, 3);
-              const moodQuery = String(input.mood_or_genre_query || '').trim();
-              const excludeOverplayed = input.exclude_overplayed !== false;
-              const kidsSafeOnly = Boolean(
-                input.kids_safe_only ||
-                context.kids_mode_enabled ||
-                /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(userCommandRaw)
-              );
-
-              const discovered = await this.discoverTracksForContext(
-                allUserTracks,
-                excludeOverplayed ? strictDiscoveryExclusionSet : excludedSet,
-                seedArtists,
-                moodQuery,
-                excludeOverplayed,
-                kidsSafeOnly
-              );
-
-              if (discovered[0]) {
-                lastDiscoveredOrSearchedTrack = {
-                  title: discovered[0].title,
-                  artist: discovered[0].artist,
-                  uri: '',
-                  trackId: discovered[0].trackId,
-                  ytmVideoId: discovered[0].ytmVideoId,
-                  previewUrl: discovered[0].previewUrl,
-                  audiusStreamUrl: discovered[0].audiusStreamUrl,
-                  deezerUrl: discovered[0].deezerUrl
-                };
-              }
-
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  kids_safe_only: kidsSafeOnly,
-                  recommendations_count: discovered.length,
-                  recommended_tracks: discovered
-                })
-              });
-            } else if (toolName === 'search_music_catalog' || toolName === 'search_spotify_catalog') {
-              const q = String(input.query || '').trim();
-              const artist = input.artist ? String(input.artist).trim() : undefined;
-              const searchType = (['track', 'artist', 'mood'].includes(String(input.search_type || ''))
-                ? String(input.search_type)
-                : 'track') as 'track' | 'artist' | 'mood';
-              const kidsSafeOnly = Boolean(
-                input.kids_safe_only ||
-                context.kids_mode_enabled ||
-                /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(`${q} ${userCommandRaw}`)
-              );
-              const limitNum = Math.min(10, Math.max(1, Number(input.limit || 6)));
-              const multi = await searchOpenMusicCatalog(
-                q,
-                searchType,
-                artist,
-                limitNum,
-                kidsSafeOnly,
-                0
-              );
-              const hits = multi.tracks || [];
-              if (hits[0]) {
-                lastDiscoveredOrSearchedTrack = {
-                  title: hits[0].title,
-                  artist: hits[0].artist,
-                  uri: '',
-                  trackId: hits[0].trackId,
-                  ytmVideoId: hits[0].ytmVideoId,
-                  previewUrl: hits[0].previewUrl,
-                  audiusStreamUrl: hits[0].audiusStreamUrl,
-                  deezerUrl: hits[0].deezerUrl
-                };
-              }
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
+                const spRes = await spotifyClient.searchSpotify({
                   query: q,
-                  search_type: searchType,
-                  kids_safe_only: kidsSafeOnly,
-                  results: hits.map(h => ({
-                    track_id: h.trackId,
+                  types: validTypes as any,
+                  limit: limitNum,
+                  kidsSafeOnly
+                });
+
+                const cardByTitleArtist = new Map<string, StoredTrackCardRecord>();
+                for (const card of trackCardSnapshot.track_cards || []) {
+                  cardByTitleArtist.set(`${card.title.toLowerCase().trim()} - ${card.artist.toLowerCase().trim()}`, card);
+                  cardByTitleArtist.set(card.title.toLowerCase().trim(), card);
+                }
+
+                const annotatedTracks = spRes.tracks.map(tr => {
+                  const card = cardByTitleArtist.get(`${tr.title.toLowerCase().trim()} - ${tr.artist.toLowerCase().trim()}`)
+                    || cardByTitleArtist.get(tr.title.toLowerCase().trim());
+                  return {
+                    ...tr,
+                    verified_play_count_in_tunemind: card?.verified_play_count ?? 0,
+                    is_in_resting_vault: isLockedInVault(tr.title, card?.track_id || tr.spotify_uri),
+                    is_liked_in_tunemind: Boolean(card?.is_liked)
+                  };
+                });
+
+                const freshPick = annotatedTracks.find(t => !t.is_in_resting_vault) || annotatedTracks[0];
+                if (freshPick) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: freshPick.title,
+                    artist: freshPick.artist,
+                    uri: freshPick.spotify_uri
+                  };
+                }
+
+                // Fallback supplement with open catalog if Spotify returned 0 hits
+                let openCatalogSupplement: any[] = [];
+                if (annotatedTracks.length === 0 && (!spRes.connected || spRes.playlists.length === 0)) {
+                  const openMulti = await searchOpenMusicCatalog(q, 'track', undefined, Math.min(limitNum, 5), kidsSafeOnly, 0);
+                  openCatalogSupplement = (openMulti.tracks || []).map(h => ({
                     title: h.title,
                     artist: h.artist,
                     album: h.album,
                     genre: h.genre,
-                    popularity: h.popularity,
                     explicit: h.explicit,
-                    has_preview: Boolean(h.previewUrl),
-                    has_full_audius_stream: Boolean(h.audiusStreamUrl),
+                    spotify_uri: normalizeSpotifyUri(h.trackId) || undefined,
                     ytm_video_id: h.ytmVideoId || undefined
-                  })),
-                  artists: multi.artists
-                })
-              });
-            } else if (toolName === 'inspect_tunemind_playlists') {
-              const q = String(input.query || '').toLowerCase().trim();
-              const pls = Array.isArray(context.tunemind_playlists) ? context.tunemind_playlists : [];
-              const filtered = q
-                ? pls.filter(p =>
-                    p.name.toLowerCase().includes(q) ||
-                    (p.description || '').toLowerCase().includes(q) ||
-                    (p.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
-                  )
-                : pls;
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  storage_note: 'TuneMind-owned playlists stored inside TuneMind (not Spotify).',
-                  total_tunemind_playlists: pls.length,
-                  playlists: filtered
-                })
-              });
-            } else if (toolName === 'inspect_for_you_suggestions') {
-              const filter = String(input.category_filter || '').toLowerCase().trim();
-              const limit = Math.min(20, Math.max(1, Number(input.limit || 10)));
-              let picks = Array.isArray(context.for_you_picks) ? [...context.for_you_picks] : [];
-              if (filter) {
-                if (filter === 'saved') {
-                  picks = picks.filter(p => p.is_saved);
-                } else if (filter === 'wildcard') {
-                  picks = picks.filter(p => p.is_wildcard || (p.sub_tier || '').toLowerCase().includes('wildcard'));
-                } else {
-                  picks = picks.filter(p =>
-                    p.title.toLowerCase().includes(filter) ||
-                    p.artist.toLowerCase().includes(filter) ||
-                    (p.category || '').toLowerCase().includes(filter) ||
-                    (p.genre_tag || '').toLowerCase().includes(filter) ||
-                    (p.reason || '').toLowerCase().includes(filter)
-                  );
+                  }));
+                  if (openMulti.tracks?.[0]) {
+                    lastDiscoveredOrSearchedTrack = {
+                      title: openMulti.tracks[0].title,
+                      artist: openMulti.tracks[0].artist,
+                      uri: normalizeSpotifyUri(openMulti.tracks[0].trackId) || '',
+                      trackId: openMulti.tracks[0].trackId,
+                      ytmVideoId: openMulti.tracks[0].ytmVideoId,
+                      previewUrl: openMulti.tracks[0].previewUrl,
+                      audiusStreamUrl: openMulti.tracks[0].audiusStreamUrl,
+                      deezerUrl: openMulti.tracks[0].deezerUrl
+                    };
+                  }
                 }
-              }
-              const sliced = picks.slice(0, limit);
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  total_for_you_picks: picks.length,
-                  picks: sliced
-                })
-              });
-            } else if (toolName === 'query_user_library' || toolName === 'query_spotify_library') {
-              const scope = String(input.scope || 'all');
-              const playerFilter = String(input.player_filter || '').toLowerCase().trim();
-              const q = String(input.query || '').toLowerCase().trim();
 
-              const libTracks = Array.isArray(context.cross_app_library) ? [...context.cross_app_library] : [];
-              const tmPlaylists = Array.isArray(context.tunemind_playlists) ? [...context.tunemind_playlists] : [];
-
-              let filteredTracks = libTracks;
-              if (playerFilter) {
-                filteredTracks = filteredTracks.filter(t => {
-                  const appMatch = (t.primary_app_name || '').toLowerCase().includes(playerFilter);
-                  const pkgMatch = (t.primary_source_package || '').toLowerCase().includes(playerFilter);
-                  const listMatch = Array.isArray(t.source_packages)
-                    && t.source_packages.some(pkg => String(pkg).toLowerCase().includes(playerFilter));
-                  return appMatch || pkgMatch || listMatch;
-                });
-              }
-              if (scope === 'liked_tracks' || scope === 'liked') {
-                filteredTracks = filteredTracks.filter(t => t.is_liked);
-              }
-              if (q) {
-                filteredTracks = filteredTracks.filter(t =>
-                  String(t.title || '').toLowerCase().includes(q) ||
-                  String(t.artist || '').toLowerCase().includes(q)
-                );
-              }
-
-              const matchedPlaylists = q
-                ? tmPlaylists.filter(pl =>
-                    pl.name.toLowerCase().includes(q) ||
-                    (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
-                  )
-                : tmPlaylists;
-
-              const picked = filteredTracks.find(t => t.title && !excludedSet.has(t.title.toLowerCase().trim()))
-                || filteredTracks[0];
-              if (picked) {
-                lastDiscoveredOrSearchedTrack = {
-                  title: picked.title,
-                  artist: picked.artist,
-                  uri: '',
-                  trackId: picked.track_id
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    query: q,
+                    spotify_connected: spRes.connected,
+                    kids_safe_only: kidsSafeOnly,
+                    tracks: annotatedTracks,
+                    artists: spRes.artists,
+                    playlists: spRes.playlists,
+                    albums: spRes.albums,
+                    open_catalog_supplement: openCatalogSupplement.length > 0 ? openCatalogSupplement : undefined,
+                    error: spRes.error
+                  })
                 };
               }
 
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  detected_player_tabs: context.detected_player_tabs || [],
-                  tracks: scope === 'playlists' ? [] : filteredTracks.slice(0, 25),
-                  tunemind_playlists: scope === 'liked_tracks' ? [] : matchedPlaylists.slice(0, 15),
-                  total_library_tracks: libTracks.length,
-                  total_playlists: tmPlaylists.length
-                })
-              });
-            } else if (toolName === 'query_listening_stats') {
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  listening_stats: context.listening_stats || null,
-                  hearing_telemetry: context.hearing_telemetry || null,
-                  top_user_artists: topUserArtists,
-                  top_most_played_tracks: mostPlayedTracks.slice(0, 6)
-                })
-              });
-            } else if (toolName === 'inspect_vault_tracks') {
-              const includeFresh = input.include_fresh_pool !== false;
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: toolCall.id,
-                content: JSON.stringify({
-                  vault_count: (context.vault_tracks || []).length,
-                  vault_tracks: context.vault_tracks || [],
-                  fresh_tracks: includeFresh ? freshTracks.slice(0, 10) : []
-                })
-              });
-            } else {
-              toolResults.push({
+              if (toolName === 'query_tunemind_track_cards') {
+                const filter = String(input.filter || 'all');
+                const kw = String(input.artist_or_keyword || '').toLowerCase().trim();
+                const srcFilter = String(input.source_player || '').toLowerCase().trim();
+                const limit = Math.min(30, Math.max(1, Number(input.limit || 15)));
+
+                let cards: Array<{
+                  title: string;
+                  artist: string;
+                  album?: string;
+                  genre?: string;
+                  spotify_uri?: string | null;
+                  track_id: string;
+                  primary_source_package: string;
+                  verified_play_count: number;
+                  total_listened_ms: number;
+                  is_liked: boolean;
+                  is_in_vault: boolean;
+                  last_played_at?: string | null;
+                }> = (trackCardSnapshot.track_cards || []).map(c => ({
+                  title: c.title,
+                  artist: c.artist,
+                  album: c.album,
+                  genre: c.genre,
+                  spotify_uri: c.spotify_uri,
+                  track_id: c.track_id,
+                  primary_source_package: c.primary_source_package,
+                  verified_play_count: coerceNonNegativePlayCount(c.verified_play_count),
+                  total_listened_ms: Number(c.total_listened_ms || 0),
+                  is_liked: Boolean(c.is_liked),
+                  is_in_vault: Boolean(c.is_in_vault || isLockedInVault(c.title, c.track_id)),
+                  last_played_at: c.last_played_at
+                }));
+
+                if (cards.length === 0) {
+                  cards = allUserTracks.map(t => ({
+                    title: t.title,
+                    artist: t.artist,
+                    genre: SelfLearningDiscoveryEngine.inferGenre(t.title, t.artist),
+                    spotify_uri: t.spotifyUri || null,
+                    track_id: t.trackId,
+                    primary_source_package: t.source,
+                    verified_play_count: coerceNonNegativePlayCount(t.playCount),
+                    total_listened_ms: coerceNonNegativePlayCount(t.playCount) * 180_000,
+                    is_liked: false,
+                    is_in_vault: isLockedInVault(t.title, t.trackId),
+                    last_played_at: null
+                  }));
+                }
+
+                if (kw) {
+                  cards = cards.filter(c =>
+                    c.title.toLowerCase().includes(kw) ||
+                    c.artist.toLowerCase().includes(kw) ||
+                    (c.genre || '').toLowerCase().includes(kw)
+                  );
+                }
+                if (srcFilter) {
+                  cards = cards.filter(c => c.primary_source_package.toLowerCase().includes(srcFilter));
+                }
+                if (filter === 'vault') {
+                  cards = cards.filter(c => c.is_in_vault);
+                } else if (filter === 'liked') {
+                  cards = cards.filter(c => c.is_liked);
+                } else if (filter === 'overplayed') {
+                  cards = cards.filter(c => c.verified_play_count >= 3).sort((a, b) => b.verified_play_count - a.verified_play_count);
+                } else if (filter === 'fresh') {
+                  cards = cards.filter(c => !c.is_in_vault && c.verified_play_count <= 2).sort((a, b) => a.verified_play_count - b.verified_play_count);
+                } else if (filter === 'most_played') {
+                  cards = cards.sort((a, b) => b.verified_play_count - a.verified_play_count);
+                } else {
+                  cards = cards.sort((a, b) => b.verified_play_count - a.verified_play_count);
+                }
+
+                const sliced = cards.slice(0, limit).map((c, idx) => ({
+                  rank: idx + 1,
+                  ...c,
+                  freshness_percent: Math.max(12, 97 - c.verified_play_count * 10)
+                }));
+
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    storage_source: trackCardSnapshot.source,
+                    filter,
+                    total_matched: cards.length,
+                    track_cards: sliced
+                  })
+                };
+              }
+
+              if (toolName === 'query_supabase_taste_genome') {
+                const refreshedMemory = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride);
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    user_id: refreshedMemory.userId,
+                    live_supabase_connected: refreshedMemory.isLiveSupabaseConnected,
+                    intelligence_maturity_level: refreshedMemory.intelligenceMaturityLevel,
+                    total_historical_interventions: refreshedMemory.totalHistoricalInterventions,
+                    total_tracks_learned: refreshedMemory.totalTracksLearned,
+                    approved_tracks: refreshedMemory.approvedTracks,
+                    rejected_tracks: refreshedMemory.rejectedTracks,
+                    top_artists_over_time: refreshedMemory.topArtistsOverTime,
+                    top_tracks_over_time: refreshedMemory.topTracksOverTime.slice(0, 12),
+                    recent_interventions: refreshedMemory.recentInterventions.slice(0, 8),
+                    circadian_pattern_notes: refreshedMemory.circadianPatternNotes
+                  })
+                };
+              }
+
+              if (toolName === 'query_user_listening_history') {
+                const sortBy = String(input.sort_by || 'most_played');
+                const filterKeyword = String(input.artist_or_keyword || '').toLowerCase().trim();
+                const playerFilter = String(input.player_filter || '').toLowerCase().trim();
+                const limit = Math.min(20, Math.max(1, Number(input.limit || 8)));
+
+                let combinedPool = [...allUserTracks];
+                for (const lib of context.cross_app_library || []) {
+                  const exists = combinedPool.find(
+                    p => p.title.toLowerCase() === String(lib.title || '').toLowerCase()
+                  );
+                  if (!exists && lib.title) {
+                    combinedPool.push({
+                      title: lib.title,
+                      artist: lib.artist || 'Unknown Artist',
+                      trackId: lib.track_id || '',
+                      spotifyUri: undefined,
+                      source: lib.primary_source_package || 'unknown_player',
+                      playCount: coerceNonNegativePlayCount(lib.play_count ?? 0)
+                    });
+                  }
+                }
+
+                if (playerFilter) {
+                  combinedPool = combinedPool.filter(t => String(t.source || '').toLowerCase().includes(playerFilter));
+                }
+                if (filterKeyword) {
+                  combinedPool = combinedPool.filter(
+                    t =>
+                      t.title.toLowerCase().includes(filterKeyword) ||
+                      t.artist.toLowerCase().includes(filterKeyword)
+                  );
+                }
+                if (sortBy === 'most_played' || sortBy === 'overplayed_fatigued') {
+                  combinedPool.sort((a, b) => coerceNonNegativePlayCount(b.playCount) - coerceNonNegativePlayCount(a.playCount));
+                } else if (sortBy === 'least_played_fresh') {
+                  combinedPool.sort((a, b) => coerceNonNegativePlayCount(a.playCount) - coerceNonNegativePlayCount(b.playCount));
+                }
+
+                const topSlice = combinedPool.slice(0, limit);
+                if (topSlice[0]) {
+                  const enrichedTop = await this.lookupOpenCatalogTrack(topSlice[0].title, topSlice[0].artist);
+                  lastDiscoveredOrSearchedTrack = {
+                    title: topSlice[0].title,
+                    artist: topSlice[0].artist,
+                    uri: topSlice[0].spotifyUri || enrichedTop?.spotifyUri || '',
+                    trackId: enrichedTop?.trackId || topSlice[0].trackId,
+                    ytmVideoId: enrichedTop?.ytmVideoId,
+                    previewUrl: enrichedTop?.previewUrl,
+                    audiusStreamUrl: enrichedTop?.audiusStreamUrl,
+                    deezerUrl: enrichedTop?.deezerUrl
+                  };
+                }
+
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    sort_by: sortBy,
+                    total_matched: combinedPool.length,
+                    tracks: topSlice.map((t, idx) => {
+                      const plays = coerceNonNegativePlayCount(t.playCount);
+                      return {
+                        rank: idx + 1,
+                        track_id: t.trackId,
+                        spotify_uri: t.spotifyUri,
+                        title: t.title,
+                        artist: t.artist,
+                        source_player: t.source,
+                        play_count: plays,
+                        freshness_percent: Math.max(15, 96 - plays * 8)
+                      };
+                    })
+                  })
+                };
+              }
+
+              if (toolName === 'discover_and_recommend_tracks' || toolName === 'discover_and_recommend_spotify_tracks') {
+                const seedArtists: string[] = Array.isArray(input.seed_artists) && input.seed_artists.length > 0
+                  ? input.seed_artists.map(String)
+                  : topUserArtists.slice(0, 3);
+                const moodQuery = String(input.mood_or_genre_query || '').trim();
+                const excludeOverplayed = input.exclude_overplayed !== false;
+                const kidsSafeOnly = Boolean(
+                  input.kids_safe_only ||
+                  context.kids_mode_enabled ||
+                  /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(userCommandRaw)
+                );
+
+                const discovered = await this.discoverTracksForContext(
+                  allUserTracks,
+                  excludeOverplayed ? strictDiscoveryExclusionSet : excludedSet,
+                  seedArtists,
+                  moodQuery,
+                  excludeOverplayed,
+                  kidsSafeOnly
+                );
+
+                let spotifySupplement: any[] = [];
+                if (hasSpotifyLiveAuth) {
+                  const spQuery = moodQuery || seedArtists[0] || '';
+                  if (spQuery) {
+                    const spHits = await spotifyClient.searchSpotify({
+                      query: spQuery,
+                      types: ['track'],
+                      limit: 5,
+                      kidsSafeOnly
+                    });
+                    spotifySupplement = spHits.tracks;
+                  }
+                }
+
+                if (spotifySupplement[0]) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: spotifySupplement[0].title,
+                    artist: spotifySupplement[0].artist,
+                    uri: spotifySupplement[0].spotify_uri
+                  };
+                } else if (discovered[0]) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: discovered[0].title,
+                    artist: discovered[0].artist,
+                    uri: '',
+                    trackId: discovered[0].trackId,
+                    ytmVideoId: discovered[0].ytmVideoId,
+                    previewUrl: discovered[0].previewUrl,
+                    audiusStreamUrl: discovered[0].audiusStreamUrl,
+                    deezerUrl: discovered[0].deezerUrl
+                  };
+                }
+
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    kids_safe_only: kidsSafeOnly,
+                    recommendations_count: discovered.length + spotifySupplement.length,
+                    spotify_live_matches: spotifySupplement,
+                    recommended_tracks: discovered
+                  })
+                };
+              }
+
+              if (toolName === 'search_music_catalog' || toolName === 'search_spotify_catalog') {
+                const q = String(input.query || '').trim();
+                const artist = input.artist ? String(input.artist).trim() : undefined;
+                const searchType = (['track', 'artist', 'mood'].includes(String(input.search_type || ''))
+                  ? String(input.search_type)
+                  : 'track') as 'track' | 'artist' | 'mood';
+                const kidsSafeOnly = Boolean(
+                  input.kids_safe_only ||
+                  context.kids_mode_enabled ||
+                  /\b(kids?|children|nursery|lullab(?:y|ies)|toddler|baby|cocomelon|disney|akili|ubongo|bedtime)\b/i.test(`${q} ${userCommandRaw}`)
+                );
+                const limitNum = Math.min(10, Math.max(1, Number(input.limit || 6)));
+                const [multi, spLive] = await Promise.all([
+                  searchOpenMusicCatalog(q, searchType, artist, limitNum, kidsSafeOnly, 0),
+                  hasSpotifyLiveAuth
+                    ? spotifyClient.searchSpotify({
+                        query: artist ? `${q} ${artist}` : q,
+                        types: ['track'],
+                        limit: Math.min(4, limitNum),
+                        kidsSafeOnly
+                      })
+                    : Promise.resolve(null)
+                ]);
+                const hits = multi.tracks || [];
+                if (spLive?.tracks?.[0]) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: spLive.tracks[0].title,
+                    artist: spLive.tracks[0].artist,
+                    uri: spLive.tracks[0].spotify_uri,
+                    trackId: hits[0]?.trackId,
+                    ytmVideoId: hits[0]?.ytmVideoId,
+                    previewUrl: hits[0]?.previewUrl,
+                    audiusStreamUrl: hits[0]?.audiusStreamUrl,
+                    deezerUrl: hits[0]?.deezerUrl
+                  };
+                } else if (hits[0]) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: hits[0].title,
+                    artist: hits[0].artist,
+                    uri: normalizeSpotifyUri(hits[0].trackId) || '',
+                    trackId: hits[0].trackId,
+                    ytmVideoId: hits[0].ytmVideoId,
+                    previewUrl: hits[0].previewUrl,
+                    audiusStreamUrl: hits[0].audiusStreamUrl,
+                    deezerUrl: hits[0].deezerUrl
+                  };
+                }
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    query: q,
+                    search_type: searchType,
+                    kids_safe_only: kidsSafeOnly,
+                    spotify_live_tracks: spLive?.tracks || [],
+                    results: hits.map(h => ({
+                      track_id: h.trackId,
+                      spotify_uri: normalizeSpotifyUri(h.trackId) || undefined,
+                      title: h.title,
+                      artist: h.artist,
+                      album: h.album,
+                      genre: h.genre,
+                      popularity: h.popularity,
+                      explicit: h.explicit,
+                      has_preview: Boolean(h.previewUrl),
+                      has_full_audius_stream: Boolean(h.audiusStreamUrl),
+                      ytm_video_id: h.ytmVideoId || undefined
+                    })),
+                    artists: multi.artists
+                  })
+                };
+              }
+
+              if (toolName === 'inspect_tunemind_playlists') {
+                const q = String(input.query || '').toLowerCase().trim();
+                const pls = Array.isArray(context.tunemind_playlists) ? context.tunemind_playlists : [];
+                const filtered = q
+                  ? pls.filter(p =>
+                      p.name.toLowerCase().includes(q) ||
+                      (p.description || '').toLowerCase().includes(q) ||
+                      (p.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                    )
+                  : pls;
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    storage_note: 'TuneMind-owned playlists stored inside TuneMind (editable in v1).',
+                    total_tunemind_playlists: pls.length,
+                    playlists: filtered
+                  })
+                };
+              }
+
+              if (toolName === 'inspect_for_you_suggestions') {
+                const filter = String(input.category_filter || '').toLowerCase().trim();
+                const limit = Math.min(20, Math.max(1, Number(input.limit || 10)));
+                let picks = Array.isArray(context.for_you_picks) ? [...context.for_you_picks] : [];
+                if (filter) {
+                  if (filter === 'saved') {
+                    picks = picks.filter(p => p.is_saved);
+                  } else if (filter === 'wildcard') {
+                    picks = picks.filter(p => p.is_wildcard || (p.sub_tier || '').toLowerCase().includes('wildcard'));
+                  } else {
+                    picks = picks.filter(p =>
+                      p.title.toLowerCase().includes(filter) ||
+                      p.artist.toLowerCase().includes(filter) ||
+                      (p.category || '').toLowerCase().includes(filter) ||
+                      (p.genre_tag || '').toLowerCase().includes(filter) ||
+                      (p.reason || '').toLowerCase().includes(filter)
+                    );
+                  }
+                }
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    total_for_you_picks: picks.length,
+                    picks: picks.slice(0, limit)
+                  })
+                };
+              }
+
+              if (toolName === 'query_user_library' || toolName === 'query_spotify_library') {
+                const scope = String(input.scope || 'all');
+                const playerFilter = String(input.player_filter || '').toLowerCase().trim();
+                const q = String(input.query || '').toLowerCase().trim();
+
+                const libTracks = Array.isArray(context.cross_app_library) ? [...context.cross_app_library] : [];
+                const tmPlaylists = Array.isArray(context.tunemind_playlists) ? [...context.tunemind_playlists] : [];
+
+                let filteredTracks = libTracks;
+                if (playerFilter) {
+                  filteredTracks = filteredTracks.filter(t => {
+                    const appMatch = (t.primary_app_name || '').toLowerCase().includes(playerFilter);
+                    const pkgMatch = (t.primary_source_package || '').toLowerCase().includes(playerFilter);
+                    const listMatch = Array.isArray(t.source_packages)
+                      && t.source_packages.some(pkg => String(pkg).toLowerCase().includes(playerFilter));
+                    return appMatch || pkgMatch || listMatch;
+                  });
+                }
+                if (scope === 'liked_tracks' || scope === 'liked') {
+                  filteredTracks = filteredTracks.filter(t => t.is_liked);
+                }
+                if (q) {
+                  filteredTracks = filteredTracks.filter(t =>
+                    String(t.title || '').toLowerCase().includes(q) ||
+                    String(t.artist || '').toLowerCase().includes(q)
+                  );
+                }
+
+                const matchedPlaylists = q
+                  ? tmPlaylists.filter(pl =>
+                      pl.name.toLowerCase().includes(q) ||
+                      (pl.tracks || []).some(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+                    )
+                  : tmPlaylists;
+
+                const picked = filteredTracks.find(t => t.title && !excludedSet.has(t.title.toLowerCase().trim()))
+                  || filteredTracks[0];
+                if (picked) {
+                  lastDiscoveredOrSearchedTrack = {
+                    title: picked.title,
+                    artist: picked.artist,
+                    uri: '',
+                    trackId: picked.track_id
+                  };
+                }
+
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    detected_player_tabs: context.detected_player_tabs || [],
+                    tracks: scope === 'playlists' ? [] : filteredTracks.slice(0, 25),
+                    tunemind_playlists: scope === 'liked_tracks' ? [] : matchedPlaylists.slice(0, 15),
+                    total_library_tracks: libTracks.length,
+                    total_playlists: tmPlaylists.length
+                  })
+                };
+              }
+
+              if (toolName === 'query_listening_stats') {
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    listening_stats: context.listening_stats || null,
+                    hearing_telemetry: context.hearing_telemetry || null,
+                    top_user_artists: topUserArtists,
+                    top_most_played_tracks: mostPlayedTracks.slice(0, 6)
+                  })
+                };
+              }
+
+              if (toolName === 'inspect_vault_tracks') {
+                const includeFresh = input.include_fresh_pool !== false;
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({
+                    vault_count: (context.vault_tracks || []).length,
+                    vault_tracks: context.vault_tracks || [],
+                    fresh_tracks: includeFresh ? freshTracks.slice(0, 10) : []
+                  })
+                };
+              }
+
+              return {
                 type: 'tool_result',
                 tool_use_id: toolCall.id,
                 content: JSON.stringify({ error: `Unknown tool ${toolName}` })
-              });
-            }
-          }
-
-          if (submittedTurnDecision) {
-            break;
-          }
+              };
+            })
+          );
 
           messages.push({
             role: 'user',
@@ -2238,7 +2703,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
     if (submittedTurnDecision) {
       let action = (submittedTurnDecision.action || 'ADVISE_ONLY') as AgentToolCall['action'];
       let ttsText = String(submittedTurnDecision.voice_agent_tts || '').trim();
-      // IMPORTANT: Never attach a track if Claude chose ADVISE_ONLY!
+      // IMPORTANT: Never attach a track if Claude chose ADVISE_ONLY or a non-track Spotify state action!
       const isTrackBearingAction =
         action === 'PROPOSE_TRACK' ||
         action === 'PLAY_TRACK_NOW' ||
@@ -2246,6 +2711,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         action === 'QUARANTINE_TO_VAULT' ||
         action === 'RESTORE_FROM_VAULT' ||
         action === 'LIKE_TRACK' ||
+        action === 'UNLIKE_TRACK' ||
         action === 'REMOVE_FROM_TUNEMIND_PLAYLIST';
 
       let trackTitle = isTrackBearingAction
@@ -2259,7 +2725,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         : '';
 
       if (
-        (action === 'LIKE_TRACK' || action === 'QUARANTINE_TO_VAULT' || action === 'REMOVE_FROM_TUNEMIND_PLAYLIST') &&
+        (action === 'LIKE_TRACK' || action === 'UNLIKE_TRACK' || action === 'QUARANTINE_TO_VAULT' || action === 'REMOVE_FROM_TUNEMIND_PLAYLIST') &&
         (!trackTitle || /^(current_track|current song|this song|this track)$/i.test(trackTitle)) &&
         context.current_track?.title &&
         context.current_track.title !== 'Standing By' &&
@@ -2268,6 +2734,16 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         trackTitle = context.current_track.title.trim();
         trackArtist = (context.current_track.artist || trackArtist).trim();
         spotifyUri = context.current_track.spotifyUri || spotifyUri;
+      }
+
+      let rawContextUri = String(submittedTurnDecision.context_uri || '').trim();
+      if (rawContextUri) {
+        const urlMatch = rawContextUri.match(/https?:\/\/open\.spotify\.com\/(playlist|album|artist)\/([A-Za-z0-9]+)/i);
+        if (urlMatch) {
+          rawContextUri = `spotify:${urlMatch[1].toLowerCase()}:${urlMatch[2]}`;
+        } else if (!/^spotify:(playlist|album|artist):[A-Za-z0-9]+$/i.test(rawContextUri)) {
+          rawContextUri = '';
+        }
       }
 
       if (spotifyUri) {
@@ -2353,6 +2829,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         userCommandRaw,
         hasExplicitDefaultPlayer: context.player_preferences?.has_explicit_default_player,
         hasSpokenTargetPlayer,
+        hasSpotifyPremiumConnected: Boolean((context.app_state as any)?.spotify_premium_connected || hasSpotifyLiveAuth),
         isApprovingPending,
         isAutoCurateNextTrack
       });
@@ -2416,14 +2893,34 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         candidateTrackId = pending.trackId || candidateTrackId;
       }
 
-      // Resolve playable open-catalog endpoints (Spotify track URI via Songlink, YouTube Music videoId, Audius full stream, 30s preview, Deezer URL)
+      // Resolve playable open-catalog & live Spotify endpoints
       let ytmVideoId = lastDiscoveredOrSearchedTrack?.ytmVideoId || undefined;
       let previewUrl = lastDiscoveredOrSearchedTrack?.previewUrl || undefined;
       let audiusStreamUrl = lastDiscoveredOrSearchedTrack?.audiusStreamUrl || undefined;
       let deezerUrl = lastDiscoveredOrSearchedTrack?.deezerUrl || undefined;
-      if (trackTitle && (action === 'PLAY_TRACK_NOW' || action === 'PROPOSE_TRACK' || action === 'LAUNCH_DOPAMINE_CAPSULE')) {
+      if (
+        trackTitle &&
+        (action === 'PLAY_TRACK_NOW' ||
+          action === 'PROPOSE_TRACK' ||
+          action === 'LAUNCH_DOPAMINE_CAPSULE' ||
+          action === 'LIKE_TRACK' ||
+          action === 'UNLIKE_TRACK')
+      ) {
         const cleanArtist = trackArtist && trackArtist !== 'Unknown Artist' ? trackArtist : undefined;
-        const resolved = await this.lookupOpenCatalogTrack(trackTitle, cleanArtist);
+        const [resolved, spLiveTrack] = await Promise.all([
+          this.lookupOpenCatalogTrack(trackTitle, cleanArtist),
+          !spotifyUri && hasSpotifyLiveAuth
+            ? spotifyClient.searchSpotify({
+                query: cleanArtist ? `${trackTitle} ${cleanArtist}` : trackTitle,
+                types: ['track'],
+                limit: 1
+              })
+            : Promise.resolve(null)
+        ]);
+        if (spLiveTrack?.tracks?.[0]) {
+          if (!spotifyUri) spotifyUri = spLiveTrack.tracks[0].spotify_uri;
+          if (!trackArtist || trackArtist === 'Unknown Artist') trackArtist = spLiveTrack.tracks[0].artist;
+        }
         if (resolved) {
           if (!candidateTrackId && resolved.trackId) candidateTrackId = resolved.trackId;
           if (!trackArtist || trackArtist === 'Unknown Artist') trackArtist = resolved.artist;
@@ -2466,6 +2963,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
           if (trackTitle) eventStore.recordAgentTrackAction(trackTitle);
           break;
+        case 'PLAY_SPOTIFY_CONTEXT':
+          resolvedIntent = 'OS_SPOTIFY_CONTEXT';
+          ClaudeMusicReasoningProvider.setPendingProposedTrack(null, userId);
+          break;
         case 'PROPOSE_TRACK':
         case 'LAUNCH_DOPAMINE_CAPSULE':
           resolvedIntent = 'NONE';
@@ -2496,6 +2997,9 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           break;
         case 'SKIP_PREVIOUS':
           resolvedIntent = 'OS_MEDIA_PREV';
+          break;
+        case 'SEEK_TO_POSITION':
+          resolvedIntent = 'OS_MEDIA_SEEK';
           break;
         default:
           resolvedIntent = 'NONE';
@@ -2562,9 +3066,19 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           target_player: ea.target_player ? resolvePlayerPackage(ea.target_player) : undefined,
           remember_default_player: typeof ea.remember_default_player === 'boolean' ? ea.remember_default_player : undefined,
           volume_percent: typeof ea.volume_percent === 'number' ? ea.volume_percent : undefined,
+          shuffle_enabled: typeof ea.shuffle_enabled === 'boolean' ? ea.shuffle_enabled : undefined,
+          repeat_mode: ['off', 'context', 'track'].includes(String(ea.repeat_mode || ''))
+            ? (ea.repeat_mode as 'off' | 'context' | 'track')
+            : undefined,
+          seek_position_ms: typeof ea.seek_position_ms === 'number' ? ea.seek_position_ms : undefined,
+          seek_delta_ms: typeof ea.seek_delta_ms === 'number' ? ea.seek_delta_ms : undefined,
+          device_id: ea.device_id ? String(ea.device_id).trim() : undefined,
+          device_name: ea.device_name ? String(ea.device_name).trim() : undefined,
+          context_uri: ea.context_uri ? String(ea.context_uri).trim() : undefined,
           target_screen: ea.target_screen || undefined,
           track_title: ea.track_title || undefined,
           track_artist: ea.track_artist || undefined,
+          spotify_uri: ea.spotify_uri ? normalizeSpotifyUri(ea.spotify_uri) || undefined : undefined,
           playlist_name: ea.playlist_name || undefined,
           new_playlist_name: ea.new_playlist_name || undefined,
           playlist_description: ea.playlist_description || undefined,
@@ -2632,6 +3146,22 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         });
       }
       const queueTracksResolved = await normalizeTrackArray(submittedTurnDecision.queue_tracks);
+      if (hasSpotifyLiveAuth && queueTracksResolved.length > 0) {
+        await Promise.all(
+          queueTracksResolved.slice(0, 5).map(async qt => {
+            if (!qt.spotify_uri) {
+              const hit = await spotifyClient.searchSpotify({
+                query: `${qt.title} ${qt.artist || ''}`.trim(),
+                types: ['track'],
+                limit: 1
+              });
+              if (hit.tracks[0]?.spotify_uri) {
+                qt.spotify_uri = hit.tracks[0].spotify_uri;
+              }
+            }
+          })
+        );
+      }
 
       const isTemporaryYtmInAppSwitch = ClaudeMusicReasoningProvider.shouldKeepExistingDefaultPlayer({
         hasExplicitDefaultPlayer: context.player_preferences?.has_explicit_default_player,
@@ -2645,12 +3175,35 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         ? submittedTurnDecision.remember_default_player
         : undefined;
 
+      const resolvedShuffleEnabled =
+        typeof submittedTurnDecision.shuffle_enabled === 'boolean'
+          ? submittedTurnDecision.shuffle_enabled
+          : undefined;
+      const resolvedRepeatMode = ['off', 'context', 'track'].includes(String(submittedTurnDecision.repeat_mode || ''))
+        ? (submittedTurnDecision.repeat_mode as 'off' | 'context' | 'track')
+        : undefined;
+      const resolvedSeekPosMs =
+        typeof submittedTurnDecision.seek_position_ms === 'number'
+          ? Math.max(0, Math.round(submittedTurnDecision.seek_position_ms))
+          : undefined;
+      const resolvedSeekDeltaMs =
+        typeof submittedTurnDecision.seek_delta_ms === 'number'
+          ? Math.round(submittedTurnDecision.seek_delta_ms)
+          : undefined;
+      const resolvedDeviceId = submittedTurnDecision.device_id
+        ? String(submittedTurnDecision.device_id).trim()
+        : undefined;
+      const resolvedDeviceName = submittedTurnDecision.device_name
+        ? String(submittedTurnDecision.device_name).trim()
+        : undefined;
+
       const finalToolCall: AgentToolCall = {
         action,
         track_id: resolvedTrackId,
         track_title: (cleanTitleForSearch || trackTitle) || undefined,
         track_artist: (cleanArtistForSearch || trackArtist) || undefined,
         spotify_uri: spotifyUri || undefined,
+        context_uri: rawContextUri || undefined,
         ytm_video_id: ytmVideoId || undefined,
         preview_url: previewUrl || undefined,
         audius_stream_url: audiusStreamUrl || undefined,
@@ -2658,6 +3211,12 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
         target_player: targetPlayer,
         remember_default_player: resolvedRememberDefault,
         volume_percent: typeof submittedTurnDecision.volume_percent === 'number' ? submittedTurnDecision.volume_percent : undefined,
+        shuffle_enabled: resolvedShuffleEnabled,
+        repeat_mode: resolvedRepeatMode,
+        seek_position_ms: resolvedSeekPosMs,
+        seek_delta_ms: resolvedSeekDeltaMs,
+        device_id: resolvedDeviceId,
+        device_name: resolvedDeviceName,
         palette_id: submittedTurnDecision.palette_id || undefined,
         custom_accent_hex: submittedTurnDecision.custom_accent_hex || undefined,
         theme_behavior: submittedTurnDecision.theme_behavior || undefined,
@@ -2716,6 +3275,10 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           track_title: (cleanTitleForSearch || trackTitle) || undefined,
           track_artist: (cleanArtistForSearch || trackArtist) || undefined,
           spotify_uri: spotifyUri || undefined,
+          context_uri: rawContextUri || undefined,
+          shuffle_enabled: resolvedShuffleEnabled,
+          seek_position_ms: resolvedSeekPosMs,
+          seek_delta_ms: resolvedSeekDeltaMs,
           ytm_video_id: ytmVideoId || undefined,
           preview_url: previewUrl || undefined,
           audius_stream_url: audiusStreamUrl || undefined,
@@ -2723,7 +3286,7 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
           never_open_external_app: requestedNeverOpenExternal,
           suggested_bpm_target: 108
         },
-        database_tags: [providerTag, 'supabase-taste-genome', action.toLowerCase()]
+        database_tags: [providerTag, 'supabase-taste-genome', 'track-cards', action.toLowerCase()]
       };
     }
 
@@ -2918,38 +3481,38 @@ Always finish by calling 'submit_agent_turn' with concise, warm, accurate spoken
       pre_fetched_catalog_search_results: liveSearchHits.slice(0, 4)
     };
 
-    const jsonSystemPrompt = `Your name is TuneMind. You are an intelligent, warm, human-sounding, self-reasoning AI music companion, DJ, and full-app controller on Android powered by Anthropic Claude Sonnet 5.5.
+    const jsonSystemPrompt = `Your name is TuneMind. You are an intelligent, warm, human-sounding AI music companion, sonic curator, and zero-leave playback controller powered by Anthropic Claude.
 Reason naturally about what the user actually said and maintain clear, honest boundaries:
-1. IDENTITY, BOUNDARIES & CONVERSATION: You know your name is TuneMind! When the user greets you ("hi tunemind", "hello", "hey", "how are you", "who are you"), talks about their day/feelings, asks general questions, or chats WITHOUT asking to play or recommend a song right now, set "action": "ADVISE_ONLY", leave "track_title" empty, and reply warmly in your own natural words — never robotic templates, never pitch a song unprompted. Stay honest: never invent tracks, stats, or actions you didn't observe; if asked for out-of-scope tasks (medical/legal/financial advice, external APIs, purchasing), warmly decline and refocus on music.
-2. DISCOVERY, KIDS MODE & 2-STEP APPROVAL: Only when the user asks to play music, requests a genre/culture (e.g. Kikuyu/Gikuyu/Mugithi, Bongo Flava, Afrobeats, Kids/Cocomelon/Lullabies/Disney), or asks for a recommendation/most-played song, pick a matching real track from pre_fetched_discovery_candidates, search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true, asking if they want it played. If app_state.kids_mode_enabled is true or the user mentions kids/children/toddlers/family/clean/lullabies, choose strictly non-explicit ("explicit": false) age-appropriate songs. Never pick a track literally named "Any Song" unless the user explicitly asked for Zico.
+1. IDENTITY, BOUNDARIES & CONVERSATION: You know your name is TuneMind! When the user greets you, talks about their day/feelings, asks music questions, or shares a mood WITHOUT commanding a specific song immediately, respond conversationally using "ADVISE_ONLY" or propose a thoughtful song match using "PROPOSE_TRACK" ("expect_follow_up": true) so the user can approve or refine in dialogue. Stay honest: never invent tracks, stats, or play counts you did not observe.
+2. DISCOVERY, KIDS MODE & 2-STEP APPROVAL: Only when recommending or responding to a mood, pick a matching real track from pre_fetched_discovery_candidates, search results, or history and set "action": "PROPOSE_TRACK", "expect_follow_up": true. If app_state.kids_mode_enabled is true or the user mentions kids/children/toddlers/family/clean/lullabies, choose strictly non-explicit ("explicit": false) age-appropriate songs.
 3. APPROVAL vs. REJECTION OF PENDING TRACK:
    - ONLY if pending_proposed_track_awaiting_user_approval is present AND the user clearly approves ("yes", "play it", "sure", "okay", "ndio", "sawa"), set "action": "PLAY_TRACK_NOW" with that exact pending track.
-   - If pending_proposed_track_awaiting_user_approval is present AND the user declines ("no", "I don't want that song", "don't play it", "cancel", "pass", "not that one"), NEVER return PLAY_TRACK_NOW! Use "action": "ADVISE_ONLY" with empty track fields (or propose a different alternative with "PROPOSE_TRACK" if they asked for another song).
-4. TUNEMIND-OWNED VOICE PLAYLISTS:
-   - All TuneMind playlists live permanently inside TuneMind (context.tunemind_playlists) and play via TuneMind's Hybrid player or the user's chosen music app.
-   - When the user says "add this/current song to a new playlist" without giving a name yet -> ask conversationally what name they'd like using "action": "ADVISE_ONLY", "expect_follow_up": true.
-   - Once you have a playlist name -> "CREATE_TUNEMIND_PLAYLIST" or "ADD_TO_TUNEMIND_PLAYLIST" with "playlist_name" and "playlist_tracks".
-   - Play an existing TuneMind playlist -> "PLAY_TUNEMIND_PLAYLIST" with "playlist_name".
-5. FULL APP & PLAYBACK CONTROLS (inspect app_state):
-   - Accent color -> "SET_THEME_COLOR" ("custom_accent_hex": "#00FFA3" | "#FF2A85" | "#A855F7" | "#00E5FF" | "#FF9400" | "#3B82F6" | "AUTO")
-   - Mood palette -> "SHIFT_ATMOSPHERE" ("morning" | "afternoon" | "evening" | "night" | "auto")
-   - Toggles -> "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE"
-   - Queue tracks up next -> "QUEUE_TRACKS" ("queue_tracks": [{"title": "...", "artist": "..."}])
-   - Sleep timer -> "SET_SLEEP_TIMER" ("sleep_timer_minutes": N or 0 to cancel)
-   - If user asks to play without opening an external app OR app_state.strict_no_app_switch_enabled is true -> set "never_open_external_app": true.
-   - Screens -> "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", "SYNC_SPOTIFY_LIBRARY", "EXPORT_PLAYLIST_TO_SPOTIFY", or "NAVIGATE_SCREEN" ("DOPAMINE" | "AGENT" | "RHYTHM" | "CROSS_APP_LIBRARY" | "TUNEMIND_PLAYLISTS")
-   - Playback/Volume/Vault -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "SET_VOLUME_PERCENT", "QUARANTINE_TO_VAULT"
-   - Optionally include "extra_actions": [...] to combine actions in one turn.
+   - If pending_proposed_track_awaiting_user_approval is present AND the user declines ("no", "pass", "cancel", "not that one"), NEVER return PLAY_TRACK_NOW! Use "action": "ADVISE_ONLY" or propose a different alternative with "PROPOSE_TRACK".
+4. TUNEMIND-ONLY PLAYLIST EDITS IN v1:
+   - Playlist creation and editing ("CREATE_TUNEMIND_PLAYLIST", "ADD_TO_TUNEMIND_PLAYLIST", "REMOVE_FROM_TUNEMIND_PLAYLIST", "RENAME_TUNEMIND_PLAYLIST", "DELETE_TUNEMIND_PLAYLIST", "PLAY_TUNEMIND_PLAYLIST") apply ONLY to TuneMind-owned playlists stored inside TuneMind. Do NOT promise to edit Spotify playlists in v1.
+5. SPOTIFY CONNECT & FULL APP CONTROLS:
+   - Single track play -> "PLAY_TRACK_NOW"
+   - Spotify playlist/album/artist context play -> "PLAY_SPOTIFY_CONTEXT" ("context_uri", optional "shuffle_enabled")
+   - Playback/Queue/Likes/Modes/Devices -> "PAUSE_PLAYBACK", "RESUME_PLAYBACK", "SKIP_NEXT", "SKIP_PREVIOUS", "QUEUE_TRACKS", "LIKE_TRACK", "UNLIKE_TRACK", "SET_SHUFFLE", "SET_REPEAT_MODE", "SEEK_TO_POSITION", "TRANSFER_SPOTIFY_DEVICE", "SET_VOLUME_PERCENT"
+   - App controls -> "SET_THEME_COLOR", "SHIFT_ATMOSPHERE", "TOGGLE_AUTONOMOUS_DJ", "TOGGLE_STAY_IN_TUNEMIND", "TOGGLE_STRICT_NO_APP_SWITCH", "TOGGLE_KIDS_MODE", "SET_SLEEP_TIMER", "QUARANTINE_TO_VAULT", "RESTORE_FROM_VAULT", "OPEN_SETTINGS", "OPEN_SPOTIFY_CONNECT_GUIDE", "SYNC_SPOTIFY_LIBRARY", "NAVIGATE_SCREEN".
 
 Respond ONLY with a single valid JSON object:
 {
   "voice_agent_tts": "Your natural, warm, unscripted spoken reply (1-3 sentences)",
   "flow_state_analysis": "Short 1-line studio HUD note",
   "calculated_satiety_percentage": 24,
-  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_VOLUME_PERCENT" | "QUARANTINE_TO_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "OPEN_SPOTIFY_CONNECT_GUIDE" | "SYNC_SPOTIFY_LIBRARY" | "EXPORT_PLAYLIST_TO_SPOTIFY" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
+  "action": "ADVISE_ONLY" | "PROPOSE_TRACK" | "PLAY_TRACK_NOW" | "PLAY_SPOTIFY_CONTEXT" | "PAUSE_PLAYBACK" | "RESUME_PLAYBACK" | "SKIP_NEXT" | "SKIP_PREVIOUS" | "SET_SHUFFLE" | "SET_REPEAT_MODE" | "SEEK_TO_POSITION" | "TRANSFER_SPOTIFY_DEVICE" | "SET_VOLUME_PERCENT" | "LIKE_TRACK" | "UNLIKE_TRACK" | "QUARANTINE_TO_VAULT" | "RESTORE_FROM_VAULT" | "SHIFT_ATMOSPHERE" | "SET_THEME_COLOR" | "TOGGLE_AUTONOMOUS_DJ" | "TOGGLE_STAY_IN_TUNEMIND" | "TOGGLE_STRICT_NO_APP_SWITCH" | "TOGGLE_KIDS_MODE" | "CREATE_TUNEMIND_PLAYLIST" | "ADD_TO_TUNEMIND_PLAYLIST" | "REMOVE_FROM_TUNEMIND_PLAYLIST" | "RENAME_TUNEMIND_PLAYLIST" | "DELETE_TUNEMIND_PLAYLIST" | "PLAY_TUNEMIND_PLAYLIST" | "QUEUE_TRACKS" | "SET_SLEEP_TIMER" | "OPEN_SETTINGS" | "OPEN_SPOTIFY_CONNECT_GUIDE" | "SYNC_SPOTIFY_LIBRARY" | "NAVIGATE_SCREEN" | "LAUNCH_DOPAMINE_CAPSULE",
   "track_title": "",
   "track_artist": "",
   "track_id": "",
+  "spotify_uri": "",
+  "context_uri": "",
+  "shuffle_enabled": false,
+  "repeat_mode": "off",
+  "seek_position_ms": 0,
+  "seek_delta_ms": 0,
+  "device_id": "",
+  "device_name": "",
   "playlist_name": "",
   "playlist_description": "",
   "mood_or_audience": "",

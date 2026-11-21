@@ -1278,6 +1278,15 @@ class AgentVoiceManager(
         put("user_email", identity.email)
         put("supabase_url", identity.supabaseUrl)
         put("supabase_anon_key", identity.supabaseAnonKey)
+        if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+            com.tunemind.app.provider.SpotifyPremiumConnectManager.getValidAccessTokenQuick(context)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { put("spotify_access_token", it) }
+            com.tunemind.app.provider.SpotifyPremiumConnectManager.ensureLoaded(context)
+                .lastDeviceName
+                .takeIf { it.isNotBlank() }
+                ?.let { put("spotify_device_name", it) }
+        }
         put("dialogue_history", getDialogueHistoryJsonArray())
         getAppState?.invoke()?.let { put("app_state", it) }
     }
@@ -2658,10 +2667,16 @@ class AgentVoiceManager(
             rawAction == "RENAME_TUNEMIND_PLAYLIST" ||
             rawAction == "DELETE_TUNEMIND_PLAYLIST" ||
             rawAction == "PLAY_TUNEMIND_PLAYLIST" ||
+            rawAction == "PLAY_SPOTIFY_CONTEXT" ||
+            rawAction == "SET_SHUFFLE" ||
+            rawAction == "SET_REPEAT_MODE" ||
+            rawAction == "SEEK_TO_POSITION" ||
+            rawAction == "TRANSFER_SPOTIFY_DEVICE" ||
             rawAction == "QUEUE_TRACKS" ||
             rawAction == "PLAY_NEXT_IN_QUEUE" ||
             rawAction == "CLEAR_UP_NEXT_QUEUE" ||
             rawAction == "LIKE_TRACK" ||
+            rawAction == "UNLIKE_TRACK" ||
             rawAction == "REFRESH_FOR_YOU_PICKS" ||
             rawAction == "OPEN_MUSIC_PLAYER_APP" ||
             rawAction == "SET_SLEEP_TIMER" ||
@@ -2782,10 +2797,12 @@ class AgentVoiceManager(
             rawAction == "PLAY_TRACK_NOW" ||
             rawIntent == "OS_MEDIA_NEXT_AND_DEEP_LINK"
         )
-        val isDirectPlayCommand = (hasExplicitDefaultPlayer || spokenPlayerPkg != null) &&
+        val spotifyPremiumConnected = com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)
+        val isDirectPlayCommand = (hasExplicitDefaultPlayer || spokenPlayerPkg != null || spotifyPremiumConnected) &&
             !isSyntheticPrompt &&
             !Regex("^\\s*(?:what|which|who|how|why|where|when|can\\s+you\\s+suggest|can\\s+you\\s+recommend|do\\s+you\\s+have|tell\\s+me|show\\s+me)\\b").containsMatchIn(userTranscriptLower) &&
-            !Regex("\\b(?:recommend|recommendation|suggest|suggestion|what\\s+is\\s+my|what'?s\\s+my|what\\s+do\\s+you\\s+have)\\b").containsMatchIn(userTranscriptLower) &&
+            !Regex("\\b(?:recommend|recommendation|suggest|suggestion|what\\s+is\\s+my|what'?s\\s+my|what\\s+do\\s+you\\s+have|what\\s+should\\s+i)\\b").containsMatchIn(userTranscriptLower) &&
+            !Regex("\\b(?:i\\s*(?:am|'m)\\s+feeling|i\\s+feel|feeling\\s+(?:stressed|sad|down|tired|drained|anxious|happy|hyped|lonely|chill|romantic|heartbroken|bored|overwhelmed|focused))\\b").containsMatchIn(userTranscriptLower) &&
             Regex("\\b(?:play|spin|put\\s+on|start\\s+playing)\\b").containsMatchIn(userTranscriptLower) &&
             !(
                 Regex("\\b(?:play|spin|put\\s+on)\\s+(?:for\\s+me\\s+|me\\s+)?(?:(?:a|an|any|some|another|different|random|fresh|new|good|nice|cool|great|chill)\\s+)*(?:song|songs|track|tracks|music|tune|vibe|something|anything)\\b").containsMatchIn(userTranscriptLower) &&
@@ -2949,6 +2966,13 @@ class AgentVoiceManager(
                             spotify_uri = normalizePlayableSpotifyUri(
                                 item.optString("spotify_uri", "").takeIf { it.isNotBlank() }
                             ),
+                            context_uri = item.optString("context_uri", "").takeIf { it.isNotBlank() },
+                            shuffle_enabled = if (item.has("shuffle_enabled")) item.optBoolean("shuffle_enabled") else null,
+                            repeat_mode = item.optString("repeat_mode", "").takeIf { it.isNotBlank() },
+                            seek_position_ms = if (item.has("seek_position_ms")) item.optLong("seek_position_ms", 0L) else null,
+                            seek_delta_ms = if (item.has("seek_delta_ms")) item.optLong("seek_delta_ms", 0L) else null,
+                            device_id = item.optString("device_id", "").takeIf { it.isNotBlank() },
+                            device_name = item.optString("device_name", "").takeIf { it.isNotBlank() },
                             target_player = item.optString("target_player", "").takeIf { it.isNotBlank() }
                                 ?.let { resolveTargetPlayerPackage(it) },
                             remember_default_player = if (item.has("remember_default_player")) item.optBoolean("remember_default_player") else null,
@@ -2976,12 +3000,40 @@ class AgentVoiceManager(
             }
         }
 
+        val resolvedContextUri = cmdObj?.optString("context_uri", "")?.takeIf { it.isNotBlank() }
+            ?: toolObj?.optString("context_uri", "")?.takeIf { it.isNotBlank() }
+        val resolvedShuffleEnabled = when {
+            toolObj != null && toolObj.has("shuffle_enabled") -> toolObj.optBoolean("shuffle_enabled")
+            cmdObj != null && cmdObj.has("shuffle_enabled") -> cmdObj.optBoolean("shuffle_enabled")
+            else -> null
+        }
+        val resolvedRepeatMode = toolObj?.optString("repeat_mode", "")?.takeIf { it.isNotBlank() }
+        val resolvedSeekPositionMs = when {
+            toolObj != null && toolObj.has("seek_position_ms") -> toolObj.optLong("seek_position_ms", 0L)
+            cmdObj != null && cmdObj.has("seek_position_ms") -> cmdObj.optLong("seek_position_ms", 0L)
+            else -> null
+        }
+        val resolvedSeekDeltaMs = when {
+            toolObj != null && toolObj.has("seek_delta_ms") -> toolObj.optLong("seek_delta_ms", 0L)
+            cmdObj != null && cmdObj.has("seek_delta_ms") -> cmdObj.optLong("seek_delta_ms", 0L)
+            else -> null
+        }
+        val resolvedDeviceId = toolObj?.optString("device_id", "")?.takeIf { it.isNotBlank() }
+        val resolvedDeviceName = toolObj?.optString("device_name", "")?.takeIf { it.isNotBlank() }
+
         val toolPayload = com.tunemind.app.domain.execution.AgentToolCallPayload(
             action = effectiveAction,
             track_title = rawTrackTitle,
             track_artist = rawTrackArtist,
             track_id = finalCanonicalTrackId,
             spotify_uri = resolvedSpotifyUri,
+            context_uri = resolvedContextUri,
+            shuffle_enabled = resolvedShuffleEnabled,
+            repeat_mode = resolvedRepeatMode,
+            seek_position_ms = resolvedSeekPositionMs,
+            seek_delta_ms = resolvedSeekDeltaMs,
+            device_id = resolvedDeviceId,
+            device_name = resolvedDeviceName,
             ytm_video_id = rawYtmVideoId,
             preview_url = rawPreviewUrl,
             audius_stream_url = rawAudiusStreamUrl,
@@ -3032,6 +3084,10 @@ class AgentVoiceManager(
                 track_artist = rawTrackArtist,
                 track_id = finalCanonicalTrackId,
                 spotify_uri = resolvedSpotifyUri,
+                context_uri = resolvedContextUri,
+                shuffle_enabled = resolvedShuffleEnabled,
+                seek_position_ms = resolvedSeekPositionMs,
+                seek_delta_ms = resolvedSeekDeltaMs,
                 ytm_video_id = rawYtmVideoId,
                 preview_url = rawPreviewUrl,
                 audius_stream_url = rawAudiusStreamUrl,

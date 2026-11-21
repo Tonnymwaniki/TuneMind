@@ -161,6 +161,8 @@ wss.on('connection', async (ws: WebSocket) => {
     tunemind_playlists?: TuneMindTelemetryContext['tunemind_playlists'];
     kids_mode_enabled?: boolean;
     active_sleep_timer_minutes?: number;
+    spotify_access_token?: string;
+    spotify_device_name?: string;
   }) | null = null;
 
   const daypartFromHour = (h: number): 'Morning' | 'Midday' | 'Evening' | 'Late Night' => {
@@ -319,7 +321,9 @@ wss.on('connection', async (ws: WebSocket) => {
         active_sleep_timer_minutes: clientContext?.active_sleep_timer_minutes,
         listening_stats: clientContext?.listening_stats,
         player_preferences: clientContext?.player_preferences,
-        app_state: clientContext?.app_state
+        app_state: clientContext?.app_state,
+        spotify_access_token: clientContext?.spotify_access_token,
+        spotify_device_name: clientContext?.spotify_device_name
       });
 
       console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);

@@ -339,6 +339,95 @@ open class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            "UNLIKE_TRACK" -> {
+                                val np = vm.homeState.value.nowPlaying
+                                val uTitle = tool.track_title?.takeIf { it.isNotBlank() } ?: np?.title
+                                val uArtist = tool.track_artist?.takeIf { it.isNotBlank() } ?: np?.artist ?: ""
+                                if (!uTitle.isNullOrBlank() && uTitle != "Standing By") {
+                                    val canonicalKey = com.tunemind.app.domain.model.TrackIdentityResolver
+                                        .buildNormalizedMatchKey(uTitle, uArtist)
+                                    vm.toggleLibraryTrackLike(canonicalKey, liked = false)
+                                    if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
+                                        val unlikeUri = tool.spotify_uri ?: np?.spotifyUri
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.unlikeTrackOnSpotify(
+                                                context = context,
+                                                title = uTitle,
+                                                artist = uArtist,
+                                                spotifyUri = unlikeUri
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            "PLAY_SPOTIFY_CONTEXT" -> {
+                                if (!isPrimaryTurnAction) {
+                                    val ctxUri = tool.context_uri?.takeIf { it.isNotBlank() }
+                                        ?: tool.spotify_uri?.takeIf { it.isNotBlank() }
+                                    if (!ctxUri.isNullOrBlank()) {
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.playSpotifyContextSilently(
+                                                context = context,
+                                                contextUri = ctxUri,
+                                                shuffleEnabled = tool.shuffle_enabled
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            "SET_SHUFFLE" -> {
+                                val shuffleTarget = tool.shuffle_enabled ?: true
+                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.tunemind.app.provider.SpotifyPremiumConnectManager.setShuffle(
+                                        context = context,
+                                        enabled = shuffleTarget
+                                    )
+                                }
+                            }
+                            "SET_REPEAT_MODE" -> {
+                                val mode = tool.repeat_mode?.takeIf { it.isNotBlank() } ?: "off"
+                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.tunemind.app.provider.SpotifyPremiumConnectManager.setRepeatMode(
+                                        context = context,
+                                        mode = mode
+                                    )
+                                }
+                            }
+                            "SEEK_TO_POSITION" -> {
+                                if (!isPrimaryTurnAction) {
+                                    val posMs = tool.seek_position_ms
+                                    val deltaMs = tool.seek_delta_ms
+                                    val np = vm.homeState.value.nowPlaying
+                                    if (com.tunemind.app.provider.TuneMindInAppPlayer.hasActiveTrack() ||
+                                        com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo()
+                                    ) {
+                                        val cur = np?.positionMs ?: 0L
+                                        val dest = (posMs ?: (cur + (deltaMs ?: 0L))).coerceAtLeast(0L)
+                                        vm.seekTo(dest)
+                                    } else if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.seekPlayback(
+                                                context = context,
+                                                positionMs = posMs,
+                                                deltaMs = deltaMs
+                                            )
+                                        }
+                                    } else {
+                                        val cur = np?.positionMs ?: 0L
+                                        val dest = (posMs ?: (cur + (deltaMs ?: 0L))).coerceAtLeast(0L)
+                                        vm.seekTo(dest)
+                                    }
+                                }
+                            }
+                            "TRANSFER_SPOTIFY_DEVICE" -> {
+                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.tunemind.app.provider.SpotifyPremiumConnectManager.transferPlaybackDevice(
+                                        context = context,
+                                        deviceId = tool.device_id,
+                                        deviceName = tool.device_name
+                                    )
+                                }
+                            }
                             "LAUNCH_DOPAMINE_CAPSULE" -> {
                                 vm.compileDopamineCapsule()
                                 requestedScreenPage = 0
