@@ -187,6 +187,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    implementation(libs.play.billing.ktx)
 
     // Firebase Crashlytics & Analytics (auto-activates when google-services.json is present)
     implementation(platform(libs.firebase.bom))

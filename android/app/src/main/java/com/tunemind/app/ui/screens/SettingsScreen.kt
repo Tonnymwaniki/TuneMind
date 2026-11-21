@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -100,6 +101,7 @@ fun SettingsScreen(
     val deduplicateLogs by com.tunemind.app.domain.voice.AgentSettingsStore.mergeDuplicatePlaysEnabled.collectAsState()
     val spotifyConnectStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
     val spotifyLibrarySyncState by vm.spotifyLibrarySyncState.collectAsState()
+    val billingState by vm.billingState.collectAsState()
     var spotifyClientIdInput by remember { mutableStateOf(spotifyConnectStatus.clientId) }
     var detectedClipboardClientId by remember { mutableStateOf<String?>(null) }
     var copiedRedirectUri by remember { mutableStateOf(false) }
@@ -212,6 +214,73 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
+
+            // 0. TuneMind Pro & Subscription Plan
+            Column(modifier = Modifier.fillMaxWidth()) {
+                StudioSectionHeader(title = "TuneMind Pro & Plan")
+                Spacer(modifier = Modifier.height(6.dp))
+                StudioHairlineDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            vm.openPaywall(
+                                if (billingState.hasProAccess) null
+                                else "Start your 7-day free trial for Pulse Voice Agent, 15 daily For You picks & Vault insights."
+                            )
+                        }
+                        .padding(vertical = 13.dp, horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = if (billingState.hasProAccess) safeGreen else colors.primaryAccent,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            val planTitle = when {
+                                billingState.isTrial -> "7-Day Free Trial Active (${billingState.trialDaysRemaining}d left)"
+                                billingState.hasProAccess -> "TuneMind Pro Active"
+                                else -> "Free Forever · Upgrade to Pro"
+                            }
+                            val planDesc = when {
+                                billingState.hasProAccess && billingState.dailyAgentLimit > 0 ->
+                                    "${billingState.dailyAgentUsed}/${billingState.dailyAgentLimit} daily AI chats used · Tap to manage"
+                                billingState.hasProAccess ->
+                                    "Full Conversational Agent & 15 Daily Picks active"
+                                else ->
+                                    "Unlimited tracking & Spotify playback free · Try Pro 7 days free"
+                            }
+                            Text(
+                                text = planTitle,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFF8FAFC)
+                            )
+                            Text(
+                                text = planDesc,
+                                fontSize = 12.sp,
+                                color = if (billingState.hasProAccess) safeGreen.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.58f)
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Rounded.ChevronRight,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.45f)
+                    )
+                }
+                StudioHairlineDivider()
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
 
             // 1. Voice & Playback (Open-Canvas Section)
             Column(modifier = Modifier.fillMaxWidth()) {

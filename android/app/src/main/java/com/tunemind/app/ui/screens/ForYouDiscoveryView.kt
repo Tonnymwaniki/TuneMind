@@ -196,7 +196,9 @@ fun LazyListScope.forYouDiscoveryItems(
     onSaveTrack: (AiRecommendationEntity, Boolean) -> Unit,
     onDismissTrack: (AiRecommendationEntity) -> Unit,
     onInspectTrack: (AiRecommendationEntity) -> Unit,
-    onExportPlaylist: ((List<AiRecommendationEntity>) -> Unit)? = null
+    onExportPlaylist: ((List<AiRecommendationEntity>) -> Unit)? = null,
+    hasProAccess: Boolean = true,
+    onOpenProUpgrade: ((String?) -> Unit)? = null
 ) {
     val wildcards = activeRecs
         .filter { it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true) }
@@ -264,7 +266,11 @@ fun LazyListScope.forYouDiscoveryItems(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "12 fresh unheard tracks across your genres plus 3 songs from new global genres, calibrated from your listening behavior.",
+                            text = if (hasProAccess) {
+                                "12 fresh unheard tracks across your genres plus 3 songs from new global genres, calibrated from your listening behavior."
+                            } else {
+                                "Your 2 daily Free picks are ready to sync. Start a 7-day free trial anytime for all 15 daily picks and refreshes."
+                            },
                             color = Color.White.copy(alpha = 0.64f),
                             fontSize = 12.5.sp,
                             lineHeight = 18.sp
@@ -286,7 +292,7 @@ fun LazyListScope.forYouDiscoveryItems(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Sync Today's 15 Picks",
+                                text = if (hasProAccess) "Sync Today's 15 Picks" else "Sync Today's 2 Free Picks",
                                 color = Color(0xFFF8FAFC),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -416,6 +422,65 @@ fun LazyListScope.forYouDiscoveryItems(
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
+        }
+    }
+
+    // 3b. Gentle Free-tier upgrade banner (shown calmly without popups)
+    if (!hasProAccess && onOpenProUpgrade != null) {
+        item(key = "foryou_free_tier_upgrade_banner") {
+            val theme = LocalAdaptiveTheme.current
+            SoftGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                accentTint = theme.primaryAccent,
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = theme.primaryAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "2 Free Daily Picks Active",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Try TuneMind Pro free for 7 days to unlock all 15 AI picks, refreshes & Pulse Voice Agent.",
+                            color = Color.White.copy(alpha = 0.66f),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(theme.primaryAccent.copy(alpha = 0.20f))
+                            .border(1.dp, theme.primaryAccent.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                onOpenProUpgrade("Start your 7-day free trial to unlock all 15 daily For You recommendations and unlimited refreshes.")
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = "Try 7d Free",
+                            color = theme.primaryAccent,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
         }
     }
 

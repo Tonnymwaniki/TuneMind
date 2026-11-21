@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { TelemetryReasoningPoller } from '../../domain/reasoning/TelemetryReasoningPoller';
+import { SubscriptionEntitlementStore } from '../../domain/billing/SubscriptionEntitlementStore';
 import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
@@ -127,11 +128,25 @@ async function generateElevenLabsAudio(text: string): Promise<string | null> {
 router.post('/evaluate-satiety', async (req: Request, res: Response) => {
   try {
     const payload = { ...(req.body || {}) };
+    const identity = resolveEffectiveUserIdentity(req, payload.user_id, payload.user_email);
+    const effectiveUserId = (req.authUser ? identity.userId : payload.user_id) || identity.userId;
     if (req.authUser) {
-      const identity = resolveEffectiveUserIdentity(req, payload.user_id, payload.user_email);
       payload.user_id = identity.userId;
       payload.user_email = identity.userEmail;
     }
+
+    const quota = await SubscriptionEntitlementStore.checkAndConsumeAiQuota(effectiveUserId, 'agent');
+    if (!quota.allowed) {
+      const statusCode = quota.code === 'PRO_TRIAL_REQUIRED' ? 402 : 429;
+      res.status(statusCode).json({
+        status: 'upgrade_required',
+        code: quota.code,
+        message: quota.message,
+        entitlement: quota.entitlement
+      });
+      return;
+    }
+
     const { ClaudeMusicReasoningProvider } = await import('../../domain/reasoning/ClaudeMusicReasoningProvider');
     const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.evaluateSatiety(payload);
@@ -145,6 +160,7 @@ router.post('/evaluate-satiety', async (req: Request, res: Response) => {
 
     res.json({
       status: 'ok',
+      entitlement: quota.entitlement,
       ...result
     });
   } catch (error) {

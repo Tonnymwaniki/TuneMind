@@ -652,7 +652,8 @@ object ClaudeReasoningEngine {
         genreDistribution: Map<String, Int> = emptyMap(),
         artistGenres: Map<String, String> = emptyMap(),
         cleanPlayEvents: List<com.tunemind.app.domain.memory.UnifiedPlayEvent> = emptyList(),
-        onLearningSummaryUpdated: ((ForYouLearningSummary) -> Unit)? = null
+        onLearningSummaryUpdated: ((ForYouLearningSummary) -> Unit)? = null,
+        onBillingRestriction: ((code: String, message: String) -> Unit)? = null
     ): List<AiRecommendationEntity> = withContext(Dispatchers.IO) {
         val observedArtists = (recentTracks.mapNotNull { it.artist } + listOfNotNull(nowPlayingArtist))
             .filter { it.isNotBlank() }
@@ -846,9 +847,32 @@ object ClaudeReasoningEngine {
                     writer.flush()
                 }
 
-                if (conn.responseCode in 200..299) {
+                val statusCode = conn.responseCode
+                if (statusCode == 402 || statusCode == 429) {
+                    val errText = runCatching {
+                        val stream = conn.errorStream ?: conn.inputStream
+                        if (stream != null) BufferedReader(InputStreamReader(stream, "UTF-8")).use { it.readText() } else ""
+                    }.getOrDefault("")
+                    val errJson = runCatching { JSONObject(errText) }.getOrNull()
+                    errJson?.optJSONObject("entitlement")?.let { entJson ->
+                        com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).applyEntitlementJson(entJson)
+                    }
+                    val code = errJson?.optString("code", if (statusCode == 402) "PRO_TRIAL_REQUIRED" else "QUOTA_REACHED")
+                        ?: if (statusCode == 402) "PRO_TRIAL_REQUIRED" else "QUOTA_REACHED"
+                    val msg = errJson?.optString(
+                        "message",
+                        "Start your 7-day free trial to refresh For You drops and unlock all 15 daily recommendations."
+                    ) ?: "Start your 7-day free trial to unlock unlimited refreshes."
+                    onBillingRestriction?.invoke(code, msg)
+                    return@withContext emptyList()
+                }
+
+                if (statusCode in 200..299) {
                     val text = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { it.readText() }
                     val root = JSONObject(text)
+                    root.optJSONObject("entitlement")?.let { entJson ->
+                        com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).applyEntitlementJson(entJson)
+                    }
                     val parsedSummary = parseLearningSummaryJson(root, noonCycleKey)
                     if (parsedSummary != null) {
                         saveLearningSummary(context, parsedSummary)

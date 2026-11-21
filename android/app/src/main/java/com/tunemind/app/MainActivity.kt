@@ -211,14 +211,19 @@ open class MainActivity : ComponentActivity() {
                     val kidsModeEnabled by AgentSettingsStore.kidsModeEnabled.collectAsState()
                     val tuneMindPlaylists by vm.tuneMindPlaylists.collectAsState()
                     val playbackLaunchFeedback by vm.playbackLaunchFeedback.collectAsState()
+                    val billingState by vm.billingState.collectAsState()
+                    val showPaywallSheet by vm.showPaywallSheet.collectAsState()
+                    val paywallTriggerReason by vm.paywallTriggerReason.collectAsState()
 
                     LaunchedEffect(Unit) {
                         com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
                         com.tunemind.app.sync.SyncScheduler.scheduleSpotifyTokenKeepAlive(context)
+                        vm.initBilling(context)
                     }
 
                     // Auto-restore encrypted Spotify connection from TuneMind cloud on startup / sign-in
                     LaunchedEffect(authSession.userId, authSession.isSupabaseAuthenticated) {
+                        vm.refreshBillingEntitlement(context)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
                             com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
@@ -876,6 +881,9 @@ open class MainActivity : ComponentActivity() {
                             },
                             onPlaybackLaunchResult = { result ->
                                 vm.reportPlaybackLaunchResult(result)
+                            },
+                            onProTrialRequired = { reason ->
+                                vm.openPaywall(reason)
                             }
                         )
                     }
@@ -1194,6 +1202,10 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onRefreshForYou = {
                                                     vm.triggerChronoDiscovery(forceRefresh = true)
+                                                },
+                                                hasProAccess = billingState.hasProAccess,
+                                                onOpenProUpgrade = { reason ->
+                                                    vm.openPaywall(reason)
                                                 },
                                                 onSaveForYou = { rec, saved ->
                                                     vm.toggleSaveRecommendation(rec.id, saved)
@@ -1896,6 +1908,20 @@ open class MainActivity : ComponentActivity() {
                                                 agentVoiceManager.processFinalTranscriptWithFallback(prompt)
                                             }
                                         }
+                                    )
+                                }
+
+                                // Gentle TuneMind Pro 7-Day Free Trial Google Play Billing Sheet
+                                if (showPaywallSheet) {
+                                    com.tunemind.app.ui.components.TuneMindProPaywallSheet(
+                                        billingState = billingState,
+                                        triggerReason = paywallTriggerReason,
+                                        onDismiss = { vm.dismissPaywall() },
+                                        onSelectPlanAndPurchase = { productId ->
+                                            vm.startProPurchase(this@MainActivity, productId)
+                                        },
+                                        onRestorePurchases = { vm.restoreProPurchases(context) },
+                                        onManageSubscription = { vm.manageProSubscription(context) }
                                     )
                                 }
                             }

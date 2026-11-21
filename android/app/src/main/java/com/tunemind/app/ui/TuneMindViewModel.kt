@@ -262,6 +262,65 @@ class TuneMindViewModel : ViewModel() {
     private val _nowPlayingActionStatus = MutableStateFlow<String?>(null)
     val nowPlayingActionStatus: StateFlow<String?> = _nowPlayingActionStatus.asStateFlow()
 
+    private val _billingState = MutableStateFlow(com.tunemind.app.billing.BillingUiState())
+    val billingState: StateFlow<com.tunemind.app.billing.BillingUiState> = _billingState.asStateFlow()
+
+    private val _showPaywallSheet = MutableStateFlow(false)
+    val showPaywallSheet: StateFlow<Boolean> = _showPaywallSheet.asStateFlow()
+
+    private val _paywallTriggerReason = MutableStateFlow<String?>(null)
+    val paywallTriggerReason: StateFlow<String?> = _paywallTriggerReason.asStateFlow()
+
+    @Volatile
+    private var billingObserverStarted: Boolean = false
+
+    fun initBilling(context: android.content.Context) {
+        val mgr = com.tunemind.app.billing.TuneMindBillingManager.getInstance(context)
+        if (!billingObserverStarted) {
+            billingObserverStarted = true
+            _billingState.value = mgr.state.value
+            viewModelScope.launch {
+                mgr.state.collect { st ->
+                    _billingState.value = st
+                }
+            }
+        }
+        mgr.initialize()
+    }
+
+    fun refreshBillingEntitlement(context: android.content.Context) {
+        viewModelScope.launch {
+            com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).refreshEntitlementFromBackend()
+        }
+    }
+
+    fun openPaywall(reason: String? = null) {
+        AppHolder.context?.let {
+            com.tunemind.app.billing.TuneMindBillingManager.getInstance(it).clearStatusMessage()
+        }
+        _paywallTriggerReason.value = reason?.takeIf { it.isNotBlank() }
+        _showPaywallSheet.value = true
+    }
+
+    fun dismissPaywall() {
+        _showPaywallSheet.value = false
+        _paywallTriggerReason.value = null
+    }
+
+    fun startProPurchase(activity: android.app.Activity, productId: String) {
+        com.tunemind.app.billing.TuneMindBillingManager.getInstance(activity)
+            .launchSubscriptionPurchase(activity, productId)
+    }
+
+    fun restoreProPurchases(context: android.content.Context) {
+        com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).restorePurchases()
+    }
+
+    fun manageProSubscription(context: android.content.Context) {
+        com.tunemind.app.billing.TuneMindBillingManager.getInstance(context)
+            .openManageSubscriptionsInPlayStore(context)
+    }
+
     private val playedOrConsumedQueueKeys = LinkedHashSet<String>()
     @Volatile
     private var queueRotationOffset: Int = 0
@@ -4546,9 +4605,17 @@ class TuneMindViewModel : ViewModel() {
                     runCatching { aiRecDao?.clearInvalidSpotifyUris() }
                 }
 
+                val billingHasPro = _billingState.value.hasProAccess ||
+                    com.tunemind.app.billing.TuneMindBillingManager.getInstance(ctx).state.value.hasProAccess
+                if (forceRefresh && !billingHasPro) {
+                    openPaywall("Start your 7-day free trial to refresh For You drops and unlock all 15 daily AI recommendations.")
+                    return@launch
+                }
+
                 val existingInFlow = _aiDiscoveryCrate.value.filter {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
+                val requiredCachedCount = if (billingHasPro) 10 else 2
                 if (!forceRefresh) {
                     fun repairUnverifiedAsync(pool: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>) {
                         val unverified = pool.filter {
@@ -4604,7 +4671,7 @@ class TuneMindViewModel : ViewModel() {
                         }
                     }
 
-                    if (existingInFlow.size >= 10) {
+                    if (existingInFlow.size >= requiredCachedCount) {
                         autoTriggeredNoonCycleKey = todayNoonKey
                         repairUnverifiedAsync(existingInFlow)
                         return@launch
@@ -4613,7 +4680,7 @@ class TuneMindViewModel : ViewModel() {
                     val existingInRoom = withContext(Dispatchers.IO) {
                         aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()
                     }
-                    if (existingInRoom.size >= 10) {
+                    if (existingInRoom.size >= requiredCachedCount) {
                         autoTriggeredNoonCycleKey = todayNoonKey
                         repairUnverifiedAsync(existingInRoom)
                         return@launch
@@ -4777,6 +4844,11 @@ class TuneMindViewModel : ViewModel() {
                     cleanPlayEvents = _cleanPlayHistory.value,
                     onLearningSummaryUpdated = { summary ->
                         _forYouLearningState.value = summary
+                    },
+                    onBillingRestriction = { code, message ->
+                        if (code == "PRO_TRIAL_REQUIRED") {
+                            openPaywall(message)
+                        }
                     }
                 )
 

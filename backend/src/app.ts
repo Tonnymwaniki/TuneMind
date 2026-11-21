@@ -12,6 +12,7 @@ import supportRouter from './api/v1/support';
 import accountRouter from './api/v1/account';
 import spotifyRouter from './api/v1/spotify';
 import trackCardsRouter from './api/v1/trackCards';
+import billingRouter from './api/v1/billing';
 import legalRouter from './api/v1/legalRoutes';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 import { RestingVaultEngine } from './domain/vault/RestingVaultEngine';
@@ -64,6 +65,7 @@ export function createApp(): express.Express {
   app.use('/api/v1/account', sensitiveOpsLimiter, accountRouter);
   app.use('/api/v1/spotify', spotifyRouter);
   app.use('/api/v1/track-cards', trackCardsRouter);
+  app.use('/api/v1/billing', billingRouter);
 
   // ─── Live Supabase Intelligence Sync & Long-Term Growth Endpoints ──────────
   app.post('/api/v1/intelligence/sync', async (req: Request, res: Response) => {

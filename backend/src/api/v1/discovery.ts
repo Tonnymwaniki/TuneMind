@@ -3,14 +3,16 @@ import {
   DiscoveryFeedbackEvent,
   SelfLearningDiscoveryEngine
 } from '../../domain/recommendation/SelfLearningDiscoveryEngine';
+import { SubscriptionEntitlementStore } from '../../domain/billing/SubscriptionEntitlementStore';
 import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
 
 /**
  * POST /api/v1/discovery/daily-drop
- * Runs online learning on yesterday's recommendation outcomes + cross-app listening context,
- * then builds a verified 2-per-genre + 2 global wildcard unplayed daily slate.
+ * Runs online learning on yesterday's recommendation outcomes + cross-app listening context.
+ * - Free users receive 2 verified non-repeating daily picks at $0 Claude cost.
+ * - Trial/Pro users receive the full 15-song Haiku-synthesized slate within fair-use quotas.
  */
 router.post('/daily-drop', async (req: Request, res: Response) => {
   try {
@@ -20,6 +22,37 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       body.userId || body.user_id,
       body.userEmail || body.user_email
     );
+    const effectiveUserId = (req.authUser ? identity.userId : (body.userId || body.user_id)) || identity.userId;
+    const forceRefresh = Boolean(body.forceRefresh || body.force_refresh);
+    const entitlement = await SubscriptionEntitlementStore.getEntitlement(effectiveUserId);
+    const enforcePaywall = SubscriptionEntitlementStore.isPaywallEnforced();
+
+    if (enforcePaywall && !entitlement.hasProAccess && forceRefresh) {
+      res.status(402).json({
+        status: 'upgrade_required',
+        code: 'PRO_TRIAL_REQUIRED',
+        message: 'Start your 7-day free trial of TuneMind Pro to refresh picks and unlock all 15 daily recommendations.',
+        entitlement
+      });
+      return;
+    }
+
+    const isFreeOffer = enforcePaywall && !entitlement.hasProAccess;
+    if (!isFreeOffer && enforcePaywall) {
+      const preQuota = await SubscriptionEntitlementStore.checkAndConsumeAiQuota(effectiveUserId, 'for_you', {
+        consume: false
+      });
+      if (!preQuota.allowed && forceRefresh) {
+        res.status(429).json({
+          status: 'quota_reached',
+          code: preQuota.code || 'TRIAL_QUOTA_REACHED',
+          message: preQuota.message,
+          entitlement: preQuota.entitlement
+        });
+        return;
+      }
+    }
+
     const engine = new SelfLearningDiscoveryEngine();
     const toStringArray = (val: unknown, maxLen: number): string[] =>
       Array.isArray(val)
@@ -35,10 +68,12 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       (typeof body.spotify_access_token === 'string' ? body.spotify_access_token.trim() : '');
 
     const result = await engine.generateDailyForYouDrop({
-      userId: req.authUser ? identity.userId : (body.userId || body.user_id),
+      userId: effectiveUserId,
       userEmail: req.authUser ? identity.userEmail : (body.userEmail || body.user_email),
       dropDate: body.dropDate || body.drop_date,
-      forceRefresh: Boolean(body.forceRefresh || body.force_refresh),
+      forceRefresh: isFreeOffer ? false : forceRefresh,
+      skipClaude: isFreeOffer,
+      maxTotalRecommendations: isFreeOffer ? 2 : undefined,
       timezone: body.timezone,
       localHour: typeof body.localHour === 'number' ? body.localHour : undefined,
       timeSlot: body.timeSlot || body.time_slot,
@@ -66,7 +101,20 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       supabaseUrl: body.supabase_url,
       supabaseKey: body.supabase_anon_key
     });
-    res.json(result);
+
+    let updatedEntitlement = entitlement;
+    if (!isFreeOffer && enforcePaywall && result.isAiGenerated && result.modelUsed !== 'cached-daily-drop') {
+      const consumed = await SubscriptionEntitlementStore.checkAndConsumeAiQuota(effectiveUserId, 'for_you', {
+        consume: true
+      });
+      updatedEntitlement = consumed.entitlement;
+    }
+
+    res.json({
+      ...result,
+      entitlement: updatedEntitlement,
+      isFreeLimitedDrop: isFreeOffer
+    });
   } catch (error) {
     console.error('[discovery.ts] Error generating daily drop:', error);
     res.status(500).json({

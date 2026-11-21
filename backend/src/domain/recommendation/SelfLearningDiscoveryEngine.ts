@@ -171,6 +171,8 @@ export interface DailyDropRequest {
   yesterdayOutcomes?: DiscoveryFeedbackEvent[];
   playedFeedback?: string[];
   dismissedFeedback?: string[];
+  skipClaude?: boolean;
+  maxTotalRecommendations?: number;
   supabaseUrl?: string;
   supabaseKey?: string;
 }
@@ -1562,12 +1564,12 @@ export class SelfLearningDiscoveryEngine {
             ? body.data.map((m: any) => String(m?.id || '').trim()).filter((id: string) => id.startsWith('claude-'))
             : [];
           if (ids.length > 0) {
-            // Prioritize Claude Sonnet 5.5 first, then latest Sonnet models, with Haiku as fallback
-            const sonnet55 = ids.filter((id: string) => id.includes('sonnet') && id.includes('5-5'));
-            const otherSonnets = ids.filter((id: string) => id.includes('sonnet') && !id.includes('5-5'));
-            const haikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('sonnet'));
-            const rest = ids.filter((id: string) => !id.includes('sonnet') && !id.includes('haiku'));
-            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...sonnet55, ...otherSonnets, ...haikus, ...rest];
+            // Prioritize cost-efficient Claude Haiku first, with Sonnet as fallback
+            const haiku55 = ids.filter((id: string) => id.includes('haiku') && id.includes('5-5'));
+            const otherHaikus = ids.filter((id: string) => id.includes('haiku') && !id.includes('5-5'));
+            const sonnets = ids.filter((id: string) => id.includes('sonnet'));
+            const rest = ids.filter((id: string) => !id.includes('haiku') && !id.includes('sonnet'));
+            SelfLearningDiscoveryEngine.discoveredClaudeModels = [...haiku55, ...otherHaikus, ...sonnets, ...rest];
             SelfLearningDiscoveryEngine.lastClaudeDiscoveryMs = now;
           }
         }
@@ -1581,15 +1583,17 @@ export class SelfLearningDiscoveryEngine {
     }
 
     const envModel = (process.env.ANTHROPIC_MODEL || '').trim();
-    if (envModel && !candidates.includes(envModel)) candidates.push(envModel);
+    if (envModel && !candidates.includes(envModel)) candidates.unshift(envModel);
 
     for (const id of [
+      'claude-haiku-5-5',
+      'claude-haiku-4-5',
+      'claude-haiku-4-5-20251001',
+      'claude-3-5-haiku-20241022',
       'claude-sonnet-5-5',
       'claude-sonnet-4-6',
       'claude-sonnet-4-5',
-      'claude-sonnet-4-5-20250929',
-      'claude-haiku-5-5',
-      'claude-haiku-4-5'
+      'claude-sonnet-4-5-20250929'
     ]) {
       if (!candidates.includes(id)) candidates.push(id);
     }
@@ -1616,8 +1620,8 @@ export class SelfLearningDiscoveryEngine {
       }
     }
 
-    // Batch-classify any unknown played regional/global artists ONCE and cache persistently
-    if (this.anthropic && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
+    // Batch-classify any unknown played regional/global artists ONCE and cache persistently (skip for Free $0-AI mode)
+    if (!payload.skipClaude && this.anthropic && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
       const unknownArtists = Array.from(
         new Set(
           payload.recentTracks
@@ -1629,7 +1633,7 @@ export class SelfLearningDiscoveryEngine {
       if (unknownArtists.length > 0) {
         try {
           const models = await this.getCandidateClaudeModels();
-          const primaryModel = models[0] || 'claude-sonnet-5-5';
+          const primaryModel = models[0] || 'claude-haiku-4-5';
           const clsResp = await this.anthropic.messages.create({
             model: primaryModel,
             max_tokens: 260,
@@ -1821,8 +1825,12 @@ export class SelfLearningDiscoveryEngine {
     }
 
     // Cost Protection: return today's cached 12:00 PM drop if still valid, verified, and unexcluded
+    const requestedCap = typeof payload.maxTotalRecommendations === 'number' && payload.maxTotalRecommendations > 0
+      ? Math.floor(payload.maxTotalRecommendations)
+      : null;
+    const minCachedThreshold = requestedCap ? Math.min(requestedCap, 2) : 10;
     const existingDropForCycle = (model.recentDrops || []).find(
-      (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= 10
+      (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= minCachedThreshold
     );
     const forceRefreshCooldownMs = 15 * 60_000;
     if (
@@ -1865,17 +1873,18 @@ export class SelfLearningDiscoveryEngine {
           };
         });
 
-      if (cleanCached.length >= 10) {
+      const finalCached = requestedCap ? cleanCached.slice(0, requestedCap) : cleanCached;
+      if (finalCached.length >= minCachedThreshold) {
         return {
           status: 'ok',
           dropDate,
           nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
-          isAiGenerated: true,
+          isAiGenerated: !payload.skipClaude,
           modelUsed: 'cached-daily-drop',
-          wildcardCount: cleanCached.filter((r) => r.isWildcard).length,
+          wildcardCount: finalCached.filter((r) => r.isWildcard).length,
           learningSummary,
           genreAllocation,
-          recommendations: cleanCached
+          recommendations: finalCached
         };
       }
     }
@@ -1887,10 +1896,10 @@ export class SelfLearningDiscoveryEngine {
     const totalTargetCount = genreTargetCount + desiredWildcards;
     let candidates: Array<ScoredDiscoveryTrack & { _fromBank?: boolean }> = [];
     let isAiGenerated = false;
-    let modelUsed = 'tunemind-contextual-bandit';
+    let modelUsed = payload.skipClaude ? 'free-open-catalog-2picks' : 'tunemind-contextual-bandit';
 
-    // 4. AI Deep Reasoning Synthesis (Single cost-capped Haiku-first pass per daily cycle)
-    if (this.anthropic) {
+    // 4. AI Deep Reasoning Synthesis (Single cost-capped Haiku-first pass per daily cycle; skipped for Free $0 mode)
+    if (!payload.skipClaude && this.anthropic) {
       const allocationInstruction = genreAllocation
         .map((g) => `- ${g.slots} UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
         .join('\n');
@@ -2152,7 +2161,7 @@ Return ONLY a raw JSON array:
       }
     }
 
-    const verified = [...finalGenrePicks, ...finalWildcards]
+    const rankedVerified = [...finalGenrePicks, ...finalWildcards]
       .filter(
         (tr) =>
           !this.isExcludedTrack(
@@ -2179,6 +2188,12 @@ Return ONLY a raw JSON array:
         if (a.isWildcard !== b.isWildcard) return a.isWildcard ? 1 : -1;
         return b.mlScore - a.mlScore;
       });
+
+    const verified = requestedCap
+      ? rankedVerified.filter((tr) => !tr.isWildcard).slice(0, requestedCap).length >= requestedCap
+        ? rankedVerified.filter((tr) => !tr.isWildcard).slice(0, requestedCap)
+        : rankedVerified.slice(0, requestedCap)
+      : rankedVerified;
 
     // Permanently remember every emitted track so future days NEVER repeat them even after 14+ days
     const updatedKeys = new Set<string>(model.recommendedTrackKeys || []);

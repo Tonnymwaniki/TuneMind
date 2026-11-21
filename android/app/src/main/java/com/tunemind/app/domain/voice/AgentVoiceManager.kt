@@ -69,7 +69,8 @@ class AgentVoiceManager(
     private val onTrackDispatched: ((title: String, artist: String, sourcePlayer: String) -> Unit)? = null,
     private val onToolActionExecuted: ((toolCall: com.tunemind.app.domain.execution.AgentToolCallPayload) -> Unit)? = null,
     private val onPlaybackLaunchResult: ((com.tunemind.app.provider.PlaybackLaunchResult) -> Unit)? = null,
-    private val onWakeOpenAppRequested: (() -> Unit)? = null
+    private val onWakeOpenAppRequested: (() -> Unit)? = null,
+    private val onProTrialRequired: ((reason: String) -> Unit)? = null
 ) : RecognitionListener {
     private val TAG = "AgentVoiceManager"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -3300,6 +3301,14 @@ class AgentVoiceManager(
 
         setThinkingState()
         scope.launch {
+            // Free users get instant local playback & utility controls at $0 Claude API cost
+            val billingSnapshot = com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).state.value
+            if (!billingSnapshot.hasProAccess && isFreeTierLocalCommand(cleaned)) {
+                val localFreeJson = buildLocalOnDeviceFallbackJson(cleaned)
+                dispatchReasoningResult(localFreeJson, localFreeJson.optString("voice_agent_tts", ""))
+                return@launch
+            }
+
             try {
                 val np = getNowPlaying?.invoke()
                 val recents = getRecentTracks?.invoke() ?: emptyList()
@@ -3308,6 +3317,8 @@ class AgentVoiceManager(
                 val vaultList = getVaultTracks?.invoke() ?: emptyList()
                 val capsule = getDopamineCapsule?.invoke()
                 val pendingProp = clientPendingProposedTrack
+                val authMgr = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
+                val authSession = authMgr.sessionFlow.value
 
                 val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                 val daypart = when (hour) {
@@ -3318,6 +3329,8 @@ class AgentVoiceManager(
                 }
 
                 val bodyJson = JSONObject().apply {
+                    if (authSession.userId.isNotBlank()) put("userId", authSession.userId)
+                    authSession.email?.takeIf { it.isNotBlank() }?.let { put("userEmail", it) }
                     put("timestamp_utc", java.time.Instant.now().toString())
                     put("circadian_daypart", daypart)
                     put("user_command", cleaned)
@@ -3402,18 +3415,55 @@ class AgentVoiceManager(
 
                 val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
                 val mediaType = "application/json; charset=utf-8".toMediaType()
-                val req = Request.Builder()
+                val reqBuilder = Request.Builder()
                     .url("$baseUrl/api/v1/reasoning/evaluate-satiety")
                     .post(bodyJson.toString().toRequestBody(mediaType))
-                    .build()
+                val accessToken = runCatching { authMgr.getAccessToken() }.getOrDefault("")
+                if (accessToken.isNotBlank()) {
+                    reqBuilder.header("Authorization", "Bearer $accessToken")
+                }
 
-                val resp = reasoningHttpClient.newCall(req).execute()
+                val resp = reasoningHttpClient.newCall(reqBuilder.build()).execute()
                 val respStr = resp.body?.string()
+                val respCode = resp.code
                 resp.close()
 
                 if (resp.isSuccessful && !respStr.isNullOrBlank()) {
                     val respJson = JSONObject(respStr)
                     dispatchReasoningResult(respJson, respJson.optString("voice_agent_tts", ""))
+                    return@launch
+                }
+
+                if ((respCode == 402 || respCode == 429) && !respStr.isNullOrBlank()) {
+                    val errJson = runCatching { JSONObject(respStr) }.getOrNull()
+                    errJson?.optJSONObject("entitlement")?.let { entJson ->
+                        com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).applyEntitlementJson(entJson)
+                    }
+                    val errCode = errJson?.optString("code", "") ?: ""
+                    val errMsg = errJson?.optString(
+                        "message",
+                        "Start your 7-day free trial to chat with Pulse AI Agent."
+                    ) ?: "Start your 7-day free trial to chat with Pulse AI Agent."
+                    val targetPlayer = np?.sourcePackage?.takeIf { it.isNotBlank() } ?: "tunemind_inapp"
+                    val restrictedJson = JSONObject().apply {
+                        put("calculated_satiety_percentage", _agentSatietyFlow.value)
+                        put("reasoning_mode", "JOURNEY_ADVISOR")
+                        put("flow_state_analysis", errMsg)
+                        put("voice_agent_tts", errMsg)
+                        put("agent_tool_call", JSONObject().apply {
+                            put("action", "ADVISE_ONLY")
+                            put("expect_follow_up", false)
+                        })
+                        put("os_execution_command", JSONObject().apply {
+                            put("intent", "NONE")
+                            put("target_player", targetPlayer)
+                            put("search_query", "")
+                        })
+                    }
+                    dispatchReasoningResult(restrictedJson, errMsg)
+                    if (respCode == 402 || errCode == "PRO_TRIAL_REQUIRED") {
+                        mainHandler.post { onProTrialRequired?.invoke(errMsg) }
+                    }
                     return@launch
                 }
             } catch (e: Exception) {
@@ -3424,6 +3474,32 @@ class AgentVoiceManager(
             val localJson = buildLocalOnDeviceFallbackJson(cleaned)
             dispatchReasoningResult(localJson, localJson.optString("voice_agent_tts", ""))
         }
+    }
+
+    private fun isFreeTierLocalCommand(transcript: String): Boolean {
+        val lower = transcript.lowercase().trim()
+        if (lower.isBlank()) return true
+        val pending = clientPendingProposedTrack
+        if (pending != null && Regex(
+                "\\b(yes|yeah|yep|sure|okay|ok|play|play it|go ahead|do it|sounds good|ndio|sawa|spin it|no|nope|nah|cancel|never\\s*mind|skip|next|stop|another)\\b"
+            ).containsMatchIn(lower)
+        ) {
+            return true
+        }
+        if (Regex("\\b(pause|stop|quiet|mute|silence|resume|unpause|continue playing|keep playing|skip|next song|next track|previous|go back|last song|volume|louder|quieter|turn it down|turn it up)\\b").containsMatchIn(lower)) {
+            return true
+        }
+        if (Regex("\\b(what is playing|what's playing|current song|open vault|show vault|go to vault|open rhythm|show dna|rhythm dna|open playlists?|show playlists?)\\b").containsMatchIn(lower)) {
+            return true
+        }
+        val cleanNoPunct = lower.replace(Regex("[.!?,;:'\"]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val explicitPlay = Regex("^\\s*(please\\s+)?(play|spin|put on)\\s+(.+)$").find(cleanNoPunct)?.groupValues?.getOrNull(3)?.trim()
+        if (!explicitPlay.isNullOrBlank() && explicitPlay.length >= 2 &&
+            !isNewOrRecommendSongRequest(lower) && !isConversationalNonTitlePhrase(explicitPlay)
+        ) {
+            return true
+        }
+        return false
     }
 
     private fun buildLocalOnDeviceFallbackJson(transcript: String): JSONObject {

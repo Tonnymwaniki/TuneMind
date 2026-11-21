@@ -125,7 +125,9 @@ fun DopamineVaultScreen(
     manualFreshTracks: List<ManualFreshTrack> = emptyList(),
     freshExcludedKeys: Set<String> = emptySet(),
     onAddToFresh: (title: String, artist: String, sourcePackage: String?, spotifyUri: String?, trackId: String?, albumArtUrl: String?) -> Unit = { _, _, _, _, _, _ -> },
-    onRemoveFromFresh: (title: String, artist: String, spotifyUri: String?, trackId: String?) -> Unit = { _, _, _, _ -> }
+    onRemoveFromFresh: (title: String, artist: String, spotifyUri: String?, trackId: String?) -> Unit = { _, _, _, _ -> },
+    hasProAccess: Boolean = true,
+    onOpenProUpgrade: ((String?) -> Unit)? = null
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
@@ -810,7 +812,9 @@ fun DopamineVaultScreen(
                                     trackId = rec.resolvedCanonicalTrackId()
                                 )
                             },
-                            onExportPlaylist = onExportForYouPlaylist
+                            onExportPlaylist = onExportForYouPlaylist,
+                            hasProAccess = hasProAccess,
+                            onOpenProUpgrade = onOpenProUpgrade
                         )
                     } else if (displayedSongs.isEmpty()) {
                         item(key = "vault_empty") {
