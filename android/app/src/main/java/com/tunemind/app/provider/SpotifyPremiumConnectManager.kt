@@ -1472,9 +1472,10 @@ object SpotifyPremiumConnectManager {
                         connectLatch.countDown()
                     }
                 }
-                runCatching { connectLatch.await(1500L, TimeUnit.MILLISECONDS) }
+                runCatching { connectLatch.await(1200L, TimeUnit.MILLISECONDS) }
 
-                for (waitMs in listOf(350L, 600L)) {
+                val mbPolls = if (browserConnected) listOf(350L, 600L) else listOf(350L)
+                for (waitMs in mbPolls) {
                     runCatching { Thread.sleep(waitMs) }
                     findBestConnectDevice(accessToken)?.let { dev ->
                         Log.i(TAG, "✅ Silent MediaBrowser wake brought up Spotify Connect device '${dev.second}'")

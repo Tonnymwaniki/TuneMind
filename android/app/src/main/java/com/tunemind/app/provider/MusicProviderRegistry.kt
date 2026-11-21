@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Log
 import com.tunemind.app.domain.recommendation.RecommendedTrack
 
 /**
@@ -252,28 +253,8 @@ class TuneMindInAppProvider : MusicProvider {
                     )
                 }
                 is SpotifyPlayResult.NoActiveDevice -> {
-                    val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
-                    if (!strictNoSwitch || MusicPlayerAutoLauncher.canAutoReturnToTuneMind(context)) {
-                        val rec = RecommendedTrack(
-                            id = connectRes.trackUri ?: match.title,
-                            title = match.title,
-                            artist = match.artist,
-                            reason = "Waking Spotify for full-track playback",
-                            confidence = match.confidence,
-                            spotifyUri = connectRes.trackUri
-                        )
-                        val wakeLaunch = MusicPlayerAutoLauncher.launchWithAutoPlay(
-                            context = context,
-                            providerId = SpotifyMusicProvider.PROVIDER_ID,
-                            displayName = "Spotify",
-                            packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
-                            track = rec,
-                            query = match.searchQuery,
-                            deepLinkUri = connectRes.trackUri,
-                            neverOpenExternalApp = false
-                        )
-                        if (wakeLaunch.isSuccess) return wakeLaunch
-                    }
+                    // Stay inside TuneMind! Fall cleanly to Local Audio -> Audius -> Built-In Full YouTube Player.
+                    Log.i("TuneMindInAppProvider", "Spotify Connect offline (${connectRes.message}); continuing to in-app full-song tiers without leaving TuneMind.")
                 }
                 else -> Unit
             }
@@ -326,13 +307,16 @@ class TuneMindInAppProvider : MusicProvider {
             !SpotifyPremiumConnectManager.isConnectedAndPremium(context) &&
             com.tunemind.app.domain.voice.AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(context)
 
+        val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
+        val stayInTuneMind = com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context)
+
         if (ytmVideoId != null && TuneMindYouTubeEmbedController.startVideo(
                 context = context,
                 videoId = ytmVideoId,
                 title = match.title,
                 artist = match.artist,
                 album = resolved?.albumName,
-                previewFallback = if (preferSpotifyOverPreview) null else resolved?.previewUrl,
+                previewFallback = if (preferSpotifyOverPreview && !strictNoSwitch && !stayInTuneMind) null else resolved?.previewUrl,
                 fallbackExternalPkg = if (preferSpotifyOverPreview) SpotifyMusicProvider.SPOTIFY_PACKAGE else YouTubeMusicProvider.YTM_PACKAGE,
                 fallbackExternalName = if (preferSpotifyOverPreview) "Spotify" else "YouTube Music"
             )
@@ -346,8 +330,8 @@ class TuneMindInAppProvider : MusicProvider {
             )
         }
 
-        // Spotify Free Smart Mode: never trap users in a 30-second preview if Spotify can play the full song!
-        if (preferSpotifyOverPreview) {
+        // Spotify Free Smart Mode (only open external Spotify if Stay-in-TuneMind / Never-Leave are OFF):
+        if (preferSpotifyOverPreview && !strictNoSwitch && !stayInTuneMind) {
             val exactSpotifyUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(match.deepLinkUri, resolved)
                 ?: if (SpotifyPremiumConnectManager.isConnected(context)) {
                     SpotifyPremiumConnectManager.searchExactTrackUri(

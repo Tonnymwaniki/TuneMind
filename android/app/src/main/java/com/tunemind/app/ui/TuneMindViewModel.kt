@@ -5249,32 +5249,42 @@ class TuneMindViewModel : ViewModel() {
                             playTrack(first.title, first.artist, first.externalUri.takeIf { it.isNotBlank() }, chosenPkg)
                             postNowPlayingStatus("Playing \"${playlistWithTracks.playlist.name}\" (${items.size} tracks)")
                         } else {
-                            // No active silent device awake even after silent wake -> wake Spotify directly
-                            // to the playlist and auto-kick playback + auto-return as soon as Connect wakes.
-                            com.tunemind.app.provider.SpotifyPremiumConnectManager
-                                .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
-                            com.tunemind.app.provider.MusicPlayerAutoLauncher
-                                .scheduleSpotifyPlaylistWakeKicker(
-                                    context = ctx,
-                                    spotifyPlaylistId = spotifyPlaylistId,
-                                    playlistName = playlistWithTracks.playlist.name
-                                )
-                            postNowPlayingStatus("Waking Spotify to play \"${playlistWithTracks.playlist.name}\"...")
+                            val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(ctx)
+                            val stayInTuneMind = com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(ctx)
+                            if (strictNoSwitch || stayInTuneMind) {
+                                postNowPlayingStatus("Kept Spotify closed inside TuneMind — open this playlist once in Spotify or sync tracks to play inside TuneMind.")
+                            } else {
+                                com.tunemind.app.provider.SpotifyPremiumConnectManager
+                                    .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
+                                com.tunemind.app.provider.MusicPlayerAutoLauncher
+                                    .scheduleSpotifyPlaylistWakeKicker(
+                                        context = ctx,
+                                        spotifyPlaylistId = spotifyPlaylistId,
+                                        playlistName = playlistWithTracks.playlist.name
+                                    )
+                                postNowPlayingStatus("Waking Spotify to play \"${playlistWithTracks.playlist.name}\"...")
+                            }
                         }
                     }
                 }
                 return
             } else if (items.isEmpty()) {
-                // Spotify Free Smart Mode or personalized mix: open directly in Spotify app so full tracks play
-                com.tunemind.app.provider.SpotifyPremiumConnectManager
-                    .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
-                com.tunemind.app.provider.MusicPlayerAutoLauncher
-                    .scheduleSpotifyPlaylistWakeKicker(
-                        context = ctx,
-                        spotifyPlaylistId = spotifyPlaylistId,
-                        playlistName = playlistWithTracks.playlist.name
-                    )
-                postNowPlayingStatus("Opening \"${playlistWithTracks.playlist.name}\" in Spotify — TuneMind will capture every song you play")
+                val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(ctx)
+                val stayInTuneMind = com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(ctx)
+                if (strictNoSwitch || stayInTuneMind) {
+                    postNowPlayingStatus("Kept Spotify closed inside TuneMind — sync tracks or ask the agent to play matching songs inside TuneMind.")
+                } else {
+                    // Spotify Free Smart Mode or personalized mix: open directly in Spotify app so full tracks play
+                    com.tunemind.app.provider.SpotifyPremiumConnectManager
+                        .openSpotifyPlaylistInApp(ctx, spotifyPlaylistId)
+                    com.tunemind.app.provider.MusicPlayerAutoLauncher
+                        .scheduleSpotifyPlaylistWakeKicker(
+                            context = ctx,
+                            spotifyPlaylistId = spotifyPlaylistId,
+                            playlistName = playlistWithTracks.playlist.name
+                        )
+                    postNowPlayingStatus("Opening \"${playlistWithTracks.playlist.name}\" in Spotify — TuneMind will capture every song you play")
+                }
                 return
             }
         }

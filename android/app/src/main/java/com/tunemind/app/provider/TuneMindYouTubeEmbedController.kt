@@ -422,6 +422,32 @@ object TuneMindYouTubeEmbedController {
                 val fallbackName = _fallbackExternalNameFlow.value ?: "YouTube Music"
 
                 stop(clearMetadata = true)
+                val stayLocked = ctx != null && (
+                    com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(ctx) ||
+                        com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(ctx)
+                    )
+
+                fun playInAppPreviewFallbackOnEmbedError() {
+                    _statusNoticeFlow.value = if (!fallbackPreview.isNullOrBlank() && ctx != null && title.isNotBlank()) {
+                        "YouTube blocked in-app embedding for '$title' (code $errorCode) — playing 30s preview inside TuneMind instead."
+                    } else {
+                        "Kept inside TuneMind — YouTube blocked embedding for '$title' (code $errorCode). Tap 'Open full track in $fallbackName' if you want to switch apps."
+                    }
+                    if (ctx != null && !fallbackPreview.isNullOrBlank() && title.isNotBlank()) {
+                        TuneMindInAppPlayer.playStreamUrl(
+                            context = ctx,
+                            streamUrl = fallbackPreview,
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            expectedDurationMs = 30_000L,
+                            isPreview = true,
+                            fallbackExternalPkg = fallbackPkg,
+                            fallbackExternalName = fallbackName
+                        )
+                    }
+                }
+
                 if (ctx != null && title.isNotBlank() && SpotifyPremiumConnectManager.isConnectedAndPremium(ctx)) {
                     Thread {
                         val spotifyRes = SpotifyPremiumConnectManager.playTrackSilently(
@@ -434,7 +460,7 @@ object TuneMindYouTubeEmbedController {
                                 _statusNoticeFlow.value =
                                     "Playing full track '$title' silently on Spotify (${spotifyRes.deviceName})."
                             }
-                        } else if (SpotifyMusicProvider().isInstalled(ctx)) {
+                        } else if (!stayLocked && SpotifyMusicProvider().isInstalled(ctx)) {
                             val trackUri = (spotifyRes as? SpotifyPlayResult.NoActiveDevice)?.trackUri
                             val rec = com.tunemind.app.domain.recommendation.RecommendedTrack(
                                 id = trackUri ?: title,
@@ -457,13 +483,18 @@ object TuneMindYouTubeEmbedController {
                             mainHandler.post {
                                 _statusNoticeFlow.value = "Opened full track '$title' in Spotify."
                             }
+                        } else {
+                            mainHandler.post {
+                                playInAppPreviewFallbackOnEmbedError()
+                            }
                         }
                     }.start()
                     return@post
                 }
 
-                // Spotify Free Smart Mode: never drop into a 30s preview when YouTube blocks embedding!
+                // Spotify Free Smart Mode (only when Stay-in-TuneMind and Never-Leave Mode allow external switching):
                 val preferSpotifyHandoff = ctx != null &&
+                    !stayLocked &&
                     title.isNotBlank() &&
                     SpotifyMusicProvider().isInstalled(ctx) &&
                     com.tunemind.app.domain.voice.AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(ctx) &&
@@ -497,25 +528,7 @@ object TuneMindYouTubeEmbedController {
                     return@post
                 }
 
-                _statusNoticeFlow.value = if (!fallbackPreview.isNullOrBlank() && ctx != null && title.isNotBlank()) {
-                    "YouTube blocked in-app embedding for '$title' (code $errorCode) — playing 30s preview inside TuneMind instead."
-                } else {
-                    "YouTube blocked in-app embedding for '$title' (code $errorCode). Tap 'Open in $fallbackName' for full playback."
-                }
-
-                if (ctx != null && !fallbackPreview.isNullOrBlank() && title.isNotBlank()) {
-                    TuneMindInAppPlayer.playStreamUrl(
-                        context = ctx,
-                        streamUrl = fallbackPreview,
-                        title = title,
-                        artist = artist,
-                        album = album,
-                        expectedDurationMs = 30_000L,
-                        isPreview = true,
-                        fallbackExternalPkg = fallbackPkg,
-                        fallbackExternalName = fallbackName
-                    )
-                }
+                playInAppPreviewFallbackOnEmbedError()
             }
         }
     }
