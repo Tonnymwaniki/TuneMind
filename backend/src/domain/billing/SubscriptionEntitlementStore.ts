@@ -293,7 +293,10 @@ export class SubscriptionEntitlementStore {
   public static async getEntitlement(userId: string): Promise<UserEntitlementSnapshot> {
     const cleanId = this.normalizeUserId(userId);
     const rec = await this.loadSubscriptionRecord(cleanId);
-    const effectiveTier = this.evaluateEffectiveTier(rec);
+    const evaluatedTier = this.evaluateEffectiveTier(rec);
+    const paywallEnforced = this.isPaywallEnforced();
+    const effectiveTier: SubscriptionTier =
+      !paywallEnforced && evaluatedTier === 'FREE' ? 'PRO' : evaluatedTier;
     const limits = this.resolveLimitsForTier(effectiveTier);
     const usage = this.getUsageBucket(cleanId);
     const nowMs = Date.now();
@@ -306,12 +309,12 @@ export class SubscriptionEntitlementStore {
       hasProAccess: effectiveTier === 'PRO' || effectiveTier === 'TRIAL',
       isTrial: effectiveTier === 'TRIAL',
       planId: effectiveTier === 'FREE' ? null : rec.planId,
-      billingSource: effectiveTier === 'FREE' ? 'none' : rec.billingSource,
+      billingSource: evaluatedTier === 'FREE' ? 'none' : rec.billingSource,
       trialEndsAtMs: rec.trialEndsAtMs,
       currentPeriodEndMs: rec.currentPeriodEndMs,
       trialDaysRemaining,
       autoRenewing: rec.autoRenewing,
-      verificationMode: rec.verificationMode,
+      verificationMode: !paywallEnforced && evaluatedTier === 'FREE' ? 'paywall_disabled' : rec.verificationMode,
       dailyAgentLimit: limits.agentLimit,
       dailyAgentUsed: usage.agentUsed,
       dailyAgentRemaining: Math.max(0, limits.agentLimit - usage.agentUsed),

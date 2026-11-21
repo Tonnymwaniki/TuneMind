@@ -97,4 +97,20 @@ describe('TuneMind Monetization, 7-Day Trial & Cost Protection', () => {
     expect(afterExpiry.tier).toBe('FREE');
     expect(afterExpiry.hasProAccess).toBe(false);
   });
+
+  test('ENFORCE_PRO_PAYWALL=false grants hasProAccess=true on GET /entitlement for pre-launch testing', async () => {
+    const prev = process.env.ENFORCE_PRO_PAYWALL;
+    process.env.ENFORCE_PRO_PAYWALL = 'false';
+    try {
+      const app = createApp();
+      const res = await request(app).get(`/api/v1/billing/entitlement?userId=dev-${Date.now()}`);
+      expect(res.status).toBe(200);
+      expect(res.body.entitlement.hasProAccess).toBe(true);
+      expect(res.body.entitlement.tier).toBe('PRO');
+      expect(res.body.entitlement.verificationMode).toBe('paywall_disabled');
+    } finally {
+      if (prev === undefined) delete process.env.ENFORCE_PRO_PAYWALL;
+      else process.env.ENFORCE_PRO_PAYWALL = prev;
+    }
+  });
 });
