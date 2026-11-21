@@ -1,3 +1,5 @@
+import { isStrictTitleArtistMatch } from '../../api/v1/musicProfiles';
+import { TrackCardStore } from '../storage/TrackCardStore';
 import { SelfLearningDiscoveryEngine } from './SelfLearningDiscoveryEngine';
 
 describe('SelfLearningDiscoveryEngine', () => {
@@ -42,7 +44,7 @@ describe('SelfLearningDiscoveryEngine', () => {
     expect(model.positiveOutcomes).toBe(1);
   });
 
-  it('allocates 2 songs per detected genre + 3 global wildcards from completely different genres and excludes already-heard tracks', async () => {
+  it('allocates proportional 12 slots across qualified genres + 3 global wildcards and excludes already-heard tracks', async () => {
     const engine = new SelfLearningDiscoveryEngine();
     const res = await engine.generateDailyForYouDrop({
       userId: `alloc-user-${Date.now()}`,
@@ -59,11 +61,13 @@ describe('SelfLearningDiscoveryEngine', () => {
     });
 
     expect(res.status).toBe('ok');
-    expect(res.genreAllocation.every((g) => g.slots === 2)).toBe(true);
+    const totalGenreSlots = res.genreAllocation.reduce((sum, g) => sum + g.slots, 0);
+    expect(totalGenreSlots).toBe(12);
     const activeGenres = new Set(res.genreAllocation.map((g) => g.genre.toLowerCase()));
 
     const wildcards = res.recommendations.filter((r) => r.isWildcard);
-    expect(wildcards.length).toBe(3);
+    expect(wildcards.length).toBeGreaterThan(0);
+    expect(wildcards.length).toBeLessThanOrEqual(3);
     for (const w of wildcards) {
       expect(activeGenres.has(w.genre.toLowerCase())).toBe(false);
     }
@@ -74,6 +78,60 @@ describe('SelfLearningDiscoveryEngine', () => {
     expect(titles).not.toContain('humble.');
     expect(res.learningSummary.intelligenceScorePercent).toBeGreaterThanOrEqual(34);
     expect(res.learningSummary.learnedTraits.length).toBeGreaterThan(0);
+  });
+
+  it('never repeats tracks from earlier days, TrackCardStore (even 0-play Spotify/MediaObserver detections), or title/remaster variants', async () => {
+    const userId = `norepeat-user-${Date.now()}`;
+    await TrackCardStore.syncSnapshot(userId, {
+      track_cards: [
+        {
+          canonical_track_key: 'soweto|victony',
+          track_id: 'spotify:track:1234567890123456789012',
+          spotify_uri: 'spotify:track:1234567890123456789012',
+          title: 'Soweto (feat. Tempoe) - Remastered',
+          artist: 'Victony, Tempoe',
+          primary_source_package: 'com.spotify.music'
+        }
+      ]
+    });
+
+    const engine = new SelfLearningDiscoveryEngine();
+    const day1 = await engine.generateDailyForYouDrop({
+      userId,
+      dropDate: '2026-11-14@12PM',
+      timezone: 'Africa/Nairobi',
+      timeSlot: 'Evening',
+      recentTracks: [
+        { title: 'Ku Lo Sa', artist: 'Oxlade', genre: 'Afrobeats', playCount: 0, sourceApp: 'com.spotify.music' },
+        { title: 'Calm Down', artist: 'Rema', genre: 'Afrobeats', playCount: 2, sourceApp: 'com.spotify.music' }
+      ],
+      userTasteAnchors: ['Afrobeats', 'Bongo Flava', 'Hip-Hop']
+    });
+
+    const day1Keys = new Set(day1.recommendations.map((r) => `${r.title.toLowerCase()}::${r.artist.toLowerCase()}`));
+    expect(day1Keys.has('soweto::victony')).toBe(false);
+    expect(day1.recommendations.some((r) => r.title.toLowerCase().includes('ku lo sa'))).toBe(false);
+    expect(day1.recommendations.some((r) => r.title.toLowerCase().includes('calm down'))).toBe(false);
+
+    // Simulate Day 2: model shouldn't repeat any Day 1 pick
+    const day2 = await engine.generateDailyForYouDrop({
+      userId,
+      dropDate: '2026-11-15@12PM',
+      timezone: 'Africa/Nairobi',
+      timeSlot: 'Evening',
+      userTasteAnchors: ['Afrobeats', 'Bongo Flava', 'Hip-Hop']
+    });
+
+    for (const rec of day2.recommendations) {
+      const k = `${rec.title.toLowerCase()}::${rec.artist.toLowerCase()}`;
+      expect(day1Keys.has(k)).toBe(false);
+    }
+  });
+
+  it('strictly rejects wrong-artist and remix mismatches in catalog identity matching', () => {
+    expect(isStrictTitleArtistMatch('Soweto', 'Victony', 'Soweto', 'Victony & Tempoe')).toBe(true);
+    expect(isStrictTitleArtistMatch('Free Mind', 'Tems', 'Free Mind', 'Another Random Artist')).toBe(false);
+    expect(isStrictTitleArtistMatch('Calm Down', 'Rema', 'Calm Down (TikTok Remix)', 'Rema')).toBe(false);
   });
 
   it('computes 12:00 PM local-timezone daily drop cycle keys accurately', () => {

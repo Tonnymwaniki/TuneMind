@@ -6,6 +6,14 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
+data class RecommendationIdentityProjection(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val trackId: String,
+    val spotifyUri: String?
+)
+
 @Dao
 interface AiRecommendationDao {
 
@@ -29,6 +37,12 @@ interface AiRecommendationDao {
 
     @Query("SELECT DISTINCT title FROM ai_recommendation_crate")
     suspend fun getAllKnownTitles(): List<String>
+
+    @Query("SELECT id, title, artist, trackId, spotifyUri FROM ai_recommendation_crate")
+    suspend fun getAllIdentityProjections(): List<RecommendationIdentityProjection>
+
+    @Query("UPDATE ai_recommendation_crate SET spotifyUri = NULL WHERE spotifyUri IS NOT NULL AND spotifyUri NOT LIKE 'spotify:track:%'")
+    suspend fun clearInvalidSpotifyUris()
 
     @Query("SELECT DISTINCT (title || ' by ' || artist) FROM ai_recommendation_crate WHERE wasPlayed = 1 OR isSaved = 1 ORDER BY recommendedAtMs DESC LIMIT 15")
     suspend fun getPositiveFeedbackSignals(): List<String>

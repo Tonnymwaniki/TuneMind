@@ -154,7 +154,7 @@ function buildCanonicalKey(title: string, artist: string): string {
   return `${normalizeForMatch(title)}|${normalizeForMatch(artist)}`;
 }
 
-function isStrictTitleArtistMatch(
+export function isStrictTitleArtistMatch(
   expectedTitle: string,
   expectedArtist: string,
   candidateTitle: string,
@@ -164,9 +164,19 @@ function isStrictTitleArtistMatch(
   const normCandTitle = normalizeForMatch(candidateTitle);
   if (!normExpTitle || !normCandTitle) return false;
 
+  // Reject alternate-version mismatches (remix, cover, karaoke, sped up, slowed, instrumental) unless expected asked for them
+  const versionTags = ['remix', 'karaoke', 'tribute', 'cover', 'instrumental', 'acapella', 'sped up', 'slowed'];
+  const expLower = (expectedTitle || '').toLowerCase();
+  const candLower = (candidateTitle || '').toLowerCase();
+  for (const tag of versionTags) {
+    if (candLower.includes(tag) && !expLower.includes(tag)) {
+      return false;
+    }
+  }
+
   const titleMatched =
     normCandTitle === normExpTitle ||
-    (normExpTitle.length >= 4 && (normCandTitle.includes(normExpTitle) || normExpTitle.includes(normCandTitle)));
+    (normExpTitle.length >= 5 && (normCandTitle.includes(normExpTitle) || normExpTitle.includes(normCandTitle)));
 
   const expTitleWords = new Set(normExpTitle.split(/\s+/).filter(w => w.length >= 2));
   const candTitleWords = new Set(normCandTitle.split(/\s+/).filter(w => w.length >= 2));
@@ -174,14 +184,37 @@ function isStrictTitleArtistMatch(
   expTitleWords.forEach(w => {
     if (candTitleWords.has(w)) overlap++;
   });
-  const wordRatio = overlap / Math.max(1, Math.min(expTitleWords.size, candTitleWords.size));
+  const wordRatio = expTitleWords.size > 0 && candTitleWords.size > 0
+    ? overlap / Math.max(expTitleWords.size, candTitleWords.size)
+    : 0;
 
-  if (!titleMatched && wordRatio < 0.65) return false;
+  if (!titleMatched && wordRatio < 0.72) return false;
 
-  const normExpArtist = normalizeForMatch(expectedArtist);
+  const expPrimaryArtist = (expectedArtist || '')
+    .split(/\s*(?:,|&|feat\.?|ft\.?|featuring|with|\bx\b)\s*/i)[0] || '';
+  const normExpArtist = normalizeForMatch(expPrimaryArtist || expectedArtist);
+  const normFullExpArtist = normalizeForMatch(expectedArtist);
   const normCandArtist = normalizeForMatch(candidateArtist);
-  if (!normExpArtist) return titleMatched || wordRatio >= 0.75;
-  return normCandArtist.includes(normExpArtist) || normExpArtist.includes(normCandArtist);
+
+  if (!normExpArtist) return titleMatched || wordRatio >= 0.8;
+  if (!normCandArtist) return false;
+
+  if (
+    normCandArtist === normExpArtist ||
+    normCandArtist === normFullExpArtist ||
+    (normExpArtist.length >= 3 && (normCandArtist.includes(normExpArtist) || normExpArtist.includes(normCandArtist)))
+  ) {
+    return true;
+  }
+
+  const expArtistWords = new Set(normExpArtist.split(/\s+/).filter(w => w.length >= 2));
+  const candArtistWords = new Set(normCandArtist.split(/\s+/).filter(w => w.length >= 2));
+  if (expArtistWords.size === 0 || candArtistWords.size === 0) return false;
+  let artistHits = 0;
+  expArtistWords.forEach(w => {
+    if (candArtistWords.has(w)) artistHits++;
+  });
+  return artistHits / Math.max(expArtistWords.size, candArtistWords.size) >= 0.75;
 }
 
 async function fetchJsonWithTimeout(url: string, timeoutMs = 4000, headers?: Record<string, string>): Promise<any | null> {
@@ -497,11 +530,11 @@ export async function resolveUniversalTrackProfile(
     resolveYouTubeMusicVideoId(cleanTitle, cleanArtist)
   ]);
 
-  const dz = dzHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || dzHits[0] || null;
-  const it = itHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || itHits[0] || null;
+  const dz = dzHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
+  const it = itHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
   const au = audiusHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
 
-  if (!dz && !it && !au && !ytmVideoId) {
+  if (!dz && !it && !au) {
     trackProfileCache.set(key, { value: null, expiresAtMs: now + NEGATIVE_CACHE_TTL_MS });
     trimMapIfNeeded(trackProfileCache, 2500);
     return null;
@@ -524,11 +557,9 @@ export async function resolveUniversalTrackProfile(
   ).slice(0, 4);
 
   const sourcesUsed = [dz ? 'deezer' : '', it ? 'itunes' : '', au ? 'audius' : ''].filter(Boolean);
-  const ytmWatchUrl = ytmVideoId ? `https://music.youtube.com/watch?v=${ytmVideoId}` : null;
   const { spotifyUri, spotifyUrl, ytmVideoId: songlinkYtmVideoId } = await resolveSpotifyUriViaSonglink([
     dz?.deezerUrl || null,
-    it?.itunesUrl || null,
-    ytmWatchUrl
+    it?.itunesUrl || null
   ]);
   const finalYtmVideoId = ytmVideoId || songlinkYtmVideoId || null;
 

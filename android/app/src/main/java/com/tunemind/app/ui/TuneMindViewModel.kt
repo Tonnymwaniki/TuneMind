@@ -4542,15 +4542,24 @@ class TuneMindViewModel : ViewModel() {
                 if (_isDiscovering.value) return@launch
 
                 val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+                withContext(Dispatchers.IO) {
+                    runCatching { aiRecDao?.clearInvalidSpotifyUris() }
+                }
+
                 val existingInFlow = _aiDiscoveryCrate.value.filter {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
                 if (!forceRefresh) {
                     fun repairUnverifiedAsync(pool: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>) {
-                        val unverified = pool.filter { it.previewUrl.isNullOrBlank() && it.spotifyUri.isNullOrBlank() }
+                        val unverified = pool.filter {
+                            it.previewUrl.isNullOrBlank() ||
+                                com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(it.spotifyUri) == null
+                        }
                         if (unverified.isEmpty()) return
                         viewModelScope.launch(Dispatchers.IO) {
-                            val repaired = unverified.take(8).map { rec ->
+                            val spConnected = com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(ctx)
+                            val repaired = unverified.take(15).map { rec ->
+                                val existingValidSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
                                 val resolved = runCatching {
                                     com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
                                         context = ctx,
@@ -4558,17 +4567,38 @@ class TuneMindViewModel : ViewModel() {
                                         cleanArtist = rec.artist,
                                         fullQuery = "${rec.title} ${rec.artist}".trim()
                                     )
-                                }.getOrNull()
-                                if (resolved == null) rec else {
-                                    val playable = resolved.audiusStreamUrl?.takeIf { it.isNotBlank() }
-                                        ?: resolved.previewUrl?.takeIf { it.isNotBlank() }
-                                    val link = resolved.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
-                                        ?: resolved.deezerUrl?.takeIf { it.isNotBlank() }
-                                    rec.copy(
-                                        previewUrl = playable ?: rec.previewUrl,
-                                        spotifyUri = link ?: rec.spotifyUri
+                                }.getOrNull()?.takeIf {
+                                    com.tunemind.app.provider.UniversalTrackResolver.isStrictTitleArtistMatch(
+                                        rec.title,
+                                        rec.artist,
+                                        it.cleanTitle,
+                                        it.cleanArtist
                                     )
                                 }
+                                val spUri = existingValidSpotifyUri
+                                    ?: com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(resolved?.spotifyUri)
+                                    ?: if (spConnected) {
+                                        runCatching {
+                                            com.tunemind.app.provider.SpotifyPremiumConnectManager.searchExactTrackUri(
+                                                context = ctx,
+                                                title = rec.title,
+                                                artist = rec.artist
+                                            )
+                                        }.getOrNull()
+                                    } else null
+                                val playable = resolved?.audiusStreamUrl?.takeIf { it.isNotBlank() }
+                                    ?: resolved?.previewUrl?.takeIf { it.isNotBlank() }
+                                rec.copy(
+                                    album = rec.album?.takeIf { it.isNotBlank() } ?: resolved?.albumName,
+                                    previewUrl = playable ?: rec.previewUrl,
+                                    spotifyUri = spUri,
+                                    trackId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                        trackId = rec.trackId,
+                                        spotifyUri = spUri,
+                                        title = rec.title,
+                                        artist = rec.artist
+                                    )
+                                )
                             }
                             runCatching { aiRecDao?.insertAll(repaired) }
                         }
@@ -4597,23 +4627,95 @@ class TuneMindViewModel : ViewModel() {
                 val satiety = if (currentPlays <= 0) 0 else minOf(95, maxOf(18, currentPlays * 22))
                 val authSession = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value
 
-                val (allKnownTitles, playedSignals, dismissedSignals, previousOutcomes) = withContext(Dispatchers.IO) {
-                    val knownFromCrate = aiRecDao?.getAllKnownTitles() ?: emptyList()
-                    val playedUnifiedTitles = _unifiedTracks.value
-                        .filter { it.verifiedPlayCount > 0 }
-                        .map { it.title }
-                    val historyTitles = _historyState.value.tracks
-                        .filter { it.distinctAppearanceCount > 0 }
-                        .mapNotNull { it.title }
-                    val vaultTitles = _vaultState.value.map { it.title }
-                    // Strict Never-Played Rule: exclude only played tracks (playCount > 0), Vault tracks, and past suggestions;
-                    // unplayed tracks in Library with playCount == 0 remain eligible.
-                    val combinedExclusions = (knownFromCrate + playedUnifiedTitles + historyTitles + vaultTitles).distinct()
-                    DataQuad(
-                        combinedExclusions,
-                        aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
-                        aiRecDao?.getDismissedSignals() ?: emptyList(),
-                        aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 30) ?: emptyList()
+                val queryCtx = withContext(Dispatchers.IO) {
+                    val crateProjections = aiRecDao?.getAllIdentityProjections() ?: emptyList()
+                    val libraryTracks = crossAppDao?.getAllLibraryTracksOnce() ?: emptyList()
+                    val playLogs = crossAppDao?.getPlayLogsOnce(1500) ?: emptyList()
+                    val dbRef = com.tunemind.app.data.local.TuneMindDatabase.getInstance(ctx)
+                    val playlistTracks = runCatching {
+                        dbRef.tuneMindPlaylistDao().getAllPlaylistTracksOnce()
+                    }.getOrDefault(emptyList())
+
+                    val titlesSet = LinkedHashSet<String>()
+                    val keysSet = LinkedHashSet<String>(
+                        com.tunemind.app.domain.ai.ClaudeReasoningEngine.getPermanentExcludedKeys(ctx)
+                    )
+                    val urisSet = LinkedHashSet<String>()
+                    val idsSet = LinkedHashSet<String>()
+
+                    crateProjections.forEach { p ->
+                        if (p.title.isNotBlank()) titlesSet.add(p.title)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(p.title, p.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(p.spotifyUri)?.let { urisSet.add(it) }
+                        if (p.trackId.isNotBlank() && !p.trackId.startsWith("disc:") && !p.trackId.startsWith("trk:")) {
+                            idsSet.add(p.trackId)
+                        }
+                    }
+                    libraryTracks.forEach { lt ->
+                        if (lt.title.isNotBlank()) titlesSet.add(lt.title)
+                        if (lt.canonicalTrackKey.isNotBlank()) keysSet.add(lt.canonicalTrackKey)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(lt.title, lt.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(lt.trackId)?.let { urisSet.add(it) }
+                        if (lt.trackId.isNotBlank()) idsSet.add(lt.trackId)
+                    }
+                    playLogs.forEach { pl ->
+                        if (pl.title.isNotBlank()) titlesSet.add(pl.title)
+                        if (pl.canonicalTrackKey.isNotBlank()) keysSet.add(pl.canonicalTrackKey)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(pl.trackId)?.let { urisSet.add(it) }
+                    }
+                    playlistTracks.forEach { pt ->
+                        if (pt.title.isNotBlank()) titlesSet.add(pt.title)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(pt.title, pt.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(pt.externalUri)?.let { urisSet.add(it) }
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(pt.trackId)?.let { urisSet.add(it) }
+                    }
+                    // Include EVERY song TuneMind has detected in _unifiedTracks (MediaObserver + Spotify Track Cards)
+                    _unifiedTracks.value.forEach { ut ->
+                        if (ut.title.isNotBlank()) titlesSet.add(ut.title)
+                        if (ut.trackKey.isNotBlank()) keysSet.add(ut.trackKey)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(ut.title, ut.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(ut.spotifyUri)?.let { urisSet.add(it) }
+                        if (ut.trackId.isNotBlank()) idsSet.add(ut.trackId)
+                    }
+                    // Include EVERY song observed in Android listening history & clean play history
+                    _historyState.value.tracks.forEach { ht ->
+                        ht.title?.takeIf { it.isNotBlank() }?.let { titlesSet.add(it) }
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(ht.title, ht.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(ht.providerTrackId)?.let { urisSet.add(it) }
+                        if (ht.trackId.isNotBlank()) idsSet.add(ht.trackId)
+                    }
+                    _cleanPlayHistory.value.forEach { cp ->
+                        if (cp.title.isNotBlank()) titlesSet.add(cp.title)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(cp.title, cp.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                        if (cp.trackId.isNotBlank()) idsSet.add(cp.trackId)
+                    }
+                    _vaultState.value.forEach { vt ->
+                        if (vt.title.isNotBlank()) titlesSet.add(vt.title)
+                        val mk = com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(vt.title, vt.artist)
+                        if (mk.isNotBlank()) keysSet.add(mk)
+                    }
+
+                    val spotifyToken = runCatching {
+                        if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(ctx)) {
+                            com.tunemind.app.provider.SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(ctx)
+                        } else null
+                    }.getOrNull()
+
+                    DiscoveryQueryContext(
+                        excludeTitles = titlesSet.toList(),
+                        excludeKeys = keysSet.toList(),
+                        excludedSpotifyUris = urisSet.toList(),
+                        excludedTrackIds = idsSet.toList(),
+                        spotifyAccessToken = spotifyToken,
+                        playedSignals = aiRecDao?.getPositiveFeedbackSignals() ?: emptyList(),
+                        dismissedSignals = aiRecDao?.getDismissedSignals() ?: emptyList(),
+                        previousOutcomes = aiRecDao?.getPreviousDropsForEvaluation(todayNoonKey, 30) ?: emptyList()
                     )
                 }
 
@@ -4658,13 +4760,17 @@ class TuneMindViewModel : ViewModel() {
                     preferredProviderId = prefProvider,
                     userTasteAnchors = _userTasteAnchors.value,
                     nowPlayingArtist = _homeState.value.nowPlaying?.artist,
-                    excludeTitles = allKnownTitles,
-                    playedSignals = playedSignals,
-                    dismissedSignals = dismissedSignals,
+                    excludeTitles = queryCtx.excludeTitles,
+                    excludeKeys = queryCtx.excludeKeys,
+                    excludedSpotifyUris = queryCtx.excludedSpotifyUris,
+                    excludedTrackIds = queryCtx.excludedTrackIds,
+                    spotifyAccessToken = queryCtx.spotifyAccessToken,
+                    playedSignals = queryCtx.playedSignals,
+                    dismissedSignals = queryCtx.dismissedSignals,
                     userId = authSession.userId,
                     userEmail = authSession.email,
                     avgVolumeRatio = avgVolume,
-                    yesterdayOutcomes = previousOutcomes,
+                    yesterdayOutcomes = queryCtx.previousOutcomes,
                     forceRefresh = forceRefresh,
                     genreDistribution = genreDist,
                     artistGenres = artistGenreMap,
@@ -4676,7 +4782,9 @@ class TuneMindViewModel : ViewModel() {
 
                 if (newRecs.isNotEmpty()) {
                     val verifiedRecs = withContext(Dispatchers.IO) {
+                        val spConnected = com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(ctx)
                         newRecs.map { rec ->
+                            val existingValidSpotifyUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
                             val resolved = runCatching {
                                 com.tunemind.app.provider.UniversalTrackResolver.resolveTrackBlocking(
                                     context = ctx,
@@ -4684,21 +4792,43 @@ class TuneMindViewModel : ViewModel() {
                                     cleanArtist = rec.artist,
                                     fullQuery = "${rec.title} ${rec.artist}".trim()
                                 )
-                            }.getOrNull()
-                            if (resolved == null) rec else {
-                                val playable = resolved.audiusStreamUrl?.takeIf { it.isNotBlank() }
-                                    ?: resolved.previewUrl?.takeIf { it.isNotBlank() }
-                                val link = resolved.ytmVideoId?.takeIf { it.isNotBlank() }?.let { "https://music.youtube.com/watch?v=$it" }
-                                    ?: resolved.deezerUrl?.takeIf { it.isNotBlank() }
-                                rec.copy(
-                                    previewUrl = playable ?: rec.previewUrl,
-                                    spotifyUri = link ?: rec.spotifyUri
+                            }.getOrNull()?.takeIf {
+                                com.tunemind.app.provider.UniversalTrackResolver.isStrictTitleArtistMatch(
+                                    rec.title,
+                                    rec.artist,
+                                    it.cleanTitle,
+                                    it.cleanArtist
                                 )
                             }
+                            val spUri = existingValidSpotifyUri
+                                ?: com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(resolved?.spotifyUri)
+                                ?: if (spConnected) {
+                                    runCatching {
+                                        com.tunemind.app.provider.SpotifyPremiumConnectManager.searchExactTrackUri(
+                                            context = ctx,
+                                            title = rec.title,
+                                            artist = rec.artist
+                                        )
+                                    }.getOrNull()
+                                } else null
+                            val playable = resolved?.audiusStreamUrl?.takeIf { it.isNotBlank() }
+                                ?: resolved?.previewUrl?.takeIf { it.isNotBlank() }
+                            rec.copy(
+                                album = rec.album?.takeIf { it.isNotBlank() } ?: resolved?.albumName,
+                                previewUrl = playable ?: rec.previewUrl,
+                                spotifyUri = spUri,
+                                trackId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
+                                    trackId = rec.trackId,
+                                    spotifyUri = spUri,
+                                    title = rec.title,
+                                    artist = rec.artist
+                                )
+                            )
                         }
                     }
                     withContext(Dispatchers.IO) {
                         try {
+                            com.tunemind.app.domain.ai.ClaudeReasoningEngine.recordPermanentExcludedRecommendations(ctx, verifiedRecs)
                             aiRecDao?.insertAll(verifiedRecs)
                         } catch (t: Throwable) {
                             android.util.Log.e("TuneMindVM", "aiRecDao insertAll error: ${t.message}", t)
@@ -4713,7 +4843,16 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
-    private data class DataQuad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+    private data class DiscoveryQueryContext(
+        val excludeTitles: List<String>,
+        val excludeKeys: List<String>,
+        val excludedSpotifyUris: List<String>,
+        val excludedTrackIds: List<String>,
+        val spotifyAccessToken: String?,
+        val playedSignals: List<String>,
+        val dismissedSignals: List<String>,
+        val previousOutcomes: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>
+    )
 
     private fun resolveCurrentVolumeRatio(context: android.content.Context): Float? {
         val recentAvg = _hearingInsightsState.value.recentVolumeObs
@@ -4855,6 +4994,7 @@ class TuneMindViewModel : ViewModel() {
                 val ctx = AppHolder.context ?: return@launch
                 val volRatio = resolveCurrentVolumeRatio(ctx) ?: 0f
                 val isCompletedFlag = if (outcome == "COMPLETED") 1 else 0
+                com.tunemind.app.domain.ai.ClaudeReasoningEngine.recordPermanentExcludedRecommendations(ctx, listOf(item))
                 aiRecDao?.recordListeningOutcome(
                     id = item.id,
                     listenedMs = listenedMs.coerceAtLeast(0L),
@@ -4889,6 +5029,7 @@ class TuneMindViewModel : ViewModel() {
                 aiRecDao?.markPlayed(id, volRatio)
                 if (ctx != null) {
                     val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                    com.tunemind.app.domain.ai.ClaudeReasoningEngine.recordPermanentExcludedRecommendations(ctx, listOf(item))
                     activeTrackedForYouSession = TrackedForYouSession(
                         rec = item,
                         startedAtMs = System.currentTimeMillis(),
@@ -4920,6 +5061,7 @@ class TuneMindViewModel : ViewModel() {
                 aiRecDao?.dismiss(id)
                 val ctx = AppHolder.context ?: return@launch
                 val item = _aiDiscoveryCrate.value.firstOrNull { it.id == id } ?: return@launch
+                com.tunemind.app.domain.ai.ClaudeReasoningEngine.recordPermanentExcludedRecommendations(ctx, listOf(item))
                 val userId = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(ctx).sessionFlow.value.userId
                 val updated = com.tunemind.app.domain.ai.ClaudeReasoningEngine.sendDiscoveryFeedback(
                     context = ctx,

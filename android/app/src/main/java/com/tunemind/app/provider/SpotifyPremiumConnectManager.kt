@@ -1190,6 +1190,7 @@ object SpotifyPremiumConnectManager {
 
     /**
      * Resolves an exact `spotify:track:<22-char-id>` URI using Spotify's `/v1/search` endpoint.
+     * Enforces strict normalized title + artist validation so unrelated tracks are NEVER played.
      */
     fun searchExactTrackUri(
         context: Context,
@@ -1201,16 +1202,77 @@ object SpotifyPremiumConnectManager {
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim()
         val searchExpr = when {
-            cleanTitle.isNotBlank() && cleanArtist.isNotBlank() -> "track:$cleanTitle artist:$cleanArtist"
+            cleanTitle.isNotBlank() && cleanArtist.isNotBlank() -> "track:\"$cleanTitle\" artist:\"$cleanArtist\""
             cleanTitle.isNotBlank() -> cleanTitle
             query.isNotBlank() -> query.trim()
             else -> return null
         }
 
+        fun normStr(raw: String): String = raw.lowercase()
+            .replace(Regex("\\([^)]*\\)|\\[[^\\]]*\\]"), " ")
+            .replace(Regex("\\s+-\\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+
+        val expTitleNorm = normStr(cleanTitle.ifBlank { query })
+        val expTitleWords = expTitleNorm.split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+        val expPrimaryArtist = cleanArtist
+            .split(Regex("\\s*(?:,|&|feat\\.?|ft\\.?|featuring|with|\\bx\\b)\\s*", RegexOption.IGNORE_CASE))
+            .firstOrNull()
+            .orEmpty()
+        val expArtistNorm = normStr(expPrimaryArtist.ifBlank { cleanArtist })
+        val expArtistWords = expArtistNorm.split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+        val versionTags = listOf("remix", "karaoke", "tribute", "cover", "instrumental", "acapella", "sped up", "slowed")
+        val expTitleLower = cleanTitle.lowercase()
+
+        fun isStrictCandidateMatch(candTitle: String, candArtist: String): Int? {
+            if (expTitleNorm.isBlank()) return null
+            val candTitleLower = candTitle.lowercase()
+            for (tag in versionTags) {
+                if (candTitleLower.contains(tag) && !expTitleLower.contains(tag)) return null
+            }
+            val candTitleNorm = normStr(candTitle)
+            if (candTitleNorm.isBlank()) return null
+
+            val exactTitle = candTitleNorm == expTitleNorm
+            val subTitle = expTitleNorm.length >= 5 && (candTitleNorm.contains(expTitleNorm) || expTitleNorm.contains(candTitleNorm))
+            val candTitleWords = candTitleNorm.split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+            val titleOverlap = if (expTitleWords.isNotEmpty() && candTitleWords.isNotEmpty()) {
+                expTitleWords.count { candTitleWords.contains(it) }.toFloat() / maxOf(expTitleWords.size, candTitleWords.size).toFloat()
+            } else 0f
+
+            if (!exactTitle && !subTitle && titleOverlap < 0.72f) return null
+
+            val candArtistNorm = normStr(candArtist)
+            var artistScore = 0
+            if (expArtistNorm.isNotBlank()) {
+                if (candArtistNorm.isBlank()) return null
+                val exactArtist = candArtistNorm == expArtistNorm
+                val subArtist = expArtistNorm.length >= 3 && (candArtistNorm.contains(expArtistNorm) || expArtistNorm.contains(candArtistNorm))
+                val candArtistWords = candArtistNorm.split(Regex("\\s+")).filter { it.length >= 2 }.toSet()
+                val artistOverlap = if (expArtistWords.isNotEmpty() && candArtistWords.isNotEmpty()) {
+                    expArtistWords.count { candArtistWords.contains(it) }.toFloat() / maxOf(expArtistWords.size, candArtistWords.size).toFloat()
+                } else 0f
+                if (!exactArtist && !subArtist && artistOverlap < 0.75f) return null
+                artistScore = when {
+                    exactArtist -> 50
+                    subArtist -> 35
+                    else -> 20
+                }
+            }
+
+            val titleScore = when {
+                exactTitle -> 60
+                subTitle -> 40
+                else -> 25
+            }
+            return titleScore + artistScore
+        }
+
         fun runSearch(expr: String): String? {
             val encoded = URLEncoder.encode(expr, "UTF-8")
             val req = Request.Builder()
-                .url("$API_BASE/search?q=$encoded&type=track&limit=5")
+                .url("$API_BASE/search?q=$encoded&type=track&limit=8")
                 .header("Authorization", "Bearer $token")
                 .header("Accept", "application/json")
                 .get()
@@ -1233,17 +1295,15 @@ object SpotifyPremiumConnectManager {
                         val itemArtist = buildString {
                             if (artistsArr != null) {
                                 for (a in 0 until artistsArr.length()) {
-                                    if (a > 0) append(" ")
+                                    if (a > 0) append(", ")
                                     append(artistsArr.optJSONObject(a)?.optString("name").orEmpty())
                                 }
                             }
                         }
-                        var score = 10 - i
-                        if (cleanTitle.isNotBlank() && itemTitle.equals(cleanTitle, ignoreCase = true)) score += 30
-                        else if (cleanTitle.isNotBlank() && itemTitle.contains(cleanTitle, ignoreCase = true)) score += 15
-                        if (cleanArtist.isNotBlank() && itemArtist.contains(cleanArtist, ignoreCase = true)) score += 25
-                        if (score > bestScore) {
-                            bestScore = score
+                        val matchScore = isStrictCandidateMatch(itemTitle, itemArtist) ?: continue
+                        val finalScore = matchScore + (8 - i)
+                        if (finalScore > bestScore) {
+                            bestScore = finalScore
                             bestUri = uri
                         }
                     }

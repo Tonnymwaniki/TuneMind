@@ -4,9 +4,19 @@ import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { getLiveSupabaseClient } from '../../config/supabase';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
+import { TrackCardStore } from '../storage/TrackCardStore';
+import { EventStore } from '../events/EventStore';
+import { SpotifyUserApiClient } from '../spotify/SpotifyUserApiClient';
+import {
+  isStrictTitleArtistMatch,
+  resolveUniversalTrackProfile
+} from '../../api/v1/musicProfiles';
 import {
   buildDeterministicTrackId,
+  buildNormalizedMatchKey,
   coerceNonNegativePlayCount,
+  extractSpotifyBase62Id,
+  normalizeSpotifyUri,
   resolveCanonicalTrackIdentity
 } from '../identity/trackIdentity';
 
@@ -89,6 +99,9 @@ export interface UserTasteModel {
   artistGenreMap?: Record<string, string>;
   acousticByTimeSlot?: Record<string, AcousticCentroid>;
   recentDrops: DailyDropRecord[];
+  recommendedTrackKeys?: string[];
+  recommendedTrackIds?: string[];
+  recommendedSpotifyUris?: string[];
   updatedAtMs: number;
 }
 
@@ -151,6 +164,10 @@ export interface DailyDropRequest {
   recentTracks?: CrossAppTrackSignal[];
   vaultTracks?: Array<{ title?: string; artist?: string; cooldownDaysRemaining?: number }>;
   excludeTitles?: string[];
+  excludeKeys?: string[];
+  excludedSpotifyUris?: string[];
+  excludedTrackIds?: string[];
+  spotifyAccessToken?: string;
   yesterdayOutcomes?: DiscoveryFeedbackEvent[];
   playedFeedback?: string[];
   dismissedFeedback?: string[];
@@ -565,31 +582,47 @@ export class SelfLearningDiscoveryEngine {
             .select('drop_date, track_id, spotify_uri, track_title, artist, genre, sub_tier, outcome_status, reason, confidence, preview_url, album_art_url, track_duration_ms, updated_at')
             .eq('user_id', userId)
             .order('updated_at', { ascending: false })
-            .limit(80)
+            .limit(1000)
         ]);
 
         const dropsByDate = new Map<string, ScoredDiscoveryTrack[]>();
+        const permKeys = new Set<string>();
+        const permTrackIds = new Set<string>();
+        const permUris = new Set<string>();
+
         if (Array.isArray(outcomeRows)) {
           for (const row of outcomeRows) {
             const dKey = String(row.drop_date || '').trim();
-            if (!dKey || !row.track_title || !row.artist) continue;
+            const rTitle = String(row.track_title || '').trim();
+            const rArtist = String(row.artist || '').trim();
+            if (!rTitle || !rArtist) continue;
+
+            const identity = resolveCanonicalTrackIdentity({
+              trackId: row.track_id,
+              spotifyUri: row.spotify_uri,
+              title: rTitle,
+              artist: rArtist,
+              prefix: 'disc'
+            });
+            permKeys.add(this.normalizeKey(rTitle, rArtist));
+            const normMatch = buildNormalizedMatchKey(rTitle, rArtist);
+            if (normMatch) permKeys.add(normMatch);
+            if (identity.trackId && !identity.trackId.startsWith('disc:') && !identity.trackId.startsWith('trk:')) {
+              permTrackIds.add(identity.trackId);
+            }
+            if (identity.spotifyUri) permUris.add(identity.spotifyUri.toLowerCase());
+
+            if (!dKey) continue;
             const list = dropsByDate.get(dKey) || [];
-            if (!list.some((x) => this.normalizeKey(x.title, x.artist) === this.normalizeKey(row.track_title, row.artist))) {
+            if (!list.some((x) => this.normalizeKey(x.title, x.artist) === this.normalizeKey(rTitle, rArtist))) {
               const isWild = String(row.sub_tier || '').toUpperCase() === 'GLOBAL_WILDCARD';
               const conf = Number(row.confidence || 0.9);
-              const identity = resolveCanonicalTrackIdentity({
-                trackId: row.track_id,
-                spotifyUri: row.spotify_uri,
-                title: String(row.track_title),
-                artist: String(row.artist),
-                prefix: 'disc'
-              });
               list.push({
                 trackId: identity.trackId,
                 spotifyUri: identity.spotifyUri,
                 playCount: 0,
-                title: String(row.track_title),
-                artist: String(row.artist),
+                title: rTitle,
+                artist: rArtist,
                 album: '',
                 genre: String(row.genre || 'Discovery'),
                 category: isWild ? 'NOVEL_EXPLORATION' : 'DOPAMINE_FLOW',
@@ -607,14 +640,14 @@ export class SelfLearningDiscoveryEngine {
           }
         }
         const hydratedDrops: DailyDropRecord[] = Array.from(dropsByDate.entries())
-          .slice(0, 10)
+          .slice(0, 14)
           .map(([dropDate, recommendations]) => ({
             dropDate,
             generatedAtMs: Date.now(),
             recommendations
           }));
 
-        if (data || hydratedDrops.length > 0) {
+        if (data || hydratedDrops.length > 0 || permKeys.size > 0) {
           const hydrated: UserTasteModel = {
             userId,
             learningIterations: Number(data?.learning_iterations || 0),
@@ -624,6 +657,9 @@ export class SelfLearningDiscoveryEngine {
             timeSlotGenreAffinity: (data?.time_slot_affinity as Record<string, Record<string, number>>) || {},
             volumeByTimeSlot: (data?.volume_profile as Record<string, number>) || {},
             recentDrops: hydratedDrops,
+            recommendedTrackKeys: Array.from(permKeys).slice(-5000),
+            recommendedTrackIds: Array.from(permTrackIds).slice(-3000),
+            recommendedSpotifyUris: Array.from(permUris).slice(-3000),
             updatedAtMs: Date.now()
           };
           SelfLearningDiscoveryEngine.memoryCache.set(userId, hydrated);
@@ -1111,15 +1147,56 @@ export class SelfLearningDiscoveryEngine {
     }));
   }
 
-  private normalizeKey(title: string, artist: string): string {
-    return `${title.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}::${artist.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+  private normalizeTitleOnly(title: string): string {
+    return (title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s*\([^)]*\)/g, '')
+      .replace(/\s*\[[^\]]*\]/g, '')
+      .replace(/\s+-\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$/i, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, '');
   }
 
-  private isExcludedTrack(title: string, artist: string, excludedTitlesLower: Set<string>, excludedKeys: Set<string>): boolean {
-    const cleanT = title.trim().toLowerCase();
-    if (!cleanT) return true;
-    if (excludedTitlesLower.has(cleanT)) return true;
-    if (excludedKeys.has(this.normalizeKey(title, artist))) return true;
+  private normalizeArtistPrimary(artist: string): string {
+    const primary = (artist || '')
+      .trim()
+      .toLowerCase()
+      .split(/\s*(?:,|&|feat\.?|ft\.?|featuring|with|\bx\b)\s*/i)[0] || '';
+    const cleaned = primary.replace(/[^a-z0-9]+/g, '');
+    return cleaned === 'unknownartist' || cleaned === 'unknown' ? '' : cleaned;
+  }
+
+  private normalizeKey(title: string, artist: string): string {
+    return `${this.normalizeTitleOnly(title)}::${this.normalizeArtistPrimary(artist)}`;
+  }
+
+  private isExcludedTrack(
+    title: string,
+    artist: string,
+    excludedTitlesLower: Set<string>,
+    excludedKeys: Set<string>,
+    spotifyUri?: string | null,
+    trackId?: string | null,
+    excludedUris?: Set<string>,
+    excludedIds?: Set<string>
+  ): boolean {
+    const rawTitleLower = title.trim().toLowerCase();
+    const normTitleCompact = this.normalizeTitleOnly(title);
+    if (!rawTitleLower && !normTitleCompact) return true;
+    if (rawTitleLower && excludedTitlesLower.has(rawTitleLower)) return true;
+    if (normTitleCompact && excludedTitlesLower.has(normTitleCompact)) return true;
+
+    const kCompact = this.normalizeKey(title, artist);
+    const kPipe = buildNormalizedMatchKey(title, artist);
+    if (kCompact && excludedKeys.has(kCompact)) return true;
+    if (kPipe && excludedKeys.has(kPipe)) return true;
+
+    const normUri = normalizeSpotifyUri(spotifyUri);
+    if (normUri && excludedUris?.has(normUri.toLowerCase())) return true;
+    const rawId = (trackId || '').trim();
+    if (rawId && !rawId.startsWith('disc:') && !rawId.startsWith('trk:') && excludedIds?.has(rawId)) return true;
     return false;
   }
 
@@ -1162,10 +1239,13 @@ export class SelfLearningDiscoveryEngine {
   }
 
   /**
-   * Grounds candidate songs against Deezer's catalog AND enriches real BPM (`tempo`),
-   * duration, previewUrl, and artwork for mathematical acoustic vector ranking.
+   * Grounds candidate songs strictly against Spotify (when connected), Deezer, iTunes & Songlink.
+   * Rejects mismatched or hallucinated tracks instead of emitting wrong artist/song pairings.
    */
-  private async verifyWithCatalog(candidate: ScoredDiscoveryTrack): Promise<ScoredDiscoveryTrack> {
+  private async verifyWithCatalog(
+    candidate: ScoredDiscoveryTrack,
+    options?: { spotifyClient?: SpotifyUserApiClient | null; fromCuratedBank?: boolean }
+  ): Promise<{ track: ScoredDiscoveryTrack; verified: boolean }> {
     const baseIdentity = resolveCanonicalTrackIdentity({
       trackId: candidate.trackId,
       spotifyUri: candidate.spotifyUri,
@@ -1173,6 +1253,82 @@ export class SelfLearningDiscoveryEngine {
       artist: candidate.artist,
       prefix: 'disc'
     });
+
+    let matchedTitle = candidate.title.trim();
+    let matchedArtist = candidate.artist.trim();
+    let matchedAlbum = (candidate.album || '').trim();
+    let matchedSpotifyUri = baseIdentity.spotifyUri;
+    let matchedTrackId = baseIdentity.trackId;
+    let matchedPreviewUrl = candidate.previewUrl;
+    let matchedAlbumArtUrl = candidate.albumArtUrl;
+    let matchedDurationMs = candidate.durationMs;
+    let matchedBpm = candidate.bpm;
+    let catalogConfirmed = false;
+    let anyNetworkSucceeded = false;
+
+    // 1. Live Spotify Search verification & authentic spotify:track:<id> attachment (when Spotify auth available)
+    if (options?.spotifyClient) {
+      try {
+        const quotedQ = `track:"${candidate.title}" artist:"${candidate.artist}"`;
+        let spRes = await options.spotifyClient.searchSpotify({
+          query: quotedQ,
+          types: ['track'],
+          limit: 5
+        });
+        if (spRes.connected) anyNetworkSucceeded = true;
+        let spHit = spRes.tracks.find((t) =>
+          isStrictTitleArtistMatch(candidate.title, candidate.artist, t.title, t.artist)
+        );
+        if (!spHit && spRes.connected) {
+          const broadRes = await options.spotifyClient.searchSpotify({
+            query: `${candidate.title} ${candidate.artist}`,
+            types: ['track'],
+            limit: 6
+          });
+          spHit = broadRes.tracks.find((t) =>
+            isStrictTitleArtistMatch(candidate.title, candidate.artist, t.title, t.artist)
+          );
+        }
+        if (spHit) {
+          catalogConfirmed = true;
+          matchedTitle = spHit.title;
+          matchedArtist = spHit.artist;
+          matchedAlbum = spHit.album || matchedAlbum;
+          matchedSpotifyUri = spHit.spotify_uri;
+          matchedTrackId = spHit.spotify_id;
+          matchedDurationMs = spHit.duration_ms || matchedDurationMs;
+          matchedPreviewUrl = spHit.preview_url || matchedPreviewUrl;
+        }
+      } catch {
+        // Non-fatal; continue to universal open catalogs
+      }
+    }
+
+    // 2. Strict Universal Catalog (Deezer + iTunes + Songlink for Spotify URI if still missing)
+    try {
+      const profile = await resolveUniversalTrackProfile(candidate.title, candidate.artist);
+      if (profile && isStrictTitleArtistMatch(candidate.title, candidate.artist, profile.cleanTitle, profile.cleanArtist)) {
+        catalogConfirmed = true;
+        anyNetworkSucceeded = true;
+        if (!matchedSpotifyUri && profile.spotifyUri) {
+          matchedSpotifyUri = profile.spotifyUri;
+        }
+        if (matchedTrackId.startsWith('disc:') || matchedTrackId.startsWith('trk:')) {
+          matchedTrackId = profile.trackId;
+        }
+        if (!matchedAlbum && profile.albumName) matchedAlbum = profile.albumName;
+        if (!matchedPreviewUrl && profile.previewUrl) matchedPreviewUrl = profile.previewUrl;
+        if (!matchedAlbumArtUrl && profile.albumArtUrl) matchedAlbumArtUrl = profile.albumArtUrl;
+        if (!options?.spotifyClient || !matchedSpotifyUri) {
+          matchedTitle = profile.cleanTitle || matchedTitle;
+          matchedArtist = profile.cleanArtist || matchedArtist;
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    // 3. Direct strict Deezer check + BPM enrichment
     try {
       const q = encodeURIComponent(`${candidate.title} ${candidate.artist}`);
       const controller = new AbortController();
@@ -1182,29 +1338,20 @@ export class SelfLearningDiscoveryEngine {
       });
       clearTimeout(timer);
       if (resp.ok) {
+        anyNetworkSucceeded = true;
         const json: any = await resp.json();
         const rows: any[] = Array.isArray(json?.data) ? json.data : [];
-        const normWantedTitle = candidate.title.toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-        const wantedTitleWords = new Set(normWantedTitle.split(/\s+/).filter(w => w.length >= 2));
-        const wantedArtistPrimary = candidate.artist.toLowerCase().split(/[,&]|feat\.?|ft\.?/)[0].replace(/[^a-z0-9]+/g, ' ').trim();
-
-        const match = rows.find((item: any) => {
-          const t = String(item?.title || '').toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-          const a = String(item?.artist?.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-          const artistOk = !wantedArtistPrimary || a.includes(wantedArtistPrimary) || wantedArtistPrimary.includes(a);
-          if (!artistOk) return false;
-          if (t === normWantedTitle || (normWantedTitle.length >= 4 && (t.includes(normWantedTitle) || normWantedTitle.includes(t)))) {
-            return true;
-          }
-          const tWords = new Set(t.split(/\s+/).filter(w => w.length >= 2));
-          let hits = 0;
-          wantedTitleWords.forEach(w => { if (tWords.has(w)) hits++; });
-          const overlapRatio = hits / Math.max(1, Math.min(wantedTitleWords.size, tWords.size));
-          return overlapRatio >= 0.6;
-        }) || null;
+        const match = rows.find((item: any) =>
+          isStrictTitleArtistMatch(
+            candidate.title,
+            candidate.artist,
+            String(item?.title || ''),
+            String(item?.artist?.name || '')
+          )
+        ) || null;
 
         if (match && match.title) {
-          let realBpm: number | undefined;
+          catalogConfirmed = true;
           if (match.id) {
             try {
               const bpmCtrl = new AbortController();
@@ -1214,42 +1361,60 @@ export class SelfLearningDiscoveryEngine {
               if (detailRes.ok) {
                 const detail: any = await detailRes.json();
                 if (typeof detail?.bpm === 'number' && detail.bpm > 40) {
-                  realBpm = Math.round(detail.bpm);
+                  matchedBpm = Math.round(detail.bpm);
                 }
               }
             } catch {
               // Non-fatal optional BPM enrichment
             }
           }
-          const verifiedId =
-            baseIdentity.trackId && !baseIdentity.trackId.startsWith('disc:')
-              ? baseIdentity.trackId
-              : match.id
-              ? `deezer:${match.id}`
-              : baseIdentity.trackId;
-          return {
-            ...candidate,
-            trackId: verifiedId,
-            spotifyUri: baseIdentity.spotifyUri,
-            playCount: 0,
-            bpm: realBpm,
-            title: String(match.title || candidate.title).trim(),
-            artist: String(match.artist?.name || candidate.artist).trim(),
-            album: String(match.album?.title || candidate.album || '').trim(),
-            previewUrl: typeof match.preview === 'string' && match.preview.startsWith('http') ? match.preview : candidate.previewUrl,
-            albumArtUrl: typeof match.album?.cover_medium === 'string' ? match.album.cover_medium : candidate.albumArtUrl,
-            durationMs: typeof match.duration === 'number' ? match.duration * 1000 : candidate.durationMs
-          };
+          if (matchedTrackId.startsWith('disc:') || matchedTrackId.startsWith('trk:')) {
+            matchedTrackId = match.id ? `deezer:${match.id}` : matchedTrackId;
+          }
+          if (!matchedAlbum && match.album?.title) matchedAlbum = String(match.album.title).trim();
+          if (!matchedPreviewUrl && typeof match.preview === 'string' && match.preview.startsWith('http')) {
+            matchedPreviewUrl = match.preview;
+          }
+          if (!matchedAlbumArtUrl && typeof match.album?.cover_medium === 'string') {
+            matchedAlbumArtUrl = match.album.cover_medium;
+          }
+          if (!matchedDurationMs && typeof match.duration === 'number') {
+            matchedDurationMs = match.duration * 1000;
+          }
         }
       }
     } catch {
-      // Non-fatal fallback
+      // Non-fatal
     }
+
+    const finalIdentity = resolveCanonicalTrackIdentity({
+      trackId: matchedTrackId,
+      spotifyUri: matchedSpotifyUri,
+      title: matchedTitle,
+      artist: matchedArtist,
+      prefix: 'disc'
+    });
+
+    // Strict accuracy guard:
+    // - LLM candidates MUST be confirmed by at least one real music catalog matching BOTH title and artist.
+    // - Vetted curated-bank tracks pass only if catalog confirmed OR external network was completely unavailable.
+    const verified = catalogConfirmed || (Boolean(options?.fromCuratedBank) && !anyNetworkSucceeded);
+
     return {
-      ...candidate,
-      trackId: baseIdentity.trackId,
-      spotifyUri: baseIdentity.spotifyUri,
-      playCount: 0
+      verified,
+      track: {
+        ...candidate,
+        trackId: finalIdentity.trackId,
+        spotifyUri: finalIdentity.spotifyUri,
+        playCount: 0,
+        bpm: matchedBpm,
+        title: matchedTitle,
+        artist: matchedArtist,
+        album: matchedAlbum,
+        previewUrl: matchedPreviewUrl,
+        albumArtUrl: matchedAlbumArtUrl,
+        durationMs: matchedDurationMs
+      }
     };
   }
 
@@ -1505,25 +1670,186 @@ export class SelfLearningDiscoveryEngine {
     const genreAllocation = this.computeGenreAllocation(model, payload, timeSlot);
     const learningSummary = this.buildLearningSummary(model, timeSlot);
 
-    // Cost Protection: return today's cached 12:00 PM drop immediately (0 Claude tokens) unless manually refreshed past cooldown
+    // Build Comprehensive Zero-Repeat Exclusion Sets BEFORE cache check so cached picks matching newly played/detected songs are also caught!
+    const excludedTitlesLower = new Set<string>();
+    const excludedKeys = new Set<string>();
+    const excludedUris = new Set<string>();
+    const excludedIds = new Set<string>();
+    const highPlayArtistsLower = new Set<string>();
+
+    const addExclusionEntry = (
+      rawTitle?: string | null,
+      rawArtist?: string | null,
+      rawUri?: string | null,
+      rawId?: string | null
+    ) => {
+      const cleanT = String(rawTitle || '').trim();
+      const cleanA = String(rawArtist || '').trim();
+      if (cleanT) {
+        excludedTitlesLower.add(cleanT.toLowerCase());
+        const compactT = this.normalizeTitleOnly(cleanT);
+        if (compactT) excludedTitlesLower.add(compactT);
+        if (cleanA) {
+          excludedKeys.add(this.normalizeKey(cleanT, cleanA));
+          const normMatch = buildNormalizedMatchKey(cleanT, cleanA);
+          if (normMatch) excludedKeys.add(normMatch);
+        }
+      }
+      const normUri = normalizeSpotifyUri(rawUri);
+      if (normUri) excludedUris.add(normUri.toLowerCase());
+      const cleanId = String(rawId || '').trim();
+      if (cleanId && !cleanId.startsWith('disc:') && !cleanId.startsWith('trk:')) {
+        excludedIds.add(cleanId);
+        const asId = extractSpotifyBase62Id(cleanId);
+        if (asId) excludedUris.add(`spotify:track:${asId}`.toLowerCase());
+      }
+    };
+
+    for (const t of payload.excludeTitles || []) {
+      const raw = String(t || '').trim();
+      if (!raw) continue;
+      if (raw.includes('|') || raw.includes('::')) {
+        const sep = raw.includes('|') ? '|' : '::';
+        const parts = raw.split(sep);
+        addExclusionEntry(parts[0], parts.slice(1).join(' '), null, null);
+      } else {
+        addExclusionEntry(raw, null, null, null);
+      }
+    }
+    for (const k of payload.excludeKeys || []) {
+      const raw = String(k || '').trim();
+      if (!raw) continue;
+      excludedKeys.add(raw.toLowerCase());
+      const sep = raw.includes('|') ? '|' : raw.includes('::') ? '::' : '';
+      if (sep) {
+        const [tPart, aPart] = raw.split(sep);
+        addExclusionEntry(tPart, aPart, null, null);
+      }
+    }
+    for (const u of payload.excludedSpotifyUris || []) {
+      const norm = normalizeSpotifyUri(u);
+      if (norm) excludedUris.add(norm.toLowerCase());
+    }
+    for (const id of payload.excludedTrackIds || []) {
+      const cleanId = String(id || '').trim();
+      if (cleanId) excludedIds.add(cleanId);
+    }
+
+    // Exclude ALL detected/played tracks from Android MediaObserver & Spotify (not just playCount > 0)
+    for (const r of payload.recentTracks || []) {
+      addExclusionEntry(r.title, r.artist, r.spotifyUri, r.trackId);
+      const plays = coerceNonNegativePlayCount(r.playCount);
+      if (plays >= 3 && r.artist) {
+        highPlayArtistsLower.add(r.artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim());
+      }
+    }
+    for (const v of payload.vaultTracks || []) {
+      addExclusionEntry(v.title, v.artist, null, null);
+    }
+    // Permanent previously recommended track keys (all drops ever recorded, even older than 14 days)
+    for (const k of model.recommendedTrackKeys || []) {
+      const raw = String(k || '').trim();
+      if (!raw) continue;
+      excludedKeys.add(raw.toLowerCase());
+      const sep = raw.includes('|') ? '|' : raw.includes('::') ? '::' : '';
+      if (sep) {
+        const [tPart, aPart] = raw.split(sep);
+        if (tPart) excludedTitlesLower.add(tPart.toLowerCase());
+      }
+    }
+    for (const u of model.recommendedSpotifyUris || []) {
+      const norm = normalizeSpotifyUri(u);
+      if (norm) excludedUris.add(norm.toLowerCase());
+    }
+    for (const id of model.recommendedTrackIds || []) {
+      if (id) excludedIds.add(id);
+    }
+    for (const pastDrop of model.recentDrops || []) {
+      if (pastDrop.dropDate === dropDate) continue;
+      for (const prev of pastDrop.recommendations || []) {
+        addExclusionEntry(prev.title, prev.artist, prev.spotifyUri, prev.trackId);
+      }
+    }
+
+    // Load permanent backend TrackCards, LongTermMemory (MediaObserver + Spotify), and EventStore
+    const spotifyClient = new SpotifyUserApiClient(userId, payload.spotifyAccessToken);
+    const [trackCardSnap, longTermMem, hasSpotifyAuth] = await Promise.all([
+      TrackCardStore.getSnapshot(userId).catch(() => ({ source: 'memory' as const, track_cards: [], playlists: [] })),
+      SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, supabaseOverride).catch(() => null),
+      spotifyClient.hasLiveAuth().catch(() => false)
+    ]);
+
+    for (const card of trackCardSnap.track_cards || []) {
+      addExclusionEntry(card.title, card.artist, card.spotify_uri, card.track_id);
+      if (card.canonical_track_key) excludedKeys.add(card.canonical_track_key.toLowerCase());
+      if ((card.verified_play_count || 0) >= 3 && card.artist) {
+        highPlayArtistsLower.add(card.artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim());
+      }
+    }
+    if (longTermMem) {
+      for (const t of longTermMem.allListenedTitles || []) {
+        addExclusionEntry(t, null, null, null);
+      }
+      for (const u of longTermMem.allListenedUris || []) {
+        const norm = normalizeSpotifyUri(u);
+        if (norm) excludedUris.add(norm.toLowerCase());
+      }
+      for (const lt of [...(longTermMem.topTracksOverTime || []), ...(longTermMem.approvedTracks || []), ...(longTermMem.rejectedTracks || [])]) {
+        addExclusionEntry(lt.title, lt.artist, (lt as any).spotifyUri, lt.trackId);
+      }
+    }
+    try {
+      const eventStore = new EventStore();
+      for (const ev of eventStore.getRecentObservedTracks(500, userId)) {
+        addExclusionEntry(ev.title, ev.artist, ev.spotifyUri, ev.trackId);
+      }
+    } catch {
+      // Non-fatal
+    }
+    if (hasSpotifyAuth) {
+      const [spRecent, spTop, spLiked] = await Promise.all([
+        spotifyClient.getRecentlyPlayed(30).catch(() => ({ connected: false, items: [] })),
+        spotifyClient.getTopTracks('medium_term', 25).catch(() => ({ connected: false, tracks: [] })),
+        spotifyClient.getSavedLikedTracks(30, 0).catch(() => ({ connected: false, total: 0, tracks: [] }))
+      ]);
+      for (const it of spRecent.items || []) {
+        addExclusionEntry(it.track.title, it.track.artist, it.track.spotify_uri, it.track.spotify_id);
+      }
+      for (const tr of [...(spTop.tracks || []), ...(spLiked.tracks || [])]) {
+        addExclusionEntry(tr.title, tr.artist, tr.spotify_uri, tr.spotify_id);
+      }
+    }
+
+    // Cost Protection: return today's cached 12:00 PM drop if still valid, verified, and unexcluded
     const existingDropForCycle = (model.recentDrops || []).find(
       (d) => d.dropDate === dropDate && Array.isArray(d.recommendations) && d.recommendations.length >= 10
     );
-    const forceRefreshCooldownMs = 15 * 60_000; // Prevent repeated paid Anthropic calls within 15 minutes even on manual refresh
+    const forceRefreshCooldownMs = 15 * 60_000;
     if (
       existingDropForCycle &&
       (!payload.forceRefresh || Date.now() - (existingDropForCycle.generatedAtMs || 0) < forceRefreshCooldownMs)
     ) {
-      return {
-        status: 'ok',
-        dropDate,
-        nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
-        isAiGenerated: true,
-        modelUsed: 'cached-daily-drop',
-        wildcardCount: existingDropForCycle.recommendations.filter((r) => r.isWildcard).length,
-        learningSummary,
-        genreAllocation,
-        recommendations: existingDropForCycle.recommendations.map((r) => {
+      const cleanCached = existingDropForCycle.recommendations
+        .filter((r) => {
+          const id = resolveCanonicalTrackIdentity({
+            trackId: r.trackId,
+            spotifyUri: r.spotifyUri,
+            title: r.title,
+            artist: r.artist,
+            prefix: 'disc'
+          });
+          return !this.isExcludedTrack(
+            r.title,
+            r.artist,
+            excludedTitlesLower,
+            excludedKeys,
+            id.spotifyUri,
+            id.trackId,
+            excludedUris,
+            excludedIds
+          );
+        })
+        .map((r) => {
           const id = resolveCanonicalTrackIdentity({
             trackId: r.trackId,
             spotifyUri: r.spotifyUri,
@@ -1537,46 +1863,29 @@ export class SelfLearningDiscoveryEngine {
             spotifyUri: id.spotifyUri,
             playCount: coerceNonNegativePlayCount(r.playCount)
           };
-        })
-      };
+        });
+
+      if (cleanCached.length >= 10) {
+        return {
+          status: 'ok',
+          dropDate,
+          nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
+          isAiGenerated: true,
+          modelUsed: 'cached-daily-drop',
+          wildcardCount: cleanCached.filter((r) => r.isWildcard).length,
+          learningSummary,
+          genreAllocation,
+          recommendations: cleanCached
+        };
+      }
     }
 
     const activeGenresLower = new Set(genreAllocation.map((g) => g.genre.toLowerCase()));
 
-    // 3. Strict Never-Played Zero-Repeat Exclusion Set (`playCount > 0` strictly barred; `playCount == 0` allowed)
-    const excludedTitlesLower = new Set<string>();
-    const excludedKeys = new Set<string>();
-    const highPlayArtistsLower = new Set<string>();
-    for (const t of payload.excludeTitles || []) {
-      const clean = t.trim().toLowerCase();
-      if (clean) excludedTitlesLower.add(clean);
-    }
-    for (const r of payload.recentTracks || []) {
-      const plays = coerceNonNegativePlayCount(r.playCount);
-      if (plays > 0) {
-        if (r.title) excludedTitlesLower.add(r.title.trim().toLowerCase());
-        if (r.title && r.artist) excludedKeys.add(this.normalizeKey(r.title, r.artist));
-        if (plays >= 3 && r.artist) {
-          highPlayArtistsLower.add(r.artist.trim().toLowerCase().split(/[,&]|feat\.?|ft\.?/i)[0].trim());
-        }
-      }
-    }
-    for (const v of payload.vaultTracks || []) {
-      if (v.title) excludedTitlesLower.add(v.title.trim().toLowerCase());
-      if (v.title && v.artist) excludedKeys.add(this.normalizeKey(v.title, v.artist));
-    }
-    for (const pastDrop of model.recentDrops || []) {
-      if (pastDrop.dropDate === dropDate) continue;
-      for (const prev of pastDrop.recommendations || []) {
-        if (prev.title) excludedTitlesLower.add(prev.title.trim().toLowerCase());
-        if (prev.title && prev.artist) excludedKeys.add(this.normalizeKey(prev.title, prev.artist));
-      }
-    }
-
     const desiredWildcards = 3;
     const genreTargetCount = genreAllocation.reduce((sum, g) => sum + g.slots, 0); // Always 12 across active user genres
-    const totalTargetCount = genreTargetCount + desiredWildcards; // 12 genre picks + 1 Wildcard showcase (3 uncharted-genre songs) = 15 daily
-    let candidates: ScoredDiscoveryTrack[] = [];
+    const totalTargetCount = genreTargetCount + desiredWildcards;
+    let candidates: Array<ScoredDiscoveryTrack & { _fromBank?: boolean }> = [];
     let isAiGenerated = false;
     let modelUsed = 'tunemind-contextual-bandit';
 
@@ -1604,18 +1913,20 @@ export class SelfLearningDiscoveryEngine {
         'Alternative Indie'
       ].filter((g) => !activeGenresLower.has(g.toLowerCase()));
 
+      const excludedPromptSample = Array.from(excludedTitlesLower).filter((x) => x.length >= 2).slice(0, 180).join(', ');
+
       const prompt = `TuneMind Daily Drop (${dropDate}, ${timeSlot}, Vol ${payload.avgVolumeRatio ? Math.round(payload.avgVolumeRatio * 100) : learningSummary.avgVolumePercent}%).
 Top Artists: ${(payload.topArtists || []).concat(payload.userTasteAnchors || []).slice(0, 8).join(', ') || 'Diverse global'}
 Feedback: ${outcomeFeedback.split('\n').slice(0, 6).join('; ') || 'Calibrating'}
+STRICT ACCURACY RULE: Every song MUST have its 100% authentic exact official title and exact official artist. NEVER guess or swap artists.
 Quota (${totalTargetCount} UNHEARD real songs = ${genreTargetCount} across your genres + 3 global wildcards):
 ${allocationInstruction}
 - 3 "GLOBAL_WILDCARD" songs in 3 COMPLETELY NEW DISTINCT genres across the world NOT in [${genreAllocation.map((g) => g.genre).join(', ')}] (e.g., ${foreignSceneHints.slice(0, 5).join(', ')}), each with 1 crisp bridge reason.
-NEVER repeat any excluded song: ${Array.from(excludedTitlesLower).slice(0, 60).join(', ')}
+NEVER repeat any excluded song: ${excludedPromptSample}
 Return ONLY a raw JSON array:
 [{"title":"","artist":"","album":"","genre":"","category":"DOPAMINE_FLOW|PALATE_CLEANSER|CHRONO_RESTORE|NOVEL_EXPLORATION","subTier":"GENRE_PICK|GLOBAL_WILDCARD","isWildcard":false,"reason":"1 short sentence","confidence":0.93}]`;
 
       const candidateModels = await this.getCandidateClaudeModels();
-      // Try at most 2 fast Haiku/fallback models so we never burn quota looping through expensive tiers
       for (const candidateModelId of candidateModels.slice(0, 2)) {
         try {
           const aiResp = await this.anthropic.messages.create({
@@ -1639,7 +1950,7 @@ Return ONLY a raw JSON array:
               const title = String(row.title || '').trim();
               const artist = String(row.artist || '').trim();
               if (!title || !artist) continue;
-              if (this.isExcludedTrack(title, artist, excludedTitlesLower, excludedKeys)) continue;
+              if (this.isExcludedTrack(title, artist, excludedTitlesLower, excludedKeys, row.spotifyUri || row.spotify_uri, row.trackId || row.track_id, excludedUris, excludedIds)) continue;
 
               const genre = SelfLearningDiscoveryEngine.inferGenre(title, artist, row.genre);
               const isWildcard = Boolean(row.isWildcard || row.subTier === 'GLOBAL_WILDCARD') && !activeGenresLower.has(genre.toLowerCase());
@@ -1668,7 +1979,8 @@ Return ONLY a raw JSON array:
                 reason: String(row.reason || `Picked for your ${timeSlot} ${genre} rotation.`).trim(),
                 confidence: mlScore,
                 mlScore,
-                isWildcard
+                isWildcard,
+                _fromBank: false
               });
             }
             if (candidates.length > 0) break;
@@ -1679,13 +1991,41 @@ Return ONLY a raw JSON array:
       }
     }
 
-    // 5. Enforce 2-per-active-genre + 3 COMPLETELY DIFFERENT-GENRE wildcards
+    // 5. Catalog-first verification: verify LLM picks FIRST and discard any unverified/mismatched title-artist pairs
+    const activeSpotifyClient = hasSpotifyAuth ? spotifyClient : null;
+    const verifiedLlmCandidates: ScoredDiscoveryTrack[] = [];
+    if (candidates.length > 0) {
+      const llmChecked = await Promise.all(
+        candidates.map((c) => this.verifyWithCatalog(c, { spotifyClient: activeSpotifyClient, fromCuratedBank: Boolean(c._fromBank) }))
+      );
+      for (const res of llmChecked) {
+        if (!res.verified) continue;
+        if (
+          this.isExcludedTrack(
+            res.track.title,
+            res.track.artist,
+            excludedTitlesLower,
+            excludedKeys,
+            res.track.spotifyUri,
+            res.track.trackId,
+            excludedUris,
+            excludedIds
+          )
+        ) {
+          continue;
+        }
+        verifiedLlmCandidates.push(res.track);
+      }
+    }
+
+    // Assemble proportional genre picks + 3 uncharted wildcards from verified LLM pool, then verified bank backfill
     const finalGenrePicks: ScoredDiscoveryTrack[] = [];
     const seenDropKeys = new Set<string>();
+    const bankQueue: Array<{ track: ScoredDiscoveryTrack; targetType: 'genre' | 'wildcard' }> = [];
 
     for (const alloc of genreAllocation) {
       let countForAlloc = 0;
-      for (const c of candidates) {
+      for (const c of verifiedLlmCandidates) {
         if (countForAlloc >= alloc.slots) break;
         if (c.isWildcard || c.genre.toLowerCase() !== alloc.genre.toLowerCase()) continue;
         const k = this.normalizeKey(c.title, c.artist);
@@ -1702,33 +2042,41 @@ Return ONLY a raw JSON array:
         for (const b of bankMatches) {
           if (countForAlloc >= alloc.slots) break;
           const k = this.normalizeKey(b.title, b.artist);
-          if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
+          if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys, b.spotifyUri, b.trackId, excludedUris, excludedIds)) continue;
           seenDropKeys.add(k);
           const mlScore = Number((b.confidence * 0.5 + alloc.score * 0.5).toFixed(3));
-          finalGenrePicks.push({ ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' });
+          bankQueue.push({
+            track: { ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' },
+            targetType: 'genre'
+          });
           countForAlloc += 1;
         }
       }
     }
 
-    // Guarantee full 12 genre picks if any active genre's pool ran tight
-    if (finalGenrePicks.length < genreTargetCount) {
+    // Top up remaining genre slots if any active genre pool ran tight
+    let projectedGenreCount = finalGenrePicks.length + bankQueue.filter((x) => x.targetType === 'genre').length;
+    if (projectedGenreCount < genreTargetCount) {
       for (const b of CURATED_GLOBAL_DISCOVERY_BANK.filter((x) => !x.isWildcard)) {
-        if (finalGenrePicks.length >= genreTargetCount) break;
+        if (projectedGenreCount >= genreTargetCount) break;
         const k = this.normalizeKey(b.title, b.artist);
-        if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys)) continue;
+        if (seenDropKeys.has(k) || this.isExcludedTrack(b.title, b.artist, excludedTitlesLower, excludedKeys, b.spotifyUri, b.trackId, excludedUris, excludedIds)) continue;
         seenDropKeys.add(k);
         const score = this.scoreGenreForContext(model, b.genre, timeSlot);
         const mlScore = Number((b.confidence * 0.5 + score * 0.5).toFixed(3));
-        finalGenrePicks.push({ ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' });
+        bankQueue.push({
+          track: { ...b, confidence: mlScore, mlScore, isWildcard: false, subTier: 'GENRE_PICK' },
+          targetType: 'genre'
+        });
+        projectedGenreCount += 1;
       }
     }
 
-    // Collect 3 Wildcards strictly from genres NOT in user's active genres (and prefer 3 distinct wildcard genres!)
+    // Collect 3 Wildcards strictly from genres NOT in user's active genres (prefer 3 distinct genres)
     const finalWildcards: ScoredDiscoveryTrack[] = [];
     const seenWildcardGenres = new Set<string>();
 
-    for (const c of candidates) {
+    for (const c of verifiedLlmCandidates) {
       if (finalWildcards.length >= desiredWildcards) break;
       if (!c.isWildcard || activeGenresLower.has(c.genre.toLowerCase())) continue;
       if (seenWildcardGenres.has(c.genre.toLowerCase())) continue;
@@ -1739,36 +2087,85 @@ Return ONLY a raw JSON array:
       finalWildcards.push({ ...c, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
     }
 
-    if (finalWildcards.length < desiredWildcards) {
+    let projectedWildcardCount = finalWildcards.length;
+    if (projectedWildcardCount < desiredWildcards) {
       const bankWildcards = CURATED_GLOBAL_DISCOVERY_BANK.filter(
         (b) => b.isWildcard && !activeGenresLower.has(b.genre.toLowerCase())
       );
-      // Pass 1: maximize distinct wildcard genres
       for (const w of bankWildcards) {
-        if (finalWildcards.length >= desiredWildcards) break;
+        if (projectedWildcardCount >= desiredWildcards) break;
         if (seenWildcardGenres.has(w.genre.toLowerCase())) continue;
         const k = this.normalizeKey(w.title, w.artist);
-        if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys)) continue;
+        if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys, w.spotifyUri, w.trackId, excludedUris, excludedIds)) continue;
         seenDropKeys.add(k);
         seenWildcardGenres.add(w.genre.toLowerCase());
-        finalWildcards.push({ ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
+        bankQueue.push({
+          track: { ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' },
+          targetType: 'wildcard'
+        });
+        projectedWildcardCount += 1;
       }
-      // Pass 2: allow second wildcard from non-active genres if pool is tight
       for (const w of bankWildcards) {
-        if (finalWildcards.length >= desiredWildcards) break;
+        if (projectedWildcardCount >= desiredWildcards) break;
         const k = this.normalizeKey(w.title, w.artist);
-        if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys)) continue;
+        if (seenDropKeys.has(k) || this.isExcludedTrack(w.title, w.artist, excludedTitlesLower, excludedKeys, w.spotifyUri, w.trackId, excludedUris, excludedIds)) continue;
         seenDropKeys.add(k);
-        finalWildcards.push({ ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' });
+        bankQueue.push({
+          track: { ...w, isWildcard: true, subTier: 'GLOBAL_WILDCARD' },
+          targetType: 'wildcard'
+        });
+        projectedWildcardCount += 1;
       }
     }
 
-    const assembled = [...finalGenrePicks, ...finalWildcards];
+    if (bankQueue.length > 0) {
+      const verifiedBank = await Promise.all(
+        bankQueue.map(async (item) => {
+          const checked = await this.verifyWithCatalog(item.track, {
+            spotifyClient: activeSpotifyClient,
+            fromCuratedBank: true
+          });
+          return { ...checked, targetType: item.targetType };
+        })
+      );
+      for (const vb of verifiedBank) {
+        if (!vb.verified) continue;
+        if (
+          this.isExcludedTrack(
+            vb.track.title,
+            vb.track.artist,
+            excludedTitlesLower,
+            excludedKeys,
+            vb.track.spotifyUri,
+            vb.track.trackId,
+            excludedUris,
+            excludedIds
+          )
+        ) {
+          continue;
+        }
+        if (vb.targetType === 'wildcard') {
+          finalWildcards.push(vb.track);
+        } else {
+          finalGenrePicks.push(vb.track);
+        }
+      }
+    }
 
-    // 6. Real-catalog verification + Deezer BPM enrichment + Mathematical Acoustic Cosine Scoring
-    const verifiedRaw = await Promise.all(assembled.map((c) => this.verifyWithCatalog(c)));
-    const verified = verifiedRaw
-      .filter((tr) => !this.isExcludedTrack(tr.title, tr.artist, excludedTitlesLower, excludedKeys))
+    const verified = [...finalGenrePicks, ...finalWildcards]
+      .filter(
+        (tr) =>
+          !this.isExcludedTrack(
+            tr.title,
+            tr.artist,
+            excludedTitlesLower,
+            excludedKeys,
+            tr.spotifyUri,
+            tr.trackId,
+            excludedUris,
+            excludedIds
+          )
+      )
       .map((tr) => {
         const cosineScore = this.scoreCandidateAcousticCosine(model, tr, timeSlot, highPlayArtistsLower);
         return {
@@ -1782,6 +2179,25 @@ Return ONLY a raw JSON array:
         if (a.isWildcard !== b.isWildcard) return a.isWildcard ? 1 : -1;
         return b.mlScore - a.mlScore;
       });
+
+    // Permanently remember every emitted track so future days NEVER repeat them even after 14+ days
+    const updatedKeys = new Set<string>(model.recommendedTrackKeys || []);
+    const updatedIds = new Set<string>(model.recommendedTrackIds || []);
+    const updatedUris = new Set<string>(model.recommendedSpotifyUris || []);
+    for (const item of verified) {
+      updatedKeys.add(this.normalizeKey(item.title, item.artist));
+      const normMatch = buildNormalizedMatchKey(item.title, item.artist);
+      if (normMatch) updatedKeys.add(normMatch);
+      if (item.trackId && !item.trackId.startsWith('disc:') && !item.trackId.startsWith('trk:')) {
+        updatedIds.add(item.trackId);
+      }
+      if (item.spotifyUri) {
+        updatedUris.add(item.spotifyUri.toLowerCase());
+      }
+    }
+    model.recommendedTrackKeys = Array.from(updatedKeys).slice(-5000);
+    model.recommendedTrackIds = Array.from(updatedIds).slice(-3000);
+    model.recommendedSpotifyUris = Array.from(updatedUris).slice(-3000);
 
     // Record daily drop into model history + save updated model & Supabase slate snapshot
     model.recentDrops = [
@@ -1840,7 +2256,7 @@ Return ONLY a raw JSON array:
       nextRefreshLocalLabel: '12:00 PM daily (your timezone)',
       isAiGenerated,
       modelUsed,
-      wildcardCount: finalWildcards.length,
+      wildcardCount: verified.filter((r) => r.isWildcard).length,
       learningSummary: this.buildLearningSummary(model, timeSlot),
       genreAllocation,
       recommendations: verified

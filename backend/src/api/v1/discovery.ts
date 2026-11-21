@@ -21,6 +21,19 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       body.userEmail || body.user_email
     );
     const engine = new SelfLearningDiscoveryEngine();
+    const toStringArray = (val: unknown, maxLen: number): string[] =>
+      Array.isArray(val)
+        ? val.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean).slice(0, maxLen)
+        : [];
+    const headerSpotifyToken =
+      typeof req.headers['x-spotify-access-token'] === 'string'
+        ? req.headers['x-spotify-access-token'].trim()
+        : undefined;
+    const rawSpotifyToken =
+      headerSpotifyToken ||
+      (typeof body.spotifyAccessToken === 'string' ? body.spotifyAccessToken.trim() : '') ||
+      (typeof body.spotify_access_token === 'string' ? body.spotify_access_token.trim() : '');
+
     const result = await engine.generateDailyForYouDrop({
       userId: req.authUser ? identity.userId : (body.userId || body.user_id),
       userEmail: req.authUser ? identity.userEmail : (body.userEmail || body.user_email),
@@ -32,8 +45,8 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       satietyLevel: Number(body.satietyLevel ?? body.satiety_level ?? 38),
       preferredProvider: body.preferredProvider || body.preferred_provider,
       avgVolumeRatio: typeof body.avgVolumeRatio === 'number' ? body.avgVolumeRatio : undefined,
-      topArtists: Array.isArray(body.topArtists) ? body.topArtists : [],
-      userTasteAnchors: Array.isArray(body.userTasteAnchors) ? body.userTasteAnchors : [],
+      topArtists: toStringArray(body.topArtists, 40),
+      userTasteAnchors: toStringArray(body.userTasteAnchors, 40),
       genreDistribution: body.genreDistribution && typeof body.genreDistribution === 'object'
         ? body.genreDistribution
         : undefined,
@@ -42,10 +55,14 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
         : undefined,
       recentTracks: Array.isArray(body.recentTracks) ? body.recentTracks : [],
       vaultTracks: Array.isArray(body.vaultTracks) ? body.vaultTracks : [],
-      excludeTitles: Array.isArray(body.excludeTitles) ? body.excludeTitles : [],
+      excludeTitles: toStringArray(body.excludeTitles, 2000),
+      excludeKeys: toStringArray(body.excludeKeys || body.exclude_keys, 2500),
+      excludedSpotifyUris: toStringArray(body.excludedSpotifyUris || body.excluded_spotify_uris, 1500),
+      excludedTrackIds: toStringArray(body.excludedTrackIds || body.excluded_track_ids, 1500),
+      spotifyAccessToken: rawSpotifyToken.length >= 20 ? rawSpotifyToken : undefined,
       yesterdayOutcomes: Array.isArray(body.yesterdayOutcomes) ? body.yesterdayOutcomes : [],
-      playedFeedback: Array.isArray(body.playedFeedback) ? body.playedFeedback : [],
-      dismissedFeedback: Array.isArray(body.dismissedFeedback) ? body.dismissedFeedback : [],
+      playedFeedback: toStringArray(body.playedFeedback, 50),
+      dismissedFeedback: toStringArray(body.dismissedFeedback, 50),
       supabaseUrl: body.supabase_url,
       supabaseKey: body.supabase_anon_key
     });

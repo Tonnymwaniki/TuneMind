@@ -52,7 +52,9 @@ class ForYouDailyDropWorker(
                 return@withContext Result.success()
             }
 
-            val rows = db.eventQueueDao().getRecentEvents(150)
+            dao.clearInvalidSpotifyUris()
+
+            val rows = db.eventQueueDao().getRecentEvents(400)
             val observations: List<PlaybackObservation> = rows.mapNotNull { row ->
                 runCatching {
                     PlaybackObservationCodec.decode(row.payloadJson, legacySavedAtMs = row.savedAtMs)
@@ -61,7 +63,7 @@ class ForYouDailyDropWorker(
             val truncated = observations.size >= EventBufferRepository.MAX_OBSERVATIONS
             val episodes = ListeningSessionReconstructor().reconstruct(observations, retainedWindowMayBeTruncated = truncated)
             val memory = ListeningMemoryBuilder().build(observations, episodes, retainedHistoryMayBeIncomplete = truncated)
-            val recentTracks = memory.tracks.take(24)
+            val recentTracks = memory.tracks.take(200)
 
             // Read Vault tracks so already-resting tracks are excluded
             val vaultPrefs = applicationContext.getSharedPreferences("tunemind_vault_prefs", Context.MODE_PRIVATE)
@@ -88,16 +90,54 @@ class ForYouDailyDropWorker(
                 }
             }
 
-            val knownFromCrate = dao.getAllKnownTitles()
-            val historyTitles = recentTracks.filter { it.distinctAppearanceCount > 0 }.mapNotNull { it.title }
-            val vaultTitles = vaultTracks.map { it.title }
-            val combinedExclusions = (knownFromCrate + historyTitles + vaultTitles).distinct()
+            val crateProjections = dao.getAllIdentityProjections()
+            val libTracks = db.crossAppLibraryDao().getAllLibraryTracksOnce()
+            val playLogs = db.crossAppLibraryDao().getPlayLogsOnce(1500)
+
+            val combinedTitles = LinkedHashSet<String>()
+            val combinedKeys = LinkedHashSet<String>(ClaudeReasoningEngine.getPermanentExcludedKeys(applicationContext))
+            val combinedUris = LinkedHashSet<String>()
+            val combinedIds = LinkedHashSet<String>()
+
+            crateProjections.forEach { p ->
+                if (p.title.isNotBlank()) combinedTitles.add(p.title)
+                val mk = TrackIdentityResolver.buildNormalizedMatchKey(p.title, p.artist)
+                if (mk.isNotBlank()) combinedKeys.add(mk)
+                TrackIdentityResolver.normalizeSpotifyUri(p.spotifyUri)?.let { combinedUris.add(it) }
+                if (p.trackId.isNotBlank() && !p.trackId.startsWith("disc:") && !p.trackId.startsWith("trk:")) {
+                    combinedIds.add(p.trackId)
+                }
+            }
+            recentTracks.forEach { r ->
+                r.title?.takeIf { it.isNotBlank() }?.let { combinedTitles.add(it) }
+                val mk = TrackIdentityResolver.buildNormalizedMatchKey(r.title, r.artist)
+                if (mk.isNotBlank()) combinedKeys.add(mk)
+                TrackIdentityResolver.normalizeSpotifyUri(r.providerTrackId)?.let { combinedUris.add(it) }
+                if (r.trackId.isNotBlank()) combinedIds.add(r.trackId)
+            }
+            libTracks.forEach { t ->
+                if (t.title.isNotBlank()) combinedTitles.add(t.title)
+                if (t.canonicalTrackKey.isNotBlank()) combinedKeys.add(t.canonicalTrackKey)
+                val mk = TrackIdentityResolver.buildNormalizedMatchKey(t.title, t.artist)
+                if (mk.isNotBlank()) combinedKeys.add(mk)
+                TrackIdentityResolver.normalizeSpotifyUri(t.trackId)?.let { combinedUris.add(it) }
+                if (t.trackId.isNotBlank()) combinedIds.add(t.trackId)
+            }
+            playLogs.forEach { pl ->
+                if (pl.title.isNotBlank()) combinedTitles.add(pl.title)
+                if (pl.canonicalTrackKey.isNotBlank()) combinedKeys.add(pl.canonicalTrackKey)
+                TrackIdentityResolver.normalizeSpotifyUri(pl.trackId)?.let { combinedUris.add(it) }
+            }
+            vaultTracks.forEach { v ->
+                if (v.title.isNotBlank()) combinedTitles.add(v.title)
+                val mk = TrackIdentityResolver.buildNormalizedMatchKey(v.title, v.artist)
+                if (mk.isNotBlank()) combinedKeys.add(mk)
+            }
 
             val playedSignals = dao.getPositiveFeedbackSignals()
             val dismissedSignals = dao.getDismissedSignals()
             val previousOutcomes = dao.getPreviousDropsForEvaluation(todayNoonKey, 30)
 
-            val libTracks = db.crossAppLibraryDao().getAllLibraryTracksOnce()
             val visualsMap = db.crossAppLibraryDao().getTrackVisualSnapshot().associateBy { it.trackKey }
             val artistsMap = db.crossAppLibraryDao().getArtistProfileSnapshot().associateBy { it.artistKey }
             val visualRepo = com.tunemind.app.data.ingestion.UniversalMusicVisualRepository.getInstance(applicationContext)
@@ -115,7 +155,7 @@ class ForYouDailyDropWorker(
             val dedupSnap = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.buildSnapshot(
                 rawObservations = observations,
                 crossAppTracks = libTracks,
-                crossAppLogs = emptyList(),
+                crossAppLogs = playLogs,
                 nowPlayingTitle = null,
                 nowPlayingArtist = null,
                 nowPlayingSourcePkg = null,
@@ -125,6 +165,11 @@ class ForYouDailyDropWorker(
             val slot = TimeSlot.currentSlot()
             val prefProvider = MusicProviderRegistry.getInstance(applicationContext).getPreferredProviderId()
             val authSession = TuneMindAuthSessionManager.getInstance(applicationContext).sessionFlow.value
+            val spotifyToken = runCatching {
+                if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(applicationContext)) {
+                    com.tunemind.app.provider.SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(applicationContext)
+                } else null
+            }.getOrNull()
             val currentPlays = recentTracks.firstOrNull()?.distinctAppearanceCount?.coerceAtLeast(0) ?: 0
             val satiety = if (currentPlays <= 0) 15 else minOf(95, maxOf(18, currentPlays * 22))
             val avgVol = runCatching {
@@ -144,7 +189,11 @@ class ForYouDailyDropWorker(
                 preferredProviderId = prefProvider,
                 userTasteAnchors = emptyList(),
                 nowPlayingArtist = recentTracks.firstOrNull()?.artist,
-                excludeTitles = combinedExclusions,
+                excludeTitles = combinedTitles.toList(),
+                excludeKeys = combinedKeys.toList(),
+                excludedSpotifyUris = combinedUris.toList(),
+                excludedTrackIds = combinedIds.toList(),
+                spotifyAccessToken = spotifyToken,
                 playedSignals = playedSignals,
                 dismissedSignals = dismissedSignals,
                 userId = authSession.userId,
@@ -165,10 +214,28 @@ class ForYouDailyDropWorker(
                         title = rec.title,
                         artist = rec.artist
                     )
-                    rec.copy(dropDateKey = todayNoonKey, trackId = canonicalId)
+                    rec.copy(
+                        dropDateKey = todayNoonKey,
+                        trackId = canonicalId,
+                        spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
+                    )
                 }
+                ClaudeReasoningEngine.recordPermanentExcludedRecommendations(applicationContext, stamped)
                 dao.insertAll(stamped)
-                // Prune older un-saved recommendations > 14 days so DB stays lean while keeping recent exclusions
+                // Record permanent exclusions of any older rows before pruning old unsaved DB rows
+                ClaudeReasoningEngine.recordPermanentExcludedRecommendations(
+                    applicationContext,
+                    crateProjections.map {
+                        AiRecommendationEntity(
+                            id = it.id,
+                            title = it.title,
+                            artist = it.artist,
+                            reason = "",
+                            spotifyUri = it.spotifyUri,
+                            trackId = it.trackId
+                        )
+                    }
+                )
                 val fourteenDaysAgoMs = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(14)
                 dao.pruneOldUnsaved(fourteenDaysAgoMs)
             }

@@ -576,6 +576,51 @@ object ClaudeReasoningEngine {
         )
     }
 
+    private const val PREFS_PERM_REC_HISTORY = "tunemind_for_you_perm_history_v1"
+    private const val KEY_PERM_REC_KEYS_JSON = "perm_rec_keys_json"
+
+    fun normalizeTitleExclusionKey(rawTitle: String): String {
+        return rawTitle.trim().lowercase()
+            .replace(Regex("\\s*\\([^)]*\\)"), "")
+            .replace(Regex("\\s*\\[[^\\]]*\\]"), "")
+            .replace(Regex("\\s+-\\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+    }
+
+    fun getPermanentExcludedKeys(context: Context): List<String> {
+        return try {
+            val prefs = context.applicationContext.getSharedPreferences(PREFS_PERM_REC_HISTORY, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_PERM_REC_KEYS_JSON, null) ?: return emptyList()
+            val arr = JSONArray(raw)
+            buildList(arr.length()) {
+                for (i in 0 until arr.length()) {
+                    val s = arr.optString(i).trim()
+                    if (s.isNotBlank()) add(s)
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun recordPermanentExcludedRecommendations(context: Context, items: List<AiRecommendationEntity>) {
+        if (items.isEmpty()) return
+        try {
+            val prefs = context.applicationContext.getSharedPreferences(PREFS_PERM_REC_HISTORY, Context.MODE_PRIVATE)
+            val existing = LinkedHashSet<String>(getPermanentExcludedKeys(context))
+            items.forEach { rec ->
+                val normKey = TrackIdentityResolver.buildNormalizedMatchKey(rec.title, rec.artist)
+                if (normKey.isNotBlank()) existing.add(normKey)
+                val cleanT = normalizeTitleExclusionKey(rec.title)
+                if (cleanT.isNotBlank()) existing.add(cleanT)
+                TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)?.let { existing.add(it.lowercase()) }
+            }
+            val bounded = if (existing.size > 3000) existing.toList().takeLast(3000) else existing.toList()
+            prefs.edit().putString(KEY_PERM_REC_KEYS_JSON, JSONArray(bounded).toString()).apply()
+        } catch (_: Exception) {}
+    }
+
     /**
      * Generates the 12:00 PM Self-Learning AI Daily Drop (`POST /api/v1/discovery/daily-drop`):
      * - Auto-rotates strictly on the user's local 12:00 PM cycle key.
@@ -593,6 +638,10 @@ object ClaudeReasoningEngine {
         userTasteAnchors: List<String> = emptyList(),
         nowPlayingArtist: String? = null,
         excludeTitles: List<String> = emptyList(),
+        excludeKeys: List<String> = emptyList(),
+        excludedSpotifyUris: List<String> = emptyList(),
+        excludedTrackIds: List<String> = emptyList(),
+        spotifyAccessToken: String? = null,
         playedSignals: List<String> = emptyList(),
         dismissedSignals: List<String> = emptyList(),
         userId: String = "",
@@ -614,6 +663,9 @@ object ClaudeReasoningEngine {
         val noonCycleKey = NoonDropSchedule.getNoonCycleKey(calendar)
         val timezoneId = calendar.timeZone.id ?: TimeZone.getDefault().id
         val localHour = calendar.get(Calendar.HOUR_OF_DAY)
+        val permanentHistoryKeys = getPermanentExcludedKeys(context)
+        val mergedExcludeKeys = (excludeKeys + permanentHistoryKeys).distinct()
+        val mergedExcludeTitles = excludeTitles.distinct()
 
         val payload = JSONObject().apply {
             if (userId.isNotBlank()) put("userId", userId)
@@ -653,8 +705,27 @@ object ClaudeReasoningEngine {
             put("userTasteAnchors", anchorsArray)
 
             val excludeArray = JSONArray()
-            excludeTitles.distinct().take(150).forEach { excludeArray.put(it) }
+            mergedExcludeTitles.take(1500).forEach { excludeArray.put(it) }
             put("excludeTitles", excludeArray)
+
+            if (mergedExcludeKeys.isNotEmpty()) {
+                val exKeyArray = JSONArray()
+                mergedExcludeKeys.take(2000).forEach { exKeyArray.put(it) }
+                put("excludeKeys", exKeyArray)
+            }
+            if (excludedSpotifyUris.isNotEmpty()) {
+                val exUriArray = JSONArray()
+                excludedSpotifyUris.distinct().take(1000).forEach { exUriArray.put(it) }
+                put("excludedSpotifyUris", exUriArray)
+            }
+            if (excludedTrackIds.isNotEmpty()) {
+                val exIdArray = JSONArray()
+                excludedTrackIds.distinct().take(1000).forEach { exIdArray.put(it) }
+                put("excludedTrackIds", exIdArray)
+            }
+            if (!spotifyAccessToken.isNullOrBlank()) {
+                put("spotifyAccessToken", spotifyAccessToken)
+            }
 
             val playedArray = JSONArray()
             playedSignals.take(15).forEach { playedArray.put(it) }
@@ -668,7 +739,7 @@ object ClaudeReasoningEngine {
                 "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}"
             }
             val tracksArray = JSONArray()
-            recentTracks.take(40).forEach { t ->
+            recentTracks.take(250).forEach { t ->
                 val identity = TrackIdentityResolver.resolveCanonicalIdentity(
                     trackId = t.trackId.ifBlank { null },
                     spotifyUri = t.providerTrackId,
@@ -784,6 +855,13 @@ object ClaudeReasoningEngine {
                         onLearningSummaryUpdated?.invoke(parsedSummary)
                     }
 
+                    val localExTitles = mergedExcludeTitles.flatMap {
+                        listOf(it.lowercase().trim(), normalizeTitleExclusionKey(it))
+                    }.filter { it.isNotBlank() }.toHashSet()
+                    val localExKeys = mergedExcludeKeys.map { it.lowercase().trim() }.toHashSet()
+                    val localExUris = excludedSpotifyUris.mapNotNull { TrackIdentityResolver.normalizeSpotifyUri(it)?.lowercase() }.toHashSet()
+                    val localExIds = excludedTrackIds.filter { it.isNotBlank() && !it.startsWith("disc:") && !it.startsWith("trk:") }.toHashSet()
+
                     val recsArray = root.optJSONArray("recommendations")
                     if (recsArray != null && recsArray.length() > 0) {
                         val list = mutableListOf<AiRecommendationEntity>()
@@ -793,16 +871,10 @@ object ClaudeReasoningEngine {
                             val item = recsArray.getJSONObject(i)
                             val title = item.optString("title", "").trim()
                             val artist = item.optString("artist", "").trim()
-                            val key = "${title.lowercase()}_${artist.lowercase()}"
+                            val normMatchKey = TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
+                            val key = normMatchKey.ifBlank { "${title.lowercase()}|${artist.lowercase()}" }
                             if (title.isBlank() || artist.isBlank() || seenKeys.contains(key)) continue
-                            seenKeys.add(key)
 
-                            val genreTag = item.optString("genre", "Discovery").trim().ifBlank { "Discovery" }
-                            val subTier = item.optString("subTier", "GENRE_PICK").trim().ifBlank { "GENRE_PICK" }
-                            val isWildcard = item.optBoolean("isWildcard", subTier == "GLOBAL_WILDCARD")
-                            val confidence = item.optDouble("confidence", 0.91).toFloat().coerceIn(0.65f, 0.99f)
-                            val mlScoreRaw = item.optDouble("mlScore", confidence.toDouble())
-                            val matchPercent = (mlScoreRaw * 100.0).roundToInt().coerceIn(72, 99)
                             val recTrackIdRaw = item.optString("trackId", "").ifBlank { item.optString("track_id", "") }
                             val recSpotifyUriRaw = item.optString("spotifyUri", "").ifBlank { item.optString("spotify_uri", "") }
                             val recIdentity = TrackIdentityResolver.resolveCanonicalIdentity(
@@ -811,6 +883,23 @@ object ClaudeReasoningEngine {
                                 title = title,
                                 artist = artist
                             )
+                            val normCleanTitle = normalizeTitleExclusionKey(title)
+                            val isExcludedLocal =
+                                localExKeys.contains(key) ||
+                                    localExTitles.contains(title.lowercase()) ||
+                                    (normCleanTitle.isNotBlank() && localExTitles.contains(normCleanTitle)) ||
+                                    (recIdentity.spotifyUri != null && localExUris.contains(recIdentity.spotifyUri.lowercase())) ||
+                                    localExIds.contains(recIdentity.trackId)
+                            if (isExcludedLocal) continue
+
+                            seenKeys.add(key)
+
+                            val genreTag = item.optString("genre", "Discovery").trim().ifBlank { "Discovery" }
+                            val subTier = item.optString("subTier", "GENRE_PICK").trim().ifBlank { "GENRE_PICK" }
+                            val isWildcard = item.optBoolean("isWildcard", subTier == "GLOBAL_WILDCARD")
+                            val confidence = item.optDouble("confidence", 0.91).toFloat().coerceIn(0.65f, 0.99f)
+                            val mlScoreRaw = item.optDouble("mlScore", confidence.toDouble())
+                            val matchPercent = (mlScoreRaw * 100.0).roundToInt().coerceIn(72, 99)
                             val previewUrl = item.optString("previewUrl", "").trim().takeIf { it.startsWith("http") }
 
                             list.add(
@@ -832,14 +921,17 @@ object ClaudeReasoningEngine {
                                     dropDateKey = noonCycleKey,
                                     matchScorePercent = matchPercent,
                                     isWildcard = isWildcard,
-                                    spotifyUri = recIdentity.spotifyUri,
+                                    spotifyUri = TrackIdentityResolver.normalizeSpotifyUri(recIdentity.spotifyUri),
                                     previewUrl = previewUrl,
                                     trackDurationMs = item.optLong("durationMs", 0L),
                                     trackId = recIdentity.trackId
                                 )
                             )
                         }
-                        if (list.isNotEmpty()) return@withContext list
+                        if (list.isNotEmpty()) {
+                            recordPermanentExcludedRecommendations(context, list)
+                            return@withContext list
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -912,9 +1004,17 @@ object ClaudeReasoningEngine {
             FallbackTrack("Mambote", "Fally Ipupa", "Afro-Francophone", "Silky Congolese rumba guitars bridge effortlessly from warm melodic tastes.", "NOVEL_EXPLORATION", "GLOBAL_WILDCARD", true, 83)
         ).filter { !activeGenreNames.contains(it.genre.lowercase()) }.take(3)
 
-        val excludedSet = excludeTitles.map { it.lowercase().trim() }.toSet()
-        val combined = (genrePicks + wildcardCandidates).filter { !excludedSet.contains(it.title.lowercase()) }
-            .ifEmpty { genrePicks + wildcardCandidates }
+        val excludedSet = mergedExcludeTitles.flatMap { listOf(it.lowercase().trim(), normalizeTitleExclusionKey(it)) }
+            .filter { it.isNotBlank() }
+            .toSet()
+        val excludedKeySet = mergedExcludeKeys.map { it.lowercase().trim() }.toSet()
+        val combined = (genrePicks + wildcardCandidates).filter { item ->
+            val key = TrackIdentityResolver.buildNormalizedMatchKey(item.title, item.artist)
+            val cleanT = normalizeTitleExclusionKey(item.title)
+            !excludedSet.contains(item.title.lowercase()) &&
+                !excludedSet.contains(cleanT) &&
+                !excludedKeySet.contains(key)
+        }
 
         val offlineSummary = getSavedLearningSummary(context).copy(
             dropDateKey = noonCycleKey,
@@ -927,7 +1027,7 @@ object ClaudeReasoningEngine {
         onLearningSummaryUpdated?.invoke(offlineSummary)
 
         val nowMs = System.currentTimeMillis()
-        combined.mapIndexed { idx, item ->
+        val offlineEntities = combined.mapIndexed { idx, item ->
             AiRecommendationEntity(
                 id = AiRecommendationEntity.createDeterministicId(item.title, item.artist),
                 title = item.title,
@@ -949,6 +1049,8 @@ object ClaudeReasoningEngine {
                 trackId = TrackIdentityResolver.buildDeterministicTrackId(item.title, item.artist)
             )
         }
+        recordPermanentExcludedRecommendations(context, offlineEntities)
+        offlineEntities
     }
 
     /**

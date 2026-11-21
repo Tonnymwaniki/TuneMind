@@ -88,6 +88,9 @@ interface TuneMindPlaylistDao {
     @Query("SELECT * FROM tunemind_playlists ORDER BY updated_at_ms DESC")
     suspend fun getAllPlaylistsOnce(): List<TuneMindPlaylistEntity>
 
+    @Query("SELECT * FROM tunemind_playlist_tracks ORDER BY added_at_ms DESC")
+    suspend fun getAllPlaylistTracksOnce(): List<TuneMindPlaylistTrackEntity>
+
     @Query("SELECT * FROM tunemind_playlist_tracks WHERE playlist_id = :playlistId ORDER BY position_index ASC, added_at_ms ASC")
     suspend fun getTracksForPlaylistOnce(playlistId: String): List<TuneMindPlaylistTrackEntity>
 

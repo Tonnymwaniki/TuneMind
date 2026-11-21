@@ -1203,17 +1203,19 @@ open class MainActivity : ComponentActivity() {
                                                 },
                                                 onPlayForYouTrack = { rec ->
                                                     vm.markRecommendationPlayed(rec.id)
-                                                    playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                    val validSpUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
+                                                    playAnyTrack(rec.title, rec.artist, validSpUri, selectedTargetPlayer)
                                                 },
                                                 onPreviewForYouTrack = { rec ->
+                                                    val validSpUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
                                                     if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
                                                         vm.markRecommendationPlayed(rec.id)
-                                                        playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                        playAnyTrack(rec.title, rec.artist, validSpUri, selectedTargetPlayer)
                                                     } else {
                                                         val previewed = vm.previewAiRecommendation(context, rec)
                                                         if (!previewed) {
                                                             vm.markRecommendationPlayed(rec.id)
-                                                            playAnyTrack(rec.title, rec.artist, rec.spotifyUri, selectedTargetPlayer)
+                                                            playAnyTrack(rec.title, rec.artist, validSpUri, selectedTargetPlayer)
                                                         }
                                                     }
                                                 },
@@ -1224,7 +1226,13 @@ open class MainActivity : ComponentActivity() {
                                                     vm.saveTrackToCrossAppLiked(title, artist)
                                                 },
                                                 onExportForYouPlaylist = { recs ->
-                                                    val triples = recs.map { Triple(it.title, it.artist, it.spotifyUri) }
+                                                    val triples = recs.map {
+                                                        Triple(
+                                                            it.title,
+                                                            it.artist,
+                                                            com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(it.spotifyUri)
+                                                        )
+                                                    }
                                                     vm.exportForYouDropAsPlaylist("TuneMind Daily Drop", triples)
                                                 },
                                                 requestedSubTab = requestedDopamineSubTab,

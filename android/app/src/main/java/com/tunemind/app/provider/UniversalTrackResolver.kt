@@ -76,6 +76,59 @@ object UniversalTrackResolver {
             .trim()
     }
 
+    fun isStrictTitleArtistMatch(
+        expectedTitle: String,
+        expectedArtist: String,
+        candidateTitle: String,
+        candidateArtist: String
+    ): Boolean {
+        val normExpTitle = normalizeTitleForExactMatch(expectedTitle)
+        val normCandTitle = normalizeTitleForExactMatch(candidateTitle)
+        if (normExpTitle.isBlank() || normCandTitle.isBlank()) return false
+
+        val versionTags = listOf("remix", "karaoke", "tribute", "cover", "instrumental", "acapella", "sped up", "slowed")
+        val expLower = expectedTitle.lowercase()
+        val candLower = candidateTitle.lowercase()
+        if (versionTags.any { tag -> candLower.contains(tag) && !expLower.contains(tag) }) {
+            return false
+        }
+
+        val titleMatched = normCandTitle == normExpTitle ||
+            (normExpTitle.length >= 5 && (normCandTitle.contains(normExpTitle) || normExpTitle.includesWordOrContained(normCandTitle)))
+        val expWords = normExpTitle.split(" ").filter { it.length >= 2 }.toSet()
+        val candWords = normCandTitle.split(" ").filter { it.length >= 2 }.toSet()
+        val overlap = if (expWords.isNotEmpty() && candWords.isNotEmpty()) {
+            expWords.count { candWords.contains(it) }.toFloat() / maxOf(expWords.size, candWords.size).toFloat()
+        } else 0f
+
+        if (!titleMatched && overlap < 0.72f) return false
+
+        val expPrimaryArtist = expectedArtist
+            .split(Regex("\\s*(?:,|&|feat\\.?|ft\\.?|featuring|with|\\bx\\b)\\s*", RegexOption.IGNORE_CASE))
+            .firstOrNull()
+            .orEmpty()
+        val normExpArtist = normalizeTitleForExactMatch(expPrimaryArtist.ifBlank { expectedArtist })
+        val normFullExpArtist = normalizeTitleForExactMatch(expectedArtist)
+        val normCandArtist = normalizeTitleForExactMatch(candidateArtist)
+        if (normExpArtist.isBlank()) return titleMatched || overlap >= 0.80f
+        if (normCandArtist.isBlank()) return false
+
+        if (normCandArtist == normExpArtist ||
+            normCandArtist == normFullExpArtist ||
+            (normExpArtist.length >= 3 && (normCandArtist.contains(normExpArtist) || normExpArtist.contains(normCandArtist)))
+        ) {
+            return true
+        }
+        val expArtistWords = normExpArtist.split(" ").filter { it.length >= 2 }.toSet()
+        val candArtistWords = normCandArtist.split(" ").filter { it.length >= 2 }.toSet()
+        if (expArtistWords.isEmpty() || candArtistWords.isEmpty()) return false
+        val artistRatio = expArtistWords.count { candArtistWords.contains(it) }.toFloat() /
+            maxOf(expArtistWords.size, candArtistWords.size).toFloat()
+        return artistRatio >= 0.75f
+    }
+
+    private fun String.includesWordOrContained(other: String): Boolean = this.contains(other)
+
     fun getCached(title: String, artist: String): ResolvedPlayableLinks? {
         val key = TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
         return resolvedCache[key]
@@ -253,6 +306,9 @@ object UniversalTrackResolver {
                     ?: return null
                 val cleanTitle = resolvedObj.optString("cleanTitle").ifBlank { title }
                 val cleanArtist = resolvedObj.optString("cleanArtist").ifBlank { artist }
+                if (title.isNotBlank() && !isStrictTitleArtistMatch(title, artist, cleanTitle, cleanArtist)) {
+                    return null
+                }
                 val genresArr = resolvedObj.optJSONArray("genres")
                 val genresList = mutableListOf<String>()
                 if (genresArr != null) {
@@ -342,15 +398,8 @@ object UniversalTrackResolver {
     }
 
     private fun fetchDeezerSingle(query: String, title: String, artist: String): OpenCatalogSearchTrack? {
-        val list = fetchDeezerList(query, 6)
-        val normT = normalizeTitleForExactMatch(title)
-        val normA = normalizeTitleForExactMatch(artist)
-        return list.firstOrNull {
-            normalizeTitleForExactMatch(it.title) == normT &&
-                (normA.isBlank() || normalizeTitleForExactMatch(it.artist).contains(normA))
-        } ?: list.firstOrNull {
-            normalizeTitleForExactMatch(it.title).contains(normT)
-        } ?: list.firstOrNull()
+        val list = fetchDeezerList(query, 8)
+        return list.firstOrNull { isStrictTitleArtistMatch(title, artist, it.title, it.artist) }
     }
 
     private fun fetchItunesList(query: String, limit: Int): List<OpenCatalogSearchTrack> {
@@ -391,13 +440,8 @@ object UniversalTrackResolver {
     }
 
     private fun fetchItunesSingle(query: String, title: String, artist: String): OpenCatalogSearchTrack? {
-        val list = fetchItunesList(query, 6)
-        val normT = normalizeTitleForExactMatch(title)
-        val normA = normalizeTitleForExactMatch(artist)
-        return list.firstOrNull {
-            normalizeTitleForExactMatch(it.title) == normT &&
-                (normA.isBlank() || normalizeTitleForExactMatch(it.artist).contains(normA))
-        } ?: list.firstOrNull()
+        val list = fetchItunesList(query, 8)
+        return list.firstOrNull { isStrictTitleArtistMatch(title, artist, it.title, it.artist) }
     }
 
     private fun fetchAudiusStreamUrl(title: String, artist: String, query: String): String? {
@@ -407,17 +451,13 @@ object UniversalTrackResolver {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 val arr = JSONObject(resp.body?.string().orEmpty()).optJSONArray("data") ?: return null
-                val normT = normalizeTitleForExactMatch(title)
-                val normA = normalizeTitleForExactMatch(artist)
                 for (i in 0 until minOf(arr.length(), 8)) {
                     val obj = arr.optJSONObject(i) ?: continue
                     if (!obj.optBoolean("is_streamable", true)) continue
                     val id = obj.optString("id").takeIf { it.isNotBlank() } ?: continue
-                    val hitTitle = normalizeTitleForExactMatch(obj.optString("title"))
-                    val hitArtist = normalizeTitleForExactMatch(obj.optJSONObject("user")?.optString("name").orEmpty())
-                    val titleMatches = hitTitle == normT || (normT.length >= 4 && hitTitle.contains(normT))
-                    val artistMatches = normA.isBlank() || hitArtist.contains(normA) || normA.contains(hitArtist)
-                    if (titleMatches && artistMatches) {
+                    val hitTitle = obj.optString("title")
+                    val hitArtist = obj.optJSONObject("user")?.optString("name").orEmpty()
+                    if (isStrictTitleArtistMatch(title, artist, hitTitle, hitArtist)) {
                         return "https://api.audius.co/v1/tracks/$id/stream?app_name=TuneMind"
                     }
                 }
