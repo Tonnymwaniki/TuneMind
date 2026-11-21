@@ -253,7 +253,7 @@ class TuneMindInAppProvider : MusicProvider {
                 }
                 is SpotifyPlayResult.NoActiveDevice -> {
                     val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
-                    if (!strictNoSwitch) {
+                    if (!strictNoSwitch || MusicPlayerAutoLauncher.canAutoReturnToTuneMind(context)) {
                         val rec = RecommendedTrack(
                             id = connectRes.trackUri ?: match.title,
                             title = match.title,

@@ -84,9 +84,15 @@ fun SettingsScreen(
     val backgroundAutoPlayEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.backgroundAutoPlayEnabled.collectAsState()
     val kidsModeEnabled by com.tunemind.app.domain.voice.AgentSettingsStore.kidsModeEnabled.collectAsState()
     val spotifyFreeOpenInSpotify by com.tunemind.app.domain.voice.AgentSettingsStore.spotifyFreeOpenInSpotify.collectAsState()
+    val autoReturnAfterSpotifyWake by com.tunemind.app.domain.voice.AgentSettingsStore.autoReturnAfterSpotifyWakeEnabled.collectAsState()
 
     var hasNotificationAccess by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)) }
     var hasAudioPermission by remember { mutableStateOf(com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)) }
+    var hasOverlayPermission by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M || android.provider.Settings.canDrawOverlays(context)
+        )
+    }
 
     val fatigueSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
     val chronoReceptivity by com.tunemind.app.domain.voice.AgentSettingsStore.lateNightComfortEnabled.collectAsState()
@@ -129,6 +135,7 @@ fun SettingsScreen(
             vm.checkBatteryOptimization(context)
             hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
             hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
+            hasOverlayPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || android.provider.Settings.canDrawOverlays(context)
             selectedProviderId = registry.getPreferredProviderId()
             alwaysAsk = registry.isAlwaysAskEnabled()
         }
@@ -629,8 +636,40 @@ fun SettingsScreen(
                                     contentColor = Color(0xFF061018)
                                 )
                             ) {
-                                Text("Open Spotify to Wake Device", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Cold-Wake Spotify Device", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                             }
+                        }
+
+                        if (spotifyConnectStatus.isPremium) {
+                            StudioHairlineDivider()
+                            SettingsSwitchRow(
+                                title = "Auto-Return After Spotify Cold-Wake",
+                                description = if (hasOverlayPermission && autoReturnAfterSpotifyWake) {
+                                    "Active: TuneMind wakes Spotify silently first — and if Android requires a quick screen wake after clearing Recent Apps, TuneMind starts your song and returns automatically."
+                                } else if (!hasOverlayPermission) {
+                                    "Turn on to grant 'Appear on top' so TuneMind automatically snaps back to this screen after waking Spotify when Recent Apps were cleared."
+                                } else {
+                                    "Off: Uses silent cold-wake first and shows a 1-tap 'Back to TuneMind' banner if Spotify had to open."
+                                },
+                                checked = hasOverlayPermission && autoReturnAfterSpotifyWake,
+                                onCheckedChange = { enable ->
+                                    if (enable && !hasOverlayPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                        com.tunemind.app.domain.voice.AgentSettingsStore.setAutoReturnAfterSpotifyWakeEnabled(context, true)
+                                        runCatching {
+                                            context.startActivity(
+                                                android.content.Intent(
+                                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    android.net.Uri.parse("package:${context.packageName}")
+                                                ).apply {
+                                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        com.tunemind.app.domain.voice.AgentSettingsStore.setAutoReturnAfterSpotifyWakeEnabled(context, enable)
+                                    }
+                                }
+                            )
                         }
 
                         Text(

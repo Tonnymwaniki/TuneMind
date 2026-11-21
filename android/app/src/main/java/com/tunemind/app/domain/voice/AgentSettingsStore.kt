@@ -35,6 +35,7 @@ object AgentSettingsStore {
     private const val KEY_ALERTS_SYNC_STATUS = "alerts_sync_status_enabled"
     private const val KEY_KIDS_MODE = "kids_mode_enabled"
     private const val KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY = "spotify_free_open_in_spotify"
+    private const val KEY_AUTO_RETURN_SPOTIFY_WAKE = "auto_return_spotify_wake_enabled"
 
     @Volatile
     private var initialized = false
@@ -90,6 +91,9 @@ object AgentSettingsStore {
     private val _spotifyFreeOpenInSpotify = MutableStateFlow(true)
     val spotifyFreeOpenInSpotify: StateFlow<Boolean> = _spotifyFreeOpenInSpotify.asStateFlow()
 
+    private val _autoReturnAfterSpotifyWakeEnabled = MutableStateFlow(true)
+    val autoReturnAfterSpotifyWakeEnabled: StateFlow<Boolean> = _autoReturnAfterSpotifyWakeEnabled.asStateFlow()
+
     private fun prefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -116,6 +120,7 @@ object AgentSettingsStore {
             _syncStatusAlertsEnabled.value = p.getBoolean(KEY_ALERTS_SYNC_STATUS, true)
             _kidsModeEnabled.value = p.getBoolean(KEY_KIDS_MODE, false)
             _spotifyFreeOpenInSpotify.value = p.getBoolean(KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY, true)
+            _autoReturnAfterSpotifyWakeEnabled.value = p.getBoolean(KEY_AUTO_RETURN_SPOTIFY_WAKE, true)
             initialized = true
         }
     }
@@ -306,5 +311,16 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_SPOTIFY_FREE_OPEN_IN_SPOTIFY, enabled).apply()
         _spotifyFreeOpenInSpotify.value = enabled
+    }
+
+    fun isAutoReturnAfterSpotifyWakeEnabled(context: Context): Boolean {
+        ensureLoaded(context)
+        return _autoReturnAfterSpotifyWakeEnabled.value
+    }
+
+    fun setAutoReturnAfterSpotifyWakeEnabled(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        prefs(context).edit().putBoolean(KEY_AUTO_RETURN_SPOTIFY_WAKE, enabled).apply()
+        _autoReturnAfterSpotifyWakeEnabled.value = enabled
     }
 }

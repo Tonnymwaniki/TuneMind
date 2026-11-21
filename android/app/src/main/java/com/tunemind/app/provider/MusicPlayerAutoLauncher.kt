@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
@@ -391,10 +392,11 @@ object MusicPlayerAutoLauncher {
                 is SpotifyPlayResult.NoActiveDevice -> {
                     spotifyHadNoActiveDevice = true
                     spotifyResolvedUriFromConnect = connectRes.trackUri
-                    Log.w(TAG, "Tier-1S Spotify Connect: ${connectRes.message}")
-                    // If strict mode is OFF, wake Spotify immediately with the exact full track URI
-                    // instead of falling into a 30s preview; this also wakes Spotify Connect for next songs!
-                    if (!strictNoSwitch && !connectRes.trackUri.isNullOrBlank()) {
+                    Log.w(TAG, "Tier-1S Spotify Connect (after silent cold-wake): ${connectRes.message}")
+                    val allowAutoWakeAndBounce = !strictNoSwitch || canAutoReturnToTuneMind(context)
+                    // Wake Spotify once directly with the exact full track URI + Connect auto-play kicker
+                    // instead of leaving the user stranded or making them open Spotify manually and re-ask.
+                    if (allowAutoWakeAndBounce && !connectRes.trackUri.isNullOrBlank()) {
                         val wakeOutcome = launchExternalColdHandoff(
                             context = context,
                             targetPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
@@ -405,7 +407,8 @@ object MusicPlayerAutoLauncher {
                             fullSearchQuery = fullSearchQuery,
                             deepLinkUri = connectRes.trackUri,
                             previousTitle = previousTitle,
-                            resolvedLinks = null
+                            resolvedLinks = null,
+                            autoReturnAfterPlay = canAutoReturnToTuneMind(context)
                         )
                         if (wakeOutcome.launched) return wakeOutcome
                     }
@@ -581,7 +584,7 @@ object MusicPlayerAutoLauncher {
             ) {
                 val extraHint = when {
                     spotifyHadNoActiveDevice ->
-                        "Open Spotify briefly once to wake your phone for full silent Spotify playback, or tap 'Open full track in Spotify'."
+                        "Android blocked silent Spotify wake after clearing Recent Apps (Never-Leave Mode is ON). Enable 'Auto-Return After Cold Wake' in Settings or tap 'Open full track in Spotify'."
                     ytmInstalled ->
                         "Say 'use YouTube inside TuneMind' for the full song, or tap 'Open full track in $displayName'."
                     else ->
@@ -730,6 +733,74 @@ object MusicPlayerAutoLauncher {
         }
     }
 
+    fun canAutoReturnToTuneMind(context: Context): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            Settings.canDrawOverlays(context) &&
+            AgentSettingsStore.isAutoReturnAfterSpotifyWakeEnabled(context)
+    }
+
+    fun bringTuneMindToForegroundIfAllowed(context: Context, delayMs: Long = 380L) {
+        if (!canAutoReturnToTuneMind(context)) return
+        val appCtx = context.applicationContext
+        mainHandler.postDelayed({
+            runCatching {
+                val returnIntent = Intent(appCtx, com.tunemind.app.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra("returned_from_spotify_wake", true)
+                }
+                appCtx.startActivity(returnIntent)
+                Log.i(TAG, "✅ Auto-returned to TuneMind after Spotify cold-wake playback confirmed")
+            }.onFailure { err ->
+                Log.d(TAG, "Auto-return note: ${err.message}")
+            }
+        }, delayMs)
+    }
+
+    fun scheduleSpotifyPlaylistWakeKicker(
+        context: Context,
+        spotifyPlaylistId: String,
+        playlistName: String
+    ) {
+        val cleanId = spotifyPlaylistId.trim()
+        if (cleanId.isBlank()) return
+        val appCtx = context.applicationContext
+        val autoReturn = canAutoReturnToTuneMind(appCtx)
+        postReturnToTuneMindNotification(appCtx, playlistName.ifBlank { "Spotify Playlist" }, "Spotify")
+
+        Thread {
+            val delays = listOf(1000L, 1000L, 1200L, 1400L)
+            for (waitMs in delays) {
+                runCatching { Thread.sleep(waitMs) }
+                val listener = TuneMindListenerService.instance
+                if (listener?.isPlayingOrBuffering(SpotifyMusicProvider.SPOTIFY_PACKAGE) == true) {
+                    postReturnToTuneMindNotification(
+                        context = appCtx,
+                        trackTitle = playlistName.ifBlank { "Spotify Playlist" },
+                        playerDisplayName = "Spotify",
+                        confirmedPlaying = true,
+                        silentUpdate = true
+                    )
+                    if (autoReturn) bringTuneMindToForegroundIfAllowed(appCtx)
+                    return@Thread
+                }
+                val res = SpotifyPremiumConnectManager.playPlaylistContextSilently(appCtx, cleanId)
+                if (res is SpotifyPlayResult.Success) {
+                    postReturnToTuneMindNotification(
+                        context = appCtx,
+                        trackTitle = playlistName.ifBlank { "Spotify Playlist" },
+                        playerDisplayName = "Spotify",
+                        confirmedPlaying = true,
+                        silentUpdate = true
+                    )
+                    if (autoReturn) bringTuneMindToForegroundIfAllowed(appCtx)
+                    return@Thread
+                }
+            }
+        }.start()
+    }
+
     private fun launchExternalColdHandoff(
         context: Context,
         targetPkg: String?,
@@ -740,11 +811,13 @@ object MusicPlayerAutoLauncher {
         fullSearchQuery: String,
         deepLinkUri: String?,
         previousTitle: String?,
-        resolvedLinks: ResolvedPlayableLinks?
+        resolvedLinks: ResolvedPlayableLinks?,
+        autoReturnAfterPlay: Boolean = false
     ): LaunchOutcome {
         lastStalledPlaybackAttempt = null
         val isYtmTarget = targetPkg?.contains("youtube.music", ignoreCase = true) == true
         val isSpotifyTarget = targetPkg?.contains("spotify", ignoreCase = true) == true
+        val effectiveAutoReturn = autoReturnAfterPlay || (isSpotifyTarget && canAutoReturnToTuneMind(context))
         val exactSpotifyUri = if (isSpotifyTarget) extractSpotifyTrackUri(deepLinkUri, resolvedLinks) else null
         val precisionWatchUrl = if (isYtmTarget && !resolvedLinks?.ytmVideoId.isNullOrBlank()) {
             "https://music.youtube.com/watch?v=${resolvedLinks!!.ytmVideoId}"
@@ -770,7 +843,8 @@ object MusicPlayerAutoLauncher {
                     overrideQuery = fullSearchQuery,
                     previousTitle = previousTitle,
                     spotifyUri = null,
-                    ytmVideoId = resolvedLinks?.ytmVideoId
+                    ytmVideoId = resolvedLinks?.ytmVideoId,
+                    autoReturnOnPlay = false
                 )
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 return LaunchOutcome(
@@ -805,14 +879,20 @@ object MusicPlayerAutoLauncher {
                     overrideQuery = fullSearchQuery,
                     previousTitle = previousTitle,
                     spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId
+                    ytmVideoId = resolvedLinks?.ytmVideoId,
+                    autoReturnOnPlay = effectiveAutoReturn
                 )
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                val msg = if (effectiveAutoReturn) {
+                    "Waking Spotify to play '$cleanTitle' and returning automatically to TuneMind."
+                } else {
+                    "Woke Spotify to play '$cleanTitle' directly."
+                }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = false,
                     destinationUri = exactSpotifyUri,
-                    detailMessage = "Opened exact track '$cleanTitle' in $displayName."
+                    detailMessage = msg
                 )
             } catch (e: Exception) {
                 Log.d(TAG, "Exact Spotify track URI launch failed, trying MEDIA_PLAY_FROM_SEARCH: ${e.message}")
@@ -845,7 +925,8 @@ object MusicPlayerAutoLauncher {
                     overrideQuery = fullSearchQuery,
                     previousTitle = previousTitle,
                     spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId
+                    ytmVideoId = resolvedLinks?.ytmVideoId,
+                    autoReturnOnPlay = effectiveAutoReturn
                 )
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 val honestMsg = if (isSpotifyTarget && exactSpotifyUri == null) {
@@ -891,7 +972,8 @@ object MusicPlayerAutoLauncher {
                     overrideQuery = fullSearchQuery,
                     previousTitle = previousTitle,
                     spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId
+                    ytmVideoId = resolvedLinks?.ytmVideoId,
+                    autoReturnOnPlay = effectiveAutoReturn
                 )
                 postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
                 return LaunchOutcome(
@@ -1119,8 +1201,10 @@ object MusicPlayerAutoLauncher {
         overrideQuery: String? = null,
         previousTitle: String? = null,
         spotifyUri: String? = null,
-        ytmVideoId: String? = null
+        ytmVideoId: String? = null,
+        autoReturnOnPlay: Boolean = false
     ) {
+        val appCtx = context.applicationContext
         val cleanTitle = sanitizeTrackTitleForPlay(track.title)
         val cleanArtist = sanitizeArtistForPlay(track.artist)
         val query = overrideQuery?.takeIf { it.isNotBlank() }
@@ -1131,6 +1215,24 @@ object MusicPlayerAutoLauncher {
         val normPrev = UniversalTrackResolver.normalizeTitleForExactMatch(previousTitle.orEmpty())
         val confirmedReturnNotified = AtomicBoolean(false)
         val cleanDisplayTitle = cleanTitle.ifBlank { track.title }
+        val isSpotifyTarget = targetPackage?.contains("spotify", ignoreCase = true) == true
+        val shouldAutoReturn = autoReturnOnPlay && canAutoReturnToTuneMind(appCtx)
+
+        fun onConfirmedPlaying() {
+            lastStalledPlaybackAttempt = null
+            if (confirmedReturnNotified.compareAndSet(false, true)) {
+                postReturnToTuneMindNotification(
+                    context = appCtx,
+                    trackTitle = cleanDisplayTitle,
+                    playerDisplayName = displayName,
+                    confirmedPlaying = true,
+                    silentUpdate = true
+                )
+                if (shouldAutoReturn) {
+                    bringTuneMindToForegroundIfAllowed(appCtx)
+                }
+            }
+        }
 
         lateinit var reactiveListener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit
         reactiveListener = { snap ->
@@ -1143,20 +1245,37 @@ object MusicPlayerAutoLauncher {
                 )
             val isActiveState = snap.isPlaying || snap.playbackStateCode == 3 || snap.playbackStateCode == 6
             if (pkgMatches && snapTitleMatches && isActiveState) {
-                lastStalledPlaybackAttempt = null
-                if (confirmedReturnNotified.compareAndSet(false, true)) {
-                    postReturnToTuneMindNotification(
-                        context = context,
-                        trackTitle = cleanDisplayTitle,
-                        playerDisplayName = displayName,
-                        confirmedPlaying = true,
-                        silentUpdate = true
-                    )
-                }
+                onConfirmedPlaying()
                 TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
             }
         }
         TuneMindListenerService.addPlaybackSnapshotListener(reactiveListener)
+
+        // Spotify Premium Post-UI-Wake Connect Kicker:
+        // The millisecond Spotify finishes cold boot and registers the phone on Connect,
+        // blast PUT /v1/me/player/play for the exact track so Spotify never pauses on UI open.
+        if (isSpotifyTarget && SpotifyPremiumConnectManager.isConnectedAndPremium(appCtx)) {
+            Thread {
+                for (waitMs in listOf(850L, 900L, 1050L, 1150L)) {
+                    if (confirmedReturnNotified.get()) break
+                    runCatching { Thread.sleep(waitMs) }
+                    if (confirmedReturnNotified.get()) break
+                    val res = SpotifyPremiumConnectManager.tryConnectPlayAfterUiWake(
+                        context = appCtx,
+                        spotifyUri = spotifyUri,
+                        title = cleanTitle.ifBlank { track.title },
+                        artist = cleanArtist.ifBlank { track.artist },
+                        query = query
+                    )
+                    if (res is SpotifyPlayResult.Success) {
+                        Log.i(TAG, "✅ Post-wake Spotify Connect kicker started '$cleanDisplayTitle' on ${res.deviceName}")
+                        onConfirmedPlaying()
+                        TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
+                        break
+                    }
+                }
+            }.start()
+        }
 
         for ((index, delay) in listOf(550L, 1250L, 2100L, 3100L).withIndex()) {
             mainHandler.postDelayed({
@@ -1181,7 +1300,7 @@ object MusicPlayerAutoLauncher {
             }, delay)
         }
 
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val audioManager = appCtx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         for (delay in listOf(1400L, 2250L, 3250L, 4200L, 5200L)) {
             mainHandler.postDelayed({
                 try {
@@ -1194,16 +1313,7 @@ object MusicPlayerAutoLauncher {
                         )
                     val playingOrBufferingTarget = listener?.isPlayingOrBuffering(targetPackage) == true
                     if (titleMatchesNewSong && playingOrBufferingTarget) {
-                        lastStalledPlaybackAttempt = null
-                        if (confirmedReturnNotified.compareAndSet(false, true)) {
-                            postReturnToTuneMindNotification(
-                                context = context,
-                                trackTitle = cleanDisplayTitle,
-                                playerDisplayName = displayName,
-                                confirmedPlaying = true,
-                                silentUpdate = true
-                            )
-                        }
+                        onConfirmedPlaying()
                         TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
                     } else if (titleMatchesNewSong || (delay >= 2250L && listener?.hasActiveSession(targetPackage) == true && !playingOrBufferingTarget)) {
                         listener?.play(targetPackage)
@@ -1221,13 +1331,13 @@ object MusicPlayerAutoLauncher {
                 if (confirmedReturnNotified.get()) return@postDelayed
                 val listener = TuneMindListenerService.instance
                 if (listener?.isPlayingOrBuffering(targetPackage) == true) {
-                    lastStalledPlaybackAttempt = null
+                    onConfirmedPlaying()
                     TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
                     return@postDelayed
                 }
                 Log.w(TAG, "$displayName did not confirm playback for '$cleanTitle' within 6.2s; offering TuneMind recovery.")
                 postStalledPlaybackRecoveryNotification(
-                    context = context,
+                    context = appCtx,
                     targetPackage = targetPackage,
                     trackTitle = cleanDisplayTitle,
                     trackArtist = cleanArtist.ifBlank { track.artist },

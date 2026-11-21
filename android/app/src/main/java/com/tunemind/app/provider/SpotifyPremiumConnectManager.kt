@@ -1,11 +1,20 @@
 package com.tunemind.app.provider
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.session.MediaControllerCompat
 import android.util.Log
+import android.view.KeyEvent
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -24,6 +33,7 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 enum class SpotifyErrorHintType {
@@ -985,7 +995,14 @@ object SpotifyPremiumConnectManager {
                 hasActiveDevice = false,
                 message = "Spotify session expired — reconnect in Settings."
             )
-        val dev = findBestConnectDeviceWithType(token)
+        var dev = findBestConnectDeviceWithType(token)
+        if (dev == null && status.isPremium) {
+            val wake = coldWakeSpotifySilently(context, token, targetSpotifyUri = null)
+            if (wake.sentMediaButtonPlay) {
+                runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
+            }
+            dev = findBestConnectDeviceWithType(token)
+        }
         return if (dev != null) {
             val prefs = getPrefs(context)
             prefs.edit().putString(KEY_LAST_DEVICE_NAME, dev.second).apply()
@@ -999,7 +1016,7 @@ object SpotifyPremiumConnectManager {
         } else {
             SpotifyDeviceCheckResult(
                 hasActiveDevice = false,
-                message = "No active Spotify device found yet. Tap 'Wake Spotify' once so Spotify registers this phone."
+                message = "Silent wake didn't find an active device (Spotify was killed from Recent Apps). Tap 'Cold-Wake Spotify Device' below once, or enable 'Auto-Return After Spotify Cold-Wake'."
             )
         }
     }
@@ -1279,6 +1296,292 @@ object SpotifyPremiumConnectManager {
         }
     }
 
+    private data class SilentColdWakeOutcome(
+        val device: Pair<String, String>? = null,
+        val mediaSessionPlayingTarget: Boolean = false,
+        val sentMediaButtonPlay: Boolean = false
+    )
+
+    private fun querySpotifyMediaBrowserComponent(context: Context): ComponentName? {
+        val pm = context.packageManager
+        for (pkg in listOf("com.spotify.music", "com.spotify.lite")) {
+            val intent = Intent("android.media.browse.MediaBrowserService").setPackage(pkg)
+            val resolved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentServices(intent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentServices(intent, 0)
+            }
+            val si = resolved.firstOrNull()?.serviceInfo
+            if (si != null) return ComponentName(si.packageName, si.name)
+        }
+        return null
+    }
+
+    private fun dispatchTargetedSpotifyMediaPlayBroadcast(context: Context): Boolean {
+        val pm = context.packageManager
+        var sentAny = false
+        for (pkg in listOf("com.spotify.music", "com.spotify.lite")) {
+            val probeIntent = Intent(Intent.ACTION_MEDIA_BUTTON).setPackage(pkg)
+            val receivers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryBroadcastReceivers(probeIntent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryBroadcastReceivers(probeIntent, 0)
+            }
+            val ri = receivers.firstOrNull()?.activityInfo ?: continue
+            val comp = ComponentName(ri.packageName, ri.name)
+            val now = android.os.SystemClock.uptimeMillis()
+            for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                val event = KeyEvent(now, now, action, KeyEvent.KEYCODE_MEDIA_PLAY, 0)
+                val broadcast = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                    component = comp
+                    setPackage(ri.packageName)
+                    putExtra(Intent.EXTRA_KEY_EVENT, event)
+                    addFlags(Intent.FLAG_RECEIVER_FOREGROUND or Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                }
+                runCatching {
+                    context.sendOrderedBroadcast(broadcast, null)
+                    sentAny = true
+                }.onFailure {
+                    runCatching {
+                        context.sendBroadcast(broadcast)
+                        sentAny = true
+                    }
+                }
+            }
+            if (sentAny) {
+                Log.i(TAG, "Sent targeted ACTION_MEDIA_BUTTON wake broadcast directly to ${comp.flattenToShortString()}")
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isSpotifySessionPlayingExpectedTrack(
+        expectedTitle: String,
+        targetPkg: String = "com.spotify.music"
+    ): Boolean {
+        val listener = com.tunemind.app.service.TuneMindListenerService.instance ?: return false
+        if (!listener.isPlayingOrBuffering(targetPkg)) return false
+        if (expectedTitle.isBlank()) return true
+        val cur = listener.getActiveTitle(targetPkg).orEmpty()
+        if (cur.isBlank()) return false
+        val normCur = UniversalTrackResolver.normalizeTitleForExactMatch(cur)
+        val normExp = UniversalTrackResolver.normalizeTitleForExactMatch(expectedTitle)
+        return normCur.isNotBlank() && normExp.isNotBlank() && (
+            normCur == normExp ||
+                (normExp.length >= 4 && (normCur.contains(normExp) || normExp.contains(normCur)))
+            )
+    }
+
+    /**
+     * Silent Layer-1 Cold-Wake for Spotify when killed/swiped from Recent Apps:
+     * 1) Pulses any warm Spotify MediaSession via `playFromUri` / `play`.
+     * 2) Binds silently to Spotify's exported `MediaBrowserService` (`MediaBrowserCompat`) to wake
+     *    Spotify's service process in the background with ZERO Activity switch, and dispatches
+     *    `playFromUri` if Spotify grants a MediaSession token.
+     * 3) Sends an explicit targeted `ACTION_MEDIA_BUTTON` broadcast scoped ONLY to Spotify's
+     *    `MediaButtonReceiver` while polling `/v1/me/player/devices` until Connect registers.
+     */
+    private fun coldWakeSpotifySilently(
+        context: Context,
+        accessToken: String,
+        targetSpotifyUri: String?,
+        expectedTitle: String = ""
+    ): SilentColdWakeOutcome {
+        val appCtx = context.applicationContext
+        val mainHandler = Handler(Looper.getMainLooper())
+        val isOnMainThread = Looper.myLooper() == Looper.getMainLooper()
+        val uriObj = targetSpotifyUri?.takeIf { it.startsWith("spotify:") }?.let { Uri.parse(it) }
+        val playExtras = Bundle().apply {
+            putBoolean("android.intent.extra.START_PLAYBACK", true)
+            putBoolean("autostart", true)
+            putBoolean("play", true)
+        }
+
+        // Step 1: Warm MediaSession pulse if already present
+        val initialListener = com.tunemind.app.service.TuneMindListenerService.instance
+        if (initialListener?.hasActiveSession("com.spotify.music") == true ||
+            initialListener?.hasActiveSession("com.spotify.lite") == true
+        ) {
+            Log.i(TAG, "Spotify Connect idle but MediaSession warm — pulsing Spotify before Connect play")
+            runCatching {
+                if (uriObj != null) {
+                    initialListener.playFromUri("com.spotify.music", uriObj, playExtras)
+                } else {
+                    initialListener.play("com.spotify.music")
+                }
+            }
+            if (!isOnMainThread) {
+                runCatching { Thread.sleep(750L) }
+                findBestConnectDevice(accessToken)?.let { dev ->
+                    return SilentColdWakeOutcome(device = dev)
+                }
+                if (isSpotifySessionPlayingExpectedTrack(expectedTitle)) {
+                    return SilentColdWakeOutcome(mediaSessionPlayingTarget = true)
+                }
+            }
+        }
+
+        if (isOnMainThread) {
+            return SilentColdWakeOutcome(device = findBestConnectDevice(accessToken))
+        }
+
+        // Step 2: Bind silently to Spotify's MediaBrowserService (zero UI switch)
+        var browser: MediaBrowserCompat? = null
+        val connectLatch = CountDownLatch(1)
+        var browserConnected = false
+
+        try {
+            val browserComponent = querySpotifyMediaBrowserComponent(appCtx)
+            if (browserComponent != null) {
+                Log.i(TAG, "Cold-waking Spotify silently via MediaBrowserService: ${browserComponent.flattenToShortString()}")
+                mainHandler.post {
+                    try {
+                        lateinit var mb: MediaBrowserCompat
+                        val cb = object : MediaBrowserCompat.ConnectionCallback() {
+                            override fun onConnected() {
+                                browserConnected = true
+                                runCatching {
+                                    val controller = MediaControllerCompat(appCtx, mb.sessionToken)
+                                    if (uriObj != null) {
+                                        controller.transportControls.playFromUri(uriObj, playExtras)
+                                    } else {
+                                        controller.transportControls.play()
+                                    }
+                                }
+                                connectLatch.countDown()
+                            }
+
+                            override fun onConnectionSuspended() {
+                                connectLatch.countDown()
+                            }
+
+                            override fun onConnectionFailed() {
+                                // Note: even when Spotify declines untrusted browse access, binding
+                                // still wakes Spotify's service/process lifecycle in the background.
+                                connectLatch.countDown()
+                            }
+                        }
+                        mb = MediaBrowserCompat(appCtx, browserComponent, cb, null)
+                        browser = mb
+                        mb.connect()
+                    } catch (e: Throwable) {
+                        Log.d(TAG, "MediaBrowserCompat init note: ${e.message}")
+                        connectLatch.countDown()
+                    }
+                }
+                runCatching { connectLatch.await(1500L, TimeUnit.MILLISECONDS) }
+
+                for (waitMs in listOf(350L, 600L)) {
+                    runCatching { Thread.sleep(waitMs) }
+                    findBestConnectDevice(accessToken)?.let { dev ->
+                        Log.i(TAG, "✅ Silent MediaBrowser wake brought up Spotify Connect device '${dev.second}'")
+                        return SilentColdWakeOutcome(device = dev)
+                    }
+                    val l = com.tunemind.app.service.TuneMindListenerService.instance
+                    if (l?.hasActiveSession("com.spotify.music") == true) {
+                        if (uriObj != null) {
+                            runCatching { l.playFromUri("com.spotify.music", uriObj, playExtras) }
+                        }
+                        if (isSpotifySessionPlayingExpectedTrack(expectedTitle)) {
+                            Log.i(TAG, "✅ Silent MediaBrowser wake started target track in Spotify MediaSession")
+                            return SilentColdWakeOutcome(
+                                device = findBestConnectDevice(accessToken),
+                                mediaSessionPlayingTarget = true
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Step 3: Targeted explicit ACTION_MEDIA_BUTTON wake scoped strictly to Spotify's receiver
+            val sentButton = dispatchTargetedSpotifyMediaPlayBroadcast(appCtx)
+            if (sentButton || browserConnected) {
+                var pushedUriToWokenSession = false
+                for (waitMs in listOf(450L, 650L, 800L, 900L)) {
+                    runCatching { Thread.sleep(waitMs) }
+                    val listener = com.tunemind.app.service.TuneMindListenerService.instance
+                    if (!pushedUriToWokenSession && listener?.hasActiveSession("com.spotify.music") == true && uriObj != null) {
+                        pushedUriToWokenSession = true
+                        runCatching { listener.playFromUri("com.spotify.music", uriObj, playExtras) }
+                    }
+                    findBestConnectDevice(accessToken)?.let { dev ->
+                        Log.i(TAG, "✅ Silent Cold-Wake succeeded — Spotify Connect device '${dev.second}' is awake")
+                        return SilentColdWakeOutcome(
+                            device = dev,
+                            sentMediaButtonPlay = sentButton
+                        )
+                    }
+                    if (isSpotifySessionPlayingExpectedTrack(expectedTitle)) {
+                        return SilentColdWakeOutcome(
+                            device = findBestConnectDevice(accessToken),
+                            mediaSessionPlayingTarget = true,
+                            sentMediaButtonPlay = sentButton
+                        )
+                    }
+                }
+            }
+
+            return SilentColdWakeOutcome(
+                device = findBestConnectDevice(accessToken),
+                sentMediaButtonPlay = sentButton
+            )
+        } finally {
+            browser?.let { mb ->
+                mainHandler.post {
+                    runCatching { mb.disconnect() }
+                }
+            }
+        }
+    }
+
+    /**
+     * Lightweight post-UI-wake Connect API kicker called right after Spotify Activity opens on cold start
+     * so playback triggers instantaneously the moment Spotify's phone socket registers Connect.
+     */
+    fun tryConnectPlayAfterUiWake(
+        context: Context,
+        spotifyUri: String?,
+        title: String = "",
+        artist: String = "",
+        query: String = ""
+    ): SpotifyPlayResult {
+        if (!isConnectedAndPremium(context)) return SpotifyPlayResult.NotConnected
+        val token = refreshAccessTokenIfNeeded(context) ?: return SpotifyPlayResult.NotConnected
+        val resolvedUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(spotifyUri)
+            ?: (if (title.isNotBlank()) searchExactTrackUri(context, title, artist, query) else null)
+            ?: return SpotifyPlayResult.Failed("Track URI unavailable.")
+        val device = findBestConnectDevice(token)
+            ?: return SpotifyPlayResult.NoActiveDevice("Spotify Connect still initializing.", resolvedUri)
+
+        val url = "$API_BASE/me/player/play?device_id=${URLEncoder.encode(device.first, "UTF-8")}"
+        val payload = JSONObject().put("uris", JSONArray().put(resolvedUri)).toString()
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .header("Content-Type", "application/json")
+            .put(payload.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        return try {
+            httpClient.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
+                    val prefs = getPrefs(context)
+                    prefs.edit().putString(KEY_LAST_DEVICE_NAME, device.second).apply()
+                    _statusFlow.value = readStatusFromPrefs(prefs, currentError = null, isAuthorizing = false)
+                    SpotifyPlayResult.Success(resolvedUri, device.second)
+                } else if (resp.code == 404) {
+                    SpotifyPlayResult.NoActiveDevice("Spotify Connect device not ready yet.", resolvedUri)
+                } else {
+                    SpotifyPlayResult.Failed("HTTP ${resp.code}")
+                }
+            }
+        } catch (e: Exception) {
+            SpotifyPlayResult.Failed(e.message ?: "Network error")
+        }
+    }
+
     /**
      * Plays a full-length Spotify track silently in the background on the user's active Spotify
      * Connect device WITHOUT leaving TuneMind.
@@ -1322,20 +1625,18 @@ object SpotifyPremiumConnectManager {
             ?: return SpotifyPlayResult.Failed("Could not locate '$title' on Spotify.")
 
         var device = findBestConnectDevice(token)
+        var wakeOutcome = SilentColdWakeOutcome()
 
-        // If Spotify Connect currently reports no awake device, try a silent MediaSession wake pulse first.
+        // If Spotify Connect currently reports no awake device (e.g. Spotify cleared from Recent Apps),
+        // run Layer-1 Silent Background Cold-Wake via MediaBrowserService + targeted Spotify receiver.
         if (device == null) {
-            val listener = com.tunemind.app.service.TuneMindListenerService.instance
-            val hasWarmSpotify = listener?.hasActiveSession("com.spotify.music") == true ||
-                listener?.hasActiveSession("com.spotify.lite") == true
-            if (hasWarmSpotify) {
-                try {
-                    Log.i(TAG, "Spotify Connect idle but MediaSession warm — sending silent wake pulse before Connect play")
-                    listener?.play("com.spotify.music")
-                    Thread.sleep(850L)
-                    device = findBestConnectDevice(token)
-                } catch (_: Throwable) {}
-            }
+            wakeOutcome = coldWakeSpotifySilently(
+                context = context,
+                accessToken = token,
+                targetSpotifyUri = resolvedUri,
+                expectedTitle = title
+            )
+            device = wakeOutcome.device
         }
 
         fun executePlay(activeToken: String, targetDeviceId: String?): okhttp3.Response {
@@ -1367,22 +1668,32 @@ object SpotifyPremiumConnectManager {
                 response = executePlay(token, device?.first)
             }
 
-            // If Spotify returned 404 NO_ACTIVE_DEVICE on a stale/missing device_id, retry once after refreshing device list
+            // If Spotify returned 404 NO_ACTIVE_DEVICE on a stale/missing device_id, refresh or attempt silent wake
             if (response.code == 404) {
                 response.close()
-                val retryListener = com.tunemind.app.service.TuneMindListenerService.instance
-                if (retryListener?.hasActiveSession("com.spotify.music") == true) {
-                    runCatching {
-                        retryListener.play("com.spotify.music")
-                        Thread.sleep(750L)
-                    }
+                if (wakeOutcome.device == null && !wakeOutcome.sentMediaButtonPlay) {
+                    wakeOutcome = coldWakeSpotifySilently(
+                        context = context,
+                        accessToken = token,
+                        targetSpotifyUri = resolvedUri,
+                        expectedTitle = title
+                    )
+                    device = wakeOutcome.device
+                } else {
+                    device = findBestConnectDevice(token)
                 }
-                device = findBestConnectDevice(token)
+
                 if (device != null) {
                     response = executePlay(token, device.first)
+                } else if (wakeOutcome.mediaSessionPlayingTarget || isSpotifySessionPlayingExpectedTrack(title)) {
+                    Log.i(TAG, "✅ Silent Cold-Wake playing '$resolvedUri' via Spotify MediaSession without leaving TuneMind")
+                    return SpotifyPlayResult.Success(resolvedUri, "Spotify (Phone)")
                 } else {
+                    if (wakeOutcome.sentMediaButtonPlay) {
+                        runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
+                    }
                     return SpotifyPlayResult.NoActiveDevice(
-                        message = "No active Spotify device found. Open Spotify once so your phone wakes up for silent playback.",
+                        message = "Spotify needs one automatic wake-up tap after clearing Recent Apps.",
                         trackUri = resolvedUri
                     )
                 }
@@ -1398,6 +1709,10 @@ object SpotifyPremiumConnectManager {
                     return SpotifyPlayResult.Success(resolvedUri, deviceName)
                 }
 
+                if (wakeOutcome.mediaSessionPlayingTarget || isSpotifySessionPlayingExpectedTrack(title)) {
+                    return SpotifyPlayResult.Success(resolvedUri, "Spotify (Phone)")
+                }
+
                 val errBody = resp.body?.string().orEmpty()
                 val reason = runCatching {
                     JSONObject(errBody).optJSONObject("error")?.optString("reason").orEmpty()
@@ -1409,8 +1724,11 @@ object SpotifyPremiumConnectManager {
                 Log.w(TAG, "Spotify /v1/me/player/play returned HTTP ${resp.code} (reason=$reason, msg=$message)")
                 when {
                     resp.code == 404 || reason.equals("NO_ACTIVE_DEVICE", ignoreCase = true) -> {
+                        if (wakeOutcome.sentMediaButtonPlay) {
+                            runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
+                        }
                         SpotifyPlayResult.NoActiveDevice(
-                            message = "No active Spotify device found. Open Spotify once so your phone wakes up for silent playback.",
+                            message = "Spotify needs one automatic wake-up tap after clearing Recent Apps.",
                             trackUri = resolvedUri
                         )
                     }
@@ -1518,7 +1836,8 @@ object SpotifyPremiumConnectManager {
     }
 
     /**
-     * Plays an entire Spotify playlist context silently on the user's active Spotify Connect device (Premium).
+     * Plays an entire Spotify playlist context silently on the user's active Spotify Connect device (Premium),
+     * running silent cold-wake if Spotify was cleared from Recent Apps.
      */
     fun playPlaylistContextSilently(
         context: Context,
@@ -1533,8 +1852,18 @@ object SpotifyPremiumConnectManager {
         }
         var token = refreshAccessTokenIfNeeded(context)
             ?: return SpotifyPlayResult.Failed("Spotify token unavailable — reconnect in Settings.")
-        val device = findBestConnectDevice(token)
         val contextUri = "spotify:playlist:$cleanId"
+        var device = findBestConnectDevice(token)
+        var wakeOutcome = SilentColdWakeOutcome()
+
+        if (device == null) {
+            wakeOutcome = coldWakeSpotifySilently(
+                context = context,
+                accessToken = token,
+                targetSpotifyUri = contextUri
+            )
+            device = wakeOutcome.device
+        }
 
         fun executePlay(activeToken: String, targetDeviceId: String?): okhttp3.Response {
             val url = buildString {
@@ -1561,12 +1890,37 @@ object SpotifyPremiumConnectManager {
                 response.close()
                 token = refreshAccessTokenIfNeeded(context, forceRefresh = true)
                     ?: return SpotifyPlayResult.Failed("Spotify session expired.")
-                response = executePlay(token, findBestConnectDevice(token)?.first)
+                device = findBestConnectDevice(token)
+                response = executePlay(token, device?.first)
+            }
+            if (response.code == 404) {
+                response.close()
+                if (wakeOutcome.device == null && !wakeOutcome.sentMediaButtonPlay) {
+                    wakeOutcome = coldWakeSpotifySilently(
+                        context = context,
+                        accessToken = token,
+                        targetSpotifyUri = contextUri
+                    )
+                    device = wakeOutcome.device
+                } else {
+                    device = findBestConnectDevice(token)
+                }
+                if (device != null) {
+                    response = executePlay(token, device.first)
+                } else {
+                    if (wakeOutcome.sentMediaButtonPlay) {
+                        runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
+                    }
+                    return SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", contextUri)
+                }
             }
             response.use { resp ->
                 if (resp.isSuccessful || resp.code == 204 || resp.code == 202) {
                     SpotifyPlayResult.Success(contextUri, device?.second ?: "Spotify")
                 } else if (resp.code == 404) {
+                    if (wakeOutcome.sentMediaButtonPlay) {
+                        runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
+                    }
                     SpotifyPlayResult.NoActiveDevice("No active Spotify device found.", contextUri)
                 } else {
                     SpotifyPlayResult.Failed("Spotify playlist playback returned HTTP ${resp.code}")
