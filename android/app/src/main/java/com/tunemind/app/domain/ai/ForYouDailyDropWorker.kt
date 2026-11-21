@@ -18,6 +18,7 @@ import com.tunemind.app.data.local.TuneMindDatabase
 import com.tunemind.app.domain.memory.ListeningMemoryBuilder
 import com.tunemind.app.domain.model.PlaybackObservation
 import com.tunemind.app.domain.model.TrackIdentityResolver
+import com.tunemind.app.domain.recommendation.AiRecommendationEntity
 import com.tunemind.app.domain.reconstruction.ListeningSessionReconstructor
 import com.tunemind.app.domain.temporal.TimeSlot
 import com.tunemind.app.provider.MusicProviderRegistry
