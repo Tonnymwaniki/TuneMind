@@ -94,27 +94,18 @@ fun rememberResolvedTrackMedia(
         UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist)
     }
 
-    LaunchedEffect(cleanTitle, cleanArtist) {
-        if (cleanTitle.isNotBlank()) {
-            withContext(Dispatchers.IO) {
-                repo.enqueueVisualEnrichment(listOf(cleanTitle to cleanArtist))
-            }
-        }
+    val visualsMap by repo.trackVisualsMapFlow.collectAsState()
+    val artistsMap by repo.artistProfilesMapFlow.collectAsState()
+
+    val resolved = remember(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl) {
+        resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
     }
 
-    val visualsFlow = remember(repo) { repo.observeTrackVisualsMap() }
-    val artistsFlow = remember(repo) { repo.observeArtistProfilesMap() }
-
-    val resolved by remember(tKey, aKey, fallbackAlbumArtUrl) {
-        combine(visualsFlow, artistsFlow) { visualsMap, artistsMap ->
-            resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
-        }.distinctUntilChanged().flowOn(Dispatchers.Default)
-    }.collectAsState(
-        initial = ResolvedTrackVisuals(
-            trackKey = tKey,
-            albumArtUrl = fallbackAlbumArtUrl?.takeIf { it.isNotBlank() }
-        )
-    )
+    LaunchedEffect(cleanTitle, cleanArtist, resolved.albumArtUrl) {
+        if (cleanTitle.isNotBlank() && resolved.albumArtUrl.isNullOrBlank()) {
+            repo.enqueueVisualEnrichment(listOf(cleanTitle to cleanArtist))
+        }
+    }
 
     return resolved
 }
@@ -129,23 +120,19 @@ fun rememberResolvedArtistPhoto(
     val cleanArtist = remember(artistName) { artistName?.trim().orEmpty() }
     val aKey = remember(cleanArtist) { UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist) }
 
-    LaunchedEffect(cleanArtist) {
-        if (cleanArtist.isNotBlank()) {
-            withContext(Dispatchers.IO) {
-                repo.enqueueVisualEnrichment(listOf("" to cleanArtist))
+    val artistsMap by repo.artistProfilesMapFlow.collectAsState()
+    val photo = remember(artistsMap, aKey, artistId) {
+        (if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null)
+            ?: artistId?.takeIf { it.isNotBlank() }?.let { id ->
+                artistsMap.values.firstOrNull { it.artistId == id }?.imageUrl
             }
-        }
     }
 
-    val artistsFlow = remember(repo) { repo.observeArtistProfilesMap() }
-    val photo by remember(aKey, artistId) {
-        artistsFlow.map { artistsMap ->
-            (if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null)
-                ?: artistId?.takeIf { it.isNotBlank() }?.let { id ->
-                    artistsMap.values.firstOrNull { it.artistId == id }?.imageUrl
-                }
-        }.distinctUntilChanged().flowOn(Dispatchers.Default)
-    }.collectAsState(initial = null)
+    LaunchedEffect(cleanArtist, photo) {
+        if (cleanArtist.isNotBlank() && photo.isNullOrBlank()) {
+            repo.enqueueVisualEnrichment(listOf("" to cleanArtist))
+        }
+    }
 
     return photo
 }

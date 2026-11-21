@@ -98,11 +98,22 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     private var mediaPlayer: MediaPlayer? = null
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
+    private var isShutDown = false
     private var pendingSpeech: Pair<String, () -> Unit>? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     init {
-        tts = TextToSpeech(context.applicationContext, this)
+        mainHandler.postDelayed({ ensureTtsStarted() }, 500L)
+    }
+
+    private fun ensureTtsStarted(): TextToSpeech? {
+        if (isShutDown) return null
+        if (tts == null) {
+            runCatching {
+                tts = TextToSpeech(context.applicationContext, this)
+            }
+        }
+        return tts
     }
 
     override fun onInit(status: Int) {
@@ -267,7 +278,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     private fun speakWithListener(text: String, onCompletion: () -> Unit) {
-        val ttsInstance = tts
+        val ttsInstance = ensureTtsStarted()
         if (ttsInstance == null) {
             onCompletion()
             return
@@ -708,6 +719,8 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     fun shutdown() {
+        isShutDown = true
+        mainHandler.removeCallbacksAndMessages(null)
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()

@@ -112,15 +112,19 @@ class AgentVoiceManager(
     @Volatile
     private var isWsOpenForAudio = false
     private var webSocket: WebSocket? = null
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15000, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .build()
-    private val reasoningHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .readTimeout(30000, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .writeTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .build()
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+    }
+    private val reasoningHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(30000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .writeTimeout(12000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
+    }
     private var isRecording = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -243,11 +247,12 @@ class AgentVoiceManager(
     private var nativeRecognizer: AndroidSpeechRecognizer? = null
     private var errorResetJob: Job? = null
 
+    @Volatile
+    private var hasStartedWakeEngineInit = false
+
     init {
-        AgentSettingsStore.ensureLoaded(context)
         registerAudioRecordingMonitor()
         refreshUnifiedTracksCacheAsync()
-        initWakeWordEngine()
         startCloudKeepAlivePing()
         startAutonomousEndOfSongMonitor()
         startWakeWordSelfHealingWatchdog()
@@ -517,6 +522,17 @@ class AgentVoiceManager(
             }
             Log.d(TAG, "App left foreground (autonomousHandover=$isExecutingAutonomousHandover) — Vosk wake-word paused; End-of-Song DJ remains active.")
         } else {
+            if (!hasStartedWakeEngineInit) {
+                hasStartedWakeEngineInit = true
+                scope.launch {
+                    delay(600L)
+                    if (isAppInForeground) {
+                        initWakeWordEngine()
+                    } else {
+                        hasStartedWakeEngineInit = false
+                    }
+                }
+            }
             resumeWakeWordListening()
         }
     }
@@ -1616,8 +1632,9 @@ class AgentVoiceManager(
 
         scope.launch {
             while (isActive) {
+                val autonomousOn = AgentSettingsStore.isAutonomousDjEnabled(context)
                 try {
-                    if (AgentSettingsStore.isAutonomousDjEnabled(context)) {
+                    if (autonomousOn) {
                         val snap = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
                         if (snap != null) {
                             evaluatePlaybackSnapshotForEndOfSong(snap)
@@ -1626,7 +1643,7 @@ class AgentVoiceManager(
                 } catch (e: Exception) {
                     Log.d(TAG, "End-of-song monitor poll notice: ${e.message}")
                 }
-                delay(750L)
+                delay(if (autonomousOn) 750L else 3_000L)
             }
         }
     }

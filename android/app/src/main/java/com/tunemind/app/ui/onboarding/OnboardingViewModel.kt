@@ -21,11 +21,15 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
 
     private val authSessionManager = TuneMindAuthSessionManager.getInstance(application)
 
-    private val _currentStep = MutableStateFlow(evaluateInitialStep())
-    val currentStep: StateFlow<OnboardingStep> = _currentStep.asStateFlow()
-
     private var alwaysShowAuthFirstOnLaunch: Boolean = false
     private var authCompletedForThisLaunch: Boolean = false
+
+    private val _currentStep = MutableStateFlow(OnboardingStep.AUTH_LOGIN)
+    val currentStep: StateFlow<OnboardingStep> = _currentStep.asStateFlow()
+
+    fun hasPassedLaunchGate(alwaysShowAuthFirst: Boolean): Boolean {
+        return !alwaysShowAuthFirst || authCompletedForThisLaunch
+    }
 
     fun configureLaunchGate(alwaysShowAuthFirst: Boolean) {
         alwaysShowAuthFirstOnLaunch = alwaysShowAuthFirst
@@ -37,24 +41,18 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun evaluateInitialStep(): OnboardingStep {
-        authSessionManager.refreshSessionState()
         val session = authSessionManager.sessionFlow.value
         val app = getApplication<Application>()
         if (alwaysShowAuthFirstOnLaunch && !authCompletedForThisLaunch) {
             return OnboardingStep.AUTH_LOGIN
         }
-        if (!session.hasCompletedAccountOnboarding) {
+        if (!session.isLoggedIn || !session.hasCompletedAccountOnboarding || !session.hasCompletedStartFlow) {
             return OnboardingStep.AUTH_LOGIN
         }
-        val isReturningUser = session.isLoggedIn || session.hasCompletedStartFlow
-        return if (isReturningUser) {
-            if (session.hasCompletedStartFlow && PermissionUtils.hasMicrophonePermission(app)) {
-                OnboardingStep.COMPLETE
-            } else {
-                evaluateRemainingPermissionStep(app)
-            }
+        return if (PermissionUtils.hasMicrophonePermission(app)) {
+            OnboardingStep.COMPLETE
         } else {
-            OnboardingStep.AUTH_LOGIN
+            evaluateRemainingPermissionStep(app)
         }
     }
 

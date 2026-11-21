@@ -2192,8 +2192,8 @@ class TuneMindViewModel : ViewModel() {
     }
 
     init {
-        // Observe experiment state safely
-        viewModelScope.launch {
+        // Observe experiment state safely on Default dispatcher
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 experimentRepo?.observeExperiment()?.collect { exp ->
                     val status = exp?.status?.let { runCatching { ExperimentStatus.valueOf(it) }.getOrNull() } ?: ExperimentStatus.NOT_STARTED
@@ -2211,8 +2211,8 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        // Observe audio devices and volume from Room DB
-        viewModelScope.launch {
+        // Observe audio devices and volume from Room DB on Default dispatcher
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 audioDao?.observeRecentSessions()?.collect { sessions ->
                     val active = sessions.firstOrNull { it.disconnectedAt == null }
@@ -2227,7 +2227,7 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 audioDao?.observeRecentVolume()?.collect { obs ->
                     refreshHearingInsights()
@@ -2238,13 +2238,17 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Foreground live volume + headset + Bluetooth monitor so UI reacts immediately even if listener service is asleep
-        registerForegroundHearingMonitor()
-        refreshHearingInsights()
-
-        refreshReadiness()
-        refreshClaudeState()
-        requestClaudeSessionReasoning()
+        // Defer non-critical readiness IPC & hearing monitor slightly so first UI frame renders instantaneously
+        viewModelScope.launch(Dispatchers.Main) {
+            registerForegroundHearingMonitor()
+            refreshHearingInsights()
+            kotlinx.coroutines.delay(350L)
+            withContext(Dispatchers.IO) {
+                refreshReadiness()
+                refreshClaudeState()
+            }
+            requestClaudeSessionReasoning()
+        }
 
         // Hook in-app 30s preview / local playback completion into For You closed-loop learning AND Up Next Auto-Play
         val completionListener: (String, String, String) -> Unit = { doneTitle, doneArtist, pkg ->
@@ -2283,9 +2287,9 @@ class TuneMindViewModel : ViewModel() {
                 val isPlayingNow = _homeState.value.nowPlaying?.isPlaying == true
                 kotlinx.coroutines.delay(
                     when {
-                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 550L
-                        uiForegroundActive -> 1200L
-                        else -> 3500L
+                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 1000L
+                        uiForegroundActive -> 2500L
+                        else -> 8000L
                     }
                 )
                 if (ctx == null) continue
@@ -2316,7 +2320,7 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 aiRecDao?.observeSaved()?.collect { saved ->
                     _savedAiRecommendations.value = saved
@@ -2326,7 +2330,7 @@ class TuneMindViewModel : ViewModel() {
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 aiRecDao?.observePlayedCount()?.collect { count ->
                     _playedRecCount.value = count
@@ -2334,7 +2338,7 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 aiRecDao?.observeSavedCount()?.collect { count ->
                     _savedRecCount.value = count
@@ -2342,7 +2346,7 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             try {
                 aiRecDao?.observeDismissedCount()?.collect { count ->
                     _dismissedRecCount.value = count
@@ -2350,18 +2354,21 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Initialize Telemetry Reasoning Report & schedule periodic Claude + Noon Drop Workers
-        AppHolder.context?.let { ctx ->
-            _reasoningReport.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.getLatestReport(ctx)
-            com.tunemind.app.domain.ai.ClaudeTelemetryReasoningWorker.schedulePeriodic(ctx)
-            com.tunemind.app.domain.ai.ForYouDailyDropWorker.scheduleNextNoonDrop(ctx)
+        // Stagger WorkManager & telemetry initialization off main thread so startup stays ultra-light
+        viewModelScope.launch(Dispatchers.IO) {
+            AppHolder.context?.let { ctx ->
+                _reasoningReport.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.getLatestReport(ctx)
+                kotlinx.coroutines.delay(450L)
+                com.tunemind.app.domain.ai.ClaudeTelemetryReasoningWorker.schedulePeriodic(ctx)
+                com.tunemind.app.domain.ai.ForYouDailyDropWorker.scheduleNextNoonDrop(ctx)
+            }
+            refreshTelemetryReasoningReport()
+            recomputeAdaptiveTheme()
+            triggerChronoDiscovery(forceRefresh = false)
         }
-        refreshTelemetryReasoningReport()
-        recomputeAdaptiveTheme()
-        triggerChronoDiscovery(forceRefresh = false)
 
         // 60-second periodic watcher: auto-rotates For You AI discovery at 12:00 PM local time and tracks daypart shifts
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             var lastObservedSlot = currentTimeSlot
             var lastObservedNoonCycle = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
             while (true) {
@@ -2375,8 +2382,6 @@ class TuneMindViewModel : ViewModel() {
                     triggerChronoDiscovery(forceRefresh = true)
                 } else if (currentSlot != lastObservedSlot) {
                     lastObservedSlot = currentSlot
-                    recomputeAdaptiveTheme()
-                } else {
                     recomputeAdaptiveTheme()
                 }
             }
@@ -2506,7 +2511,7 @@ class TuneMindViewModel : ViewModel() {
                     com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity
                 ) { rows, crossTracks, crossLogs, mergeDuplicates, repetitionSensitivity ->
                     listOf(rows, crossTracks, crossLogs, mergeDuplicates, repetitionSensitivity)
-                }.debounce(250L).collect { values ->
+                }.debounce(500L).collect { values ->
                     @Suppress("UNCHECKED_CAST")
                     val rows = values[0] as List<PlaybackObservation>
                     @Suppress("UNCHECKED_CAST")
@@ -2522,7 +2527,9 @@ class TuneMindViewModel : ViewModel() {
                     cachedMergeDuplicatesForStats = mergeDuplicates
                     cachedRepetitionSensitivityForStats = repetitionSensitivity
 
-                    crossAppRecorder?.backfillFromObservationsIfEmpty(rows)
+                    withContext(Dispatchers.IO) {
+                        crossAppRecorder?.backfillFromObservationsIfEmpty(rows)
+                    }
 
                     val memory: ListeningMemory
                     val coverage: CoverageAssessment
@@ -2531,7 +2538,7 @@ class TuneMindViewModel : ViewModel() {
                     val restoredMap = loadRestoredVaultMapFromPrefs()
                     val activeVaultFreshness = buildActiveVaultFreshnessMap(System.currentTimeMillis())
                     val snapshot: com.tunemind.app.domain.memory.DeduplicatedListeningSnapshot
-                    withContext(Dispatchers.Default) {
+                    run {
                         val truncated = rows.size >= EventBufferRepository.MAX_OBSERVATIONS
                         val episodes = ListeningSessionReconstructor().reconstruct(rows, retainedWindowMayBeTruncated = truncated)
                         memory = ListeningMemoryBuilder().build(rows, episodes, retainedHistoryMayBeIncomplete = truncated)
@@ -4318,7 +4325,7 @@ class TuneMindViewModel : ViewModel() {
             else -> "$todayLabel listened today with +%.1f dB margin — comfortable within safe limits.".format(headroom)
         }
 
-        _hearingInsightsState.value = _hearingInsightsState.value.copy(
+        val nextState = _hearingInsightsState.value.copy(
             activeSnapshot = snapshot,
             estimatedAverageDb = estDb,
             currentHeadroomDb = headroom,
@@ -4328,6 +4335,9 @@ class TuneMindViewModel : ViewModel() {
             safeHoursRemaining = safeHoursLeft,
             safetyGuidance = guidance
         )
+        if (nextState != _hearingInsightsState.value) {
+            _hearingInsightsState.value = nextState
+        }
     }
 
     fun getFreshHearingInsightsNow(): HearingInsightsState {

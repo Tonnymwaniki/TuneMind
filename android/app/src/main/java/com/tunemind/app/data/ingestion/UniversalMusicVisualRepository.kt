@@ -16,7 +16,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -36,42 +39,59 @@ class UniversalMusicVisualRepository private constructor(private val context: Co
     private val dao: CrossAppLibraryDao by lazy { db.crossAppLibraryDao() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlightKeys = ConcurrentHashMap.newKeySet<String>()
+    private val resolvedWithArtKeys = ConcurrentHashMap.newKeySet<String>()
 
-    fun observeTrackVisualsMap(): Flow<Map<String, TrackVisualCacheEntity>> {
-        return dao.observeAllTrackVisuals().map { list ->
-            buildMap {
+    val trackVisualsMapFlow: StateFlow<Map<String, TrackVisualCacheEntity>> by lazy {
+        dao.observeAllTrackVisuals().map { list ->
+            buildMap(list.size * 2) {
                 for (item in list) {
                     put(item.trackKey, item)
+                    if (!item.albumArtUrl.isNullOrBlank()) {
+                        resolvedWithArtKeys.add(item.trackKey)
+                    }
                     item.trackId?.takeIf { it.isNotBlank() }?.let { put(it, item) }
                 }
             }
-        }
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
     }
 
-    fun observeArtistProfilesMap(): Flow<Map<String, ArtistProfileCacheEntity>> {
-        return dao.observeAllArtistProfiles().map { list ->
+    val artistProfilesMapFlow: StateFlow<Map<String, ArtistProfileCacheEntity>> by lazy {
+        dao.observeAllArtistProfiles().map { list ->
             list.associateBy { it.artistKey }
-        }
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
     }
+
+    fun observeTrackVisualsMap(): Flow<Map<String, TrackVisualCacheEntity>> = trackVisualsMapFlow
+
+    fun observeArtistProfilesMap(): Flow<Map<String, ArtistProfileCacheEntity>> = artistProfilesMapFlow
 
     fun enqueueVisualEnrichment(tracks: List<Pair<String, String>>) {
         if (tracks.isEmpty()) return
+        val quickCandidates = tracks.mapNotNull { (title, artist) ->
+            val cleanTitle = title.trim()
+            val cleanArtist = artist.trim()
+            if (cleanTitle.isBlank()) return@mapNotNull null
+            val key = TrackIdentityResolver.buildNormalizedMatchKey(cleanTitle, cleanArtist)
+            if (resolvedWithArtKeys.contains(key) || inFlightKeys.contains(key)) return@mapNotNull null
+            Triple(key, cleanTitle, cleanArtist)
+        }.distinctBy { it.first }
+        if (quickCandidates.isEmpty()) return
+
         scope.launch {
-            val existing = runCatching { dao.getTrackVisualSnapshot().associateBy { it.trackKey } }.getOrDefault(emptyMap())
-            val pending = tracks
-                .asSequence()
-                .mapNotNull { (title, artist) ->
-                    val cleanTitle = title.trim()
-                    val cleanArtist = artist.trim()
-                    if (cleanTitle.isBlank()) return@mapNotNull null
-                    val key = TrackIdentityResolver.buildNormalizedMatchKey(cleanTitle, cleanArtist)
+            val existing = trackVisualsMapFlow.value.ifEmpty {
+                runCatching { dao.getTrackVisualSnapshot().associateBy { it.trackKey } }.getOrDefault(emptyMap())
+            }
+            val pending = quickCandidates
+                .filter { (key, _, _) ->
                     val cached = existing[key]
-                    if (cached != null && !cached.albumArtUrl.isNullOrBlank()) return@mapNotNull null
-                    Triple(key, cleanTitle, cleanArtist)
+                    if (cached != null && !cached.albumArtUrl.isNullOrBlank()) {
+                        resolvedWithArtKeys.add(key)
+                        false
+                    } else {
+                        true
+                    }
                 }
-                .distinctBy { it.first }
-                .take(18)
-                .toList()
+                .take(12)
 
             for ((key, title, artist) in pending) {
                 if (!inFlightKeys.add(key)) continue

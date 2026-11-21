@@ -604,6 +604,29 @@ private fun TuneMindLivingOrb(
         label = "orb_swirl"
     )
 
+    val tickCount = 36
+    val tickCos = remember {
+        FloatArray(tickCount) { t -> cos((t.toFloat() / tickCount) * (2f * PI).toFloat()) }
+    }
+    val tickSin = remember {
+        FloatArray(tickCount) { t -> sin((t.toFloat() / tickCount) * (2f * PI).toFloat()) }
+    }
+    val sampleCount = 48
+    val sampleThetas = remember {
+        FloatArray(sampleCount + 1) { i -> (i.toFloat() / sampleCount) * (2f * PI).toFloat() }
+    }
+    val sampleCos1 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i]) } }
+    val sampleSin1 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i]) } }
+    val sampleCos2 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 2f) } }
+    val sampleSin2 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 2f) } }
+    val sampleCos3 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 3f) } }
+    val sampleSin3 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 3f) } }
+    val sampleCos4 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 4f) } }
+    val sampleSin5 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 5f) } }
+
+    val orbPath = remember { Path() }
+    val innerVoicePath = remember { Path() }
+
     Canvas(modifier = modifier) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val baseRadius = size.minDimension * 0.285f * breathScale
@@ -630,33 +653,41 @@ private fun TuneMindLivingOrb(
             center = center
         )
 
-        // Subtle 48-tick acoustic studio dial around the orb
+        // Subtle 36-tick acoustic studio dial around the orb (zero trig allocation per frame)
         val dialRadiusInner = size.minDimension * 0.39f
-        val tickCount = 48
+        val majorTickLen = 7.dp.toPx()
+        val minorTickLen = 3.5.dp.toPx()
+        val majorStroke = 1.4.dp.toPx()
+        val minorStroke = 1.dp.toPx()
+        val cosWave = cos(wavePhase)
+        val sinWave = sin(wavePhase)
+        val cosWave2 = cos(wavePhase * 2f)
+        val sinWave2 = sin(wavePhase * 2f)
+        val sinWave3 = sin(wavePhase * 3f)
+        val cosWave3 = cos(wavePhase * 3f)
+
         for (t in 0 until tickCount) {
-            val angle = (t.toFloat() / tickCount) * (2f * PI).toFloat()
-            val isMajor = t % 4 == 0
-            val pulseWave = 0.5f + 0.5f * sin(angle * 2f - wavePhase)
-            val tickLen = if (isMajor) 7.dp.toPx() else 3.5.dp.toPx()
+            val isMajor = t % 3 == 0
+            val c = tickCos[t]
+            val s = tickSin[t]
+            val tickLen = if (isMajor) majorTickLen else minorTickLen
             val tickAlpha = when {
-                agentState != AgentState.IDLE -> 0.18f + 0.32f * pulseWave
-                isMusicPlaying -> 0.14f + 0.22f * pulseWave
+                agentState != AgentState.IDLE || isMusicPlaying -> {
+                    val angleSin2 = 2f * s * c
+                    val angleCos2 = c * c - s * s
+                    val pulseWave = 0.5f + 0.5f * (angleSin2 * cosWave - angleCos2 * sinWave)
+                    if (agentState != AgentState.IDLE) 0.18f + 0.32f * pulseWave else 0.14f + 0.22f * pulseWave
+                }
                 isMajor -> 0.22f
                 else -> 0.10f
             }
-            val start = Offset(
-                center.x + dialRadiusInner * cos(angle),
-                center.y + dialRadiusInner * sin(angle)
-            )
-            val end = Offset(
-                center.x + (dialRadiusInner + tickLen) * cos(angle),
-                center.y + (dialRadiusInner + tickLen) * sin(angle)
-            )
+            val start = Offset(center.x + dialRadiusInner * c, center.y + dialRadiusInner * s)
+            val end = Offset(center.x + (dialRadiusInner + tickLen) * c, center.y + (dialRadiusInner + tickLen) * s)
             drawLine(
                 color = (if (isMajor) primaryAccent else Color.White).copy(alpha = tickAlpha),
                 start = start,
                 end = end,
-                strokeWidth = if (isMajor) 1.4.dp.toPx() else 1.dp.toPx(),
+                strokeWidth = if (isMajor) majorStroke else minorStroke,
                 cap = StrokeCap.Round
             )
         }
@@ -682,24 +713,37 @@ private fun TuneMindLivingOrb(
             else -> if (isMusicPlaying) baseRadius * (0.034f * energy.coerceIn(0.6f, 1.1f)) else baseRadius * 0.012f
         }
 
-        val sampleCount = 72
-        val orbPath = Path()
+        orbPath.rewind()
         for (i in 0..sampleCount) {
-            val theta = (i.toFloat() / sampleCount) * (2f * PI).toFloat()
-            val harmonic = if (agentState == AgentState.SPEAKING) {
-                0.55f * sin(theta * 3f + wavePhase * 2f) +
-                    0.35f * sin(theta * 5f - wavePhase * 3f) +
-                    0.20f * cos(theta * 2f + wavePhase)
-            } else if (agentState == AgentState.THINKING) {
-                0.65f * sin(theta * 2f + wavePhase) +
-                    0.35f * cos(theta * 4f - wavePhase * 2f)
-            } else {
-                0.70f * sin(theta * 3f + wavePhase) +
-                    0.30f * cos(theta * 2f - wavePhase)
+            val c1 = sampleCos1[i]
+            val s1 = sampleSin1[i]
+            val c2 = sampleCos2[i]
+            val s2 = sampleSin2[i]
+            val c3 = sampleCos3[i]
+            val s3 = sampleSin3[i]
+            val harmonic = when (agentState) {
+                AgentState.SPEAKING -> {
+                    val sin3p2 = s3 * cosWave2 + c3 * sinWave2
+                    val cos5 = kotlin.math.cos(sampleThetas[i] * 5f)
+                    val sin5m3 = sampleSin5[i] * cosWave3 - cos5 * sinWave3
+                    val cos2p1 = c2 * cosWave - s2 * sinWave
+                    0.55f * sin3p2 + 0.35f * sin5m3 + 0.20f * cos2p1
+                }
+                AgentState.THINKING -> {
+                    val sin2p1 = s2 * cosWave + c2 * sinWave
+                    val sin4 = kotlin.math.sin(sampleThetas[i] * 4f)
+                    val cos4m2 = sampleCos4[i] * cosWave2 + sin4 * sinWave2
+                    0.65f * sin2p1 + 0.35f * cos4m2
+                }
+                else -> {
+                    val sin3p1 = s3 * cosWave + c3 * sinWave
+                    val cos2m1 = c2 * cosWave + s2 * sinWave
+                    0.70f * sin3p1 + 0.30f * cos2m1
+                }
             }
             val r = baseRadius + wobbleAmp * harmonic
-            val x = center.x + r * cos(theta)
-            val y = center.y + r * sin(theta)
+            val x = center.x + r * c1
+            val y = center.y + r * s1
             if (i == 0) orbPath.moveTo(x, y) else orbPath.lineTo(x, y)
         }
         orbPath.close()
@@ -709,8 +753,8 @@ private fun TuneMindLivingOrb(
         val coreDeep = lerp(secondaryAccent, Color(0xFF0A0D18), 0.55f)
 
         val focalOffset = Offset(
-            center.x - baseRadius * 0.24f + cos(wavePhase) * baseRadius * 0.08f,
-            center.y - baseRadius * 0.28f + sin(wavePhase) * baseRadius * 0.08f
+            center.x - baseRadius * 0.24f + cosWave * baseRadius * 0.08f,
+            center.y - baseRadius * 0.28f + sinWave * baseRadius * 0.08f
         )
 
         drawPath(
@@ -727,7 +771,7 @@ private fun TuneMindLivingOrb(
         )
 
         val cloudCenter = Offset(
-            center.x + sin(wavePhase) * baseRadius * 0.16f,
+            center.x + sinWave * baseRadius * 0.16f,
             center.y + cos(wavePhase * 0.8f) * baseRadius * 0.14f
         )
         drawCircle(
@@ -780,9 +824,9 @@ private fun TuneMindLivingOrb(
                 }
             }
             AgentState.SPEAKING -> {
-                val innerVoicePath = Path()
+                innerVoicePath.rewind()
                 val widthSpan = baseRadius * 1.05f
-                val segments = 32
+                val segments = 24
                 for (i in 0..segments) {
                     val t = i.toFloat() / segments
                     val x = center.x - widthSpan / 2f + widthSpan * t
@@ -799,7 +843,7 @@ private fun TuneMindLivingOrb(
             AgentState.LISTENING -> {
                 drawCircle(
                     color = luminousWhite.copy(alpha = 0.52f),
-                    radius = baseRadius * (0.48f + 0.08f * sin(wavePhase)),
+                    radius = baseRadius * (0.48f + 0.08f * sinWave),
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )

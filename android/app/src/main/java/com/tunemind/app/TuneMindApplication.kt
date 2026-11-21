@@ -14,22 +14,26 @@ class TuneMindApplication : Application() {
         super.onCreate()
         com.tunemind.app.ui.AppHolder.context = applicationContext
 
-        // Initialize Firebase Crashlytics cleanly whenever google-services.json is bundled.
+        // Initialize Firebase Crashlytics cleanly without blocking Application.onCreate on Keystore IPC.
         val activeBaseUrl = BackendEndpointManager.getActiveHttpBaseUrl(applicationContext)
         runCatching {
             if (FirebaseApp.getApps(this).isNotEmpty()) {
                 val crashlytics = FirebaseCrashlytics.getInstance()
                 crashlytics.isCrashlyticsCollectionEnabled = true
                 crashlytics.setCustomKey("backend_url", activeBaseUrl)
-                TuneMindAuthSessionManager.getInstance(applicationContext)
-                    .sessionFlow.value.userId
-                    .takeIf { it.isNotBlank() }
-                    ?.let { crashlytics.setUserId(it) }
             }
         }
 
-        // Pre-warm Render Free instance in the background on cold app launch so auth/AI calls don't stall.
+        // Bind user ID + pre-warm Render instance off the main thread so cold launch stays instant.
         Thread {
+            runCatching {
+                if (FirebaseApp.getApps(this).isNotEmpty()) {
+                    TuneMindAuthSessionManager.getInstance(applicationContext)
+                        .sessionFlow.value.userId
+                        .takeIf { it.isNotBlank() }
+                        ?.let { FirebaseCrashlytics.getInstance().setUserId(it) }
+                }
+            }
             runCatching {
                 val conn = (URL("${activeBaseUrl.trimEnd('/')}/health").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -43,7 +47,7 @@ class TuneMindApplication : Application() {
                 }
             }
         }.apply {
-            name = "TuneMindHealthWarmup"
+            name = "TuneMindStartupWarmup"
             isDaemon = true
             start()
         }
