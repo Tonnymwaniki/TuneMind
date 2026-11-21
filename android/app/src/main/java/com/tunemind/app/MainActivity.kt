@@ -900,9 +900,13 @@ open class MainActivity : ComponentActivity() {
                     val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
                     val liveTranscript by agentVoiceManager.transcriptionFlow.collectAsState(initial = "Say \"Hi TuneMind\" or tap the orb")
                     var hasCompletedLaunchStartFlow by remember { mutableStateOf(authSession.hasCompletedStartFlow) }
+                    var hasPassedLaunchOnboardingGate by rememberSaveable {
+                        mutableStateOf(!ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING)
+                    }
                     val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding
 
-                    val isMainAppActive = hasCompletedLaunchStartFlow &&
+                    val isMainAppActive = hasPassedLaunchOnboardingGate &&
+                        hasCompletedLaunchStartFlow &&
                         authSession.hasCompletedStartFlow &&
                         hasCompletedAccountGate &&
                         hasAllPermissions
@@ -1044,7 +1048,10 @@ open class MainActivity : ComponentActivity() {
                             if (!isMainAppActive) {
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     OnboardingScreen(
+                                        alwaysShowAuthFirst = ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING,
+                                        isSplashFinished = !showBrandSplash,
                                         onComplete = {
+                                            hasPassedLaunchOnboardingGate = true
                                             hasCompletedLaunchStartFlow = true
                                             authSessionManager.markAccountOnboardingCompleted()
                                             authSessionManager.markStartFlowCompleted()
@@ -1965,6 +1972,10 @@ open class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        // Testing toggle: keeps Splash -> Onboarding (Google / Email Login) active on every app launch.
+        // Flip to false before Play Store production release so returning signed-in users enter directly.
+        private const val ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING = true
+
         fun forceRebindListener(context: Context) {
             try {
                 if (!NotificationAccess.isEnabled(context)) return

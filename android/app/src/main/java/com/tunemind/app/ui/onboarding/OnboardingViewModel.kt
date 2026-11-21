@@ -24,10 +24,25 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     private val _currentStep = MutableStateFlow(evaluateInitialStep())
     val currentStep: StateFlow<OnboardingStep> = _currentStep.asStateFlow()
 
+    private var alwaysShowAuthFirstOnLaunch: Boolean = false
+    private var authCompletedForThisLaunch: Boolean = false
+
+    fun configureLaunchGate(alwaysShowAuthFirst: Boolean) {
+        alwaysShowAuthFirstOnLaunch = alwaysShowAuthFirst
+        if (alwaysShowAuthFirst && !authCompletedForThisLaunch) {
+            _currentStep.value = OnboardingStep.AUTH_LOGIN
+        } else {
+            _currentStep.value = evaluateInitialStep()
+        }
+    }
+
     private fun evaluateInitialStep(): OnboardingStep {
         authSessionManager.refreshSessionState()
         val session = authSessionManager.sessionFlow.value
         val app = getApplication<Application>()
+        if (alwaysShowAuthFirstOnLaunch && !authCompletedForThisLaunch) {
+            return OnboardingStep.AUTH_LOGIN
+        }
         if (!session.hasCompletedAccountOnboarding) {
             return OnboardingStep.AUTH_LOGIN
         }
@@ -68,6 +83,7 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun proceedFromAuthToPermissions() {
+        authCompletedForThisLaunch = true
         authSessionManager.markAccountOnboardingCompleted()
         authSessionManager.markStartFlowCompleted()
         val app = getApplication<Application>()

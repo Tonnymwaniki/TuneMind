@@ -35,7 +35,8 @@ data class TuneMindUserSession(
     val isGoogleConnected: Boolean = false,
     val isSupabaseAuthenticated: Boolean = false,
     val tasteArchetype: String = "",
-    val supabaseUrl: String = ""
+    val supabaseUrl: String = "",
+    val lastAuthCompletedAtMs: Long = 0L
 )
 
 data class SavedAccountProfile(
@@ -78,6 +79,16 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     private val _savedAccountsFlow = MutableStateFlow(readSavedAccounts())
     val savedAccountsFlow: StateFlow<List<SavedAccountProfile>> = _savedAccountsFlow.asStateFlow()
+
+    private val _lastAuthErrorFlow = MutableStateFlow<String?>(null)
+    val lastAuthErrorFlow: StateFlow<String?> = _lastAuthErrorFlow.asStateFlow()
+
+    @Volatile
+    private var lastAuthSuccessWallMs: Long = 0L
+
+    fun clearLastAuthError() {
+        _lastAuthErrorFlow.value = null
+    }
 
     private fun createEncryptedPrefs(ctx: Context): SharedPreferences {
         return try {
@@ -138,7 +149,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             isGoogleConnected = googleConnected,
             isSupabaseAuthenticated = supabaseToken.isNotBlank() && isSupabaseConfigured(),
             tasteArchetype = prefs.getString(KEY_TASTE_ARCHETYPE, "") ?: "",
-            supabaseUrl = getSupabaseUrl()
+            supabaseUrl = getSupabaseUrl(),
+            lastAuthCompletedAtMs = lastAuthSuccessWallMs
         )
     }
 
@@ -270,6 +282,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             syncProfileFromSupabase()
         }
 
+        lastAuthSuccessWallMs = System.currentTimeMillis()
+        _lastAuthErrorFlow.value = null
         refreshSessionState()
         Result.success(_sessionFlow.value)
     }
@@ -361,6 +375,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             provider = "GOOGLE"
         )
         mirrorIdentityToUserPrefs(cleanName, cleanEmail)
+        lastAuthSuccessWallMs = System.currentTimeMillis()
+        _lastAuthErrorFlow.value = null
         refreshSessionState()
     }
 
@@ -376,6 +392,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     ): Result<TuneMindUserSession> = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim()
         val cleanName = displayName.trim().ifBlank { cleanEmail.substringBefore("@") }
+        _lastAuthErrorFlow.value = null
 
         if (isSupabaseConfigured()) {
             val supabaseUrl = getSupabaseUrl()
@@ -453,6 +470,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                         provider = "EMAIL"
                     )
                     syncProfileFromSupabase()
+                    lastAuthSuccessWallMs = System.currentTimeMillis()
+                    _lastAuthErrorFlow.value = null
                     refreshSessionState()
                     return@withContext Result.success(_sessionFlow.value)
                 }
@@ -483,6 +502,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             provider = "EMAIL"
         )
         mirrorIdentityToUserPrefs(cleanName, cleanEmail)
+        lastAuthSuccessWallMs = System.currentTimeMillis()
+        _lastAuthErrorFlow.value = null
         refreshSessionState()
         Result.success(_sessionFlow.value)
     }
@@ -493,12 +514,22 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     suspend fun handleSupabaseRedirectUri(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         val fragmentParams = parseUrlFragment(uri.fragment)
+        val oauthError = fragmentParams["error_description"]
+            ?: uri.getQueryParameter("error_description")
+            ?: fragmentParams["error"]
+            ?: uri.getQueryParameter("error")
+        if (!oauthError.isNullOrBlank()) {
+            _lastAuthErrorFlow.value = Uri.decode(oauthError).replace('+', ' ').trim()
+            return@withContext false
+        }
+
         val accessToken = fragmentParams["access_token"] ?: uri.getQueryParameter("access_token")
         val refreshToken = fragmentParams["refresh_token"] ?: uri.getQueryParameter("refresh_token") ?: ""
         val providerToken = fragmentParams["provider_token"] ?: uri.getQueryParameter("provider_token")
         val providerRefreshToken = fragmentParams["provider_refresh_token"] ?: uri.getQueryParameter("provider_refresh_token")
 
         if (accessToken.isNullOrBlank()) {
+            _lastAuthErrorFlow.value = "Google sign-in did not return an access token. Ensure 'tunemind://supabase-auth-callback' is in Supabase Redirect URLs."
             return@withContext false
         }
 
@@ -568,6 +599,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
 
         syncProfileFromSupabase()
+        lastAuthSuccessWallMs = System.currentTimeMillis()
+        _lastAuthErrorFlow.value = null
         refreshSessionState()
         true
     }

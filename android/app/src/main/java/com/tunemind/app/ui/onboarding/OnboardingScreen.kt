@@ -28,12 +28,16 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,6 +50,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -69,6 +74,8 @@ import kotlinx.coroutines.launch
 fun OnboardingScreen(
     onComplete: () -> Unit,
     onOpenLegal: (Int) -> Unit = {},
+    alwaysShowAuthFirst: Boolean = false,
+    isSplashFinished: Boolean = true,
     viewModel: OnboardingViewModel = viewModel()
 ) {
     val currentStep by viewModel.currentStep.collectAsState()
@@ -90,8 +97,8 @@ fun OnboardingScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.resetToWelcome()
+    LaunchedEffect(alwaysShowAuthFirst) {
+        viewModel.configureLaunchGate(alwaysShowAuthFirst)
     }
 
     LaunchedEffect(currentStep) {
@@ -99,6 +106,17 @@ fun OnboardingScreen(
             onComplete()
         }
     }
+
+    val entranceAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isSplashFinished) 1f else 0f,
+        animationSpec = tween(durationMillis = 360),
+        label = "onboarding_splash_reveal_alpha"
+    )
+    val entranceScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isSplashFinished) 1f else 0.97f,
+        animationSpec = tween(durationMillis = 420),
+        label = "onboarding_splash_reveal_scale"
+    )
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -113,6 +131,10 @@ fun OnboardingScreen(
     StudioAmbientBackground {
         AnimatedContent(
             targetState = currentStep,
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(entranceAlpha)
+                .scale(entranceScale),
             transitionSpec = {
                 fadeIn(tween(240)) togetherWith fadeOut(tween(180))
             },
@@ -192,24 +214,35 @@ private fun AuthLoginStep(
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val savedAccounts by authManager.savedAccountsFlow.collectAsState()
+    val remoteAuthError by authManager.lastAuthErrorFlow.collectAsState()
 
     var isSignUpMode by remember { mutableStateOf(true) }
     var emailInput by remember { mutableStateOf(session.email) }
     var passwordInput by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf(session.displayName) }
     var authError by remember { mutableStateOf<String?>(null) }
+    var authInfoNotice by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
 
     var showEmailSheet by remember { mutableStateOf(false) }
     var showGoogleConfirmSheet by remember { mutableStateOf(false) }
     var awaitingGoogleOAuthCallback by remember { mutableStateOf(false) }
+    var googleLaunchStartedAtMs by remember { mutableStateOf(0L) }
     var selectedGoogleEmail by remember { mutableStateOf(session.email.ifBlank { "" }) }
     var selectedGoogleName by remember { mutableStateOf(session.displayName) }
 
-    LaunchedEffect(session.isGoogleConnected, session.isSupabaseAuthenticated, awaitingGoogleOAuthCallback) {
-        if (awaitingGoogleOAuthCallback && (session.isGoogleConnected || session.isSupabaseAuthenticated)) {
+    LaunchedEffect(session.lastAuthCompletedAtMs, awaitingGoogleOAuthCallback) {
+        if (awaitingGoogleOAuthCallback && session.lastAuthCompletedAtMs > googleLaunchStartedAtMs) {
             awaitingGoogleOAuthCallback = false
             onContinue()
+        }
+    }
+
+    LaunchedEffect(remoteAuthError) {
+        if (!remoteAuthError.isNullOrBlank()) {
+            awaitingGoogleOAuthCallback = false
+            authError = remoteAuthError
         }
     }
 
@@ -234,6 +267,8 @@ private fun AuthLoginStep(
 
     fun launchGoogleAccountPicker() {
         authError = null
+        authInfoNotice = null
+        authManager.clearLastAuthError()
         try {
             @Suppress("DEPRECATION")
             val chooseIntent = android.accounts.AccountManager.newChooseAccountIntent(
@@ -255,13 +290,16 @@ private fun AuthLoginStep(
         val cleanEmail = emailInput.trim()
         if (!cleanEmail.contains("@") || !cleanEmail.contains(".")) {
             authError = "Enter a valid email address."
+            authInfoNotice = null
             return
         }
         if (passwordInput.length < 6) {
             authError = "Password must be at least 6 characters."
+            authInfoNotice = null
             return
         }
         authError = null
+        authInfoNotice = null
         isSubmitting = true
         focusManager.clearFocus()
         scope.launch {
@@ -276,7 +314,34 @@ private fun AuthLoginStep(
                 showEmailSheet = false
                 onContinue()
             }.onFailure { err ->
-                authError = err.message ?: "Could not sign in with email"
+                val msg = err.message ?: "Could not sign in with email"
+                if (msg.contains("Verification email sent", ignoreCase = true)) {
+                    authInfoNotice = msg
+                    isSignUpMode = false
+                } else {
+                    authError = msg
+                }
+            }
+        }
+    }
+
+    fun submitForgotPassword() {
+        val cleanEmail = emailInput.trim()
+        if (!cleanEmail.contains("@") || !cleanEmail.contains(".")) {
+            authError = "Enter your email address above first so we know where to send the reset link."
+            authInfoNotice = null
+            return
+        }
+        authError = null
+        authInfoNotice = null
+        isSubmitting = true
+        scope.launch {
+            val res = authManager.sendPasswordResetEmail(cleanEmail)
+            isSubmitting = false
+            res.onSuccess {
+                authInfoNotice = "Password reset link sent to $cleanEmail. Check your inbox."
+            }.onFailure { err ->
+                authError = err.message ?: "Could not send password reset email."
             }
         }
     }
@@ -459,12 +524,16 @@ private fun AuthLoginStep(
                                             text = "Continue as ${saved.displayName}",
                                             color = Color.White,
                                             fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = "${saved.email} · ${if (saved.provider == "GOOGLE") "Google" else "Email"}",
                                             color = Color.White.copy(alpha = 0.58f),
-                                            fontSize = 11.sp
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     Text(
@@ -483,7 +552,10 @@ private fun AuthLoginStep(
                 Button(
                     onClick = {
                         authError = null
+                        authInfoNotice = null
+                        authManager.clearLastAuthError()
                         if (authManager.isSupabaseConfigured()) {
+                            googleLaunchStartedAtMs = System.currentTimeMillis()
                             val launched = authManager.launchGoogleLogin(context)
                             if (launched) {
                                 awaitingGoogleOAuthCallback = true
@@ -507,7 +579,13 @@ private fun AuthLoginStep(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        if (session.isGoogleConnected) {
+                        if (awaitingGoogleOAuthCallback) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF0D0D0D),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        } else if (session.isGoogleConnected) {
                             Icon(
                                 imageVector = Icons.Rounded.Check,
                                 contentDescription = null,
@@ -523,16 +601,46 @@ private fun AuthLoginStep(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = if (session.isGoogleConnected) {
-                                "Google · ${session.email.ifBlank { session.displayName }}"
-                            } else {
-                                "Continue with Google"
+                            text = when {
+                                awaitingGoogleOAuthCallback -> "Finishing Google Sign-In…"
+                                session.isGoogleConnected -> "Google · ${session.email.ifBlank { session.displayName }}"
+                                else -> "Continue with Google"
                             },
                             color = Color(0xFF0D0D0D),
                             fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+
+                if (awaitingGoogleOAuthCallback) {
+                    TextButton(
+                        onClick = {
+                            awaitingGoogleOAuthCallback = false
+                            launchGoogleAccountPicker()
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(
+                            text = "Browser didn't return? Pick Google account on device",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                if (!showEmailSheet && !authError.isNullOrBlank()) {
+                    Text(
+                        text = authError!!,
+                        color = Color(0xFFFF6B81),
+                        fontSize = 12.5.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp)
+                    )
                 }
 
                 // Button 2: Continue with Email (TuneMind Account)
@@ -546,6 +654,7 @@ private fun AuthLoginStep(
                         .clickable {
                             isSignUpMode = true
                             authError = null
+                            authInfoNotice = null
                             showEmailSheet = true
                         },
                     contentAlignment = Alignment.Center
@@ -600,6 +709,7 @@ private fun AuthLoginStep(
                     modifier = Modifier.clickable {
                         isSignUpMode = false
                         authError = null
+                        authInfoNotice = null
                         showEmailSheet = true
                     },
                     horizontalArrangement = Arrangement.Center,
@@ -665,6 +775,8 @@ private fun AuthLoginStep(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -685,6 +797,7 @@ private fun AuthLoginStep(
                     onSelectTab = { idx ->
                         isSignUpMode = idx == 0
                         authError = null
+                        authInfoNotice = null
                     }
                 )
 
@@ -693,6 +806,7 @@ private fun AuthLoginStep(
                     onValueChange = {
                         emailInput = it
                         authError = null
+                        authInfoNotice = null
                     },
                     label = { Text("Email address") },
                     placeholder = { Text("you@example.com", color = Color.White.copy(alpha = 0.34f)) },
@@ -728,10 +842,24 @@ private fun AuthLoginStep(
                     onValueChange = {
                         passwordInput = it
                         authError = null
+                        authInfoNotice = null
                     },
                     label = { Text(if (isSignUpMode) "Create password" else "Password") },
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (passwordVisible) {
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                                tint = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
                         imeAction = ImeAction.Done
@@ -744,12 +872,41 @@ private fun AuthLoginStep(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                if (!isSignUpMode) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = "Forgot password?",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = !isSubmitting) { submitForgotPassword() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                if (!authInfoNotice.isNullOrBlank()) {
+                    Text(
+                        text = authInfoNotice!!,
+                        color = Color(0xFF34D399),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 18.sp
+                    )
+                }
+
                 if (!authError.isNullOrBlank()) {
                     Text(
                         text = authError!!,
                         color = Color(0xFFFF6B81),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 18.sp
                     )
                 }
 
@@ -765,6 +922,14 @@ private fun AuthLoginStep(
                         .fillMaxWidth()
                         .height(54.dp)
                 ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF09090B),
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                    }
                     Text(
                         text = when {
                             isSubmitting -> "Please wait…"
