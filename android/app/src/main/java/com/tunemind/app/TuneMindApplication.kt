@@ -24,8 +24,12 @@ class TuneMindApplication : Application() {
             }
         }
 
-        // Bind user ID + pre-warm Render instance off the main thread so cold launch stays instant.
+        // Bind user ID + pre-warm Render instance + schedule Sunday/Monthly drop reminders off the main thread
         Thread {
+            runCatching {
+                com.tunemind.app.sync.WeeklyShareDropWorker.ensureChannel(applicationContext)
+                com.tunemind.app.sync.SyncScheduler.scheduleRecapDropReminders(applicationContext)
+            }
             runCatching {
                 if (FirebaseApp.getApps(this).isNotEmpty()) {
                     TuneMindAuthSessionManager.getInstance(applicationContext)

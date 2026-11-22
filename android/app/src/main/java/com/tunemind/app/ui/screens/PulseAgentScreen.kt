@@ -22,11 +22,11 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -93,7 +93,8 @@ fun PulseAgentScreen(
     onCycleAtmospherePalette: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
     onOpenStats: () -> Unit = {},
-    onOpenSearch: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
+    hasUnreadNotifications: Boolean = false,
     onOpenNowPlaying: () -> Unit = {},
     onOpenAgentGuide: () -> Unit = {},
     profileInitial: String = "",
@@ -172,13 +173,23 @@ fun PulseAgentScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Search Music",
-                            tint = Color.White.copy(alpha = 0.86f),
-                            modifier = Modifier.size(22.dp)
-                        )
+                    IconButton(onClick = onOpenNotifications) {
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            Icon(
+                                imageVector = Icons.Rounded.Notifications,
+                                contentDescription = "Notifications & Share Cards",
+                                tint = Color.White.copy(alpha = 0.88f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            if (hasUnreadNotifications) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(activeAccent)
+                                )
+                            }
+                        }
                     }
                     IconButton(onClick = onCycleAtmospherePalette) {
                         Icon(

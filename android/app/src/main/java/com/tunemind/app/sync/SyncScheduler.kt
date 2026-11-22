@@ -83,5 +83,28 @@ object SyncScheduler {
             android.util.Log.w(TAG, "Spotify keep-alive scheduling notice: ${t.message}")
         }
     }
+
+    /**
+     * Schedules a lightweight periodic local check every 12 hours to notify users every Sunday
+     * (and on the 1st of each month) when their viral share cards are ready to post.
+     */
+    fun scheduleRecapDropReminders(context: Context) {
+        try {
+            val periodic = PeriodicWorkRequestBuilder<WeeklyShareDropWorker>(
+                12L,
+                TimeUnit.HOURS
+            )
+                .addTag("tunemind-share-drops")
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                "tunemind-share-drop-reminders",
+                ExistingPeriodicWorkPolicy.KEEP,
+                periodic
+            )
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "Share drop reminder scheduling notice: ${t.message}")
+        }
+    }
 }
 

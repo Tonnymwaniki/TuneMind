@@ -49,8 +49,15 @@ open class MainActivity : ComponentActivity() {
     private var startupError: Throwable? = null
     private val pendingRecoveryBundleFlow =
         kotlinx.coroutines.flow.MutableStateFlow<Bundle?>(null)
+    private val pendingOpenNotificationsFlow =
+        kotlinx.coroutines.flow.MutableStateFlow(false)
 
     private fun captureRecoveryIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(com.tunemind.app.sync.WeeklyShareDropWorker.EXTRA_OPEN_NOTIFICATIONS, false) == true) {
+            pendingOpenNotificationsFlow.value = true
+            intent.removeExtra(com.tunemind.app.sync.WeeklyShareDropWorker.EXTRA_OPEN_NOTIFICATIONS)
+            intent.removeExtra(com.tunemind.app.sync.WeeklyShareDropWorker.EXTRA_OPEN_SHARE_STUDIO)
+        }
         if (intent?.action == com.tunemind.app.provider.MusicPlayerAutoLauncher.ACTION_RECOVER_PLAYBACK_IN_TUNEMIND) {
             val extras = intent.extras ?: return
             pendingRecoveryBundleFlow.value = Bundle(extras)
@@ -213,6 +220,7 @@ open class MainActivity : ComponentActivity() {
                                 activity = this@MainActivity,
                                 authSession = authSession,
                                 pendingRecoveryBundleFlow = pendingRecoveryBundleFlow,
+                                pendingOpenNotificationsFlow = pendingOpenNotificationsFlow,
                                 onSignedOutToAuth = {
                                     hasCompletedLaunchStartFlow = false
                                     hasPassedLaunchOnboardingGate = false
@@ -250,6 +258,7 @@ open class MainActivity : ComponentActivity() {
         activity: ComponentActivity,
         authSession: com.tunemind.app.data.auth.TuneMindUserSession,
         pendingRecoveryBundleFlow: kotlinx.coroutines.flow.MutableStateFlow<Bundle?>,
+        pendingOpenNotificationsFlow: kotlinx.coroutines.flow.MutableStateFlow<Boolean>,
         onSignedOutToAuth: () -> Unit
     ) {
         val context = LocalContext.current
@@ -1014,6 +1023,14 @@ open class MainActivity : ComponentActivity() {
             mutableStateOf<com.tunemind.app.provider.MusicPlayerAutoLauncher.StalledPlaybackAttempt?>(null)
         }
         val pendingRecoveryBundle by pendingRecoveryBundleFlow.collectAsState()
+        val pendingOpenNotifications by pendingOpenNotificationsFlow.collectAsState()
+
+        LaunchedEffect(pendingOpenNotifications) {
+            if (pendingOpenNotifications) {
+                pendingOpenNotificationsFlow.value = false
+                showNotificationsScreen = true
+            }
+        }
 
         LaunchedEffect(Unit) {
             orchestrator.start()
@@ -1391,9 +1408,13 @@ open class MainActivity : ComponentActivity() {
                                 onOpenStats = {
                                     showStatsScreen = true
                                 },
-                                onOpenSearch = {
-                                    showSearchScreen = true
+                                onOpenNotifications = {
+                                    showNotificationsScreen = true
                                 },
+                                hasUnreadNotifications = com.tunemind.app.sync.WeeklyShareDropWorker.isSundayToday() ||
+                                    vaultState.any { it.recoveryProgress >= 0.75f } ||
+                                    hearingInsights.currentHeadroomDb < 6f ||
+                                    !PermissionUtils.hasNotificationListenerPermission(context),
                                 onOpenNowPlaying = {
                                     showNowPlayingScreen = true
                                 },
@@ -1472,6 +1493,7 @@ open class MainActivity : ComponentActivity() {
                                 onOpenHearingHealth = { showHearingScreen = true },
                                 onOpenMusicProfile = { showMusicProfileScreen = true },
                                 onOpenStats = { showStatsScreen = true },
+                                onOpenSearch = { showSearchScreen = true },
                                 tasteShiftSummary = tasteShiftSummary,
                                 onRefreshStats = { vm.refreshLiveListeningStatsNow() },
                                 requestedSubDeck = requestedRhythmSubDeck,

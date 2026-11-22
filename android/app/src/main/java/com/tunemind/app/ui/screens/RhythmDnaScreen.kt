@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -97,6 +98,7 @@ fun RhythmDnaScreen(
     onOpenHearingHealth: () -> Unit = {},
     onOpenMusicProfile: () -> Unit = {},
     onOpenStats: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     tasteShiftSummary: CrossAppTasteShiftSummary = CrossAppTasteShiftSummary(),
     onRefreshStats: () -> Unit = {},
     requestedSubDeck: Int? = null,
@@ -262,12 +264,31 @@ fun RhythmDnaScreen(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.4).sp
                 )
-                Text(
-                    text = "${activePhase.label} · ${activePhase.hoursLabel} · $liveClockLabel",
-                    color = activeSubDeckAccent.copy(alpha = 0.85f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "${activePhase.label} · ${activePhase.hoursLabel} · $liveClockLabel",
+                        color = activeSubDeckAccent.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    IconButton(
+                        onClick = onOpenSearch,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "Search Music",
+                            tint = Color(0xFFF8FAFC),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))

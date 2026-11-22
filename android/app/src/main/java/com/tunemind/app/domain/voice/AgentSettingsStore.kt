@@ -31,6 +31,7 @@ object AgentSettingsStore {
     private const val KEY_MERGE_DUPLICATE_PLAYS = "merge_duplicate_plays_enabled"
     private const val KEY_ALERTS_VAULT_RECOVERY = "alerts_vault_recovery_enabled"
     private const val KEY_ALERTS_WEEKLY_RECAP = "alerts_weekly_recap_enabled"
+    private const val KEY_ALERTS_MONTHLY_RECAP = "alerts_monthly_recap_enabled"
     private const val KEY_ALERTS_HEARING = "alerts_hearing_enabled"
     private const val KEY_ALERTS_SYNC_STATUS = "alerts_sync_status_enabled"
     private const val KEY_KIDS_MODE = "kids_mode_enabled"
@@ -79,6 +80,9 @@ object AgentSettingsStore {
     private val _weeklyRecapAlertsEnabled = MutableStateFlow(true)
     val weeklyRecapAlertsEnabled: StateFlow<Boolean> = _weeklyRecapAlertsEnabled.asStateFlow()
 
+    private val _monthlyRecapAlertsEnabled = MutableStateFlow(true)
+    val monthlyRecapAlertsEnabled: StateFlow<Boolean> = _monthlyRecapAlertsEnabled.asStateFlow()
+
     private val _hearingAlertsEnabled = MutableStateFlow(true)
     val hearingAlertsEnabled: StateFlow<Boolean> = _hearingAlertsEnabled.asStateFlow()
 
@@ -116,6 +120,7 @@ object AgentSettingsStore {
             _mergeDuplicatePlaysEnabled.value = p.getBoolean(KEY_MERGE_DUPLICATE_PLAYS, true)
             _vaultRecoveryAlertsEnabled.value = p.getBoolean(KEY_ALERTS_VAULT_RECOVERY, true)
             _weeklyRecapAlertsEnabled.value = p.getBoolean(KEY_ALERTS_WEEKLY_RECAP, true)
+            _monthlyRecapAlertsEnabled.value = p.getBoolean(KEY_ALERTS_MONTHLY_RECAP, true)
             _hearingAlertsEnabled.value = p.getBoolean(KEY_ALERTS_HEARING, true)
             _syncStatusAlertsEnabled.value = p.getBoolean(KEY_ALERTS_SYNC_STATUS, true)
             _kidsModeEnabled.value = p.getBoolean(KEY_KIDS_MODE, false)
@@ -267,6 +272,17 @@ object AgentSettingsStore {
         ensureLoaded(context)
         prefs(context).edit().putBoolean(KEY_ALERTS_WEEKLY_RECAP, enabled).apply()
         _weeklyRecapAlertsEnabled.value = enabled
+    }
+
+    fun isMonthlyRecapAlertsEnabled(context: Context): Boolean {
+        ensureLoaded(context)
+        return _monthlyRecapAlertsEnabled.value
+    }
+
+    fun setMonthlyRecapAlertsEnabled(context: Context, enabled: Boolean) {
+        ensureLoaded(context)
+        prefs(context).edit().putBoolean(KEY_ALERTS_MONTHLY_RECAP, enabled).apply()
+        _monthlyRecapAlertsEnabled.value = enabled
     }
 
     fun isHearingAlertsEnabled(context: Context): Boolean {
