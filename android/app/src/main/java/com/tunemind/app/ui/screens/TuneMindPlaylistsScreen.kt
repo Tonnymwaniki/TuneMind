@@ -66,9 +66,20 @@ fun TuneMindPlaylistsScreen(
         SpotifyLibrarySyncEngine.ensureLoaded(context)
     }
 
-    var selectedPlaylistId by remember { mutableStateOf<String?>(null) }
+    val initialMatch = remember(initialSelectedPlaylistName) {
+        initialSelectedPlaylistName?.trim()?.takeIf { it.isNotBlank() }?.let { target ->
+            playlists.firstOrNull { it.playlist.name.equals(target, ignoreCase = true) }
+        }
+    }
+    var selectedPlaylistId by remember(initialSelectedPlaylistName) {
+        mutableStateOf(initialMatch?.playlist?.playlistId)
+    }
     // 0 = TuneMind Playlists (universal cross-app), 1 = Spotify Playlists (synced)
-    var activeDirectoryTab by rememberSaveable { mutableStateOf(0) }
+    var activeDirectoryTab by rememberSaveable(initialSelectedPlaylistName) {
+        mutableStateOf(
+            if (initialMatch != null && SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(initialMatch.playlist.playlistId)) 1 else 0
+        )
+    }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showAddSongsSheet by remember { mutableStateOf(false) }
     var showRenameDialogForId by remember { mutableStateOf<String?>(null) }
@@ -271,6 +282,13 @@ fun TuneMindPlaylistsScreen(
                         vm.removeTrackFromTuneMindPlaylist(activePlaylist.playlist.playlistId, entryId)
                     }
                 )
+            } else if (!initialSelectedPlaylistName.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = colors.primaryAccent)
+                }
             } else {
                 PlaylistDirectoryContent(
                     activeTab = activeDirectoryTab,

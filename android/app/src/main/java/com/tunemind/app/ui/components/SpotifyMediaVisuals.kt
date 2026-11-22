@@ -148,7 +148,9 @@ fun TuneMindAvatarCircle(
     borderColor: Color = accentColor.copy(alpha = 0.55f)
 ) {
     val context = LocalContext.current
-    val cleanUrl = imageUrl?.trim()?.takeIf { it.startsWith("http") }
+    val cleanUrl = imageUrl?.trim()?.takeIf {
+        it.startsWith("http") || it.startsWith("file://") || it.startsWith("/")
+    }
     var imageFailed by remember(cleanUrl) { mutableStateOf(false) }
     val letter = fallbackInitial.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "T"
 

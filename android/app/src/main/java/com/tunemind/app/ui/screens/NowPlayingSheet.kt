@@ -115,7 +115,7 @@ fun NowPlayingSheet(
         isYtCurrent -> ytArtist
         isInAppCurrent -> inAppArtist
         else -> nowPlaying?.artist
-    })?.takeIf { it.isNotBlank() } ?: "Start a song or ask TuneMind"
+    })?.takeIf { it.isNotBlank() } ?: "Tap Play to start Fresh Up Next"
     val effectivePlaying = when {
         isYtCurrent -> ytPlaying
         isInAppCurrent -> inAppPlaying
@@ -704,15 +704,15 @@ fun NowPlayingSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            StudioSectionHeader(title = "Up Next · ${queueTracks.size}/5")
+                            StudioSectionHeader(title = "Up Next from Fresh · ${queueTracks.size}/5")
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = if (autoOverrideEnabled) {
-                                    "Queue locked · Shifts up & auto-refills from Fresh"
+                                    "Queue locked · Overrides Spotify & external autoplay"
                                 } else {
-                                    "Queue unlocked · Tap Lock to block player autoplay"
+                                    "Queue unlocked · Tap Lock to override player autoplay"
                                 },
-                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.56f),
+                                color = if (autoOverrideEnabled) safeGreen else Color(0xFFB8B2CC),
                                 fontSize = 11.5.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -724,32 +724,28 @@ fun NowPlayingSheet(
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(100.dp),
-                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (autoOverrideEnabled) safeGreen.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.14f)
-                                ),
+                                color = if (autoOverrideEnabled) safeGreen.copy(alpha = 0.18f) else Color(0xFF1A1033),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(100.dp))
                                     .clickable { vm.setUpNextAutoOverrideEnabled(!autoOverrideEnabled) }
                             ) {
                                 Text(
                                     text = if (autoOverrideEnabled) "Locked" else "Lock",
-                                    color = if (autoOverrideEnabled) safeGreen else Color.White.copy(alpha = 0.72f),
+                                    color = if (autoOverrideEnabled) safeGreen else Color(0xFFD6D1E6),
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                                 )
                             }
                             IconButton(
                                 onClick = { vm.refreshUpNextQueue() },
-                                modifier = Modifier.size(30.dp)
+                                modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Shuffle,
                                     contentDescription = "Refresh Up Next Queue",
                                     tint = neonCyan,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -834,7 +830,7 @@ fun NowPlayingSheet(
                                     artist = capTrack.artist,
                                     spotifyUri = capTrack.spotifyUri,
                                     trackId = canonicalCapId
-                                ).coerceAtLeast(capTrack.playCount)
+                                )
                             }
                             TuneMindTrackCard(
                                 title = capTrack.title,

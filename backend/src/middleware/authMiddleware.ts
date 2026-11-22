@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { getLiveSupabaseClient, getSupabaseAdminClient } from '../config/supabase';
 import { SupabaseIntelligenceStore } from '../domain/storage/SupabaseIntelligenceStore';
+import { recordAuthAuditEvent } from './authAuditLogger';
 
 export interface AuthenticatedUser {
   id: string;
@@ -187,6 +188,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = extractBearerToken(req);
   if (!token) {
+    recordAuthAuditEvent(req, 'AUTH_FAILURE', { reason: 'missing_bearer_token' });
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authorization Bearer token is required.'
@@ -204,6 +206,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   if (!user) {
+    recordAuthAuditEvent(req, 'AUTH_FAILURE', { reason: 'invalid_or_expired_jwt' });
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid or expired authentication session.'

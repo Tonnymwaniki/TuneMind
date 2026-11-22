@@ -174,7 +174,7 @@ fun SearchScreen(
                 val a = entry.artist?.trim()?.ifBlank { "Unknown Artist" } ?: "Unknown Artist"
                 val canonicalId = entry.canonicalTrackId()
                 val truePlays = vm.resolvePlayCount(t, a, null, canonicalId)
-                    .takeIf { it > 0 } ?: entry.distinctAppearanceCount.coerceAtLeast(0)
+                    .coerceAtLeast(0)
                 list.add(
                     UniversalSearchItem(
                         id = "hist_${entry.entryId}_$idx",
@@ -202,7 +202,7 @@ fun SearchScreen(
                     spotifyUri = null,
                     sourcePkg = lib.primarySourcePackage.ifBlank { selectedTargetPlayer },
                     origin = SearchOrigin.LIBRARY,
-                    playCount = vm.resolvePlayCount(lib.title, lib.artist, null, lib.trackId).takeIf { it > 0 } ?: lib.playCount,
+                    playCount = vm.resolvePlayCount(lib.title, lib.artist, null, lib.trackId),
                     trackId = lib.trackId
                 )
             )
@@ -571,9 +571,11 @@ fun SearchScreen(
                             SearchOrigin.DISCOVERY -> electricPurple
                             SearchOrigin.HISTORY -> theme.primaryAccent
                         }
-                        val accuratePlayCount = maxOf(
-                            vm.resolvePlayCount(item.title, item.artist, item.spotifyUri, item.trackId),
-                            item.playCount
+                        val accuratePlayCount = vm.resolvePlayCount(
+                            item.title,
+                            item.artist,
+                            item.spotifyUri,
+                            item.trackId
                         )
                         if (item.vaultId != null) {
                             val vStatus = vm.resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)

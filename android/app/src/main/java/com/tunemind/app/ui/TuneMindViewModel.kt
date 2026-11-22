@@ -853,26 +853,27 @@ class TuneMindViewModel : ViewModel() {
             title = title,
             artist = artist
         )
-        _playCountByTrackId.value[canonical.trackId]?.let { return it }
         val cleanUri = canonical.spotifyUri?.lowercase()?.takeIf { it.isNotBlank() }
-        if (cleanUri != null) {
-            _playCountByUri.value[cleanUri]?.let { return it }
-        }
         val detId = TrackIdentityResolver.buildDeterministicTrackId(title, artist)
-        _playCountByTrackId.value[detId]?.let { return it }
         val key = ListeningPlayDeduplicator.canonicalTrackKey(title, artist)
-        _playCountByKey.value[key]?.let { return it }
         val normKey = TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
-        if (normKey.isNotBlank() && normKey != "|") {
-            _playCountByKey.value[normKey]?.let { return it }
-        }
-        val fuzzy = getUnifiedIndex().findMatch(
+
+        // Single canonical Song Card truth: unify across all identity keys for this track
+        val unifiedMatch = getUnifiedIndex().findMatch(
             title = title,
             artist = artist,
             spotifyUri = canonical.spotifyUri,
             canonicalId = canonical.trackId
+        )?.verifiedPlayCount ?: 0
+
+        return maxOf(
+            unifiedMatch,
+            _playCountByTrackId.value[canonical.trackId] ?: 0,
+            if (cleanUri != null) (_playCountByUri.value[cleanUri] ?: 0) else 0,
+            _playCountByTrackId.value[detId] ?: 0,
+            _playCountByKey.value[key] ?: 0,
+            if (normKey.isNotBlank() && normKey != "|") (_playCountByKey.value[normKey] ?: 0) else 0
         )
-        return fuzzy?.verifiedPlayCount ?: 0
     }
 
     fun isTrackCurrentlyPlaying(title: String?, artist: String?, spotifyUri: String? = null): Boolean {
@@ -1648,6 +1649,10 @@ class TuneMindViewModel : ViewModel() {
         val seenUris = HashSet<String>()
         val seenTitlesWithKnownArtist = HashSet<String>()
 
+        val exclusionAiKeys = _aiDiscoveryCrate.value
+            .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
+            .toSet()
+
         fun addCandidateIfEligible(track: DopamineCapsuleTrack) {
             val cleanTitle = track.title.trim()
             if (cleanTitle.length < 2) return
@@ -1660,6 +1665,14 @@ class TuneMindViewModel : ViewModel() {
             }
             val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, track.artist)
             if (normKey in excludedFresh || canonicalTrackId in excludedFresh) return
+            val cKeyCheck = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, track.artist)
+            // Never pull unplayed For You AI recommendations into Up Next unless explicitly pinned/played in Fresh
+            val isManualOrPlayed = _manualFreshTracks.value.any {
+                ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) == cKeyCheck
+            } || _unifiedTracks.value.any {
+                ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) == cKeyCheck && it.verifiedPlayCount > 0
+            }
+            if (cKeyCheck in exclusionAiKeys && !isManualOrPlayed) return
             val cleanUri = track.spotifyUri?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotBlank() }
             if (cleanUri != null && cleanUri in seenUris) return
 
@@ -2348,9 +2361,21 @@ class TuneMindViewModel : ViewModel() {
     }
 
     fun playNextFromQueue(targetPlayer: String? = null): Boolean {
-        val currentQueue = compileDopamineCapsule().tracks
-        val nextTrack = currentQueue.firstOrNull() ?: return false
-        playQueuedTrack(nextTrack, targetPlayer)
+        val currentQueue = _upNextQueueState.value.tracks
+        val nextTrack = currentQueue.firstOrNull()
+        if (nextTrack != null) {
+            playQueuedTrack(nextTrack, targetPlayer)
+            return true
+        }
+        viewModelScope.launch(Dispatchers.Default) {
+            computeUpNextQueueSync(forceRebuild = true)
+            val builtNext = _upNextQueueState.value.tracks.firstOrNull()
+            if (builtNext != null) {
+                withContext(Dispatchers.Main) {
+                    playQueuedTrack(builtNext, targetPlayer)
+                }
+            }
+        }
         return true
     }
 
@@ -3204,6 +3229,16 @@ class TuneMindViewModel : ViewModel() {
                 return
             }
         }
+        val activeNowPlaying = _homeState.value.nowPlaying
+        val snapNow = com.tunemind.app.service.TuneMindListenerService.instance?.getActivePlaybackSnapshot()
+        val hasActiveTrack = !activeNowPlaying?.title.isNullOrBlank() ||
+            !(snapNow?.title.isNullOrBlank())
+        if (!hasActiveTrack) {
+            if (playNextFromQueue(resolveActiveMediaPackage())) {
+                postNowPlayingStatus("Playing next song from Fresh Up Next")
+                return
+            }
+        }
         val targetPkg = resolveActiveMediaPackage()
         val controllerResumed = runCatching {
             com.tunemind.app.service.TuneMindListenerService.instance?.play(targetPkg) ?: false
@@ -3239,12 +3274,12 @@ class TuneMindViewModel : ViewModel() {
 
     fun skipNext(respectAutoQueue: Boolean = true) {
         val ctx = AppHolder.context
+        val hasActiveTrack = isInAppPlayerCurrent() ||
+            com.tunemind.app.provider.TuneMindYouTubeEmbedController.hasActiveVideo() ||
+            !_homeState.value.nowPlaying?.title.isNullOrBlank()
         val autoQueueActive = ctx != null &&
             com.tunemind.app.domain.voice.AgentSettingsStore.isUpNextAutoOverrideEnabled(ctx)
-        if (respectAutoQueue &&
-            (autoQueueActive || isInAppPlayerCurrent()) &&
-            compileDopamineCapsule().tracks.isNotEmpty()
-        ) {
+        if (!hasActiveTrack || (respectAutoQueue && (autoQueueActive || isInAppPlayerCurrent()))) {
             if (playNextFromQueue(resolveActiveMediaPackage())) return
         }
 
@@ -3429,7 +3464,7 @@ class TuneMindViewModel : ViewModel() {
             }
 
             // Trigger A: Song is within final window -> preempt external playlist autoplay & spin TuneMind Up Next
-            val leadWindowMs = if (queueMonitoredDurationMs >= 35_000L) 4_200L else 1_800L
+            val leadWindowMs = if (queueMonitoredDurationMs >= 35_000L) 5_500L else 2_000L
             if (snap.isPlaying &&
                 queueMonitoredDurationMs >= 15_000L &&
                 snap.positionMs >= (queueMonitoredDurationMs - leadWindowMs) &&
@@ -3991,12 +4026,17 @@ class TuneMindViewModel : ViewModel() {
         }
     }
 
+    private var vaultReconcileJob: kotlinx.coroutines.Job? = null
+
     fun refreshVaultLifecycleNow(syncWithBackend: Boolean = false) {
-        reconcileVaultLifecycle(
-            unifiedList = _unifiedTracks.value,
-            cleanEvents = _cleanPlayHistory.value,
-            syncBackend = syncWithBackend
-        )
+        if (vaultReconcileJob?.isActive == true) return
+        vaultReconcileJob = viewModelScope.launch(Dispatchers.Default) {
+            reconcileVaultLifecycle(
+                unifiedList = _unifiedTracks.value,
+                cleanEvents = _cleanPlayHistory.value,
+                syncBackend = syncWithBackend
+            )
+        }
     }
 
     private fun reconcileVaultLifecycle(

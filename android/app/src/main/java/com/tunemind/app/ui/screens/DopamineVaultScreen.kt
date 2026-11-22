@@ -133,7 +133,7 @@ fun DopamineVaultScreen(
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
-    var selectedTab by remember { mutableStateOf(0) } // 0 = Fresh, 1 = Resting, 2 = For You
+    var selectedTab by remember { mutableStateOf(requestedSubTab?.takeIf { it in 0..2 } ?: 0) } // 0 = Fresh, 1 = Resting, 2 = For You
     var freshFilter by remember { mutableStateOf(0) } // 0 = All, 1 = Comebacks, 2 = Library Gems, 3 = Played
     var activeSyncSong by remember { mutableStateOf<DopamineSongItem?>(null) }
     var showManualPickerSheet by remember { mutableStateOf(false) }
@@ -311,8 +311,7 @@ fun DopamineVaultScreen(
                 ?: "track_${key.hashCode()}_${list.size}".also { seenIds.add(it) }
             val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(t.providerTrackId)
             val canonicalId = t.canonicalTrackId()
-            val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
-                ?: t.distinctAppearanceCount.coerceAtLeast(0)
+            val plays = resolvePlayCount(title, artist, uri).coerceAtLeast(0)
             val vaultStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
             val cooling = vaultStatus.isInVault || vaultStatus.isCoolingDown
             if (!cooling && isFreshExcluded(title, artist, canonicalId)) continue
@@ -410,7 +409,7 @@ fun DopamineVaultScreen(
             }
             val vaultStatus = resolveTrackVaultStatus(title, artist, null, canonicalId)
             if (vaultStatus.isInVault || vaultStatus.isCoolingDown || isFreshExcluded(title, artist, canonicalId)) continue
-            val plays = resolvePlayCount(title, artist, null).takeIf { it > 0 } ?: lib.playCount.coerceAtLeast(0)
+            val plays = resolvePlayCount(title, artist, null).coerceAtLeast(0)
             val appName = CrossAppPlayRecorder.resolveFriendlyPlayerName(lib.primarySourcePackage)
             val readiness = RestingVaultEngine.computeFreshReadiness(
                 baseFreshnessPercent = if (plays == 0) 99 else vaultStatus.freshnessPercent,
@@ -858,7 +857,6 @@ fun DopamineVaultScreen(
                         ) { _, song ->
                             val isCurrentlyPlaying = isTrackCurrentlyPlaying(song.title, song.artist, song.spotifyUri)
                             val accurateCount = resolvePlayCount(song.title, song.artist, song.spotifyUri)
-                                .coerceAtLeast(song.playCount)
 
                             TuneMindTrackCard(
                                 title = song.title,

@@ -2,8 +2,11 @@ package com.tunemind.app.ui.screens
 
 import android.Manifest
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.tunemind.app.data.local.ProfileCustomizationStore
+import com.tunemind.app.data.local.UserProfileCustomData
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -86,8 +89,11 @@ fun ProfileScreen(
     var hasNotificationAccess by remember { mutableStateOf(PermissionUtils.hasNotificationListenerPermission(context)) }
     var isBatteryIgnored by remember { mutableStateOf(PermissionUtils.isIgnoringBatteryOptimizations(context)) }
 
-    var showEditProfileSheet by remember { mutableStateOf(false) }
-    var showCredentialsSheet by remember { mutableStateOf(false) }
+    var showEditProfileScreen by remember { mutableStateOf(false) }
+    var customProfileData by remember(session.userId) {
+        mutableStateOf(ProfileCustomizationStore.load(context))
+    }
+    val effectiveAvatarSource = customProfileData.avatarFilePath.ifBlank { session.avatarUrl }
     var showSwitchAccountsSheet by remember { mutableStateOf(false) }
     var showLogoutSheet by remember { mutableStateOf(false) }
     var showClearHistorySheet by remember { mutableStateOf(false) }
@@ -289,9 +295,9 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TuneMindAvatarCircle(
-                            imageUrl = session.avatarUrl,
+                            imageUrl = effectiveAvatarSource,
                             fallbackInitial = effectiveDisplayName.ifEmpty { "T" },
-                            size = 62.dp,
+                            size = 68.dp,
                             accentColor = neonCyan,
                             borderWidth = 2.dp,
                             borderColor = Color.White.copy(alpha = 0.25f)
@@ -316,7 +322,7 @@ fun ProfileScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 IconButton(
-                                    onClick = { showEditProfileSheet = true },
+                                    onClick = { showEditProfileScreen = true },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
@@ -359,6 +365,38 @@ fun ProfileScreen(
                         }
                     }
 
+                    if (customProfileData.bio.isNotBlank()) {
+                        Text(
+                            text = customProfileData.bio,
+                            fontSize = 13.sp,
+                            color = Color(0xFFD6D1E6),
+                            lineHeight = 18.sp
+                        )
+                    }
+
+                    if (customProfileData.favoriteGenres.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            customProfileData.favoriteGenres.take(4).forEach { genre ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(neonCyan.copy(alpha = 0.14f))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = genre,
+                                        color = neonCyan,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     StudioHairlineDivider()
 
                     val monitoredHours = formatListeningDuration(stats.allTimeListeningMs)
@@ -394,45 +432,25 @@ fun ProfileScreen(
                             )
                         }
                     } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        Button(
+                            onClick = { showEditProfileScreen = true },
+                            shape = RoundedCornerShape(28.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1A1033),
+                                contentColor = Color(0xFFF5F3FF)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
                         ) {
-                            OutlinedButton(
-                                onClick = { showEditProfileSheet = true },
-                                shape = RoundedCornerShape(28.dp),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(46.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Edit,
-                                    contentDescription = null,
-                                    tint = Color(0xFFF8FAFC),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Edit Profile", color = Color(0xFFF8FAFC), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            OutlinedButton(
-                                onClick = { showCredentialsSheet = true },
-                                shape = RoundedCornerShape(28.dp),
-                                border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.48f)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(46.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.VpnKey,
-                                    contentDescription = null,
-                                    tint = neonCyan,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Credentials", color = neonCyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            }
+                            Icon(
+                                imageVector = Icons.Rounded.Edit,
+                                contentDescription = null,
+                                tint = neonCyan,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Edit Profile", color = Color(0xFFF5F3FF), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -768,237 +786,36 @@ fun ProfileScreen(
     }
 
     // =========================================================================
-    // MODAL BOTTOM SHEETS (EDIT PROFILE, CREDENTIALS, SWITCH ACCOUNTS, LOG OUT)
+    // FULL-SCREEN EDIT PROFILE & ACCOUNT SHEETS
     // =========================================================================
 
-    if (showEditProfileSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        var nameDraft by remember(effectiveDisplayName) { mutableStateOf(effectiveDisplayName) }
-        var archetypeDraft by remember(effectiveArchetype) { mutableStateOf(effectiveArchetype) }
-        var isSaving by remember { mutableStateOf(false) }
-
-        ModalBottomSheet(
-            onDismissRequest = { showEditProfileSheet = false },
-            sheetState = sheetState,
-            containerColor = Color(0xFF140D24),
-            contentColor = Color(0xFFF8FAFC),
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Text("Edit Profile", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
-
-                OutlinedTextField(
-                    value = nameDraft,
-                    onValueChange = { nameDraft = it },
-                    label = { Text("Display Name") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = fieldColors,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = archetypeDraft,
-                    onValueChange = { archetypeDraft = it },
-                    label = { Text("Listening Archetype") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = fieldColors,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Button(
-                    onClick = {
-                        if (nameDraft.isNotBlank()) {
-                            isSaving = true
-                            val cleanName = nameDraft.trim()
-                            val cleanArch = archetypeDraft.trim().ifBlank { effectiveArchetype }
-                            vm.updateUserProfile(cleanName, cleanArch)
-                            scope.launch {
-                                authManager.updateProfileAndPreferences(
-                                    displayName = cleanName,
-                                    tasteArchetype = cleanArch
-                                )
-                                isSaving = false
-                                showEditProfileSheet = false
-                                statusBanner = "Profile updated."
-                            }
-                        }
-                    },
-                    enabled = !isSaving && nameDraft.isNotBlank(),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = neonCyan, contentColor = Color(0xFF0D0D0D)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                ) {
-                    Text(if (isSaving) "Saving…" else "Save Profile", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    if (showEditProfileScreen) {
+        BackHandler(enabled = true) { showEditProfileScreen = false }
+        FullScreenEditProfile(
+            initialName = effectiveDisplayName,
+            initialArchetype = effectiveArchetype,
+            initialCustom = customProfileData,
+            fallbackAvatarUrl = session.avatarUrl,
+            neonCyan = neonCyan,
+            fieldColors = fieldColors,
+            onBack = { showEditProfileScreen = false },
+            onSave = { cleanName, cleanArch, updatedCustom ->
+                vm.updateUserProfile(cleanName, cleanArch)
+                if (updatedCustom.favoriteGenres.isNotEmpty()) {
+                    vm.saveTasteAnchors(updatedCustom.favoriteGenres)
+                }
+                ProfileCustomizationStore.save(context, updatedCustom)
+                customProfileData = updatedCustom
+                scope.launch {
+                    authManager.updateProfileAndPreferences(
+                        displayName = cleanName,
+                        tasteArchetype = cleanArch
+                    )
+                    showEditProfileScreen = false
+                    statusBanner = "Profile updated."
                 }
             }
-        }
-    }
-
-    if (showCredentialsSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        var newPassword by remember { mutableStateOf("") }
-        var confirmPassword by remember { mutableStateOf("") }
-        var credMessage by remember { mutableStateOf<String?>(null) }
-        var credIsError by remember { mutableStateOf(false) }
-        var isSubmittingCred by remember { mutableStateOf(false) }
-
-        ModalBottomSheet(
-            onDismissRequest = { showCredentialsSheet = false },
-            sheetState = sheetState,
-            containerColor = Color(0xFF140D24),
-            contentColor = Color(0xFFF8FAFC),
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.22f)) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Text("Credentials & Security", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF8FAFC))
-
-                SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CredentialInfoLine("Email", effectiveEmail.ifBlank { "Not set" })
-                        CredentialInfoLine(
-                            "Sign-In Method",
-                            if (session.primaryProvider == "GOOGLE" || session.isGoogleConnected) "Google" else "Email & Password"
-                        )
-                        CredentialInfoLine("User ID", session.userId.ifBlank { "local-device" })
-                        CredentialInfoLine(
-                            "Cloud Backend",
-                            when {
-                                session.isSupabaseAuthenticated -> "Supabase Authenticated"
-                                authManager.isSupabaseConfigured() -> "Supabase Ready (Local Sign-In)"
-                                else -> "Encrypted Local Vault"
-                            }
-                        )
-                    }
-                }
-
-                if (session.primaryProvider != "GOOGLE") {
-                    OutlinedTextField(
-                        value = newPassword,
-                        onValueChange = {
-                            newPassword = it
-                            credMessage = null
-                        },
-                        label = { Text("New Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = confirmPassword,
-                        onValueChange = {
-                            confirmPassword = it
-                            credMessage = null
-                        },
-                        label = { Text("Confirm New Password") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = fieldColors,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    if (!credMessage.isNullOrBlank()) {
-                        Text(
-                            text = credMessage!!,
-                            color = if (credIsError) dangerRed else safeGreen,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-
-                    Button(
-                        onClick = {
-                            if (newPassword.length < 6) {
-                                credIsError = true
-                                credMessage = "Password must be at least 6 characters."
-                                return@Button
-                            }
-                            if (newPassword != confirmPassword) {
-                                credIsError = true
-                                credMessage = "Passwords do not match."
-                                return@Button
-                            }
-                            isSubmittingCred = true
-                            scope.launch {
-                                val res = authManager.updatePassword(newPassword)
-                                isSubmittingCred = false
-                                res.onSuccess {
-                                    credIsError = false
-                                    credMessage = "Password updated on your TuneMind cloud account."
-                                    newPassword = ""
-                                    confirmPassword = ""
-                                }.onFailure { err ->
-                                    credIsError = true
-                                    credMessage = err.message ?: "Could not update password."
-                                }
-                            }
-                        },
-                        enabled = !isSubmittingCred,
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = neonCyan, contentColor = Color(0xFF0D0D0D)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    ) {
-                        Text(if (isSubmittingCred) "Updating…" else "Update Password", fontWeight = FontWeight.Bold)
-                    }
-
-                    if (effectiveEmail.contains("@") && authManager.isSupabaseConfigured()) {
-                        TextButton(
-                            onClick = {
-                                isSubmittingCred = true
-                                scope.launch {
-                                    val res = authManager.sendPasswordResetEmail(effectiveEmail)
-                                    isSubmittingCred = false
-                                    res.onSuccess {
-                                        credIsError = false
-                                        credMessage = "Password reset link sent to $effectiveEmail."
-                                    }.onFailure { err ->
-                                        credIsError = true
-                                        credMessage = err.message ?: "Could not send reset link."
-                                    }
-                                }
-                            },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("Send Password Reset Email", color = neonCyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                } else {
-                    Text(
-                        text = "Your account uses Google authentication. Manage your password inside your Google Account security settings.",
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.65f),
-                        lineHeight = 18.sp
-                    )
-                }
-            }
-        }
+        )
     }
 
     if (showSwitchAccountsSheet) {
@@ -1439,22 +1256,318 @@ private fun ProfilePermissionRow(
 }
 
 @Composable
-private fun CredentialInfoLine(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color(0xFFF8FAFC),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+private fun FullScreenEditProfile(
+    initialName: String,
+    initialArchetype: String,
+    initialCustom: UserProfileCustomData,
+    fallbackAvatarUrl: String,
+    neonCyan: Color,
+    fieldColors: TextFieldColors,
+    onBack: () -> Unit,
+    onSave: (cleanName: String, cleanArchetype: String, updatedCustom: UserProfileCustomData) -> Unit
+) {
+    val context = LocalContext.current
+    var nameDraft by remember(initialName) { mutableStateOf(initialName) }
+    var bioDraft by remember(initialCustom.bio) { mutableStateOf(initialCustom.bio) }
+    var archetypeDraft by remember(initialArchetype) { mutableStateOf(initialArchetype) }
+    var avatarPathDraft by remember(initialCustom.avatarFilePath) { mutableStateOf(initialCustom.avatarFilePath) }
+    var selectedGenres by remember(initialCustom.favoriteGenres) {
+        mutableStateOf(initialCustom.favoriteGenres.ifEmpty { listOf("Afrobeats", "Alt-R&B") })
+    }
+    var customGenreDraft by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val savedPath = ProfileCustomizationStore.saveAvatarFromUri(context, uri)
+            if (!savedPath.isNullOrBlank()) {
+                avatarPathDraft = savedPath
+            }
+        }
+    }
+
+    val presetGenres = remember {
+        listOf("Afrobeats", "Alt-R&B", "Hip-Hop", "Lo-Fi", "Synthwave", "Neo-Soul", "Amapiano", "Electronic", "Jazz", "Indie")
+    }
+    val presetArchetypes = remember {
+        listOf("Midnight Explorer", "Sonic Purist", "Mood Architect", "High-Energy Groover")
+    }
+
+    StudioAmbientBackground {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            // Top bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFFF5F3FF)
+                    )
+                }
+                Text(
+                    text = "Edit Profile",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF5F3FF)
+                )
+                TextButton(
+                    onClick = {
+                        if (nameDraft.isNotBlank() && !isSaving) {
+                            isSaving = true
+                            onSave(
+                                nameDraft.trim(),
+                                archetypeDraft.trim().ifBlank { initialArchetype },
+                                UserProfileCustomData(
+                                    avatarFilePath = avatarPathDraft,
+                                    bio = bioDraft.trim(),
+                                    favoriteGenres = selectedGenres
+                                )
+                            )
+                        }
+                    },
+                    enabled = nameDraft.isNotBlank() && !isSaving
+                ) {
+                    Text(
+                        text = if (isSaving) "Saving…" else "Save",
+                        color = if (nameDraft.isNotBlank()) neonCyan else Color(0xFFB8B2CC),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Avatar Upload Section
+                val previewSource = avatarPathDraft.ifBlank { fallbackAvatarUrl }
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    TuneMindAvatarCircle(
+                        imageUrl = previewSource,
+                        fallbackInitial = nameDraft.ifBlank { "T" },
+                        size = 104.dp,
+                        accentColor = neonCyan,
+                        borderWidth = 2.dp,
+                        borderColor = neonCyan.copy(alpha = 0.65f),
+                        modifier = Modifier.clickable { photoPickerLauncher.launch("image/*") }
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(neonCyan)
+                            .clickable { photoPickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PhotoCamera,
+                            contentDescription = "Upload Profile Photo",
+                            tint = Color(0xFF07020F),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = { photoPickerLauncher.launch("image/*") }) {
+                        Text("Upload Photo", color = neonCyan, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (avatarPathDraft.isNotBlank()) {
+                        TextButton(onClick = { avatarPathDraft = "" }) {
+                            Text("Remove Photo", color = Color(0xFFFF6B81), fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                // Display Name
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(
+                        value = nameDraft,
+                        onValueChange = { nameDraft = it },
+                        label = { Text("Display Name") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "TuneMind AI Agent uses this name during Pro voice & chat conversations.",
+                        color = Color(0xFFB8B2CC),
+                        fontSize = 11.5.sp
+                    )
+                }
+
+                // Bio / Musical Vibe
+                OutlinedTextField(
+                    value = bioDraft,
+                    onValueChange = { if (it.length <= 140) bioDraft = it },
+                    label = { Text("Bio / Musical Vibe (optional)") },
+                    placeholder = { Text("e.g. Late-night Afrobeats & Alt-R&B curator", color = Color(0xFFB8B2CC)) },
+                    maxLines = 3,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Listening Archetype
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = archetypeDraft,
+                        onValueChange = { archetypeDraft = it },
+                        label = { Text("Listening Archetype") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        presetArchetypes.take(2).forEach { arch ->
+                            val selected = archetypeDraft.equals(arch, ignoreCase = true)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selected) neonCyan.copy(alpha = 0.18f) else Color(0xFF120A24))
+                                    .clickable { archetypeDraft = arch }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = arch,
+                                    color = if (selected) neonCyan else Color(0xFFD6D1E6),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Favorite Genres
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Favorite Genres",
+                        color = Color(0xFFF5F3FF),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        presetGenres.forEach { genre ->
+                            val isSelected = selectedGenres.any { it.equals(genre, ignoreCase = true) }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(if (isSelected) neonCyan.copy(alpha = 0.20f) else Color(0xFF120A24))
+                                    .clickable {
+                                        selectedGenres = if (isSelected) {
+                                            selectedGenres.filterNot { it.equals(genre, ignoreCase = true) }
+                                        } else {
+                                            (selectedGenres + genre).distinct()
+                                        }
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = genre,
+                                    color = if (isSelected) neonCyan else Color(0xFFD6D1E6),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = customGenreDraft,
+                            onValueChange = { customGenreDraft = it },
+                            label = { Text("Add custom genre") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = fieldColors,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                val g = customGenreDraft.trim()
+                                if (g.isNotBlank() && selectedGenres.none { it.equals(g, ignoreCase = true) }) {
+                                    selectedGenres = selectedGenres + g
+                                    customGenreDraft = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = neonCyan, contentColor = Color(0xFF07020F)),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.height(52.dp)
+                        ) {
+                            Text("Add", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        if (nameDraft.isNotBlank() && !isSaving) {
+                            isSaving = true
+                            onSave(
+                                nameDraft.trim(),
+                                archetypeDraft.trim().ifBlank { initialArchetype },
+                                UserProfileCustomData(
+                                    avatarFilePath = avatarPathDraft,
+                                    bio = bioDraft.trim(),
+                                    favoriteGenres = selectedGenres
+                                )
+                            )
+                        }
+                    },
+                    enabled = !isSaving && nameDraft.isNotBlank(),
+                    shape = RoundedCornerShape(28.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = neonCyan, contentColor = Color(0xFF07020F)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                ) {
+                    Text(if (isSaving) "Saving…" else "Save Profile", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
     }
 }
 

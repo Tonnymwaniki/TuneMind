@@ -1054,6 +1054,12 @@ class AgentVoiceManager(
 
     private fun JSONObject.appendStudioContextJson() {
         appendLocalTimeContextJson()
+        val isProUser = com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).state.value.hasProAccess
+        val savedName = com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
+            .sessionFlow.value.displayName.trim()
+        if (isProUser && savedName.isNotBlank() && savedName != "TuneMind Listener") {
+            put("user_display_name", savedName)
+        }
         val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
         val installedPlayers = com.tunemind.app.ui.components.MusicPlayerUiHelper.filterMusicPlayers(
             context,

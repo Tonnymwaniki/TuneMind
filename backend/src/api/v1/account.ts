@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getLiveSupabaseClient, getSupabaseAdminClient, isServiceRoleConfigured } from '../../config/supabase';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { EventStore } from '../../domain/events/EventStore';
+import { AccountMetadataCache } from '../../domain/storage/AccountMetadataCache';
 
 const router = Router();
 
@@ -15,7 +16,10 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
     const client = getSupabaseAdminClient() || getLiveSupabaseClient();
 
     let profile: Record<string, unknown> | null = null;
-    if (client) {
+    const cachedProfile = AccountMetadataCache.get(user.id);
+    if (cachedProfile !== undefined) {
+      profile = cachedProfile;
+    } else if (client) {
       const { data } = await client
         .from('profiles')
         .select('id, email, display_name, avatar_url, primary_provider, google_connected, spotify_connected, private_session_enabled, merge_duplicate_plays, preferred_target_player, taste_archetype, created_at, updated_at')
@@ -24,6 +28,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       if (data) {
         profile = data as Record<string, unknown>;
       }
+      AccountMetadataCache.set(user.id, profile);
     }
 
     res.json({
@@ -171,6 +176,7 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
         authUserDeleted = true;
       }
     }
+    AccountMetadataCache.invalidate(user.id);
 
     res.status(200).json({
       status: 'deleted',

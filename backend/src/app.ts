@@ -58,6 +58,13 @@ export function createApp(): express.Express {
     message: 'Too many support or account requests. Please wait a few minutes.'
   });
 
+  const authOAuthLimiter = createRateLimiter({
+    windowMs: 15 * 60_000,
+    max: 15,
+    keyPrefix: 'api-oauth-auth',
+    message: 'Too many authentication or OAuth exchange attempts. Please wait 15 minutes and try again.'
+  });
+
   app.use('/api/v1', optionalAuth, apiGlobalLimiter);
 
   // ─── Public Legal & Mobile App Version Routes ──────────────────────────────
@@ -71,7 +78,7 @@ export function createApp(): express.Express {
   app.use('/api/v1/music', musicProfilesRouter);
   app.use('/api/v1/support', sensitiveOpsLimiter, supportRouter);
   app.use('/api/v1/account', sensitiveOpsLimiter, accountRouter);
-  app.use('/api/v1/spotify', spotifyRouter);
+  app.use('/api/v1/spotify', authOAuthLimiter, spotifyRouter);
   app.use('/api/v1/track-cards', trackCardsRouter);
   app.use('/api/v1/billing', billingRouter);
 

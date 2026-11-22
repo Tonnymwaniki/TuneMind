@@ -1848,7 +1848,13 @@ Always finish by calling ` + "`submit_agent_turn`" + `.`;
             { role: 'assistant' as const, text: r.agentReplied }
           ]);
 
-    const systemPrompt = this.getAutonomousSystemPrompt();
+    const savedDisplayName = typeof (context as any).user_display_name === 'string'
+      ? (context as any).user_display_name.trim()
+      : '';
+    const nameInstruction = savedDisplayName
+      ? `\n\nUSER PROFILE NAME (PRO): The user's saved name is "${savedDisplayName}". Address them naturally by this name when appropriate in conversation.`
+      : '';
+    const systemPrompt = this.getAutonomousSystemPrompt() + nameInstruction;
     const tools = this.getAutonomousAgentTools();
 
     const daypartWindow =

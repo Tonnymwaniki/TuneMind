@@ -315,11 +315,11 @@ fun SettingsScreen(
             StudioHairlineDivider()
 
             SettingsSwitchRow(
-                title = "Auto Queue Takeover",
+                title = "Override External Player Queue (Up Next)",
                 description = if (upNextAutoOverrideEnabled) {
-                    "Stops external autoplay at song end and spins TuneMind's Up Next track."
+                    "ON: When playing in Spotify or any music player, TuneMind plays your 5-song Fresh Up Next queue next instead of the player's queue."
                 } else {
-                    "Off: Lets your music app advance unless you tap Next."
+                    "OFF: Lets Spotify or your music player advance its own queue unless you tap Next."
                 },
                 checked = upNextAutoOverrideEnabled,
                 onCheckedChange = {

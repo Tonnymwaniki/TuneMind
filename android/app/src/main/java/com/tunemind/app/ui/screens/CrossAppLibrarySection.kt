@@ -661,7 +661,7 @@ fun CrossAppLibrarySection(
                             track.artist,
                             track.trackId.takeIf { it.startsWith("spotify:track:") }
                         )
-                        val truePlayCount = maxOf(resolvedPlays, track.playCount)
+                        val truePlayCount = resolvedPlays
 
                         TuneMindTrackCard(
                             title = track.title,

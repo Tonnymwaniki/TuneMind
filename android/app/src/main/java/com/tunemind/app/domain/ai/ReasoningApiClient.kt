@@ -3,6 +3,8 @@ package com.tunemind.app.domain.ai
 import android.util.Log
 import com.tunemind.app.domain.execution.ReasoningResponse
 import com.tunemind.app.domain.execution.OsExecutionCommand
+import com.tunemind.app.domain.network.TuneMindAuthOkHttp
+import com.tunemind.app.ui.AppHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -13,7 +15,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class ReasoningApiClient(private val baseUrl: String) {
-    private val client = OkHttpClient()
+    private val client: OkHttpClient by lazy {
+        AppHolder.context?.let { TuneMindAuthOkHttp.getAuthenticatedClient(it) } ?: OkHttpClient()
+    }
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
     suspend fun evaluateSatiety(

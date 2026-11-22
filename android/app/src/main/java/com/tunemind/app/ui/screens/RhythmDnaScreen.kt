@@ -221,7 +221,10 @@ fun RhythmDnaScreen(
     )
 
     // 0 = Overview, 1 = Cross-App Library, 2 = History
-    var activeRhythmSubDeck by rememberSaveable { mutableStateOf(0) }
+    var activeRhythmSubDeck by rememberSaveable { mutableStateOf(requestedSubDeck?.takeIf { it in 0..2 } ?: 0) }
+    if (requestedSubDeck != null && requestedSubDeck in 0..2 && activeRhythmSubDeck != requestedSubDeck) {
+        activeRhythmSubDeck = requestedSubDeck
+    }
     var historyFilterMode by rememberSaveable { mutableStateOf(0) } // 0 = All Apps, 1 = Recent 24h, 2 = Most Played
 
     LaunchedEffect(requestedSubDeck) {
@@ -769,8 +772,7 @@ fun RhythmDnaScreen(
                                     val pkg = selectedTargetPlayer.ifBlank {
                                         track.sourcePackage?.ifBlank { "unknown_player" } ?: "unknown_player"
                                     }
-                                    val strictPlays = resolvePlayCount(title, artist, uri)
-                                        .takeIf { it > 0 } ?: track.distinctAppearanceCount.coerceAtLeast(0)
+                                    val strictPlays = resolvePlayCount(title, artist, uri).coerceAtLeast(0)
                                     val isPlaying = isTrackCurrentlyPlaying(title, artist, uri)
                                     val vStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
 
@@ -851,8 +853,7 @@ fun RhythmDnaScreen(
         val artist = selected.artist?.trim() ?: "Unknown Artist"
         val uri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(selected.providerTrackId)
         val canonicalId = selected.canonicalTrackId()
-        val plays = resolvePlayCount(title, artist, uri).takeIf { it > 0 }
-            ?: selected.distinctAppearanceCount.coerceAtLeast(0)
+        val plays = resolvePlayCount(title, artist, uri).coerceAtLeast(0)
         val vStatus = resolveTrackVaultStatus(title, artist, uri, canonicalId)
         val freshness = if (vStatus.isInVault || vStatus.satietyScore > 0) vStatus.freshnessPercent else (100 - minOf(94, plays * 19)).coerceIn(15, 98)
         val pkg = selectedTargetPlayer.ifBlank {

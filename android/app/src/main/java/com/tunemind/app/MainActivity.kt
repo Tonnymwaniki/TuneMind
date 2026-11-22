@@ -1280,7 +1280,7 @@ open class MainActivity : ComponentActivity() {
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    beyondViewportPageCount = 0,
+                    beyondViewportPageCount = 1,
                     key = { it },
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
@@ -1443,7 +1443,9 @@ open class MainActivity : ComponentActivity() {
                                 } else {
                                     ""
                                 },
-                                profileAvatarUrl = authSession.avatarUrl,
+                                profileAvatarUrl = com.tunemind.app.data.local.ProfileCustomizationStore.load(context)
+                                    .avatarFilePath
+                                    .ifBlank { authSession.avatarUrl },
                                 currentTrackSpotifyUri = nowPlaying?.spotifyUri,
                                 currentTrackPlayCount = currentTrackPlayCount,
                                 autonomousDjEnabled = autonomousDjEnabled,
