@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { requestLogger } from './middleware/requestLogger';
 import { securityHeaders } from './middleware/securityHeaders';
 import { createRateLimiter } from './middleware/rateLimiter';
-import { optionalAuth, resolveEffectiveUserIdentity } from './middleware/authMiddleware';
+import { optionalAuth, requireAuthInProduction, resolveEffectiveUserIdentity } from './middleware/authMiddleware';
 import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
@@ -25,6 +25,14 @@ export function createApp(): express.Express {
 
   // ─── Core Security & Parsing Middleware ────────────────────────────────────
   app.use(securityHeaders);
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const p = req.path.toLowerCase();
+    if (p.includes('/.git') || p.endsWith('.map') || p.includes('..')) {
+      res.status(404).end();
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: '5mb' }));
   app.use(requestLogger);
 
@@ -68,22 +76,17 @@ export function createApp(): express.Express {
   app.use('/api/v1/billing', billingRouter);
 
   // ─── Live Supabase Intelligence Sync & Long-Term Growth Endpoints ──────────
-  app.post('/api/v1/intelligence/sync', async (req: Request, res: Response) => {
+  app.post('/api/v1/intelligence/sync', requireAuthInProduction, async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
       const userId = identity.userId;
-      const override = {
-        supabaseUrl: body.supabase_url,
-        supabaseKey: body.supabase_anon_key
-      };
 
       const tracks = Array.isArray(body.tracks) ? body.tracks : [];
       const syncRes = await SupabaseIntelligenceStore.syncTracksAndTelemetryToSupabase(userId, tracks, {
         hearingTelemetry: body.hearing_telemetry,
         vaultTracks: body.vault_tracks,
-        restoredTrackTimestamps: body.restored_track_timestamps,
-        override
+        restoredTrackTimestamps: body.restored_track_timestamps
       });
 
       if (body.intervention && typeof body.intervention === 'object') {
@@ -101,12 +104,11 @@ export function createApp(): express.Express {
             track_artist: body.intervention.track_artist,
             spotify_uri: body.intervention.spotify_uri || body.intervention.spotifyUri,
             circadian_daypart: body.intervention.circadian_daypart
-          },
-          override
+          }
         );
       }
 
-      const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId, override);
+      const summary = await SupabaseIntelligenceStore.fetchUserLongTermMemory(userId);
       res.json({
         status: 'synced',
         user_id: userId,
@@ -124,7 +126,7 @@ export function createApp(): express.Express {
     }
   });
 
-  app.post('/api/v1/intelligence/vault/reconcile', async (req: Request, res: Response) => {
+  app.post('/api/v1/intelligence/vault/reconcile', requireAuthInProduction, async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
       const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
@@ -142,11 +144,7 @@ export function createApp(): express.Express {
         Array.isArray(body.tracks) ? body.tracks : [],
         {
           vaultTracks: reconciled.activeVault,
-          restoredTrackTimestamps: restoredTimestamps,
-          override: {
-            supabaseUrl: body.supabase_url,
-            supabaseKey: body.supabase_anon_key
-          }
+          restoredTrackTimestamps: restoredTimestamps
         }
       );
 

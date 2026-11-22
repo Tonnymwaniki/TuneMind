@@ -1,5 +1,6 @@
 package com.tunemind.app.ui.components
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -9,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -40,6 +43,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,7 +58,7 @@ fun AnimatedEqualizerBars(
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "live_eq_bars")
-    val phase by infiniteTransition.animateFloat(
+    val phaseState = infiniteTransition.animateFloat(
         initialValue = 0.25f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
@@ -64,25 +69,58 @@ fun AnimatedEqualizerBars(
     )
 
     Canvas(modifier = modifier) {
+        val phase = phaseState.value
         val barWidth = (size.width / 6.5f).coerceAtLeast(2.dp.toPx())
         val gap = (size.width - barWidth * 4f) / 3f
         val maxH = size.height
-        val heights = listOf(
-            maxH * (0.40f + 0.50f * phase),
-            maxH * (0.95f - 0.38f * phase),
-            maxH * (0.52f + 0.44f * phase),
-            maxH * (0.82f - 0.34f * phase)
-        )
-        heights.forEachIndexed { idx, h ->
+        val corner = CornerRadius(barWidth / 2f, barWidth / 2f)
+        for (idx in 0..3) {
+            val h = when (idx) {
+                0 -> maxH * (0.40f + 0.50f * phase)
+                1 -> maxH * (0.95f - 0.38f * phase)
+                2 -> maxH * (0.52f + 0.44f * phase)
+                else -> maxH * (0.82f - 0.34f * phase)
+            }
             val x = idx * (barWidth + gap)
             val y = maxH - h
             drawRoundRect(
                 color = color,
                 topLeft = Offset(x, y),
                 size = Size(barWidth, h),
-                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+                cornerRadius = corner
             )
         }
+    }
+}
+
+/**
+ * Formats play/track counts compactly for large numbers (e.g. 999 -> "999", 1100 -> "1.1k", 1200000 -> "1.2M").
+ */
+fun formatCompactPlayCount(count: Int): String {
+    val safe = count.coerceAtLeast(0)
+    return when {
+        safe < 1_000 -> safe.toString()
+        safe < 1_000_000 -> {
+            val tenths = safe / 100
+            val whole = tenths / 10
+            val rem = tenths % 10
+            if (rem == 0) "${whole}k" else "${whole}.${rem}k"
+        }
+        else -> {
+            val tenths = safe / 100_000
+            val whole = tenths / 10
+            val rem = tenths % 10
+            if (rem == 0) "${whole}M" else "${whole}.${rem}M"
+        }
+    }
+}
+
+fun formatPlaysLabel(count: Int, zeroLabel: String = "0 plays"): String {
+    val safe = count.coerceAtLeast(0)
+    return when {
+        safe <= 0 -> zeroLabel
+        safe == 1 -> "1 play"
+        else -> "${formatCompactPlayCount(safe)} plays"
     }
 }
 
@@ -152,7 +190,7 @@ fun TuneMindTrackCard(
         appLabel
     ) {
         val playSummary = when {
-            safePlayCount > 0 -> "$safePlayCount ${if (safePlayCount == 1) "play" else "plays"}"
+            safePlayCount > 0 -> formatPlaysLabel(safePlayCount)
             showUnplayedLabel -> zeroPlayLabel.ifBlank { "0 plays" }
             else -> null
         }
@@ -177,13 +215,23 @@ fun TuneMindTrackCard(
         ).joinToString(" · ")
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    val haptics = LocalHapticFeedback.current
+    val cardInteraction = remember { MutableInteractionSource() }
+    Column(modifier = modifier.fillMaxWidth().animateContentSize(TuneMindSprings.snappy())) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .tactilePressScale(cardInteraction, pressedScale = 0.98f)
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (isCurrentlyPlaying) liveGreen.copy(alpha = 0.08f) else Color.Transparent)
-                .clickable { (onCardClick ?: onPlayClick).invoke() }
+                .clickable(
+                    interactionSource = cardInteraction,
+                    indication = null
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    (onCardClick ?: onPlayClick).invoke()
+                }
                 .padding(horizontal = 4.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)

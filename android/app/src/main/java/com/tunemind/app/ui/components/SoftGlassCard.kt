@@ -1,19 +1,10 @@
 package com.tunemind.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +23,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,15 +34,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -73,123 +63,38 @@ fun SoftGlassCard(
     val rimAccent = accentTint ?: theme.primaryAccent
 
     val bgBrush = remember(theme.elevatedSurface, theme.cardSurface, theme.primaryBackground, rimAccent) {
-        val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.03f).copy(alpha = 0.88f)
-        val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.18f).copy(alpha = 0.94f)
+        val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.03f).copy(alpha = 0.92f)
+        val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.16f).copy(alpha = 0.96f)
         Brush.verticalGradient(colors = listOf(topSurface, bottomSurface))
-    }
-
-    val borderBrush = remember(rimAccent) {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.10f),
-                rimAccent.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.05f)
-            )
-        )
     }
 
     Box(
         modifier = modifier
             .clip(shape)
             .background(brush = bgBrush)
-            .border(
-                width = 1.dp,
-                brush = borderBrush,
-                shape = shape
-            )
             .padding(contentPadding)
     ) {
         content()
     }
 }
 
-/**
- * Miniature animated AI neural orbit emblem rendered directly inside AI-powered tabs (e.g. For You).
- */
 @Composable
 private fun CompactAiTabLogo(
     isSelected: Boolean,
     hasFreshDrop: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val transition = rememberInfiniteTransition(label = "compact_ai_tab_logo")
-    val orbitAngle by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(5600, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "tab_orbit_angle"
+    val tint = when {
+        hasFreshDrop -> Color(0xFF00F0FF)
+        isSelected -> Color(0xFFF5F3FF)
+        else -> Color(0xFFB8B2CC)
+    }
+    Icon(
+        imageVector = Icons.Rounded.AutoAwesome,
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier
     )
-    val pulse by transition.animateFloat(
-        initialValue = 0.78f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "tab_star_pulse"
-    )
-
-    val aiCyan = Color(0xFF38BDF8)
-    val aiViolet = Color(0xFFA855F7)
-    val aiGold = Color(0xFFFBBF24)
-    val orbitBrush = remember {
-        Brush.sweepGradient(
-            colors = listOf(
-                aiCyan,
-                aiViolet,
-                aiGold,
-                aiCyan.copy(alpha = 0.2f)
-            )
-        )
-    }
-    val starBrush = remember(hasFreshDrop) {
-        Brush.linearGradient(
-            colors = if (hasFreshDrop) {
-                listOf(Color(0xFFF8FAFC), aiCyan)
-            } else {
-                listOf(Color(0xFFE2E8F0), aiViolet)
-            }
-        )
-    }
-    val starPath = remember { Path() }
-
-    Canvas(modifier = modifier) {
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val r = size.minDimension / 2f
-
-        rotate(degrees = orbitAngle, pivot = Offset(cx, cy)) {
-            drawArc(
-                brush = orbitBrush,
-                startAngle = 0f,
-                sweepAngle = 275f,
-                useCenter = false,
-                topLeft = Offset(cx - r * 0.84f, cy - r * 0.84f),
-                size = Size(r * 1.68f, r * 1.68f),
-                style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
-
-        val starR = r * 0.52f * (if (isSelected) pulse else 0.92f)
-        val innerR = starR * 0.32f
-        starPath.rewind()
-        starPath.moveTo(cx, cy - starR)
-        starPath.lineTo(cx + innerR, cy - innerR)
-        starPath.lineTo(cx + starR, cy)
-        starPath.lineTo(cx + innerR, cy + innerR)
-        starPath.lineTo(cx, cy + starR)
-        starPath.lineTo(cx - innerR, cy + innerR)
-        starPath.lineTo(cx - starR, cy)
-        starPath.lineTo(cx - innerR, cy - innerR)
-        starPath.close()
-        drawPath(
-            path = starPath,
-            brush = starBrush
-        )
-    }
 }
 
 /**
@@ -212,12 +117,13 @@ fun MagicalSegmentedTabs(
     height: Dp = 46.dp
 ) {
     if (tabs.isEmpty()) return
+    val haptics = LocalHapticFeedback.current
     val theme = LocalAdaptiveTheme.current
     val safeIndex = selectedIndex.coerceIn(0, tabs.lastIndex)
     val activeAccent = tabs[safeIndex].accent ?: theme.primaryAccent
     val animatedAccent by animateColorAsState(
         targetValue = activeAccent,
-        animationSpec = tween(240),
+        animationSpec = TuneMindSprings.snappy(),
         label = "tab_accent_color"
     )
 
@@ -230,11 +136,6 @@ fun MagicalSegmentedTabs(
             .height(height)
             .clip(outerShape)
             .background(trackColor)
-            .border(
-                width = 0.8.dp,
-                color = Color.White.copy(alpha = 0.08f),
-                shape = outerShape
-            )
             .padding(4.dp)
     ) {
         val tabGap = 4.dp
@@ -260,12 +161,7 @@ fun MagicalSegmentedTabs(
                 .width(slotWidth)
                 .fillMaxHeight()
                 .clip(pillShape)
-                .background(animatedAccent.copy(alpha = 0.16f))
-                .border(
-                    width = 0.8.dp,
-                    color = animatedAccent.copy(alpha = 0.36f),
-                    shape = pillShape
-                )
+                .background(animatedAccent.copy(alpha = 0.18f))
         )
 
         Row(
@@ -275,23 +171,28 @@ fun MagicalSegmentedTabs(
         ) {
             tabs.forEachIndexed { idx, tab ->
                 val isSelected = idx == safeIndex
+                val tabInteraction = remember { MutableInteractionSource() }
                 val textColor by animateColorAsState(
                     targetValue = when {
-                        isSelected -> Color(0xFFFAFAFA)
-                        else -> Color.White.copy(alpha = 0.56f)
+                        isSelected -> Color(0xFFF5F3FF)
+                        else -> Color(0xFFB8B2CC)
                     },
-                    animationSpec = tween(180),
+                    animationSpec = TuneMindSprings.snappy(),
                     label = "tab_label_color_$idx"
                 )
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .tactilePressScale(tabInteraction, pressedScale = 0.96f)
                         .clip(pillShape)
                         .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
+                            interactionSource = tabInteraction,
                             indication = null,
-                            onClick = { onSelectTab(idx) }
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectTab(idx)
+                            }
                         )
                         .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center

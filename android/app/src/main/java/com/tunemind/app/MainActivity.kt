@@ -332,8 +332,8 @@ open class MainActivity : ComponentActivity() {
 
         LaunchedEffect(Unit) {
             kotlinx.coroutines.delay(150L)
-            com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
             withContext(Dispatchers.IO) {
+                com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(context)
                 com.tunemind.app.sync.SyncScheduler.scheduleSpotifyTokenKeepAlive(context)
             }
             vm.initBilling(context)
@@ -1318,6 +1318,8 @@ open class MainActivity : ComponentActivity() {
                                 forYouPicks = aiDiscoveryCrate,
                                 learningState = forYouLearningState,
                                 isDiscovering = isDiscovering,
+                                isForYouAiEnabled = vm.isForYouAiEnabled.collectAsState().value,
+                                onToggleForYouAi = { enabled -> vm.setForYouAiEnabled(enabled) },
                                 resolvePlayCount = stableResolvePlayCount,
                                 isTrackCurrentlyPlaying = stableIsTrackPlaying,
                                 onRefreshForYou = {

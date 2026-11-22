@@ -43,13 +43,29 @@ fun ViralShareCardPreview(
     val primary = theme.primaryAccent
     val secondary = theme.secondaryAccent
 
-    val cardBrush = Brush.linearGradient(
-        colors = listOf(
-            Color(0xFF10172A),
-            Color(0xFF090D18),
-            Color(0xFF130F24)
+    val isReceipt = format == ShareCardFormat.DNA_RECEIPT
+
+    val cardBrush = if (isReceipt) {
+        Brush.verticalGradient(
+            colors = listOf(Color(0xFFF6F3EC), Color(0xFFEDE8DC))
         )
-    )
+    } else {
+        Brush.linearGradient(
+            colors = when (format) {
+                ShareCardFormat.PERSONALITY_ROAST -> listOf(
+                    Color(0xFF121024),
+                    Color(0xFF080B14),
+                    Color(0xFF180E22)
+                )
+                ShareCardFormat.NOW_PLAYING_VIBE -> listOf(
+                    Color(0xFF0C1824),
+                    Color(0xFF070B14),
+                    Color(0xFF150E26)
+                )
+                ShareCardFormat.DNA_RECEIPT -> listOf(Color(0xFFF6F3EC), Color(0xFFEDE8DC))
+            }
+        )
+    }
 
     Box(
         modifier = modifier
@@ -59,10 +75,14 @@ fun ViralShareCardPreview(
             .border(
                 width = 1.2.dp,
                 brush = Brush.linearGradient(
-                    listOf(
-                        primary.copy(alpha = 0.65f),
-                        secondary.copy(alpha = 0.45f)
-                    )
+                    if (isReceipt) {
+                        listOf(Color(0xFFD6CFC0), Color(0xFFC2B9A5))
+                    } else {
+                        listOf(
+                            primary.copy(alpha = 0.65f),
+                            secondary.copy(alpha = 0.45f)
+                        )
+                    }
                 ),
                 shape = RoundedCornerShape(24.dp)
             )
@@ -80,8 +100,11 @@ fun ViralShareCardPreview(
             ) {
                 Surface(
                     shape = RoundedCornerShape(100.dp),
-                    color = primary.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, primary.copy(alpha = 0.45f))
+                    color = if (isReceipt) Color(0xFF111827).copy(alpha = 0.08f) else primary.copy(alpha = 0.16f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isReceipt) Color(0xFF111827).copy(alpha = 0.25f) else primary.copy(alpha = 0.45f)
+                    )
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -95,12 +118,12 @@ fun ViralShareCardPreview(
                                 ShareCardFormat.NOW_PLAYING_VIBE -> Icons.Rounded.GraphicEq
                             },
                             contentDescription = null,
-                            tint = primary,
+                            tint = if (isReceipt) Color(0xFF111827) else primary,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = "TUNEMIND · ${model.period.badgeTitle}",
-                            color = Color(0xFFF8FAFC),
+                            color = if (isReceipt) Color(0xFF111827) else Color(0xFFF8FAFC),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.4.sp
@@ -110,7 +133,7 @@ fun ViralShareCardPreview(
 
                 Text(
                     text = model.rangeLabel.uppercase(Locale.getDefault()),
-                    color = Color.White.copy(alpha = 0.62f),
+                    color = if (isReceipt) Color(0xFF4B5563) else Color.White.copy(alpha = 0.62f),
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1
@@ -120,45 +143,47 @@ fun ViralShareCardPreview(
             // Card Body
             when (format) {
                 ShareCardFormat.PERSONALITY_ROAST -> PersonalityRoastPreviewBody(model, primary, secondary)
-                ShareCardFormat.DNA_RECEIPT -> DnaReceiptPreviewBody(model, primary, secondary)
+                ShareCardFormat.DNA_RECEIPT -> DnaReceiptPreviewBody(model)
                 ShareCardFormat.NOW_PLAYING_VIBE -> NowPlayingVibePreviewBody(model, primary, secondary)
             }
 
-            StudioHairlineDivider()
+            if (!isReceipt) {
+                StudioHairlineDivider()
 
-            // Brand Watermark Footer
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Tracked Live by TuneMind",
-                        color = Color(0xFFF8FAFC),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Spotify · YouTube Music · Boomplay · Audiomack",
-                        color = Color.White.copy(alpha = 0.56f),
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(100.dp),
-                    color = secondary.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, secondary.copy(alpha = 0.45f))
+                // Brand Watermark Footer
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "GET YOUR ROAST",
-                        color = Color(0xFFF8FAFC),
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Tracked Live by TuneMind",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Spotify · YouTube Music · Boomplay · Audiomack",
+                            color = Color.White.copy(alpha = 0.56f),
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(100.dp),
+                        color = secondary.copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, secondary.copy(alpha = 0.45f))
+                    ) {
+                        Text(
+                            text = "GET YOUR ROAST",
+                            color = Color(0xFFF8FAFC),
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
         }
@@ -217,7 +242,7 @@ private fun PersonalityRoastPreviewBody(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "#1 OBSESSION · ${model.topTrackPlays} PLAYS",
+                        text = "#1 OBSESSION · ${formatCompactPlayCount(model.topTrackPlays)} PLAYS",
                         color = primary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -295,64 +320,120 @@ private fun PersonalityRoastPreviewBody(
             }
         }
 
-        Text(
-            text = "${model.overplayedCallout} · ${model.totalListeningLabel}",
-            color = Color(0xFFFBBF24),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        // Obsession Index Meter + Verdict
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White.copy(alpha = 0.05f),
+            border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.10f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "OBSESSION INDEX · ${model.obsessionScore}%",
+                        color = Color(0xFFFBBF24),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = model.verdictBadge,
+                        color = primary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.12f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = (model.obsessionScore.coerceIn(5, 100) / 100f))
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(Brush.horizontalGradient(listOf(primary, secondary)))
+                    )
+                }
+                Text(
+                    text = "${model.overplayedCallout} · ${model.totalListeningLabel}",
+                    color = Color.White.copy(alpha = 0.80f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun DnaReceiptPreviewBody(
-    model: ViralShareCardModel,
-    primary: Color,
-    secondary: Color
+    model: ViralShareCardModel
 ) {
     val dateLabel = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date())
+    val inkDark = Color(0xFF111827)
+    val inkMuted = Color(0xFF4B5563)
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = "MUSIC DNA RECEIPT",
-                color = Color.White,
-                fontSize = 22.sp,
+                text = "TUNEMIND RECEIPT",
+                color = inkDark,
+                fontSize = 21.sp,
                 fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.6.sp
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp
             )
             Text(
-                text = "LISTENER: ${model.listenerName.uppercase(Locale.getDefault())} · $dateLabel",
-                color = Color.White.copy(alpha = 0.68f),
+                text = "ORDER #TM-07 · $dateLabel",
+                color = inkMuted,
                 fontSize = 10.5.sp,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "VERDICT: ${model.archetypeTitle.uppercase(Locale.getDefault())}",
-                color = primary,
+                text = "LISTENER: ${model.listenerName.uppercase(Locale.getDefault())} · ${model.archetypeTitle.uppercase(Locale.getDefault())}",
+                color = inkDark,
                 fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
-        StudioHairlineDivider()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color(0xFF9CA3AF).copy(alpha = 0.55f))
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "QTY  TRACK & ARTIST",
-                color = primary,
+                text = "QTY  ITEM // ARTIST",
+                color = inkDark,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold
             )
             Text(
                 text = "PLAYS",
-                color = primary,
+                color = inkDark,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold
@@ -361,9 +442,10 @@ private fun DnaReceiptPreviewBody(
 
         if (model.receiptLines.isEmpty()) {
             Text(
-                text = "Play songs in Spotify, YouTube Music, or Boomplay to print your listening receipt.",
-                color = Color.White.copy(alpha = 0.68f),
-                fontSize = 12.5.sp,
+                text = "Play songs in Spotify, YouTube Music, or Boomplay to print your verified listening receipt.",
+                color = inkMuted,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(vertical = 12.dp)
             )
         } else {
@@ -372,67 +454,110 @@ private fun DnaReceiptPreviewBody(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
                             text = "0${item.rank}",
-                            color = primary,
-                            fontSize = 12.sp,
+                            color = inkMuted,
+                            fontSize = 11.5.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = item.title,
-                                color = Color.White,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text = item.title.uppercase(Locale.getDefault()),
+                                color = inkDark,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "${item.artist} · ${item.durationLabel}",
-                                color = Color.White.copy(alpha = 0.60f),
-                                fontSize = 11.sp,
+                                color = inkMuted,
+                                fontSize = 10.5.sp,
                                 fontFamily = FontFamily.Monospace,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                         Text(
-                            text = "${item.plays}×",
-                            color = secondary,
-                            fontSize = 13.5.sp,
+                            text = "${formatCompactPlayCount(item.plays)}×",
+                            color = inkDark,
+                            fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
                 }
             }
         }
 
-        StudioHairlineDivider()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color(0xFF9CA3AF).copy(alpha = 0.55f))
+        )
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ReceiptSummaryRow("TOTAL TIME", model.totalListeningLabel)
-            ReceiptSummaryRow("COMPLETION RATE", "${model.completionPercent}% (${model.skipCount} skips)")
-            ReceiptSummaryRow("APPS", model.appSplitSummary)
+            ReceiptSummaryRow("TOTAL TIME", model.totalListeningLabel, inkDark, inkMuted)
+            ReceiptSummaryRow("COMPLETION", "${model.completionPercent}% (${model.skipCount} skips)", inkDark, inkMuted)
+            ReceiptSummaryRow("APPS", model.appSplitSummary, inkDark, inkMuted)
         }
 
         Text(
             text = model.overplayedCallout,
-            color = Color(0xFFFBBF24),
+            color = Color(0xFFB45309),
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+
+        // Crisp Thermal Barcode + Stamp
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val pattern = intArrayOf(3, 1, 5, 2, 2, 4, 1, 6, 2, 3, 1, 4, 2, 2, 5, 1, 3, 2, 4, 2, 3, 1, 5, 2, 3, 4, 1, 3)
+                pattern.forEachIndexed { idx, w ->
+                    Box(
+                        modifier = Modifier
+                            .weight(w.toFloat())
+                            .fillMaxHeight()
+                            .background(if (idx % 2 == 0) inkDark else Color.Transparent)
+                    )
+                }
+            }
+            Text(
+                text = "THANK YOU FOR LISTENING · TUNEMIND.APP",
+                color = inkMuted,
+                fontSize = 9.5.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+        }
     }
 }
 
 @Composable
-private fun ReceiptSummaryRow(label: String, value: String) {
+private fun ReceiptSummaryRow(
+    label: String,
+    value: String,
+    inkDark: Color,
+    inkMuted: Color
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -440,13 +565,13 @@ private fun ReceiptSummaryRow(label: String, value: String) {
     ) {
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.65f),
+            color = inkMuted,
             fontSize = 10.5.sp,
             fontFamily = FontFamily.Monospace
         )
         Text(
             text = value,
-            color = Color.White,
+            color = inkDark,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
@@ -468,14 +593,20 @@ private fun NowPlayingVibePreviewBody(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "CURRENT VIBE CHECK · VIA ${model.vibeSourceApp.uppercase(Locale.getDefault())}",
-            color = primary,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.6.sp,
-            textAlign = TextAlign.Center
-        )
+        Surface(
+            shape = RoundedCornerShape(100.dp),
+            color = primary.copy(alpha = 0.14f),
+            border = BorderStroke(1.dp, primary.copy(alpha = 0.40f))
+        ) {
+            Text(
+                text = "CAUGHT IN 4K · VIA ${model.vibeSourceApp.uppercase(Locale.getDefault())}",
+                color = primary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.7.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
 
         Box(
             modifier = Modifier.size(134.dp),
@@ -547,11 +678,31 @@ private fun NowPlayingVibePreviewBody(
             }
         }
 
+        // Decorative Static Waveform Strip
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.72f)
+                .height(22.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val heights = listOf(0.32f, 0.58f, 0.85f, 0.45f, 1f, 0.70f, 0.38f, 0.92f, 0.60f, 0.78f, 0.42f, 0.88f, 0.52f, 0.35f)
+            heights.forEachIndexed { i, h ->
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight(h)
+                        .clip(CircleShape)
+                        .background(if (i % 2 == 0) primary else secondary)
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            VibeStatPill("PLAYS", "${model.vibeTrackPlays}×", primary)
+            VibeStatPill("PLAYS", "${formatCompactPlayCount(model.vibeTrackPlays)}×", primary)
             VibeStatPill("FINISHER", "${model.completionPercent}%", secondary)
             VibeStatPill("PERSONA", model.archetypeTitle.substringBefore(" "), primary)
         }

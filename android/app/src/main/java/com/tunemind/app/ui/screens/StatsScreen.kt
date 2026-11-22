@@ -625,7 +625,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                             verticalArrangement = Arrangement.Bottom
                         ) {
                             Text(
-                                text = if (bucket.playCount > 0) "${bucket.playCount}" else "",
+                                text = if (bucket.playCount > 0) com.tunemind.app.ui.components.formatCompactPlayCount(bucket.playCount) else "",
                                 color = if (bucket.isHighlighted) theme.primaryAccent else Color.White.copy(alpha = 0.65f),
                                 fontSize = 10.sp,
                                 fontWeight = if (bucket.isHighlighted) FontWeight.SemiBold else FontWeight.Normal
@@ -777,7 +777,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.statsDashboardItems(
                             )
                         }
                         Text(
-                            text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                            text = com.tunemind.app.ui.components.formatPlaysLabel(artist.playCount),
                             color = theme.primaryAccent,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold

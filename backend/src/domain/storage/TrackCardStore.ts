@@ -387,41 +387,45 @@ export class TrackCardStore {
           }
         }
 
+        // Batched replace of playlist items (eliminates N+1 per-playlist DB round-trips)
+        const playlistIdsToReplace: string[] = [];
+        const allItemRows: any[] = [];
         for (const pl of rawPlaylists) {
           const pid = String(pl.id || '').trim();
           if (!pid || !Array.isArray(pl.items)) continue;
+          playlistIdsToReplace.push(pid);
 
-          // Replace items for this playlist so re-ordering / deletions stay 100% in sync
-          await adminClient.from('user_playlist_items').delete().eq('playlist_id', pid);
+          for (let idx = 0; idx < pl.items.length; idx++) {
+            const item = pl.items[idx];
+            const cardId = cardIdByKey.get(sanitizeKey(item.canonical_track_key));
+            const entryId = String(item.entry_id || `${pid}::${idx}`).trim();
+            if (!cardId || !entryId) continue;
+            allItemRows.push({
+              entry_id: entryId,
+              playlist_id: pid,
+              track_card_id: cardId,
+              position_index: Number.isFinite(item.position_index) ? Number(item.position_index) : idx,
+              source_player: String(item.source_player || 'unknown_player').trim(),
+              added_by: String(item.added_by || 'USER').trim().toUpperCase(),
+              added_at: toIsoOrNull(item.added_at_ms) || nowIso
+            });
+          }
+        }
 
-          const itemRows = pl.items
-            .map((item, idx) => {
-              const cardId = cardIdByKey.get(sanitizeKey(item.canonical_track_key));
-              const entryId = String(item.entry_id || `${pid}::${idx}`).trim();
-              if (!cardId || !entryId) return null;
-              return {
-                entry_id: entryId,
-                playlist_id: pid,
-                track_card_id: cardId,
-                position_index: Number.isFinite(item.position_index) ? Number(item.position_index) : idx,
-                source_player: String(item.source_player || 'unknown_player').trim(),
-                added_by: String(item.added_by || 'USER').trim().toUpperCase(),
-                added_at: toIsoOrNull(item.added_at_ms) || nowIso
-              };
-            })
-            .filter(Boolean);
+        if (playlistIdsToReplace.length > 0) {
+          await adminClient.from('user_playlist_items').delete().in('playlist_id', playlistIdsToReplace);
+        }
 
-          if (itemRows.length > 0) {
-            for (let i = 0; i < itemRows.length; i += 200) {
-              const chunk = itemRows.slice(i, i + 200);
-              const { error: itemErr } = await adminClient
-                .from('user_playlist_items')
-                .upsert(chunk as any[], { onConflict: 'entry_id' });
-              if (itemErr) {
-                console.warn('[TrackCardStore] user_playlist_items upsert notice:', itemErr.message);
-              } else {
-                upsertedPlaylistItems += chunk.length;
-              }
+        if (allItemRows.length > 0) {
+          for (let i = 0; i < allItemRows.length; i += 200) {
+            const chunk = allItemRows.slice(i, i + 200);
+            const { error: itemErr } = await adminClient
+              .from('user_playlist_items')
+              .upsert(chunk, { onConflict: 'entry_id' });
+            if (itemErr) {
+              console.warn('[TrackCardStore] user_playlist_items upsert notice:', itemErr.message);
+            } else {
+              upsertedPlaylistItems += chunk.length;
             }
           }
         }
@@ -452,12 +456,19 @@ export class TrackCardStore {
     }
   }
 
-  static async getSnapshot(userId: string): Promise<{
+  static async getSnapshot(
+    userId: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<{
     source: 'supabase' | 'memory';
     track_cards: StoredTrackCardRecord[];
     playlists: any[];
+    has_more: boolean;
+    next_offset: number;
   }> {
     const cleanUserId = String(userId || '').trim();
+    const limit = Math.min(500, Math.max(1, Number(options?.limit ?? 200) || 200));
+    const offset = Math.max(0, Number(options?.offset ?? 0) || 0);
     const adminClient = getSupabaseAdminClient();
 
     if (adminClient && cleanUserId) {
@@ -466,9 +477,12 @@ export class TrackCardStore {
           .from('track_cards')
           .select('*')
           .eq('user_id', cleanUserId)
-          .order('last_played_at', { ascending: false, nullsFirst: false });
+          .order('last_played_at', { ascending: false, nullsFirst: false })
+          .range(offset, offset + limit);
 
         if (!cardsErr && Array.isArray(cards)) {
+          const hasMore = cards.length > limit;
+          const pageCards = hasMore ? cards.slice(0, limit) : cards;
           const { data: playlists } = await adminClient
             .from('user_playlists')
             .select(
@@ -505,12 +519,15 @@ export class TrackCardStore {
             `
             )
             .eq('user_id', cleanUserId)
-            .order('updated_at', { ascending: false });
+            .order('updated_at', { ascending: false })
+            .limit(100);
 
           return {
             source: 'supabase',
-            track_cards: cards as StoredTrackCardRecord[],
-            playlists: playlists || []
+            track_cards: pageCards as StoredTrackCardRecord[],
+            playlists: playlists || [],
+            has_more: hasMore,
+            next_offset: offset + pageCards.length
           };
         }
       } catch (err: any) {
@@ -519,10 +536,14 @@ export class TrackCardStore {
     }
 
     const mem = getMemoryUser(cleanUserId || 'anonymous');
+    const allCards = Array.from(mem.cardsByKey.values());
+    const pageCards = allCards.slice(offset, offset + limit);
     return {
       source: 'memory',
-      track_cards: Array.from(mem.cardsByKey.values()),
-      playlists: Array.from(mem.playlistsById.values())
+      track_cards: pageCards,
+      playlists: Array.from(mem.playlistsById.values()).slice(0, 100),
+      has_more: offset + pageCards.length < allCards.length,
+      next_offset: offset + pageCards.length
     };
   }
 

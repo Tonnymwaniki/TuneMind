@@ -1075,6 +1075,28 @@ class TuneMindViewModel : ViewModel() {
     private val _isDiscovering = MutableStateFlow<Boolean>(false)
     val isDiscovering: StateFlow<Boolean> = _isDiscovering.asStateFlow()
 
+    private var forYouDiscoveryJob: kotlinx.coroutines.Job? = null
+    private val _isForYouAiEnabled = MutableStateFlow(
+        AppHolder.context?.let {
+            com.tunemind.app.domain.ai.ForYouDailyDropWorker.isForYouAiEnabled(it)
+        } ?: false
+    )
+    val isForYouAiEnabled: StateFlow<Boolean> = _isForYouAiEnabled.asStateFlow()
+
+    fun setForYouAiEnabled(enabled: Boolean) {
+        _isForYouAiEnabled.value = enabled
+        val ctx = AppHolder.context ?: return
+        com.tunemind.app.domain.ai.ForYouDailyDropWorker.setForYouAiEnabled(ctx, enabled)
+        if (!enabled) {
+            forYouDiscoveryJob?.cancel()
+            forYouDiscoveryJob = null
+            _isDiscovering.value = false
+        } else {
+            com.tunemind.app.domain.ai.ForYouDailyDropWorker.scheduleNextNoonDrop(ctx)
+            triggerChronoDiscovery(forceRefresh = false)
+        }
+    }
+
     private val _playedRecCount = MutableStateFlow(0)
     val playedRecCount: StateFlow<Int> = _playedRecCount.asStateFlow()
 
@@ -4852,9 +4874,15 @@ class TuneMindViewModel : ViewModel() {
      * evaluates previous drop outcomes and fetches 2 unheard picks per genre + 3 Global Wildcards.
      */
     fun triggerChronoDiscovery(forceRefresh: Boolean = false) {
+        if (!_isForYouAiEnabled.value) {
+            _isDiscovering.value = false
+            return
+        }
         val ctx = AppHolder.context ?: return
-        viewModelScope.launch {
+        forYouDiscoveryJob?.cancel()
+        forYouDiscoveryJob = viewModelScope.launch {
             try {
+                if (!_isForYouAiEnabled.value) return@launch
                 if (_isDiscovering.value) return@launch
 
                 val todayNoonKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()

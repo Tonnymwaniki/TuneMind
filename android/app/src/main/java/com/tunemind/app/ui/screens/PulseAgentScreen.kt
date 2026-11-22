@@ -2,6 +2,7 @@ package com.tunemind.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,8 +48,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,7 +67,9 @@ import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.SpotifyAvatarCircle
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.TuneMindAiIntelligenceLoop
+import com.tunemind.app.ui.components.TuneMindSprings
 import com.tunemind.app.ui.components.rememberResolvedTrackMedia
+import com.tunemind.app.ui.components.tactilePressScale
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.ui.theme.TuneMindTypography
 import kotlin.math.PI
@@ -110,6 +116,7 @@ fun PulseAgentScreen(
     onOpenPlaylists: () -> Unit = {}
 ) {
     val colors = LocalAdaptiveTheme.current
+    val haptics = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
     val hasPendingApproval = pendingProposedTrack != null
 
@@ -122,7 +129,7 @@ fun PulseAgentScreen(
             agentState == AgentState.ERROR -> Color(0xFFF59E0B)
             else -> colors.primaryAccent
         },
-        animationSpec = tween(450),
+        animationSpec = TuneMindSprings.snappy(),
         label = "agent_active_accent"
     )
 
@@ -260,14 +267,19 @@ fun PulseAgentScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
+                val orbInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(268.dp)
+                        .tactilePressScale(orbInteraction, pressedScale = 0.96f)
                         .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
+                            interactionSource = orbInteraction,
                             indication = null,
-                            onClick = onOrbTapped
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onOrbTapped()
+                            }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -317,8 +329,12 @@ fun PulseAgentScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .animateContentSize(TuneMindSprings.snappy())
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable { onOrbTapped() }
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onOrbTapped()
+                        }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -367,7 +383,7 @@ fun PulseAgentScreen(
                             "Ask for a song, shift the mood, or start your mix"
                         },
                         fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.58f),
+                        color = Color(0xFFB8B2CC),
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -388,12 +404,12 @@ fun PulseAgentScreen(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
                                 contentDescription = null,
-                                tint = activeAccent.copy(alpha = 0.85f),
-                                modifier = Modifier.size(14.dp)
+                                tint = activeAccent.copy(alpha = 0.90f),
+                                modifier = Modifier.size(16.dp)
                             )
                             Text(
                                 text = "Voice commands",
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = Color(0xFFD6D1E6),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -401,29 +417,25 @@ fun PulseAgentScreen(
 
                         Surface(
                             shape = RoundedCornerShape(20.dp),
-                            color = if (tuneMindPlaylistCount > 0) activeAccent.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f),
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (tuneMindPlaylistCount > 0) activeAccent.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.12f)
-                            ),
+                            color = if (tuneMindPlaylistCount > 0) activeAccent.copy(alpha = 0.16f) else Color(0xFF120A24),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
                                 .clickable { onOpenPlaylists() }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.QueueMusic,
                                     contentDescription = "TuneMind Playlists",
-                                    tint = if (tuneMindPlaylistCount > 0) activeAccent else Color.White.copy(alpha = 0.72f),
-                                    modifier = Modifier.size(14.dp)
+                                    tint = if (tuneMindPlaylistCount > 0) activeAccent else Color(0xFFD6D1E6),
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 Text(
                                     text = if (tuneMindPlaylistCount > 0) "Playlists ($tuneMindPlaylistCount)" else "Playlists",
-                                    color = if (tuneMindPlaylistCount > 0) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.78f),
+                                    color = if (tuneMindPlaylistCount > 0) Color(0xFFF5F3FF) else Color(0xFFD6D1E6),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -433,15 +445,14 @@ fun PulseAgentScreen(
                         if (kidsModeEnabled) {
                             Surface(
                                 shape = RoundedCornerShape(20.dp),
-                                color = Color(0xFF10B981).copy(alpha = 0.14f),
-                                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.48f))
+                                color = Color(0xFF10B981).copy(alpha = 0.16f)
                             ) {
                                 Text(
                                     text = "Kids Safe",
                                     color = Color(0xFFE2FCEB),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                 )
                             }
                         }
@@ -550,14 +561,14 @@ private fun TuneMindLivingOrb(
     isActive: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val wavePhase: Float
-    val breathScale: Float
-    val rippleProgress: Float
-    val swirlAngle: Float
+    val wavePhaseState: State<Float>
+    val breathScaleState: State<Float>
+    val rippleProgressState: State<Float>
+    val swirlAngleState: State<Float>
     if (isActive) {
         val infiniteTransition = rememberInfiniteTransition(label = "living_orb")
 
-        wavePhase = infiniteTransition.animateFloat(
+        wavePhaseState = infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = (2f * PI).toFloat(),
             animationSpec = infiniteRepeatable(
@@ -573,9 +584,9 @@ private fun TuneMindLivingOrb(
                 repeatMode = RepeatMode.Restart
             ),
             label = "orb_wave_phase"
-        ).value
+        )
 
-        breathScale = infiniteTransition.animateFloat(
+        breathScaleState = infiniteTransition.animateFloat(
             initialValue = 0.95f,
             targetValue = when (agentState) {
                 AgentState.SPEAKING -> 1.09f
@@ -596,9 +607,9 @@ private fun TuneMindLivingOrb(
                 repeatMode = RepeatMode.Reverse
             ),
             label = "orb_breath"
-        ).value
+        )
 
-        rippleProgress = infiniteTransition.animateFloat(
+        rippleProgressState = infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -609,9 +620,9 @@ private fun TuneMindLivingOrb(
                 repeatMode = RepeatMode.Restart
             ),
             label = "orb_ripple"
-        ).value
+        )
 
-        swirlAngle = infiniteTransition.animateFloat(
+        swirlAngleState = infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(
@@ -622,12 +633,12 @@ private fun TuneMindLivingOrb(
                 repeatMode = RepeatMode.Restart
             ),
             label = "orb_swirl"
-        ).value
+        )
     } else {
-        wavePhase = 0f
-        breathScale = 1f
-        rippleProgress = 0f
-        swirlAngle = 0f
+        wavePhaseState = remember { mutableFloatStateOf(0f) }
+        breathScaleState = remember { mutableFloatStateOf(1f) }
+        rippleProgressState = remember { mutableFloatStateOf(0f) }
+        swirlAngleState = remember { mutableFloatStateOf(0f) }
     }
 
     val tickCount = 36
@@ -729,6 +740,16 @@ private fun TuneMindLivingOrb(
                 center = center,
                 radius = nominalRadius * 2.25f
             )
+            val coreBrush = Brush.radialGradient(
+                colors = coreColors,
+                center = Offset(center.x - nominalRadius * 0.24f, center.y - nominalRadius * 0.28f),
+                radius = nominalRadius * 1.45f
+            )
+            val cloudBrush = Brush.radialGradient(
+                colors = cloudColors,
+                center = Offset.Zero,
+                radius = nominalRadius * 0.78f
+            )
             val thinkingOuterBrush = Brush.sweepGradient(
                 colors = thinkingOuterColors,
                 center = center
@@ -757,10 +778,15 @@ private fun TuneMindLivingOrb(
             val thinkInnerStroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
             val voiceStroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
             val listenStroke = Stroke(width = 2.dp.toPx())
+            val rippleStroke = Stroke(width = 1.8.dp.toPx())
             val idleArcStroke = Stroke(width = if (isMusicPlaying) 2.dp.toPx() else 1.4.dp.toPx(), cap = StrokeCap.Round)
             val rimStroke = Stroke(width = 1.4.dp.toPx())
 
             onDrawBehind {
+                val wavePhase = wavePhaseState.value
+                val breathScale = breathScaleState.value
+                val rippleProgress = rippleProgressState.value
+                val swirlAngle = swirlAngleState.value
                 val baseRadius = nominalRadius * breathScale
 
                 drawCircle(
@@ -808,7 +834,7 @@ private fun TuneMindLivingOrb(
                             color = primaryAccent.copy(alpha = alpha),
                             radius = r,
                             center = center,
-                            style = Stroke(width = (2.2f * (1f - p * 0.5f)).dp.toPx())
+                            style = rippleStroke
                         )
                     }
                 }
@@ -855,33 +881,20 @@ private fun TuneMindLivingOrb(
                 }
                 orbPath.close()
 
-                val focalOffset = Offset(
-                    center.x - baseRadius * 0.24f + cosWave * baseRadius * 0.08f,
-                    center.y - baseRadius * 0.28f + sinWave * baseRadius * 0.08f
-                )
-
                 drawPath(
                     path = orbPath,
-                    brush = Brush.radialGradient(
-                        colors = coreColors,
-                        center = focalOffset,
-                        radius = baseRadius * 1.45f
-                    )
+                    brush = coreBrush
                 )
 
-                val cloudCenter = Offset(
-                    center.x + sinWave * baseRadius * 0.16f,
-                    center.y + cos(wavePhase * 0.8f) * baseRadius * 0.14f
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = cloudColors,
-                        center = cloudCenter,
-                        radius = baseRadius * 0.78f
-                    ),
-                    radius = baseRadius * 0.78f,
-                    center = cloudCenter
-                )
+                val cloudCenterX = center.x + sinWave * baseRadius * 0.16f
+                val cloudCenterY = center.y + cos(wavePhase * 0.8f) * baseRadius * 0.14f
+                translate(left = cloudCenterX, top = cloudCenterY) {
+                    drawCircle(
+                        brush = cloudBrush,
+                        radius = baseRadius * 0.78f,
+                        center = Offset.Zero
+                    )
+                }
 
                 when (agentState) {
                     AgentState.THINKING -> {
@@ -997,16 +1010,24 @@ private fun ProposedTrackApprovalCard(
                 )
             }
 
+            val skipInteraction = remember { MutableInteractionSource() }
+            val playInteraction = remember { MutableInteractionSource() }
+            val haptics = LocalHapticFeedback.current
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
-                    onClick = onReject,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onReject()
+                    },
+                    interactionSource = skipInteraction,
                     shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
+                        .tactilePressScale(skipInteraction)
                 ) {
                     Text(
                         text = "Skip",
@@ -1017,7 +1038,11 @@ private fun ProposedTrackApprovalCard(
                 }
 
                 Button(
-                    onClick = onApprove,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onApprove()
+                    },
+                    interactionSource = playInteraction,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFF8FAFC),
                         contentColor = Color(0xFF0D0D0D)
@@ -1026,6 +1051,7 @@ private fun ProposedTrackApprovalCard(
                     modifier = Modifier
                         .weight(1.4f)
                         .height(48.dp)
+                        .tactilePressScale(playInteraction)
                 ) {
                     Text(
                         text = "Play",
@@ -1103,7 +1129,7 @@ private fun NowPlayingCard(
                 val meta = buildString {
                     append(artistName ?: "Start a song or ask TuneMind")
                     if (!trackTitle.isNullOrBlank()) {
-                        append(" · $playCount ${if (playCount == 1) "play" else "plays"}")
+                        append(" · ${com.tunemind.app.ui.components.formatPlaysLabel(playCount)}")
                     }
                     if (isMusicPlaying) append(" · Playing")
                 }

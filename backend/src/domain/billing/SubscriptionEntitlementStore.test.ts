@@ -113,4 +113,39 @@ describe('TuneMind Monetization, 7-Day Trial & Cost Protection', () => {
       else process.env.ENFORCE_PRO_PAYWALL = prev;
     }
   });
+
+  test('Production mode fails closed on unauthenticated API routes, missing Play service account, and missing RTDN secret', async () => {
+    const prevEnv = process.env.NODE_ENV;
+    const prevSa = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
+    const prevRtdn = process.env.GOOGLE_PLAY_RTDN_SECRET;
+    process.env.NODE_ENV = 'production';
+    delete process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
+    delete process.env.GOOGLE_PLAY_RTDN_SECRET;
+
+    try {
+      const app = createApp();
+      expect((await request(app).get('/api/v1/billing/entitlement?userId=victim')).status).toBe(401);
+      expect((await request(app).post('/api/v1/reasoning/agent-chat').send({ query: 'hi' })).status).toBe(401);
+      expect((await request(app).post('/api/v1/discovery/daily-drop').send({ userId: 'victim' })).status).toBe(401);
+      expect((await request(app).get('/api/v1/track-cards/snapshot?user_id=victim')).status).toBe(401);
+      expect((await request(app).post('/api/v1/intelligence/sync').send({ user_id: 'victim' })).status).toBe(401);
+      expect((await request(app).get('/api/v1/events')).status).toBe(401);
+
+      const rtdn = await request(app).post('/api/v1/billing/google-play/rtdn').send({});
+      expect(rtdn.status).toBe(503);
+
+      const verifyRes = await SubscriptionEntitlementStore.verifyGooglePlayPurchase({
+        userId: 'attacker',
+        productId: 'tunemind_pro_annual',
+        purchaseToken: 'fake_token_1234567890',
+        packageName: 'com.tunemind.app'
+      });
+      expect(verifyRes.verified).toBe(false);
+    } finally {
+      if (prevEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = prevEnv;
+      if (prevSa !== undefined) process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = prevSa;
+      if (prevRtdn !== undefined) process.env.GOOGLE_PLAY_RTDN_SECRET = prevRtdn;
+    }
+  });
 });

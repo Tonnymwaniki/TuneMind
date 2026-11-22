@@ -460,8 +460,7 @@ fun SearchScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = neonCyan.copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.4f)),
+                    color = neonCyan.copy(alpha = 0.14f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -487,7 +486,7 @@ fun SearchScreen(
                         Text(
                             text = "Grant audio library access so TuneMind can search and play songs stored directly on your device.",
                             fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.68f),
+                            color = Color(0xFFD6D1E6),
                             lineHeight = 19.sp
                         )
                         Button(
@@ -505,7 +504,7 @@ fun SearchScreen(
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(52.dp)
                         ) {
                             Text("Allow Audio Access", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
@@ -554,7 +553,7 @@ fun SearchScreen(
             } else {
                 Text(
                     text = "${filteredItems.size} ${if (filteredItems.size == 1) "result" else "results"}",
-                    color = Color.White.copy(alpha = 0.50f),
+                    color = Color(0xFFB8B2CC),
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                 )
@@ -572,12 +571,16 @@ fun SearchScreen(
                             SearchOrigin.DISCOVERY -> electricPurple
                             SearchOrigin.HISTORY -> theme.primaryAccent
                         }
+                        val accuratePlayCount = maxOf(
+                            vm.resolvePlayCount(item.title, item.artist, item.spotifyUri, item.trackId),
+                            item.playCount
+                        )
                         if (item.vaultId != null) {
                             val vStatus = vm.resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
                             TuneMindTrackCard(
                                 title = item.title,
                                 artist = item.artist,
-                                playCount = item.playCount,
+                                playCount = accuratePlayCount,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
                                 freshnessPercent = vStatus.freshnessPercent,
@@ -610,7 +613,7 @@ fun SearchScreen(
                                 title = item.title,
                                 artist = item.artist,
                                 subtitle = item.subtitle,
-                                playCount = item.playCount,
+                                playCount = accuratePlayCount,
                                 showUnplayedLabel = true,
                                 isCurrentlyPlaying = vm.isTrackCurrentlyPlaying(item.title, item.artist, item.spotifyUri),
                                 freshnessPercent = vStatus.freshnessPercent,

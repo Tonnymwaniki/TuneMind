@@ -37,6 +37,12 @@
     @com.google.gson.annotations.SerializedName <fields>;
 }
 
+# Strip verbose/debug logs in release builds
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}
+
 # Tink / EncryptedSharedPreferences
 -keepclassmembers class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite { *; }
 -dontwarn com.google.errorprone.annotations.**

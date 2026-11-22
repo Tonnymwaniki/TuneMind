@@ -435,7 +435,7 @@ fun SongProfile(
                         if (profile.appearanceCount <= 0) {
                             append(" · 0 plays")
                         } else {
-                            append(" · ${profile.appearanceCount} ${if (profile.appearanceCount == 1) "play" else "plays"} · ${playMinutes}m ${playSeconds}s")
+                            append(" · ${formatPlaysLabel(profile.appearanceCount)} · ${playMinutes}m ${playSeconds}s")
                         }
                         if (spotifyGenresLine.isNotBlank()) append(" · $spotifyGenresLine")
                     },

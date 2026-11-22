@@ -29,28 +29,13 @@ export const supabase: SupabaseClient = createClient(
   }
 );
 
-export function updateRuntimeSupabaseConfig(url?: string, key?: string): void {
-  const cleanUrl = (url || '').trim().replace(/\/+$/, '');
-  const cleanKey = (key || '').trim();
-  if (
-    cleanUrl.startsWith('https://') &&
-    !cleanUrl.includes('placeholder.supabase.co') &&
-    cleanKey.length > 20 &&
-    cleanKey !== 'placeholder-service-role-key'
-  ) {
-    if (!runtimeSupabaseUrl || runtimeSupabaseUrl.includes('placeholder.supabase.co')) {
-      runtimeSupabaseUrl = cleanUrl;
-    }
-    if (!runtimeSupabaseKey || runtimeSupabaseKey === 'placeholder-service-role-key') {
-      runtimeSupabaseKey = cleanKey;
-    }
-  }
+export function updateRuntimeSupabaseConfig(_url?: string, _key?: string): void {
+  // Security: never allow client payloads to override server Supabase URL or keys.
 }
 
-export function isSupabaseLive(overrideUrl?: string, overrideKey?: string): boolean {
-  updateRuntimeSupabaseConfig(overrideUrl, overrideKey);
-  const activeUrl = (overrideUrl || runtimeSupabaseUrl || '').trim();
-  const activeKey = (overrideKey || runtimeSupabaseKey || '').trim();
+export function isSupabaseLive(_overrideUrl?: string, _overrideKey?: string): boolean {
+  const activeUrl = (runtimeSupabaseUrl || '').trim();
+  const activeKey = (runtimeSupabaseKey || '').trim();
   return (
     activeUrl.startsWith('https://') &&
     !activeUrl.includes('placeholder.supabase.co') &&
@@ -103,12 +88,11 @@ export function getSupabaseAdminClient(overrideUrl?: string): SupabaseClient | n
   return cachedAdminClient;
 }
 
-export function getLiveSupabaseClient(overrideUrl?: string, overrideKey?: string): SupabaseClient | null {
-  updateRuntimeSupabaseConfig(overrideUrl, overrideKey);
-  const activeUrl = (overrideUrl || runtimeSupabaseUrl || '').trim().replace(/\/+$/, '');
-  const activeKey = (overrideKey || runtimeSupabaseKey || '').trim();
+export function getLiveSupabaseClient(_overrideUrl?: string, _overrideKey?: string): SupabaseClient | null {
+  const activeUrl = (runtimeSupabaseUrl || '').trim().replace(/\/+$/, '');
+  const activeKey = (runtimeSupabaseKey || '').trim();
 
-  if (!isSupabaseLive(activeUrl, activeKey)) {
+  if (!isSupabaseLive()) {
     return null;
   }
 

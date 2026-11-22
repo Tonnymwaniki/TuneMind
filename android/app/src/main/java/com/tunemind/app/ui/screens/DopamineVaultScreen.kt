@@ -97,6 +97,8 @@ fun DopamineVaultScreen(
     forYouPicks: List<AiRecommendationEntity> = emptyList(),
     learningState: ForYouLearningSummary = ForYouLearningSummary(),
     isDiscovering: Boolean = false,
+    isForYouAiEnabled: Boolean = false,
+    onToggleForYouAi: (Boolean) -> Unit = {},
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
     isTrackCurrentlyPlaying: (title: String?, artist: String?, uri: String?) -> Boolean = { t, _, _ ->
         !nowPlayingTitle.isNullOrBlank() && !t.isNullOrBlank() && t.equals(nowPlayingTitle.trim(), ignoreCase = true)
@@ -798,6 +800,8 @@ fun DopamineVaultScreen(
                             activeRecs = activeRecs,
                             learningState = learningState,
                             isDiscovering = isDiscovering,
+                            isForYouAiEnabled = isForYouAiEnabled,
+                            onToggleForYouAi = onToggleForYouAi,
                             totalWildcardsInCycle = allWildcardsInCycle.size,
                             lockedWildcardsCount = allWildcardsInCycle.count { it.isSaved && !it.isDismissed },
                             resolvePlayCount = resolvePlayCount,
@@ -854,7 +858,7 @@ fun DopamineVaultScreen(
                         ) { _, song ->
                             val isCurrentlyPlaying = isTrackCurrentlyPlaying(song.title, song.artist, song.spotifyUri)
                             val accurateCount = resolvePlayCount(song.title, song.artist, song.spotifyUri)
-                                .takeIf { it > 0 } ?: song.playCount
+                                .coerceAtLeast(song.playCount)
 
                             TuneMindTrackCard(
                                 title = song.title,

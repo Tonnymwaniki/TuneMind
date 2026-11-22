@@ -81,6 +81,8 @@ data class ViralShareCardModel(
     val archetypeTitle: String,
     val roastLine: String,
     val personaTag: String,
+    val verdictBadge: String,
+    val obsessionScore: Int,
     val totalListeningLabel: String,
     val totalPlays: Int,
     val completionPercent: Int,
@@ -167,17 +169,17 @@ object ViralShareCardEngine {
         val (archetype, roast, tag) = when {
             stats.totalVerifiedPlays == 0 -> Triple(
                 "Silent Observer",
-                "Zero plays logged in this window — press play on Spotify, YTM, or Boomplay so TuneMind can expose your habits.",
+                "Zero plays logged yet — press play on Spotify, YouTube Music, or Boomplay so TuneMind can expose your taste.",
                 "STANDBY MODE"
             )
             completion in 1..49 && skips >= 4 -> Triple(
                 "Serial Skipper",
-                "$completion% completion rate & $skips skips. Your attention span has trust issues with intros.",
+                "$completion% completion & $skips ruthless skips. Your attention span has trust issues with intros.",
                 "SKIP HAPPY"
             )
             peakHour in 0..4 || peakHour >= 23 -> Triple(
                 "2AM Overthinker",
-                "Peaked around $peakCompact with \"$topTrackTitle\" on standby. Main-character syndrome after midnight.",
+                "Peaked at $peakCompact with \"$topTrackTitle\" on standby. Main-character syndrome after midnight.",
                 "NIGHT SHIFT"
             )
             topTrackPlays >= 12 -> Triple(
@@ -187,24 +189,37 @@ object ViralShareCardEngine {
             )
             stats.appBreakdown.size >= 2 && discovery >= 42 -> Triple(
                 "Cross-App Nomad",
-                "Hopping between ${stats.appBreakdown.size} music apps ($appSplitSummary) with $discovery% fresh finds. Zero loyalty, pure taste.",
+                "App-hopping across ${stats.appBreakdown.size} players ($appSplitSummary) with $discovery% fresh finds. Zero loyalty, pure taste.",
                 "MULTI-APP"
             )
             completion >= 84 -> Triple(
                 "Certified Purist",
-                "$completion% full-song completion across ${stats.totalVerifiedPlays} plays. Respects the artist's outro every time.",
+                "$completion% full-song completion across ${stats.totalVerifiedPlays} plays. Respects the artist's outro every single time.",
                 "ZERO SKIPS"
             )
             discovery <= 18 && stats.totalVerifiedPlays >= 6 -> Triple(
                 "Comfort Loop Citizen",
-                "Only $discovery% new tracks — keeps replaying the same safe comfort songs on heavy rotation.",
+                "Only $discovery% new tracks — emotionally attached to the exact same comfort rotation.",
                 "COMFORT ZONE"
             )
             else -> Triple(
                 "Vibe Architect",
-                "$completion% completion, $skips skips, and $topGenre leading the mood across ${stats.uniqueTrackCount} songs.",
+                "$completion% completion, $skips skips, and $topGenre carrying your mood across ${stats.uniqueTrackCount} tracks.",
                 "TASTE VERIFIED"
             )
+        }
+
+        val obsessionScore = when {
+            stats.totalVerifiedPlays == 0 -> 12
+            else -> ((topTrackPlays * 6) + (completion / 3) + ((100 - discovery) / 4)).coerceIn(28, 99)
+        }
+        val verdictBadge = when {
+            stats.totalVerifiedPlays == 0 -> "AWAITING DATA"
+            topTrackPlays >= 10 -> "LOOP HAZARD"
+            completion >= 84 -> "PURIST FLEX"
+            skips >= 5 -> "ADHD SHUFFLE"
+            discovery >= 45 -> "CRATE DIGGER"
+            else -> "MAIN CHARACTER"
         }
 
         // Most overplayed / vault track roast line
@@ -314,6 +329,8 @@ object ViralShareCardEngine {
             archetypeTitle = archetype,
             roastLine = roast,
             personaTag = tag,
+            verdictBadge = verdictBadge,
+            obsessionScore = obsessionScore,
             totalListeningLabel = totalDurationLabel,
             totalPlays = stats.totalVerifiedPlays,
             completionPercent = completion,
@@ -591,7 +608,7 @@ object ViralShareCardEngine {
             textSize = 24f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText("#1 OBSESSION · ${model.topTrackPlays} PLAYS", trackBox.left + 214f, trackBox.top + 68f, labelSmall)
+        canvas.drawText("#1 OBSESSION · ${com.tunemind.app.ui.components.formatCompactPlayCount(model.topTrackPlays)} PLAYS", trackBox.left + 214f, trackBox.top + 68f, labelSmall)
 
         val trackTitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -662,20 +679,52 @@ object ViralShareCardEngine {
             drawSingleEllipsizedText(canvas, stat.roastSubtext, sSub, left + 28f, top + 174f, tileW - 56f)
         }
 
-        // Bottom Verdict Strip
-        val verdictTop = gridTop + tileH * 2 + tileGap + 30f
-        val verdictPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        // Bottom Verdict Strip + Obsession Meter
+        val verdictTop = gridTop + tileH * 2 + tileGap + 24f
+        val meterBox = RectF(padX, verdictTop, cardWidth - padX, (verdictTop + 122f).coerceAtMost(1635f))
+        val meterBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(20, 255, 255, 255) }
+        canvas.drawRoundRect(meterBox, 26f, 26f, meterBg)
+
+        val meterLabel = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#FBBF24")
-            textSize = 28f
+            textSize = 24f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        canvas.drawText(
+            "OBSESSION INDEX · ${model.obsessionScore}% · ${model.verdictBadge}",
+            meterBox.left + 26f,
+            meterBox.top + 42f,
+            meterLabel
+        )
+
+        val barLeft = meterBox.left + 26f
+        val barRight = meterBox.right - 26f
+        val barTop = meterBox.top + 60f
+        val barBottom = barTop + 14f
+        val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(38, 255, 255, 255) }
+        canvas.drawRoundRect(RectF(barLeft, barTop, barRight, barBottom), 7f, 7f, trackPaint)
+
+        val fillW = (barRight - barLeft) * (model.obsessionScore.coerceIn(5, 100) / 100f)
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                barLeft, barTop, barLeft + fillW, barBottom,
+                primaryAccent, secondaryAccent, Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawRoundRect(RectF(barLeft, barTop, barLeft + fillW, barBottom), 7f, 7f, fillPaint)
+
+        val verdictPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(210, 248, 250, 252)
+            textSize = 23f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         drawSingleEllipsizedText(
             canvas = canvas,
             text = "${model.overplayedCallout} · ${model.totalListeningLabel}",
             paint = verdictPaint,
-            x = padX,
-            y = verdictTop.coerceAtMost(1620f),
-            maxWidth = innerWidth.toFloat()
+            x = meterBox.left + 26f,
+            y = meterBox.bottom - 16f,
+            maxWidth = meterBox.width() - 52f
         )
     }
 
@@ -688,135 +737,149 @@ object ViralShareCardEngine {
         cardWidth: Float
     ) {
         val innerWidth = (cardWidth - padX * 2).toInt()
+        val paperRect = RectF(padX - 18f, 256f, cardWidth - padX + 18f, 1636f)
+        val paperPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#F6F3EC")
+        }
+        canvas.drawRoundRect(paperRect, 34f, 34f, paperPaint)
+
+        val inkDark = Color.parseColor("#111827")
+        val inkMuted = Color.parseColor("#4B5563")
+        val pLeft = paperRect.left + 44f
+        val pRight = paperRect.right - 44f
+        val pWidth = (pRight - pLeft).toInt()
 
         val headerPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 68f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            color = inkDark
+            textSize = 62f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
-        canvas.drawText("MUSIC DNA RECEIPT", padX, 314f, headerPaint)
+        canvas.drawText("TUNEMIND RECEIPT", pLeft, 340f, headerPaint)
 
         val subMono = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(185, 255, 255, 255)
-            textSize = 28f
-            typeface = Typeface.MONOSPACE
-        }
-        val dateText = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date())
-        canvas.drawText("LISTENER: ${model.listenerName.uppercase(Locale.getDefault())} · $dateText", padX, 368f, subMono)
-        canvas.drawText("VERDICT: ${model.archetypeTitle.uppercase(Locale.getDefault())}", padX, 410f, subMono)
-
-        val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(85, 255, 255, 255)
-            strokeWidth = 3f
-            pathEffect = DashPathEffect(floatArrayOf(14f, 10f), 0f)
-        }
-        canvas.drawLine(padX, 452f, cardWidth - padX, 452f, dashPaint)
-
-        // Column headers
-        val colPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = primaryAccent
+            color = inkMuted
             textSize = 26f
             typeface = Typeface.MONOSPACE
         }
-        canvas.drawText("QTY  TRACK & ARTIST", padX, 504f, colPaint)
-        val rightColPaint = TextPaint(colPaint).apply { textAlign = Paint.Align.RIGHT }
-        canvas.drawText("PLAYS", cardWidth - padX, 504f, rightColPaint)
+        val dateText = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date())
+        canvas.drawText("ORDER #TM-07 · $dateText", pLeft, 388f, subMono)
+        canvas.drawText("LISTENER: ${model.listenerName.uppercase(Locale.getDefault())} · ${model.archetypeTitle.uppercase(Locale.getDefault())}", pLeft, 426f, subMono)
 
-        var y = 584f
+        val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#9CA3AF")
+            strokeWidth = 3f
+            pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+        }
+        canvas.drawLine(pLeft, 458f, pRight, 458f, dashPaint)
+
+        val colPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = inkDark
+            textSize = 24f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        canvas.drawText("QTY  ITEM // ARTIST", pLeft, 504f, colPaint)
+        val rightColPaint = TextPaint(colPaint).apply { textAlign = Paint.Align.RIGHT }
+        canvas.drawText("PLAYS", pRight, 504f, rightColPaint)
+
+        var y = 576f
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 37f
+            color = inkDark
+            textSize = 35f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val artistPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(165, 255, 255, 255)
-            textSize = 27f
+            color = inkMuted
+            textSize = 25f
             typeface = Typeface.MONOSPACE
         }
         val countPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = secondaryAccent
-            textSize = 36f
-            typeface = Typeface.MONOSPACE
+            color = inkDark
+            textSize = 34f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             textAlign = Paint.Align.RIGHT
         }
 
         if (model.receiptLines.isEmpty()) {
             val emptyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(180, 255, 255, 255)
-                textSize = 34f
+                color = inkMuted
+                textSize = 32f
+                typeface = Typeface.MONOSPACE
             }
             drawWrappedText(
                 canvas,
                 "Play songs on Spotify, YouTube Music, or Boomplay to print your verified listening receipt.",
                 emptyPaint,
-                padX,
-                620f,
-                innerWidth,
+                pLeft,
+                610f,
+                pWidth,
                 3
             )
         } else {
             model.receiptLines.forEach { item ->
-                val rankStr = "0${item.rank}"
-                canvas.drawText(rankStr, padX, y, colPaint.apply { textSize = 32f })
-                drawSingleEllipsizedText(canvas, item.title, titlePaint, padX + 74f, y, innerWidth - 220f)
-                canvas.drawText("${item.plays}×", cardWidth - padX, y, countPaint)
+                canvas.drawText("0${item.rank}", pLeft, y, colPaint.apply { textSize = 30f })
+                drawSingleEllipsizedText(canvas, item.title.uppercase(Locale.getDefault()), titlePaint, pLeft + 68f, y, pWidth - 190f)
+                canvas.drawText("${com.tunemind.app.ui.components.formatCompactPlayCount(item.plays)}×", pRight, y, countPaint)
                 drawSingleEllipsizedText(
                     canvas,
                     "${item.artist} · ${item.durationLabel}",
                     artistPaint,
-                    padX + 74f,
-                    y + 42f,
-                    innerWidth - 220f
+                    pLeft + 68f,
+                    y + 38f,
+                    pWidth - 190f
                 )
-                y += 142f
+                y += 130f
             }
         }
 
-        val footerDashY = 1310f
-        canvas.drawLine(padX, footerDashY, cardWidth - padX, footerDashY, dashPaint)
+        val footerDashY = 1255f
+        canvas.drawLine(pLeft, footerDashY, pRight, footerDashY, dashPaint)
 
-        // Receipt totals
         val totalLabel = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(190, 255, 255, 255)
-            textSize = 30f
-            typeface = Typeface.MONOSPACE
-        }
-        val totalVal = TextPaint(totalLabel).apply {
-            color = Color.WHITE
-            textAlign = Paint.Align.RIGHT
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        }
-        canvas.drawText("TOTAL TIME", padX, 1378f, totalLabel)
-        canvas.drawText(model.totalListeningLabel, cardWidth - padX, 1378f, totalVal)
-
-        canvas.drawText("COMPLETION RATE", padX, 1430f, totalLabel)
-        canvas.drawText("${model.completionPercent}% (${model.skipCount} skips)", cardWidth - padX, 1430f, totalVal)
-
-        canvas.drawText("APPS USED", padX, 1482f, totalLabel)
-        drawSingleEllipsizedText(canvas, model.appSplitSummary, totalLabel, padX + 260f, 1482f, innerWidth - 260f)
-
-        val alertPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FBBF24")
+            color = inkMuted
             textSize = 27f
             typeface = Typeface.MONOSPACE
         }
-        drawSingleEllipsizedText(canvas, model.overplayedCallout, alertPaint, padX, 1546f, innerWidth.toFloat())
-
-        // Stylized Receipt Barcode
-        var bx = padX
-        val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(190, 255, 255, 255)
+        val totalVal = TextPaint(totalLabel).apply {
+            color = inkDark
+            textAlign = Paint.Align.RIGHT
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
         }
+        canvas.drawText("TOTAL TIME", pLeft, 1316f, totalLabel)
+        canvas.drawText(model.totalListeningLabel, pRight, 1316f, totalVal)
+
+        canvas.drawText("COMPLETION", pLeft, 1364f, totalLabel)
+        canvas.drawText("${model.completionPercent}% (${model.skipCount} skips)", pRight, 1364f, totalVal)
+
+        canvas.drawText("APPS", pLeft, 1412f, totalLabel)
+        drawSingleEllipsizedText(canvas, model.appSplitSummary, totalVal, pRight, 1412f, pWidth - 180f)
+
+        val alertPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#B45309")
+            textSize = 25f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        }
+        drawSingleEllipsizedText(canvas, model.overplayedCallout, alertPaint, pLeft, 1470f, pWidth.toFloat())
+
+        // Crisp Thermal Barcode + Thank You Stamp
+        var bx = pLeft
+        val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = inkDark }
         val pattern = intArrayOf(6, 3, 10, 4, 4, 8, 3, 12, 4, 6, 3, 9, 5, 4, 11, 3, 6, 5, 8, 4)
         var i = 0
-        while (bx < cardWidth - padX - 18f) {
+        while (bx < pRight - 14f) {
             val w = pattern[i % pattern.size].toFloat()
             if (i % 2 == 0) {
-                canvas.drawRect(bx, 1574f, bx + w, 1638f, barPaint)
+                canvas.drawRect(bx, 1502f, bx + w, 1572f, barPaint)
             }
             bx += w + 6f
             i++
         }
+        val thanksPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = inkMuted
+            textSize = 22f
+            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("THANK YOU FOR LISTENING · TUNEMIND.APP", paperRect.centerX(), 1612f, thanksPaint)
     }
 
     private fun drawVibeBody(
@@ -922,7 +985,7 @@ object ViralShareCardEngine {
         val metricsY = 1480f
         val colW = innerWidth / 3f
         val metricItems = listOf(
-            "PLAYS" to "${model.vibeTrackPlays}×",
+            "PLAYS" to "${com.tunemind.app.ui.components.formatCompactPlayCount(model.vibeTrackPlays)}×",
             "FINISHER" to "${model.completionPercent}%",
             "PERSONA" to model.archetypeTitle.substringBefore(" ")
         )
@@ -1024,6 +1087,11 @@ object ViralShareCardEngine {
             bitmap.recycle()
             saved
         }.getOrDefault(false)
+    }
+
+    fun copyRoastCaption(context: Context, caption: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("TuneMind Roast", caption))
     }
 
     fun shareToWhatsApp(context: Context, imageUri: Uri, caption: String) {

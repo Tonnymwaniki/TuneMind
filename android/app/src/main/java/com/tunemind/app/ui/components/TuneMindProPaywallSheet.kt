@@ -1,6 +1,9 @@
 package com.tunemind.app.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -288,11 +291,31 @@ fun TuneMindProPaywallSheet(
                 }
             }
 
+            val context = LocalContext.current
+            TextButton(
+                onClick = {
+                    val sku = Uri.encode(selectedPlanId)
+                    val pkg = Uri.encode(context.packageName)
+                    val url = "https://play.google.com/store/account/subscriptions?sku=$sku&package=$pkg"
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
+                },
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(
+                    text = "Manage or Cancel Subscription in Google Play",
+                    color = Color(0xFF00F0FF),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
             Text(
-                text = "Google Play Billing: 7 days free, then renews automatically at your selected plan rate. Cancel anytime before Day 7 in Google Play Subscriptions with $0 charge.",
-                color = Color.White.copy(alpha = 0.48f),
-                fontSize = 10.5.sp,
-                lineHeight = 14.sp,
+                text = "Google Play Billing: 7 days free, then renews automatically at your selected plan rate. Cancel anytime before Day 7 in Google Play Subscriptions with \$0 charge.",
+                color = Color(0xFFB8B2CC),
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )

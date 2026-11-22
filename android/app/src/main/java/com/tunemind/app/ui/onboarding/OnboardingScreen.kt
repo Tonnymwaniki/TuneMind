@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -16,6 +17,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,9 +26,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.*
@@ -39,9 +44,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -62,6 +69,8 @@ import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.TuneMindAiIntelligenceLoop
+import com.tunemind.app.ui.components.TuneMindSprings
+import com.tunemind.app.ui.components.tactilePressScale
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import com.tunemind.app.util.PermissionUtils
 import kotlinx.coroutines.launch
@@ -287,12 +296,15 @@ private fun AuthLoginStep(
 ) {
     val theme = LocalAdaptiveTheme.current
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val savedAccounts by authManager.savedAccountsFlow.collectAsState()
     val remoteAuthError by authManager.lastAuthErrorFlow.collectAsState()
 
     var isSignUpMode by remember { mutableStateOf(false) }
+    var ageConfirmed by remember { mutableStateOf(false) }
+    var termsConsentChecked by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -375,6 +387,16 @@ private fun AuthLoginStep(
             authInfoNotice = null
             return
         }
+        if (isSignUpMode && !ageConfirmed) {
+            authError = "Please confirm you are at least 13 years old (16+ where required by law)."
+            authInfoNotice = null
+            return
+        }
+        if (isSignUpMode && !termsConsentChecked) {
+            authError = "Please agree to the Privacy Policy and Terms of Service to create an account."
+            authInfoNotice = null
+            return
+        }
         authError = null
         authInfoNotice = null
         isSubmitting = true
@@ -441,60 +463,136 @@ private fun AuthLoginStep(
             .background(Color(0xFF09090B))
             .navigationBarsPadding()
     ) {
-        // Upper 50%: Lottie Brain-to-Soundwave Neural Loop Hero + Emblem
-        Box(
+        // Upper 50%: Actual Product Preview (Connected Sources + Structured Claude Insight + Live Track Row)
+        Column(
             modifier = Modifier
                 .weight(0.50f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Lightweight radial atmospheric glow behind emblem (no GPU/software blur pass)
-            Box(
-                modifier = Modifier
-                    .size(260.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFFA78BFA).copy(alpha = 0.16f),
-                                Color(0xFF38BDF8).copy(alpha = 0.08f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-
-            TuneMindAiIntelligenceLoop(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 24.dp),
-                speed = 1.05f,
-                alpha = 0.94f
-            )
-
             Image(
                 painter = painterResource(id = R.drawable.ic_tunemind_logo),
                 contentDescription = "TuneMind Icon",
                 modifier = Modifier
-                    .size(96.dp)
-                    .clip(RoundedCornerShape(24.dp)),
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(16.dp)),
                 contentScale = ContentScale.Fit
             )
 
-            // Soft bottom fade transitioning graphic seamlessly into obsidian container
-            Box(
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Real Product Preview Container (#120A24 elevated surface, zero 1dp outer border)
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(130.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color(0xFF09090B))
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF120A24))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color(0xFF00F0FF),
+                            modifier = Modifier.size(18.dp)
                         )
+                        Text(
+                            text = "Claude Listening Brief",
+                            color = Color(0xFFF5F3FF),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text(
+                        text = "Spotify · YT Music · Audiomack",
+                        color = Color(0xFFB8B2CC),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
                     )
-            )
+                }
+
+                // Structured insight preview row
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1A1033))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Late-Night Focus Pattern",
+                        color = Color(0xFFF5F3FF),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "You replay high-energy tracks 3.2x faster after 9 PM — queueing fresh rotation to prevent fatigue.",
+                        color = Color(0xFFB8B2CC),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                }
+
+                // Live playback preview row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF8A2BE2).copy(alpha = 0.25f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GraphicEq,
+                            contentDescription = null,
+                            tint = Color(0xFF00F0FF),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Cross-App Queue Synced",
+                            color = Color(0xFFF5F3FF),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Unified history, play counts & daily drops",
+                            color = Color(0xFFB8B2CC),
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color(0xFF00F0FF),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
         }
 
-        // Lower 50%: Brand Pitch & Full-Width Rounded-28dp Auth Stack
+        // Lower 50%: Sharp Value Proposition & Full-Width Rounded-28dp Auth Stack
         Column(
             modifier = Modifier
                 .weight(0.50f)
@@ -508,47 +606,35 @@ private fun AuthLoginStep(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_tunemind_logo),
-                        contentDescription = "App Icon",
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "TUNEMIND",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White,
-                        letterSpacing = 2.5.sp
-                    )
-                }
+                Text(
+                    text = "TUNEMIND",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFFF5F3FF),
+                    letterSpacing = 2.5.sp
+                )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Personal listening intelligence, synced to your account.",
+                    text = "Connect Spotify, YouTube Music & Audiomack. Analyze your listening with Claude.",
                     fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.68f),
+                    color = Color(0xFFB8B2CC),
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp,
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp)
                 )
             }
 
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(TuneMindSprings.snappy()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (savedAccounts.isNotEmpty()) {
                     val primarySaved = savedAccounts.first()
                     Surface(
                         shape = RoundedCornerShape(28.dp),
-                        color = Color(0xFF38BDF8).copy(alpha = 0.08f),
-                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.36f)),
+                        color = Color(0xFF120A24),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(28.dp))
@@ -571,7 +657,7 @@ private fun AuthLoginStep(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Continue as ${primarySaved.displayName}",
-                                    color = Color.White,
+                                    color = Color(0xFFF5F3FF),
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -579,7 +665,7 @@ private fun AuthLoginStep(
                                 )
                                 Text(
                                     text = "${primarySaved.email} · ${if (primarySaved.provider == "GOOGLE") "Google" else "Email"}",
-                                    color = Color.White.copy(alpha = 0.58f),
+                                    color = Color(0xFFB8B2CC),
                                     fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -587,7 +673,7 @@ private fun AuthLoginStep(
                             }
                             Text(
                                 text = if (isSwitchingSavedAccount) "Opening…" else "Switch",
-                                color = Color(0xFF38BDF8),
+                                color = Color(0xFF00F0FF),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -596,8 +682,10 @@ private fun AuthLoginStep(
                 }
 
                 // Primary CTA 1: Continue with Google (1-tap Login or Auto-Create Account)
+                val googleBtnInteraction = remember { MutableInteractionSource() }
                 Button(
                     onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         authError = null
                         authInfoNotice = null
                         authManager.clearLastAuthError()
@@ -613,9 +701,11 @@ private fun AuthLoginStep(
                             launchGoogleAccountPicker()
                         }
                     },
+                    interactionSource = googleBtnInteraction,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(54.dp),
+                        .height(54.dp)
+                        .tactilePressScale(googleBtnInteraction),
                     shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.White,
@@ -684,14 +774,20 @@ private fun AuthLoginStep(
                 }
 
                 // Primary CTA 2: Continue with Email (defaults to Log In)
+                val emailBtnInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
+                        .tactilePressScale(emailBtnInteraction)
                         .clip(RoundedCornerShape(28.dp))
                         .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(28.dp))
                         .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(28.dp))
-                        .clickable {
+                        .clickable(
+                            interactionSource = emailBtnInteraction,
+                            indication = null
+                        ) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             isSignUpMode = false
                             authError = null
                             authInfoNotice = null
@@ -907,6 +1003,64 @@ private fun AuthLoginStep(
                                 .clickable(enabled = !isSubmitting) { submitForgotPassword() }
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { ageConfirmed = !ageConfirmed }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Checkbox(
+                                checked = ageConfirmed,
+                                onCheckedChange = { ageConfirmed = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Color(0xFF00F0FF),
+                                    uncheckedColor = Color(0xFFB8B2CC),
+                                    checkmarkColor = Color(0xFF07020F)
+                                )
+                            )
+                            Text(
+                                text = "I confirm I am at least 13 years old (or 16+ where required by local law).",
+                                color = Color(0xFFD6D1E6),
+                                fontSize = 12.5.sp,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { termsConsentChecked = !termsConsentChecked }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Checkbox(
+                                checked = termsConsentChecked,
+                                onCheckedChange = { termsConsentChecked = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Color(0xFF00F0FF),
+                                    uncheckedColor = Color(0xFFB8B2CC),
+                                    checkmarkColor = Color(0xFF07020F)
+                                )
+                            )
+                            Text(
+                                text = "I agree to TuneMind's Terms of Service and Privacy Policy (including AI insight processing).",
+                                color = Color(0xFFD6D1E6),
+                                fontSize = 12.5.sp,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -1143,7 +1297,7 @@ private fun PermissionSetupStep(
         ) {
             Text(
                 text = "Step $stepIndex of $totalSteps",
-                color = Color.White.copy(alpha = 0.56f),
+                color = Color(0xFFB8B2CC),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -1200,7 +1354,7 @@ private fun PermissionSetupStep(
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = description,
-                    color = Color.White.copy(alpha = 0.68f),
+                    color = Color(0xFFC8C2DC),
                     fontSize = 15.sp,
                     textAlign = TextAlign.Center,
                     lineHeight = 22.sp
@@ -1219,13 +1373,21 @@ private fun PermissionSetupStep(
         }
 
         // Bottom-pinned primary action + optional helper + quiet skip
+        val haptics = LocalHapticFeedback.current
+        val primaryInteraction = remember { MutableInteractionSource() }
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(TuneMindSprings.snappy()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Button(
-                onClick = onPrimaryClick,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPrimaryClick()
+                },
+                interactionSource = primaryInteraction,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFFF8FAFC),
                     contentColor = Color(0xFF07090E)
@@ -1234,6 +1396,7 @@ private fun PermissionSetupStep(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp)
+                    .tactilePressScale(primaryInteraction)
             ) {
                 Text(
                     text = primaryButtonText,
@@ -1243,7 +1406,10 @@ private fun PermissionSetupStep(
             }
 
             if (!helperActionText.isNullOrBlank() && onHelperActionClick != null) {
-                TextButton(onClick = onHelperActionClick) {
+                TextButton(onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onHelperActionClick()
+                }) {
                     Text(
                         text = helperActionText,
                         color = accent.copy(alpha = 0.90f),
@@ -1253,10 +1419,13 @@ private fun PermissionSetupStep(
                 }
             }
 
-            TextButton(onClick = onSkipClick) {
+            TextButton(onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onSkipClick()
+            }) {
                 Text(
                     text = "Skip for now",
-                    color = Color.White.copy(alpha = 0.56f),
+                    color = Color(0xFFB8B2CC),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )

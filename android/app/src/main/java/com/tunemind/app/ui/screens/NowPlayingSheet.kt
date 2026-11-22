@@ -181,16 +181,18 @@ fun NowPlayingSheet(
 
     val canSeek = hasTrack && effectiveDurationMs > 0L
 
-    val infiniteTransition = rememberInfiniteTransition(label = "np_pulse")
-    val discScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = if (effectivePlaying) 1.04f else 0.98f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "np_disc"
-    )
+    val discScale = if (effectivePlaying) {
+        val infiniteTransition = rememberInfiniteTransition(label = "np_pulse")
+        infiniteTransition.animateFloat(
+            initialValue = 0.96f,
+            targetValue = 1.04f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "np_disc"
+        ).value
+    } else 1.0f
 
     StudioAmbientBackground(
         accentOverride = if (effectivePlaying) safeGreen else theme.primaryAccent,
@@ -449,8 +451,8 @@ fun NowPlayingSheet(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     val shownMs = (displayFraction * durationSafe).toLong()
-                    Text(formatTrackTime(shownMs), color = Color.White.copy(alpha = 0.56f), fontSize = 12.sp)
-                    Text(formatTrackTime(effectiveDurationMs), color = Color.White.copy(alpha = 0.56f), fontSize = 12.sp)
+                    Text(formatTrackTime(shownMs), color = Color(0xFFB8B2CC), fontSize = 12.sp)
+                    Text(formatTrackTime(effectiveDurationMs), color = Color(0xFFB8B2CC), fontSize = 12.sp)
                 }
             }
 
@@ -899,12 +901,11 @@ private fun NowPlayingQuickAction(
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = Color.White.copy(alpha = 0.06f),
-        border = BorderStroke(1.dp, accent.copy(alpha = 0.36f)),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFF120A24),
         modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(28.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
     ) {
         Row(

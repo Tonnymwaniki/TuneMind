@@ -40,6 +40,8 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +61,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,25 +87,32 @@ fun AiNeuralCoreEmblem(
     isThinking: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val transition = rememberInfiniteTransition(label = "ai_core_emblem")
-    val orbitDeg by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (isThinking) 2200 else 9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ai_orbit"
-    )
-    val pulse by transition.animateFloat(
-        initialValue = 0.74f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "ai_pulse"
-    )
+    val orbitDeg: Float
+    val pulse: Float
+    if (isThinking) {
+        val transition = rememberInfiniteTransition(label = "ai_core_emblem")
+        orbitDeg = transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "ai_orbit"
+        ).value
+        pulse = transition.animateFloat(
+            initialValue = 0.74f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "ai_pulse"
+        ).value
+    } else {
+        orbitDeg = 0f
+        pulse = 0.92f
+    }
 
     Canvas(modifier = modifier) {
         val cx = size.width / 2f
@@ -186,6 +196,8 @@ fun LazyListScope.forYouDiscoveryItems(
     activeRecs: List<AiRecommendationEntity>,
     learningState: ForYouLearningSummary,
     isDiscovering: Boolean,
+    isForYouAiEnabled: Boolean = false,
+    onToggleForYouAi: (Boolean) -> Unit = {},
     totalWildcardsInCycle: Int = 0,
     lockedWildcardsCount: Int = 0,
     resolvePlayCount: (title: String?, artist: String?, uri: String?) -> Int = { _, _, _ -> 0 },
@@ -225,6 +237,8 @@ fun LazyListScope.forYouDiscoveryItems(
             genreCount = orderedGenreGroups.size,
             wildcardCount = wildcards.size,
             isDiscovering = isDiscovering,
+            isForYouAiEnabled = isForYouAiEnabled,
+            onToggleForYouAi = onToggleForYouAi,
             onRefresh = onRefreshForYou,
             onExportPlaylist = if (activeRecs.isNotEmpty() && onExportPlaylist != null) {
                 { onExportPlaylist(activeRecs) }
@@ -246,7 +260,21 @@ fun LazyListScope.forYouDiscoveryItems(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (isDiscovering) {
+                    if (!isForYouAiEnabled) {
+                        Text(
+                            text = "For You AI is turned off",
+                            color = Color(0xFFF5F3FF),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Zero Claude API tokens are being used. Turn on the switch above whenever you want Claude to recommend songs.",
+                            color = Color(0xFFB8B2CC),
+                            fontSize = 12.5.sp,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    } else if (isDiscovering) {
                         CircularProgressIndicator(
                             color = Color(0xFF38BDF8),
                             strokeWidth = 2.5.dp,
@@ -498,6 +526,8 @@ private fun ForYouAiHeroCard(
     genreCount: Int,
     wildcardCount: Int,
     isDiscovering: Boolean,
+    isForYouAiEnabled: Boolean,
+    onToggleForYouAi: (Boolean) -> Unit,
     onRefresh: () -> Unit,
     onExportPlaylist: (() -> Unit)? = null
 ) {
@@ -568,7 +598,7 @@ private fun ForYouAiHeroCard(
                         } else {
                             "Daily 12:00 PM drop ($tzShort) · Next in $countdownText"
                         },
-                        color = Color.White.copy(alpha = 0.64f),
+                        color = Color(0xFFB8B2CC),
                         fontSize = 11.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -578,46 +608,102 @@ private fun ForYouAiHeroCard(
                 if (onExportPlaylist != null) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF1DB954).copy(alpha = 0.15f))
-                            .border(1.dp, Color(0xFF1DB954).copy(alpha = 0.40f), CircleShape)
                             .clickable { onExportPlaylist() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PlaylistAdd,
-                            contentDescription = "Save Drop as TuneMind Playlist",
-                            tint = Color(0xFF1DB954),
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1DB954).copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlaylistAdd,
+                                contentDescription = "Save Drop as TuneMind Playlist",
+                                tint = Color(0xFF1DB954),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .background(aiCyan.copy(alpha = 0.15f))
-                        .border(1.dp, aiCyan.copy(alpha = 0.42f), CircleShape)
-                        .clickable(enabled = !isDiscovering) { onRefresh() },
+                        .clickable(enabled = isForYouAiEnabled && !isDiscovering) { onRefresh() },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isDiscovering) {
-                        CircularProgressIndicator(
-                            color = aiCyan,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "Refresh Daily Drop",
-                            tint = aiCyan,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isForYouAiEnabled) aiCyan.copy(alpha = 0.16f)
+                                else Color.White.copy(alpha = 0.06f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isDiscovering) {
+                            CircularProgressIndicator(
+                                color = aiCyan,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Refresh Daily Drop",
+                                tint = if (isForYouAiEnabled) aiCyan else Color(0xFFB8B2CC),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Dedicated Claude API Kill-Switch for For You Screen
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1A1033))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isForYouAiEnabled) "Claude AI Recommendations: ON" else "Claude AI Recommendations: OFF",
+                        color = Color(0xFFF5F3FF),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (isForYouAiEnabled) {
+                            "Active · Turn off when done to save Claude tokens"
+                        } else {
+                            "Paused · Zero Claude API calls or auto-reloads"
+                        },
+                        color = Color(0xFFB8B2CC),
+                        fontSize = 11.sp
+                    )
+                }
+                Switch(
+                    checked = isForYouAiEnabled,
+                    onCheckedChange = onToggleForYouAi,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF07020F),
+                        checkedTrackColor = aiCyan,
+                        uncheckedThumbColor = Color(0xFFB8B2CC),
+                        uncheckedTrackColor = Color(0xFF07020F)
+                    )
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -831,7 +917,7 @@ private fun WildcardTrioShowcaseCard(
                                 }
                             }
                             val wildcardPlays = resolvePlayCount(rec.title, rec.artist, rec.spotifyUri)
-                            val wildcardPlaysLabel = "$wildcardPlays ${if (wildcardPlays == 1) "play" else "plays"}"
+                            val wildcardPlaysLabel = com.tunemind.app.ui.components.formatPlaysLabel(wildcardPlays)
                             Text(
                                 text = "${rec.artist} · $wildcardPlaysLabel",
                                 color = Color.White.copy(alpha = 0.66f),
@@ -1027,7 +1113,7 @@ private fun ForYouGenreTrackCard(
                             )
                         }
                     }
-                    val playsLabel = "$playCount ${if (playCount == 1) "play" else "plays"}"
+                    val playsLabel = com.tunemind.app.ui.components.formatPlaysLabel(playCount)
                     Text(
                         text = "${rec.artist} · $playsLabel · $statusBadge",
                         color = Color.White.copy(alpha = 0.66f),

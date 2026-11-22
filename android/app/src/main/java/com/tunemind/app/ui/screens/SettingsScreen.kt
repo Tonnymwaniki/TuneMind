@@ -1131,10 +1131,37 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Privacy Policy, Terms & About", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFAFAFA))
-                            Text("Version, permissions disclosure & open-source notices", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                            Text("Privacy Policy, Terms & About", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF5F3FF))
+                            Text("Version, permissions disclosure & open-source notices", fontSize = 12.sp, color = Color(0xFFB8B2CC))
                         }
-                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.45f))
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color(0xFFB8B2CC))
+                    }
+                    StudioHairlineDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val pkg = android.net.Uri.encode(context.packageName)
+                                val url = "https://play.google.com/store/account/subscriptions?sku=tunemind_pro_monthly&package=$pkg"
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(url)
+                                        )
+                                    )
+                                }
+                            }
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Manage or Cancel Subscription", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF5F3FF))
+                            Text("Open Google Play Subscriptions in one tap", fontSize = 12.sp, color = Color(0xFFB8B2CC))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color(0xFFB8B2CC))
                     }
                     StudioHairlineDivider()
             }

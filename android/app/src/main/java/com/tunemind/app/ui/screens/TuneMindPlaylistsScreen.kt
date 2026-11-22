@@ -37,11 +37,8 @@ import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
-private fun formatPlaylistPlayCount(plays: Int): String = when {
-    plays <= 0 -> "Not played yet"
-    plays == 1 -> "1 play"
-    else -> "$plays plays"
-}
+private fun formatPlaylistPlayCount(plays: Int): String =
+    com.tunemind.app.ui.components.formatPlaysLabel(plays, zeroLabel = "Not played yet")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

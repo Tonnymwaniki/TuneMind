@@ -4,7 +4,7 @@ import {
   SelfLearningDiscoveryEngine
 } from '../../domain/recommendation/SelfLearningDiscoveryEngine';
 import { SubscriptionEntitlementStore } from '../../domain/billing/SubscriptionEntitlementStore';
-import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
+import { requireAuthInProduction, resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
 
@@ -14,7 +14,7 @@ const router = Router();
  * - Free users receive 2 verified non-repeating daily picks at $0 Claude cost.
  * - Trial/Pro users receive the full 15-song Haiku-synthesized slate within fair-use quotas.
  */
-router.post('/daily-drop', async (req: Request, res: Response) => {
+router.post('/daily-drop', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const identity = resolveEffectiveUserIdentity(
@@ -97,9 +97,7 @@ router.post('/daily-drop', async (req: Request, res: Response) => {
       spotifyAccessToken: rawSpotifyToken.length >= 20 ? rawSpotifyToken : undefined,
       yesterdayOutcomes: Array.isArray(body.yesterdayOutcomes) ? body.yesterdayOutcomes : [],
       playedFeedback: toStringArray(body.playedFeedback, 50),
-      dismissedFeedback: toStringArray(body.dismissedFeedback, 50),
-      supabaseUrl: body.supabase_url,
-      supabaseKey: body.supabase_anon_key
+      dismissedFeedback: toStringArray(body.dismissedFeedback, 50)
     });
 
     let updatedEntitlement = entitlement;

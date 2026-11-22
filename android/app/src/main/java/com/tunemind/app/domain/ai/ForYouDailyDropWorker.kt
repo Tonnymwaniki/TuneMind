@@ -42,6 +42,9 @@ class ForYouDailyDropWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
+            if (!isForYouAiEnabled(applicationContext)) {
+                return@withContext Result.success()
+            }
             val db = TuneMindDatabase.getInstance(applicationContext)
             val dao = db.aiRecommendationDao()
             val todayNoonKey = NoonDropSchedule.getNoonCycleKey()
@@ -266,7 +269,29 @@ class ForYouDailyDropWorker(
             return (nextNoon.timeInMillis - now.timeInMillis).coerceAtLeast(60_000L)
         }
 
+        private const val FOR_YOU_PREFS_NAME = "tunemind_for_you_prefs"
+        private const val KEY_FOR_YOU_AI_ENABLED = "for_you_ai_enabled"
+
+        fun isForYouAiEnabled(context: Context): Boolean {
+            return context.applicationContext
+                .getSharedPreferences(FOR_YOU_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_FOR_YOU_AI_ENABLED, false)
+        }
+
+        fun setForYouAiEnabled(context: Context, enabled: Boolean) {
+            val appCtx = context.applicationContext
+            appCtx.getSharedPreferences(FOR_YOU_PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_FOR_YOU_AI_ENABLED, enabled)
+                .apply()
+            if (!enabled) {
+                WorkManager.getInstance(appCtx).cancelUniqueWork(UNIQUE_NOON_DROP_WORK)
+                WorkManager.getInstance(appCtx).cancelUniqueWork(UNIQUE_DAILY_BACKUP_WORK)
+            }
+        }
+
         fun scheduleNextNoonDrop(context: Context, replaceExisting: Boolean = false) {
+            if (!isForYouAiEnabled(context)) return
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()

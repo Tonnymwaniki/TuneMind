@@ -98,6 +98,24 @@ export default function App() {
   const [currentTrack, setCurrentTrack] = useState<DopamineTrack>(INITIAL_SONGS[0]);
   const [isMusicPlaying, setIsMusicPlaying] = useState<boolean>(true);
   const [tickerIndex, setTickerIndex] = useState<number>(0);
+  const [cookieChoice, setCookieChoice] = useState<'pending' | 'essential' | 'analytics'>(() => {
+    try {
+      const saved = window.localStorage.getItem('tunemind_cookie_consent');
+      if (saved === 'essential' || saved === 'analytics') return saved;
+    } catch {
+      // ignore storage errors
+    }
+    return 'pending';
+  });
+
+  const handleCookieConsent = (choice: 'essential' | 'analytics') => {
+    setCookieChoice(choice);
+    try {
+      window.localStorage.setItem('tunemind_cookie_consent', choice);
+    } catch {
+      // ignore storage errors
+    }
+  };
   const [activeSyncSong, setActiveSyncSong] = useState<DopamineTrack | null>(null);
   const [agentState, setAgentState] = useState<AgentState>('IDLE');
   const [satietyPercentage, setSatietyPercentage] = useState<number>(14);
@@ -1059,6 +1077,53 @@ export default function App() {
                 </div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LEGAL & BUSINESS FOOTER */}
+      <footer className="max-w-5xl mx-auto px-5 pt-8 pb-28 border-t border-white/10 text-xs text-[#B8B2CC] flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+          <span className="font-semibold text-[#F5F3FF]">TuneMind Labs</span> ·{' '}
+          <a href="mailto:support@tunemind.co" className="text-[#00F0FF] hover:underline">
+            support@tunemind.co
+          </a>
+        </div>
+        <nav aria-label="Legal and Compliance" className="flex flex-wrap items-center justify-center gap-4">
+          <a href="/privacy" className="hover:text-white underline-offset-4 hover:underline">Privacy Policy</a>
+          <a href="/terms" className="hover:text-white underline-offset-4 hover:underline">Terms of Service</a>
+          <a href="/refund-policy" className="hover:text-white underline-offset-4 hover:underline">Refund Policy</a>
+          <a href="/cookies" className="hover:text-white underline-offset-4 hover:underline">Cookie Policy</a>
+          <a href="/delete-account" className="hover:text-white underline-offset-4 hover:underline">Delete Account</a>
+        </nav>
+      </footer>
+
+      {/* OPT-IN COOKIE CONSENT BANNER (blocks non-essential cookies until accepted) */}
+      {cookieChoice === 'pending' && (
+        <div
+          role="dialog"
+          aria-label="Cookie Consent"
+          className="fixed bottom-24 left-4 right-4 sm:left-auto sm:right-6 sm:max-w-md z-50 rounded-2xl bg-[#120A24] border border-white/15 p-4 shadow-2xl"
+        >
+          <p className="text-xs text-[#D6D1E6] leading-relaxed mb-3">
+            TuneMind uses essential storage for sign-in and security. Optional analytics cookies stay blocked unless you opt in.{' '}
+            <a href="/cookies" className="text-[#00F0FF] underline">Cookie Policy</a>
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => handleCookieConsent('essential')}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#D6D1E6] bg-white/10 hover:bg-white/15"
+            >
+              Essential Only
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCookieConsent('analytics')}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#07020F] bg-[#00F0FF] hover:opacity-90"
+            >
+              Accept Analytics
+            </button>
           </div>
         </div>
       )}

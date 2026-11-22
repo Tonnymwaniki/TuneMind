@@ -270,30 +270,19 @@ fun RhythmDnaScreen(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.4).sp
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                IconButton(
+                    onClick = onOpenSearch,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
                 ) {
-                    Text(
-                        text = "${activePhase.label} · ${activePhase.hoursLabel} · $liveClockLabel",
-                        color = activeSubDeckAccent.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = "Search Music",
+                        tint = Color(0xFFF8FAFC),
+                        modifier = Modifier.size(20.dp)
                     )
-                    IconButton(
-                        onClick = onOpenSearch,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Search Music",
-                            tint = Color(0xFFF8FAFC),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
                 }
             }
 

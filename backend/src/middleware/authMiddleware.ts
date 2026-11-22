@@ -216,6 +216,18 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 }
 
 /**
+ * Enforces a verified Supabase Bearer JWT in production (`NODE_ENV === 'production'`),
+ * while allowing unauthenticated local development and Jest test runs.
+ */
+export async function requireAuthInProduction(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (process.env.NODE_ENV !== 'production') {
+    await optionalAuth(req, res, next);
+    return;
+  }
+  await requireAuth(req, res, next);
+}
+
+/**
  * Resolves the effective user identifier for data queries/writes.
  * When a verified JWT is present, authenticated identity always takes precedence
  * over spoofable body/query user_id or user_email fields.

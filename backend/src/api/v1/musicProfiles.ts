@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { resolveCanonicalTrackIdentity } from '../../domain/identity/trackIdentity';
+import { retryWithBackoff } from '../../utils/retryWithBackoff';
+import { isSafeExternalHttpUrl } from '../../utils/ssrfGuard';
 
 const router = Router();
 
@@ -218,13 +220,26 @@ export function isStrictTitleArtistMatch(
 }
 
 async function fetchJsonWithTimeout(url: string, timeoutMs = 4000, headers?: Record<string, string>): Promise<any | null> {
+  if (!isSafeExternalHttpUrl(url)) {
+    return null;
+  }
   try {
-    const resp = await fetch(url, {
-      headers: { Accept: 'application/json', ...(headers || {}) },
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!resp.ok) return null;
-    return await resp.json();
+    return await retryWithBackoff(
+      async () => {
+        const resp = await fetch(url, {
+          headers: { Accept: 'application/json', ...(headers || {}) },
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (resp.status === 429 || resp.status >= 500) {
+          const err: any = new Error(`HTTP ${resp.status}`);
+          err.status = resp.status;
+          throw err;
+        }
+        if (!resp.ok) return null;
+        return await resp.json();
+      },
+      { maxAttempts: 2, baseDelayMs: 200, maxDelayMs: 1_500 }
+    );
   } catch {
     return null;
   }
@@ -884,6 +899,7 @@ router.post('/resolve-profile', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing track title' });
     }
     const profile = await resolveUniversalTrackProfile(title, artist);
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
     return res.json({ found: Boolean(profile), profile });
   } catch (err: any) {
     console.error('[MusicProfiles] /resolve-profile error:', err?.message || err);
@@ -942,6 +958,7 @@ router.get('/search', async (req: Request, res: Response) => {
     const excludeExplicit = String(req.query.kids_safe || 'false') === 'true';
 
     const result = await searchOpenMusicCatalog(q, searchType, undefined, limit, excludeExplicit, offset);
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
     return res.json(result);
   } catch (err: any) {
     console.error('[MusicProfiles] /search error:', err?.message || err);
@@ -963,6 +980,7 @@ router.get('/resolve-playable', async (req: Request, res: Response) => {
     const artist = String(req.query.artist || '').trim();
     if (!title) return res.status(400).json({ error: 'Missing title query parameter' });
     const profile = await resolveUniversalTrackProfile(title, artist);
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
     return res.json({ found: Boolean(profile), profile });
   } catch (err: any) {
     console.error('[MusicProfiles] /resolve-playable error:', err?.message || err);

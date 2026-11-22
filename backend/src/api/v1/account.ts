@@ -75,7 +75,8 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
         'discovery_recommendation_outcomes',
         'track_play_events',
         'user_playlists',
-        'track_cards'
+        'track_cards',
+        'billing_entitlements'
       ];
 
       for (const table of userIdTables) {
@@ -135,6 +136,26 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
       console.warn('[Account API] Local EventStore cleanup notice:', err);
     }
 
+    // Also purge any private user files from Supabase Storage buckets
+    let purgedStorageFiles = 0;
+    if (adminClient) {
+      const storageBuckets = ['avatars', 'exports', 'share-cards', 'user-assets'];
+      for (const bucket of storageBuckets) {
+        try {
+          const { data: files } = await adminClient.storage.from(bucket).list(user.id, { limit: 100 });
+          if (files && files.length > 0) {
+            const paths = files.map(f => `${user.id}/${f.name}`);
+            const { error: rmError } = await adminClient.storage.from(bucket).remove(paths);
+            if (!rmError) {
+              purgedStorageFiles += paths.length;
+            }
+          }
+        } catch {
+          // Bucket may not exist in all deployments
+        }
+      }
+    }
+
     // Delete auth.users record when service role key is present
     let authUserDeleted = false;
     let authDeleteMessage = isServiceRoleConfigured()
@@ -157,6 +178,7 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
       auth_user_deleted: authUserDeleted,
       auth_message: authDeleteMessage,
       wiped_tables: wipedTables,
+      purged_storage_files: purgedStorageFiles,
       removed_local_events: removedLocalEvents,
       warnings: tableErrors.length > 0 ? tableErrors : undefined
     });

@@ -3,7 +3,7 @@ import {
   SubscriptionEntitlementStore,
   TUNEMIND_BILLING_PLANS
 } from '../../domain/billing/SubscriptionEntitlementStore';
-import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
+import { requireAuthInProduction, resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 
 const router = Router();
 
@@ -12,6 +12,7 @@ const router = Router();
  * Public plan metadata (localized Play Store prices take precedence on device).
  */
 router.get('/plans', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
   res.json({
     status: 'ok',
     freeForeverFeatures: [
@@ -33,7 +34,7 @@ router.get('/plans', (_req: Request, res: Response) => {
  * GET /api/v1/billing/entitlement
  * Returns user's current subscription tier (FREE, TRIAL, PRO) and daily AI quota usage.
  */
-router.get('/entitlement', async (req: Request, res: Response) => {
+router.get('/entitlement', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const identity = resolveEffectiveUserIdentity(
       req,
@@ -58,7 +59,7 @@ router.get('/entitlement', async (req: Request, res: Response) => {
  * POST /api/v1/billing/google-play/verify
  * Verifies a Google Play Billing v7 subscription purchase token server-side.
  */
-router.post('/google-play/verify', async (req: Request, res: Response) => {
+router.post('/google-play/verify', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const identity = resolveEffectiveUserIdentity(
@@ -113,7 +114,7 @@ router.post('/google-play/verify', async (req: Request, res: Response) => {
  * POST /api/v1/billing/google-play/restore
  * Restores active Play Store purchases queried on device.
  */
-router.post('/google-play/restore', async (req: Request, res: Response) => {
+router.post('/google-play/restore', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const identity = resolveEffectiveUserIdentity(
@@ -165,6 +166,10 @@ router.post('/google-play/restore', async (req: Request, res: Response) => {
 router.post('/google-play/rtdn', async (req: Request, res: Response) => {
   try {
     const expectedSecret = (process.env.GOOGLE_PLAY_RTDN_SECRET || '').trim();
+    if (process.env.NODE_ENV === 'production' && !expectedSecret) {
+      res.status(503).json({ status: 'error', message: 'RTDN webhook secret is not configured' });
+      return;
+    }
     if (expectedSecret && req.query.secret !== expectedSecret) {
       res.status(401).json({ status: 'error', message: 'Unauthorized RTDN webhook' });
       return;
@@ -186,6 +191,125 @@ router.post('/google-play/rtdn', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[billing.ts] Error processing RTDN notification:', error);
     res.status(400).json({ status: 'error', message: 'Malformed RTDN payload' });
+  }
+});
+
+/**
+ * GET /api/v1/billing/trial-reminder
+ * Checks whether the authenticated user's free trial converts within 48-72 hours
+ * and returns the renewal date, price, and one-tap Google Play cancel link.
+ */
+router.get('/trial-reminder', requireAuthInProduction, async (req: Request, res: Response) => {
+  try {
+    const identity = resolveEffectiveUserIdentity(
+      req,
+      req.query.userId as string | undefined,
+      req.query.userEmail as string | undefined
+    );
+    const entitlement = await SubscriptionEntitlementStore.getEntitlement(identity.userId);
+    const nowMs = Date.now();
+    const expiresMs = entitlement.trialEndsAtMs ?? entitlement.currentPeriodEndMs ?? NaN;
+    const hoursRemaining = Number.isFinite(expiresMs) ? (expiresMs - nowMs) / (1000 * 60 * 60) : null;
+    const isTrialExpiringSoon =
+      entitlement.tier === 'TRIAL' &&
+      hoursRemaining !== null &&
+      hoursRemaining > 0 &&
+      hoursRemaining <= 72;
+
+    const sku = entitlement.planId || 'tunemind_pro_monthly';
+    const matchedPlan = TUNEMIND_BILLING_PLANS.find((p) => p.planId === sku) || TUNEMIND_BILLING_PLANS[0];
+    const renewalIso = Number.isFinite(expiresMs) ? new Date(expiresMs).toISOString() : null;
+    const cancelUrl = `https://play.google.com/store/account/subscriptions?sku=${encodeURIComponent(sku)}&package=com.tunemind.app`;
+
+    res.json({
+      status: 'ok',
+      reminderDue: isTrialExpiringSoon,
+      hoursRemaining: hoursRemaining !== null ? Math.round(hoursRemaining) : null,
+      renewalDate: renewalIso,
+      priceDisplay: matchedPlan?.globalPriceUsd || '$4.99/month',
+      cancelUrl,
+      message: isTrialExpiringSoon && renewalIso
+        ? `Your TuneMind Pro free trial ends on ${renewalIso}. It will renew at ${matchedPlan?.globalPriceUsd || '$4.99/month'} unless you cancel beforehand.`
+        : null
+    });
+  } catch (error) {
+    console.error('[billing.ts] Error checking trial reminder:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to check trial reminder status' });
+  }
+});
+
+/**
+ * POST /api/v1/billing/trials/send-reminders
+ * Cron-callable endpoint (protected by TRIAL_REMINDER_CRON_SECRET in production)
+ * to dispatch 48-72h free-trial expiration reminders via configured email webhook.
+ */
+router.post('/trials/send-reminders', async (req: Request, res: Response) => {
+  const expectedSecret = (process.env.TRIAL_REMINDER_CRON_SECRET || '').trim();
+  if (process.env.NODE_ENV === 'production' && !expectedSecret) {
+    res.status(503).json({ status: 'error', message: 'TRIAL_REMINDER_CRON_SECRET is not configured' });
+    return;
+  }
+  if (expectedSecret && req.headers['x-cron-secret'] !== expectedSecret) {
+    res.status(401).json({ status: 'error', message: 'Unauthorized cron trigger' });
+    return;
+  }
+
+  try {
+    const { getSupabaseAdminClient } = await import('../../config/supabase');
+    const admin = getSupabaseAdminClient();
+    if (!admin) {
+      res.json({ status: 'ok', dispatched: 0, note: 'Supabase admin client not configured' });
+      return;
+    }
+
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
+    const windowEnd = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+
+    const { data: trials, error } = await admin
+      .from('billing_entitlements')
+      .select('user_id, product_id, expires_at')
+      .eq('tier', 'TRIAL')
+      .gte('expires_at', windowStart)
+      .lte('expires_at', windowEnd);
+
+    if (error) {
+      res.status(500).json({ status: 'error', message: error.message });
+      return;
+    }
+
+    const webhookUrl = (process.env.TRIAL_REMINDER_WEBHOOK_URL || '').trim();
+    let dispatched = 0;
+
+    for (const row of trials || []) {
+      const sku = String(row.product_id || 'tunemind_pro_monthly');
+      const matchedPlan = TUNEMIND_BILLING_PLANS.find((p) => p.planId === sku) || TUNEMIND_BILLING_PLANS[0];
+      const cancelUrl = `https://play.google.com/store/account/subscriptions?sku=${encodeURIComponent(sku)}&package=com.tunemind.app`;
+
+      if (webhookUrl) {
+        await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: row.user_id,
+            renewalDate: row.expires_at,
+            price: matchedPlan?.globalPriceUsd || '$4.99/month',
+            cancelUrl
+          })
+        }).catch(() => {});
+      }
+      dispatched += 1;
+    }
+
+    res.json({
+      status: 'ok',
+      windowStart,
+      windowEnd,
+      dispatched
+    });
+  } catch (error) {
+    console.error('[billing.ts] Error dispatching trial reminders:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to dispatch trial reminders' });
   }
 });
 

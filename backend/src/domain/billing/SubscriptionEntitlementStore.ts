@@ -551,7 +551,15 @@ export class SubscriptionEntitlementStore {
       }
     }
 
-    // Staging / Pre-Service-Account mode: records Play Store purchase safely with 7-day trial window
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        verified: false,
+        entitlement: await this.getEntitlement(cleanUserId),
+        error: 'Google Play billing verification is not configured on the server.'
+      };
+    }
+
+    // Staging / Pre-Service-Account mode (non-production only): records Play Store purchase with 7-day trial window
     const periodMs = 7 * DAY_MS;
     await this.saveSubscriptionRecord({
       userId: cleanUserId,

@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,7 +90,7 @@ fun FloatingGlassDock(
     }
     val activeAccent by animateColorAsState(
         targetValue = targetAccent,
-        animationSpec = tween(260),
+        animationSpec = TuneMindSprings.snappy(),
         label = "dock_active_accent"
     )
 
@@ -216,33 +218,36 @@ private fun BottomDockTab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptics = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
     val contentColor by animateColorAsState(
         targetValue = if (isSelected) Color(0xFFF8FAFC) else Color.White.copy(alpha = 0.54f),
-        animationSpec = tween(200),
+        animationSpec = TuneMindSprings.snappy(),
         label = "tabColor"
     )
     val iconTint by animateColorAsState(
         targetValue = if (isSelected) activeColor else Color.White.copy(alpha = 0.54f),
-        animationSpec = tween(200),
+        animationSpec = TuneMindSprings.snappy(),
         label = "iconColor"
     )
-    val iconScale by animateFloatAsState(
+    val iconScaleState = animateFloatAsState(
         targetValue = if (isSelected) 1.12f else 0.96f,
-        animationSpec = spring(
-            dampingRatio = 0.65f,
-            stiffness = Spring.StiffnessMedium
-        ),
+        animationSpec = TuneMindSprings.expressive(),
         label = "iconScale"
     )
 
     Column(
         modifier = modifier
             .fillMaxHeight()
+            .tactilePressScale(interactionSource, pressedScale = 0.94f)
             .clip(RoundedCornerShape(24.dp))
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
             ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -254,8 +259,9 @@ private fun BottomDockTab(
             modifier = Modifier
                 .size(20.dp)
                 .graphicsLayer {
-                    scaleX = iconScale
-                    scaleY = iconScale
+                    val s = iconScaleState.value
+                    scaleX = s
+                    scaleY = s
                 }
         )
         Spacer(modifier = Modifier.height(2.dp))

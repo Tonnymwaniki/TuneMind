@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { EventIngestionService } from '../../domain/events/EventIngestionService';
+import { requireAuthInProduction } from '../../middleware/authMiddleware';
 
 const router = Router();
 const ingestionService = new EventIngestionService();
@@ -14,7 +15,7 @@ const ingestionService = new EventIngestionService();
  *   - [ ListeningEvent, ... ]
  *   - { eventId: "...", mediaSource: "...", ... } (single event)
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAuthInProduction, async (req: Request, res: Response) => {
   let eventBatch: Record<string, unknown>[] = [];
 
   const body = req.body as any;
@@ -61,23 +62,26 @@ router.post('/', async (req: Request, res: Response) => {
  *
  * Returns stored raw events (most recent first) for live stream visualization and debugging.
  */
-router.get('/', (req: Request, res: Response) => {
+router.get('/', requireAuthInProduction, (req: Request, res: Response) => {
   const store = ingestionService.getStore();
   const allEvents = store.listAll();
-  const limit = parseInt(req.query['limit'] as string, 10) || 100;
-  const userId = req.query['userId'] as string | undefined;
+  const limit = Math.min(200, Math.max(1, parseInt(req.query['limit'] as string, 10) || 100));
+  const offset = Math.max(0, parseInt(req.query['offset'] as string, 10) || 0);
+  const userId = req.authUser?.id || (req.query['userId'] as string | undefined);
 
   let filtered = allEvents;
-  if (userId && userId !== 'all') {
+  if (userId && (req.authUser?.id || userId !== 'all')) {
     filtered = filtered.filter(e => e.user_id === userId);
   }
 
-  // Reverse so newest events appear first
-  const reversed = [...filtered].reverse().slice(0, limit);
+  // Reverse so newest events appear first, with strict offset + limit pagination
+  const reversed = [...filtered].reverse().slice(offset, offset + limit);
 
   res.json({
     total: filtered.length,
     returned: reversed.length,
+    has_more: offset + reversed.length < filtered.length,
+    next_offset: offset + reversed.length,
     events: reversed
   });
 });

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
+import { requireAuthInProduction, resolveEffectiveUserIdentity } from '../../middleware/authMiddleware';
 import { TrackCardStore } from '../../domain/storage/TrackCardStore';
 
 const router = Router();
@@ -10,7 +10,7 @@ const router = Router();
  * (Postgres trigger atomically recomputes `verified_play_count`), and syncs relational
  * user playlists (`TUNEMIND`, `SPOTIFY`, etc.) linked by `track_card_id` FK.
  */
-router.post('/sync', async (req: Request, res: Response) => {
+router.post('/sync', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const identity = resolveEffectiveUserIdentity(req, body.user_id, body.user_email);
@@ -41,20 +41,24 @@ router.post('/sync', async (req: Request, res: Response) => {
  * Returns all canonical Track Cards (with exact Postgres-verified play counts)
  * and relational Playlists with nested Track Card joins.
  */
-router.get('/snapshot', async (req: Request, res: Response) => {
+router.get('/snapshot', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const identity = resolveEffectiveUserIdentity(
       req,
       typeof req.query.user_id === 'string' ? req.query.user_id : undefined,
       typeof req.query.user_email === 'string' ? req.query.user_email : undefined
     );
-    const snapshot = await TrackCardStore.getSnapshot(identity.userId);
+    const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '200'), 10) || 200));
+    const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+    const snapshot = await TrackCardStore.getSnapshot(identity.userId, { limit, offset });
     res.json({
       status: 'ok',
       user_id: identity.userId,
       source: snapshot.source,
       track_cards: snapshot.track_cards,
-      playlists: snapshot.playlists
+      playlists: snapshot.playlists,
+      has_more: snapshot.has_more,
+      next_offset: snapshot.next_offset
     });
   } catch (err: any) {
     console.error('[TrackCardsAPI] GET /snapshot error:', err);

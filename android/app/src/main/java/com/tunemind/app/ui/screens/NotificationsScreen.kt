@@ -90,6 +90,8 @@ fun NotificationsScreen(
     val tasteShifts by vm.tasteShiftSummary.collectAsState()
     val homeState by vm.homeState.collectAsState()
 
+    // 0 = Share Drops, 1 = Alerts, 2 = Schedule
+    var selectedSectionTab by rememberSaveable { mutableStateOf(0) }
     // 0 = 7 Days (Sunday Drop), 1 = Monthly (30 Days)
     var selectedPeriodIndex by rememberSaveable { mutableStateOf(0) }
     val selectedPeriod = if (selectedPeriodIndex == 1) ShareRecapPeriod.MONTHLY else ShareRecapPeriod.SEVEN_DAYS
@@ -227,30 +229,6 @@ fun NotificationsScreen(
         hasPostNotifAccess
     ) {
         buildList {
-            if (weeklyRecapEnabled && (isSundayToday || weeklyTrackCount > 0)) {
-                add(
-                    TuneMindAlertItem(
-                        id = "sunday_share_drop_ready",
-                        title = if (isSundayToday) {
-                            "Sunday Roast Drop is Live"
-                        } else {
-                            "Your 7-Day & Monthly Share Cards Are Ready"
-                        },
-                        body = if (weeklyTrackCount > 0) {
-                            "$weeklyTrackCount songs tracked this week. Post your Roast, DNA Receipt, or Vibe Check to WhatsApp Status, Instagram, TikTok & X."
-                        } else {
-                            "Every Sunday your 7-day listening roast drops here — swipe the cards above to preview or share anytime."
-                        },
-                        icon = Icons.Rounded.Whatshot,
-                        accent = whatsAppGreen,
-                        actionLabel = "View Cards",
-                        onAction = {
-                            scope.launch { scrollState.animateScrollTo(0) }
-                        }
-                    )
-                )
-            }
-
             if (syncAlertsEnabled && !hasListenerAccess) {
                 add(
                     TuneMindAlertItem(
@@ -373,153 +351,126 @@ fun NotificationsScreen(
                     }
                     Column {
                         Text(
-                            text = "Notifications & Drops",
+                            text = "Drops & Alerts",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF8FAFC)
                         )
                         Text(
-                            text = if (isSundayToday) "Sunday Drop Day · Share Your Cards" else "Weekly Sunday Drops · Monthly Wraps · Alerts",
+                            text = if (isSundayToday) "Sunday Drop Live · Ready to share" else "Sunday Roasts · Monthly Receipts · Alerts",
                             fontSize = 11.5.sp,
                             color = if (isSundayToday) whatsAppGreen else Color.White.copy(alpha = 0.56f),
                             fontWeight = if (isSundayToday) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
                 }
-                if (liveAlerts.isNotEmpty()) {
+                if (selectedSectionTab == 1 && liveAlerts.isNotEmpty()) {
                     TextButton(
                         onClick = { dismissedIds = dismissedIds + liveAlerts.map { it.id } }
                     ) {
-                        Text("Clear", color = neonCyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Clear All", color = neonCyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // 1. VIRAL SHAREABLE CARDS STUDIO
-            SoftGlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                accentTint = theme.primaryAccent
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Viral Share Cards",
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Swipe 3 playful roast cards · 9:16 WhatsApp & social ready",
-                                color = Color.White.copy(alpha = 0.62f),
-                                fontSize = 11.5.sp
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(100.dp),
-                            color = whatsAppGreen.copy(alpha = 0.16f),
-                            border = BorderStroke(1.dp, whatsAppGreen.copy(alpha = 0.45f))
+            val alertsTabTitle = if (liveAlerts.isNotEmpty()) "Alerts (${liveAlerts.size})" else "Alerts"
+            MagicalSegmentedTabs(
+                tabs = listOf(
+                    MagicalTabItem("Share Drops", whatsAppGreen),
+                    MagicalTabItem(alertsTabTitle, neonCyan),
+                    MagicalTabItem("Schedule", electricPurple)
+                ),
+                selectedIndex = selectedSectionTab,
+                onSelectTab = { selectedSectionTab = it }
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            when (selectedSectionTab) {
+                0 -> {
+                    // 1. VIRAL SHAREABLE CARDS STUDIO
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Compact Time Window Switcher: 7 Days (Sunday) vs Monthly (30d)
+                        MagicalSegmentedTabs(
+                            tabs = listOf(
+                                MagicalTabItem("7-Day Sunday Drop", theme.primaryAccent),
+                                MagicalTabItem("30-Day Monthly", theme.secondaryAccent)
+                            ),
+                            selectedIndex = selectedPeriodIndex,
+                            onSelectTab = { selectedPeriodIndex = it }
+                        )
+
+                        // 3 Card Format Quick Chips
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = if (isSundayToday) "SUNDAY LIVE" else "SUNDAY DROP",
-                                color = whatsAppGreen,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            cardFormats.forEachIndexed { idx, format ->
+                                val selected = cardPagerState.currentPage == idx
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selected) neonCyan.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.05f),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = if (selected) neonCyan.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.10f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            scope.launch { cardPagerState.animateScrollToPage(idx) }
+                                        }
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}. ${format.shortLabel}",
+                                        color = if (selected) Color.White else Color.White.copy(alpha = 0.65f),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .padding(vertical = 8.dp, horizontal = 8.dp)
+                                            .wrapContentWidth(Alignment.CenterHorizontally)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Swipeable 3-Card Viral Carousel
+                        HorizontalPager(
+                            state = cardPagerState,
+                            pageSpacing = 12.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { page ->
+                            val fmt = cardFormats[page]
+                            ViralShareCardPreview(
+                                format = fmt,
+                                model = shareCardModel
                             )
                         }
-                    }
 
-                    // Time Window Switcher: 7 Days (Every Sunday) vs Monthly
-                    MagicalSegmentedTabs(
-                        tabs = listOf(
-                            MagicalTabItem("7 Days (Sunday)", theme.primaryAccent),
-                            MagicalTabItem("Monthly (30d)", theme.secondaryAccent)
-                        ),
-                        selectedIndex = selectedPeriodIndex,
-                        onSelectTab = { selectedPeriodIndex = it }
-                    )
-
-                    // 3 Card Format Quick Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        cardFormats.forEachIndexed { idx, format ->
-                            val selected = cardPagerState.currentPage == idx
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (selected) neonCyan.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.05f),
-                                border = BorderStroke(
-                                    width = 1.dp,
-                                    color = if (selected) neonCyan.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.10f)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        scope.launch { cardPagerState.animateScrollToPage(idx) }
-                                    }
-                            ) {
-                                Text(
-                                    text = "${idx + 1}. ${format.shortLabel}",
-                                    color = if (selected) Color.White else Color.White.copy(alpha = 0.65f),
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                        // Page Indicator Dots
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(cardFormats.size) { idx ->
+                                val active = cardPagerState.currentPage == idx
+                                Box(
                                     modifier = Modifier
-                                        .padding(vertical = 8.dp, horizontal = 8.dp)
-                                        .wrapContentWidth(Alignment.CenterHorizontally)
+                                        .padding(horizontal = 4.dp)
+                                        .height(6.dp)
+                                        .width(if (active) 22.dp else 6.dp)
+                                        .clip(CircleShape)
+                                        .background(if (active) neonCyan else Color.White.copy(alpha = 0.24f))
                                 )
                             }
                         }
-                    }
 
-                    // Swipeable 3-Card Viral Carousel
-                    HorizontalPager(
-                        state = cardPagerState,
-                        pageSpacing = 12.dp,
-                        modifier = Modifier.fillMaxWidth()
-                    ) { page ->
-                        val fmt = cardFormats[page]
-                        ViralShareCardPreview(
-                            format = fmt,
-                            model = shareCardModel
-                        )
-                    }
-
-                    // Page Indicator Dots
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        repeat(cardFormats.size) { idx ->
-                            val active = cardPagerState.currentPage == idx
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 4.dp)
-                                    .height(6.dp)
-                                    .width(if (active) 20.dp else 6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (active) neonCyan else Color.White.copy(alpha = 0.24f))
-                            )
-                        }
-                    }
-
-                    // Direct Social Share Actions: WhatsApp, All Socials (IG/TikTok/X), Save PNG
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        // Clean Viral Share Dock
                         Button(
                             onClick = {
                                 if (isExportingCard) return@Button
@@ -547,86 +498,37 @@ fun NotificationsScreen(
                             },
                             enabled = !isExportingCard,
                             colors = ButtonDefaults.buttonColors(containerColor = whatsAppGreen),
-                            shape = RoundedCornerShape(14.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 11.dp),
-                            modifier = Modifier.weight(1.35f)
+                            shape = RoundedCornerShape(16.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Share,
                                 contentDescription = null,
                                 tint = Color(0xFF041008),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(8.dp))
                             Text(
-                                text = if (isExportingCard) "Rendering..." else "WhatsApp / Status",
+                                text = if (isExportingCard) "Rendering 9:16 Card..." else "Share to WhatsApp / Status",
                                 color = Color(0xFF041008),
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
 
-                        OutlinedButton(
-                            onClick = {
-                                if (isExportingCard) return@OutlinedButton
-                                isExportingCard = true
-                                shareFeedback = null
-                                scope.launch {
-                                    val uri = ViralShareCardEngine.exportShareCardToCacheUri(
-                                        context = context,
-                                        format = activeFormat,
-                                        model = shareCardModel,
-                                        primaryAccentInt = theme.primaryAccent.toArgb(),
-                                        secondaryAccentInt = theme.secondaryAccent.toArgb()
-                                    )
-                                    isExportingCard = false
-                                    if (uri != null) {
-                                        ViralShareCardEngine.shareToAllSocials(
-                                            context = context,
-                                            imageUri = uri,
-                                            caption = shareCardModel.shareCaption
-                                        )
-                                    } else {
-                                        shareFeedback = "Could not render card image — please try again."
-                                    }
-                                }
-                            },
-                            enabled = !isExportingCard,
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 11.dp),
-                            modifier = Modifier.weight(1f)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Public,
-                                contentDescription = null,
-                                tint = neonCyan,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                text = "All Socials",
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color.White.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable(enabled = !isExportingCard) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (isExportingCard) return@OutlinedButton
                                     isExportingCard = true
                                     shareFeedback = null
                                     scope.launch {
-                                        val ok = ViralShareCardEngine.saveCardToGallery(
+                                        val uri = ViralShareCardEngine.exportShareCardToCacheUri(
                                             context = context,
                                             format = activeFormat,
                                             model = shareCardModel,
@@ -634,164 +536,207 @@ fun NotificationsScreen(
                                             secondaryAccentInt = theme.secondaryAccent.toArgb()
                                         )
                                         isExportingCard = false
-                                        shareFeedback = if (ok) {
-                                            "Saved 9:16 PNG to Pictures/TuneMind!"
+                                        if (uri != null) {
+                                            ViralShareCardEngine.shareToAllSocials(
+                                                context = context,
+                                                imageUri = uri,
+                                                caption = shareCardModel.shareCaption
+                                            )
                                         } else {
-                                            "Unable to save image to Gallery."
+                                            shareFeedback = "Could not render card image — please try again."
                                         }
                                     }
-                                }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
+                                },
+                                enabled = !isExportingCard,
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 11.dp),
+                                modifier = Modifier.weight(1.1f)
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.Download,
-                                    contentDescription = "Save Card to Gallery",
-                                    tint = Color(0xFFF8FAFC),
-                                    modifier = Modifier.size(19.dp)
+                                    imageVector = Icons.Rounded.Public,
+                                    contentDescription = null,
+                                    tint = neonCyan,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = "IG / TikTok / X",
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
                                 )
                             }
+
+                            OutlinedButton(
+                                onClick = {
+                                    ViralShareCardEngine.copyRoastCaption(context, shareCardModel.shareCaption)
+                                    shareFeedback = "Roast caption copied — ready to paste!"
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 11.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ContentCopy,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFBBF24),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = "Copy Roast",
+                                    color = Color(0xFFF8FAFC),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color.White.copy(alpha = 0.08f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable(enabled = !isExportingCard) {
+                                        isExportingCard = true
+                                        shareFeedback = null
+                                        scope.launch {
+                                            val ok = ViralShareCardEngine.saveCardToGallery(
+                                                context = context,
+                                                format = activeFormat,
+                                                model = shareCardModel,
+                                                primaryAccentInt = theme.primaryAccent.toArgb(),
+                                                secondaryAccentInt = theme.secondaryAccent.toArgb()
+                                            )
+                                            isExportingCard = false
+                                            shareFeedback = if (ok) {
+                                                "Saved 9:16 PNG to Pictures/TuneMind!"
+                                            } else {
+                                                "Unable to save image to Gallery."
+                                            }
+                                        }
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Download,
+                                        contentDescription = "Save 9:16 PNG to Gallery",
+                                        tint = Color(0xFFF8FAFC),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
                         }
-                    }
 
-                    if (!shareFeedback.isNullOrBlank()) {
-                        Text(
-                            text = shareFeedback!!,
-                            color = neonCyan,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Compact 3-Step Posting Procedure Across Social Platforms
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color.White.copy(alpha = 0.04f),
-                        border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.10f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
+                        if (!shareFeedback.isNullOrBlank()) {
                             Text(
-                                text = "HOW TO POST ANYWHERE",
+                                text = shareFeedback!!,
                                 color = neonCyan,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.6.sp
-                            )
-                            Text(
-                                text = "1. Pick 7 Days (Sunday) or Monthly, then swipe Roast, Receipt, or Vibe.",
-                                color = Color.White.copy(alpha = 0.74f),
-                                fontSize = 11.5.sp
-                            )
-                            Text(
-                                text = "2. Tap WhatsApp / Status to drop straight into Status or friend chats.",
-                                color = Color.White.copy(alpha = 0.74f),
-                                fontSize = 11.5.sp
-                            )
-                            Text(
-                                text = "3. Tap All Socials (or Save) to post crisp 9:16 PNG on Instagram Stories, TikTok, X, Telegram & Facebook.",
-                                color = Color.White.copy(alpha = 0.74f),
-                                fontSize = 11.5.sp
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 2. Live Activity Feed
-            SoftGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = theme.primaryAccent) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StudioSectionHeader(title = "Activity Center")
-                    if (liveAlerts.isEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 18.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = null,
-                                tint = safeGreen,
-                                modifier = Modifier.size(32.dp)
-                            )
-                            Text(
-                                text = "You're all caught up",
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Sunday share drops, Vault comeback alerts, hearing safety notices, and sync updates will appear here.",
-                                color = Color.White.copy(alpha = 0.56f),
-                                fontSize = 12.5.sp
-                            )
-                        }
-                    } else {
-                        liveAlerts.forEach { alert ->
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = alert.accent.copy(alpha = 0.08f),
-                                border = BorderStroke(1.dp, alert.accent.copy(alpha = 0.30f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
+                1 -> {
+                    // 2. Live Activity Feed
+                    SoftGlassCard(modifier = Modifier.fillMaxWidth(), accentTint = theme.primaryAccent) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            StudioSectionHeader(title = "Activity Center")
+                            if (liveAlerts.isEmpty()) {
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.Top
+                                        .padding(vertical = 22.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(alert.accent.copy(alpha = 0.16f)),
-                                        contentAlignment = Alignment.Center
+                                    Icon(
+                                        imageVector = Icons.Rounded.CheckCircle,
+                                        contentDescription = null,
+                                        tint = safeGreen,
+                                        modifier = Modifier.size(34.dp)
+                                    )
+                                    Text(
+                                        text = "You're all caught up",
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Vault comeback alerts, hearing safety notices, and sync updates will appear here.",
+                                        color = Color.White.copy(alpha = 0.56f),
+                                        fontSize = 12.5.sp
+                                    )
+                                }
+                            } else {
+                                liveAlerts.forEach { alert ->
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = alert.accent.copy(alpha = 0.08f),
+                                        border = BorderStroke(1.dp, alert.accent.copy(alpha = 0.30f)),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Icon(
-                                            imageVector = alert.icon,
-                                            contentDescription = null,
-                                            tint = alert.accent,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(
-                                            text = alert.title,
-                                            color = Color(0xFFF8FAFC),
-                                            fontSize = 14.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = alert.body,
-                                            color = Color.White.copy(alpha = 0.68f),
-                                            fontSize = 12.5.sp,
-                                            lineHeight = 18.sp
-                                        )
-                                        if (!alert.actionLabel.isNullOrBlank() && alert.onAction != null) {
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                OutlinedButton(
-                                                    onClick = alert.onAction,
-                                                    shape = RoundedCornerShape(28.dp),
-                                                    border = BorderStroke(1.dp, alert.accent.copy(alpha = 0.55f)),
-                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text(alert.actionLabel, color = alert.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                                }
-                                                TextButton(
-                                                    onClick = { dismissedIds = dismissedIds + alert.id }
-                                                ) {
-                                                    Text("Dismiss", color = Color.White.copy(alpha = 0.52f), fontSize = 12.sp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(alert.accent.copy(alpha = 0.16f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = alert.icon,
+                                                    contentDescription = null,
+                                                    tint = alert.accent,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = alert.title,
+                                                    color = Color(0xFFF8FAFC),
+                                                    fontSize = 14.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = alert.body,
+                                                    color = Color.White.copy(alpha = 0.68f),
+                                                    fontSize = 12.5.sp,
+                                                    lineHeight = 18.sp
+                                                )
+                                                if (!alert.actionLabel.isNullOrBlank() && alert.onAction != null) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        OutlinedButton(
+                                                            onClick = alert.onAction,
+                                                            shape = RoundedCornerShape(28.dp),
+                                                            border = BorderStroke(1.dp, alert.accent.copy(alpha = 0.55f)),
+                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(alert.actionLabel, color = alert.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                        }
+                                                        TextButton(
+                                                            onClick = { dismissedIds = dismissedIds + alert.id }
+                                                        ) {
+                                                            Text("Dismiss", color = Color.White.copy(alpha = 0.52f), fontSize = 12.sp)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -801,92 +746,130 @@ fun NotificationsScreen(
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 3. Sunday & Monthly Drop Reminders + Alert Preferences
-            SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        StudioSectionHeader(title = "Drop & Alert Preferences")
-                        Text(
-                            text = "Test Sunday Alert",
-                            color = neonCyan,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                        !WeeklyShareDropWorker.hasNotificationPermission(context)
-                                    ) {
-                                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    } else {
-                                        val sent = WeeklyShareDropWorker.postInstantDropPreviewNotification(
-                                            context = context,
-                                            isMonthly = selectedPeriod == ShareRecapPeriod.MONTHLY
-                                        )
-                                        shareFeedback = if (sent) {
-                                            "Notification sent — tap it in your shade to test!"
-                                        } else {
-                                            "Enable notifications in Android Settings."
-                                        }
-                                    }
+                else -> {
+                    // 3. Sunday & Monthly Drop Schedule + Alert Preferences
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SoftGlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            accentTint = whatsAppGreen
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSundayToday) "Sunday Drop is Live Today" else "Automated Drop Schedule",
+                                        color = Color(0xFFF8FAFC),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "7-Day Roasts drop every Sunday · 30-Day Receipts drop on the 1st of each month.",
+                                        color = Color.White.copy(alpha = 0.64f),
+                                        fontSize = 12.sp,
+                                        lineHeight = 17.sp
+                                    )
                                 }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                            !WeeklyShareDropWorker.hasNotificationPermission(context)
+                                        ) {
+                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        } else {
+                                            val sent = WeeklyShareDropWorker.postInstantDropPreviewNotification(
+                                                context = context,
+                                                isMonthly = selectedPeriod == ShareRecapPeriod.MONTHLY
+                                            )
+                                            shareFeedback = if (sent) {
+                                                "Test notification sent — check your phone shade!"
+                                            } else {
+                                                "Enable notifications in Android Settings."
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, neonCyan.copy(alpha = 0.55f)),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "Test Alert",
+                                        color = neonCyan,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!shareFeedback.isNullOrBlank()) {
+                            Text(
+                                text = shareFeedback!!,
+                                color = neonCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                StudioSectionHeader(title = "Alert Preferences")
+                                Spacer(modifier = Modifier.height(4.dp))
+                                StudioHairlineDivider()
+
+                                AlertPrefSwitchRow(
+                                    title = "Every Sunday Weekly Drop",
+                                    description = "Notify every Sunday when your 7-day roast cards are ready to share.",
+                                    checked = weeklyRecapEnabled,
+                                    accent = whatsAppGreen,
+                                    onCheckedChange = { AgentSettingsStore.setWeeklyRecapAlertsEnabled(context, it) }
+                                )
+                                StudioHairlineDivider()
+
+                                AlertPrefSwitchRow(
+                                    title = "Monthly Recap Drop",
+                                    description = "Notify on the 1st of each month when your 30-day Music DNA Receipt is ready.",
+                                    checked = monthlyRecapEnabled,
+                                    accent = electricPurple,
+                                    onCheckedChange = { AgentSettingsStore.setMonthlyRecapAlertsEnabled(context, it) }
+                                )
+                                StudioHairlineDivider()
+
+                                AlertPrefSwitchRow(
+                                    title = "Vault Comeback Alerts",
+                                    description = "Notify when resting songs regain peak freshness in Cooldown Vault.",
+                                    checked = vaultAlertsEnabled,
+                                    accent = safeGreen,
+                                    onCheckedChange = { AgentSettingsStore.setVaultRecoveryAlertsEnabled(context, it) }
+                                )
+                                StudioHairlineDivider()
+
+                                AlertPrefSwitchRow(
+                                    title = "Safe Listening Warnings",
+                                    description = "Alert when continuous high-volume headroom gets low.",
+                                    checked = hearingAlertsEnabled,
+                                    accent = warnAmber,
+                                    onCheckedChange = { AgentSettingsStore.setHearingAlertsEnabled(context, it) }
+                                )
+                                StudioHairlineDivider()
+
+                                AlertPrefSwitchRow(
+                                    title = "Sync & Permission Health",
+                                    description = "Alert if music detection or background sync needs attention.",
+                                    checked = syncAlertsEnabled,
+                                    accent = neonCyan,
+                                    onCheckedChange = { AgentSettingsStore.setSyncStatusAlertsEnabled(context, it) }
+                                )
+                            }
+                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    StudioHairlineDivider()
-
-                    AlertPrefSwitchRow(
-                        title = "Every Sunday Weekly Drop",
-                        description = "Notify every Sunday when your 7-day roast cards are ready to post to WhatsApp & socials.",
-                        checked = weeklyRecapEnabled,
-                        accent = whatsAppGreen,
-                        onCheckedChange = { AgentSettingsStore.setWeeklyRecapAlertsEnabled(context, it) }
-                    )
-                    StudioHairlineDivider()
-
-                    AlertPrefSwitchRow(
-                        title = "Monthly Recap Drop",
-                        description = "Notify at the start of each month when your 30-day Music DNA Receipt is ready.",
-                        checked = monthlyRecapEnabled,
-                        accent = electricPurple,
-                        onCheckedChange = { AgentSettingsStore.setMonthlyRecapAlertsEnabled(context, it) }
-                    )
-                    StudioHairlineDivider()
-
-                    AlertPrefSwitchRow(
-                        title = "Vault Comeback Alerts",
-                        description = "Notify when resting songs regain peak freshness in Cooldown Vault.",
-                        checked = vaultAlertsEnabled,
-                        accent = safeGreen,
-                        onCheckedChange = { AgentSettingsStore.setVaultRecoveryAlertsEnabled(context, it) }
-                    )
-                    StudioHairlineDivider()
-
-                    AlertPrefSwitchRow(
-                        title = "Safe Listening Warnings",
-                        description = "Alert when continuous high-volume headroom gets low.",
-                        checked = hearingAlertsEnabled,
-                        accent = warnAmber,
-                        onCheckedChange = { AgentSettingsStore.setHearingAlertsEnabled(context, it) }
-                    )
-                    StudioHairlineDivider()
-
-                    AlertPrefSwitchRow(
-                        title = "Sync & Permission Health",
-                        description = "Alert if music detection or background sync needs attention.",
-                        checked = syncAlertsEnabled,
-                        accent = neonCyan,
-                        onCheckedChange = { AgentSettingsStore.setSyncStatusAlertsEnabled(context, it) }
-                    )
                 }
             }
 

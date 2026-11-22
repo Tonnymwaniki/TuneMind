@@ -109,8 +109,10 @@ function renderLegalHtml(title: string, subtitle: string, sections: Array<{ head
       <a href="/">Home</a>
       <a href="/privacy">Privacy Policy</a>
       <a href="/terms">Terms of Service</a>
+      <a href="/refund-policy">Refund Policy</a>
+      <a href="/cookies">Cookie Policy</a>
       <a href="/delete-account">Account Deletion</a>
-      <a href="/health">Service Status</a>
+      <a href="mailto:support@tunemind.co">support@tunemind.co</a>
     </footer>
   </main>
 </body>
@@ -129,20 +131,24 @@ router.get('/privacy', (_req: Request, res: Response) => {
       'Effective November 2026 · Local-First Listening Companion Architecture',
       [
         {
-          heading: '1. Account Identity & Credentials',
-          body: 'When you sign in to TuneMind with Google or Email & Password, TuneMind stores your profile display name, email address, and taste preferences in our encrypted database so you can switch devices seamlessly across devices.'
+          heading: '1. Data We Collect',
+          body: 'TuneMind collects only the data needed to operate your listening companion: (a) Account Identity — email address, display name, and authentication provider; (b) Music Library & OAuth Data — encrypted OAuth tokens, playlists, liked/saved songs, and playback/listening history; (c) Device & Telemetry Identifiers — device model/OS version, audio route state, and anonymized app session identifiers.'
         },
         {
-          heading: '2. Listening Telemetry & On-Device Storage',
-          body: 'Playback history, repetition fatigue (satiety) calculations, per-player track libraries, and Resting Vault tracks are primarily processed and stored locally on your device inside a private Room SQLite database. You can pause all tracking immediately using Private Session in Profile or Settings.'
+          heading: '2. AI Processing & Personalization',
+          body: 'Your listening history, track metadata, satiety/repetition patterns, and voice or text prompts are processed using AI to generate musical insights, daily track recommendations, and conversational playback assistance. TuneMind does not sell your personal data or listening history.'
         },
         {
-          heading: '3. Device & Music Permissions',
-          body: 'Microphone access is activated only when wake-word mode is enabled or when you tap the TuneMind orb. Notification Listener permission reads active media session metadata locally on-device across your installed music players (such as YouTube Music, Boomplay, Spotify, Audiomack, and local audio) so TuneMind can organize per-app listening stats and control active playback.'
+          heading: '3. Third-Party Processors & Integrations',
+          body: 'TuneMind relies on the following named processors and integrations: <strong>Anthropic (Claude API)</strong> for AI reasoning and music insights; <strong>Supabase</strong> for authentication, encrypted database storage, and private user file storage; <strong>Spotify</strong>, <strong>Google / YouTube Data API</strong>, and <strong>Audiomack</strong> for cross-app music metadata and playback integration; <strong>Google Play Billing</strong> for subscription management and verification; and <strong>Namecheap Private Email</strong> for transactional account and trial-expiration notifications.'
         },
         {
-          heading: '4. Your Data Controls & Account Deletion',
-          body: 'From the TuneMind Profile screen you can export your complete listening data in JSON format, clear listening history, or permanently wipe your account and cloud records via Delete Account & Wipe Data.'
+          heading: '4. Device & Music Permissions',
+          body: 'Microphone access is activated only when wake-word mode is enabled or when you tap the TuneMind orb. Notification Listener permission reads active media session metadata locally on-device across your installed music players (such as Spotify, YouTube Music, Audiomack, Boomplay, and local audio) so TuneMind can organize per-app listening stats and control active playback. You can pause tracking anytime via Private Session in Profile or Settings.'
+        },
+        {
+          heading: '5. Your Data Controls & Hard Deletion',
+          body: 'From TuneMind Profile or Settings you can export your complete listening data in JSON format, clear listening history, or permanently erase your account, OAuth tokens, database records, and private cloud storage files via <strong>Delete Account &amp; Wipe Data</strong> (or at <a href="/delete-account">tunemind.co/delete-account</a>).'
         }
       ]
     )
@@ -175,6 +181,66 @@ router.get('/terms', (_req: Request, res: Response) => {
         {
           heading: '4. Account Termination & Support',
           body: 'You may stop using TuneMind or delete your account and associated cloud data at any time from Profile -> Delete Account & Wipe Data, or reach out through Help & Feedback inside the app.'
+        }
+      ]
+    )
+  );
+});
+
+/**
+ * GET /refund-policy
+ * Public HTML Refund & Subscription Policy for Google Play Billing & web links.
+ */
+router.get('/refund-policy', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(
+    renderLegalHtml(
+      'TuneMind Refund & Subscription Policy',
+      'TuneMind Labs · support@tunemind.co',
+      [
+        {
+          heading: '1. 7-Day Free Trial & Billing Cycle',
+          body: 'TuneMind Pro offers a 7-day free trial on eligible Google Play plans ($4.99/month or $29.99/year, localized by region). You will not be charged if you cancel before the trial ends.'
+        },
+        {
+          heading: '2. One-Click Cancellation',
+          body: 'You can cancel your subscription anytime directly from TuneMind (Settings or Paywall -> Manage or Cancel Subscription in Google Play) or via Google Play Subscriptions. Cancellation stops future renewals while preserving access through the end of the current billing period.'
+        },
+        {
+          heading: '3. Google Play Refund Rules',
+          body: 'All Android purchases are processed by Google Play Billing. Within 48 hours of an accidental charge or renewal, you can request a refund directly through Google Play Order History. After 48 hours, email support@tunemind.co with your Google Play order ID (GPA.*) for review.'
+        },
+        {
+          heading: '4. Official Contact',
+          body: 'Developer / Business Entity: TuneMind Labs · Official Support: support@tunemind.co · Legal Inquiries: legal@tunemind.co.'
+        }
+      ]
+    )
+  );
+});
+
+/**
+ * GET /cookies
+ * Public HTML Cookie Policy for tunemind.co and OAuth web surfaces.
+ */
+router.get('/cookies', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(
+    renderLegalHtml(
+      'TuneMind Cookie Policy',
+      'TuneMind Labs · tunemind.co',
+      [
+        {
+          heading: '1. Essential Storage Only by Default',
+          body: 'tunemind.co and TuneMind OAuth sign-in surfaces use strictly necessary session storage and security tokens (such as OAuth state and CSRF protection) required for login and core functionality.'
+        },
+        {
+          heading: '2. Optional Analytics Cookies (Opt-In)',
+          body: 'Non-essential analytics cookies are blocked by default until you explicitly click "Accept Analytics" on the cookie consent banner. You may withdraw consent at any time by clearing site storage or updating your cookie preference.'
+        },
+        {
+          heading: '3. Contact',
+          body: 'Questions about cookies or data privacy may be sent to support@tunemind.co.'
         }
       ]
     )

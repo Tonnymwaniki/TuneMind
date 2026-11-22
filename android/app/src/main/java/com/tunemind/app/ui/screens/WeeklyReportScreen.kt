@@ -259,7 +259,7 @@ fun WeeklyReportScreen(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            text = "${artist.playCount} ${if (artist.playCount == 1) "play" else "plays"}",
+                                            text = com.tunemind.app.ui.components.formatPlaysLabel(artist.playCount),
                                             color = theme.primaryAccent,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium
@@ -307,7 +307,7 @@ fun WeeklyReportScreen(
                                     append("• Keep ${vaultTracks.size} resting ${if (vaultTracks.size == 1) "track" else "tracks"} in your Vault a little longer so freshness rebounds.\n")
                                 }
                                 heavyRepeatTrack != null -> {
-                                    append("• Consider resting \"${heavyRepeatTrack.title}\" (${heavyRepeatTrack.verifiedPlayCount} plays this week) in the Vault to prevent ear fatigue.\n")
+                                    append("• Consider resting \"${heavyRepeatTrack.title}\" (${com.tunemind.app.ui.components.formatPlaysLabel(heavyRepeatTrack.verifiedPlayCount)} this week) in the Vault to prevent ear fatigue.\n")
                                 }
                                 else -> {
                                     append("• Your 7-day rotation has zero overplayed tracks — keep mixing in fresh discoveries.\n")
