@@ -79,6 +79,8 @@ fun OnboardingScreen(
     val authManager = remember { TuneMindAuthSessionManager.getInstance(context) }
     val session by authManager.sessionFlow.collectAsState()
 
+    var micPermanentlyDenied by remember { mutableStateOf(false) }
+
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -86,6 +88,10 @@ fun OnboardingScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     authManager.refreshSessionState()
+                    PermissionUtils.kickstartMediaObservation(context)
+                }
+                if (PermissionUtils.hasMicrophonePermission(context)) {
+                    micPermanentlyDenied = false
                 }
                 viewModel.checkPermissions()
             }
@@ -102,6 +108,7 @@ fun OnboardingScreen(
 
     LaunchedEffect(currentStep, alwaysShowAuthFirst) {
         if (currentStep == OnboardingStep.COMPLETE && viewModel.hasPassedLaunchGate(alwaysShowAuthFirst)) {
+            PermissionUtils.kickstartMediaObservation(context)
             onComplete()
         }
     }
@@ -119,12 +126,30 @@ fun OnboardingScreen(
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-        onResult = { viewModel.checkPermissions() }
+        onResult = { granted ->
+            if (granted || PermissionUtils.hasMicrophonePermission(context)) {
+                micPermanentlyDenied = false
+            } else if (PermissionUtils.isRuntimePermissionPermanentlyDeniedAfterResult(
+                    context = context,
+                    permission = Manifest.permission.RECORD_AUDIO,
+                    granted = false
+                )
+            ) {
+                micPermanentlyDenied = true
+            }
+            viewModel.checkPermissions()
+        }
     )
 
     val settingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
-        onResult = { viewModel.checkPermissions() }
+        onResult = {
+            if (PermissionUtils.hasMicrophonePermission(context)) {
+                micPermanentlyDenied = false
+            }
+            PermissionUtils.kickstartMediaObservation(context)
+            viewModel.checkPermissions()
+        }
     )
 
     StudioAmbientBackground {
@@ -161,8 +186,25 @@ fun OnboardingScreen(
                         accent = Color(0xFF00E5FF),
                         title = "Allow Microphone",
                         description = "Talk naturally to TuneMind by saying \"Hey TuneMind\" or tapping the sphere to ask for tracks.",
-                        primaryButtonText = "Allow Microphone",
-                        onPrimaryClick = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        primaryButtonText = if (micPermanentlyDenied) "Open App Settings" else "Allow Microphone",
+                        helperNote = if (micPermanentlyDenied) {
+                            "Microphone permission was previously disabled in Android. Tap above → Permissions → Microphone → Allow."
+                        } else null,
+                        onPrimaryClick = {
+                            if (micPermanentlyDenied) {
+                                runCatching {
+                                    settingsLauncher.launch(PermissionUtils.getAppDetailsSettingsIntent(context))
+                                }.onFailure {
+                                    PermissionUtils.openAppDetailsSettings(context)
+                                }
+                            } else {
+                                runCatching {
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }.onFailure {
+                                    PermissionUtils.openAppDetailsSettings(context)
+                                }
+                            }
+                        },
                         onSkipClick = { viewModel.skipCurrentPermissionStep() }
                     )
                 }
@@ -173,9 +215,30 @@ fun OnboardingScreen(
                         icon = Icons.Rounded.NotificationsActive,
                         accent = Color(0xFFFFB000),
                         title = "Enable Music Detection",
-                        description = "Lets TuneMind recognize what is playing across your music apps and protect favorites from overplay.",
+                        description = "Lets TuneMind recognize what is playing across Spotify, YouTube Music, Boomplay, Audiomack & local players.",
                         primaryButtonText = "Allow Music Access",
-                        onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getNotificationListenerIntent()) },
+                        helperNote = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            "If TuneMind is grayed out: open App Info → tap ⋮ (top right) → Allow restricted settings, then return here."
+                        } else null,
+                        helperActionText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            "Toggle grayed out? Open App Info"
+                        } else null,
+                        onHelperActionClick = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            {
+                                runCatching {
+                                    settingsLauncher.launch(PermissionUtils.getAppDetailsSettingsIntent(context))
+                                }.onFailure {
+                                    PermissionUtils.openAppDetailsSettings(context)
+                                }
+                            }
+                        } else null,
+                        onPrimaryClick = {
+                            runCatching {
+                                settingsLauncher.launch(PermissionUtils.getNotificationListenerIntent(context))
+                            }.onFailure {
+                                PermissionUtils.openNotificationListenerSettings(context)
+                            }
+                        },
                         onSkipClick = { viewModel.skipCurrentPermissionStep() }
                     )
                 }
@@ -186,9 +249,23 @@ fun OnboardingScreen(
                         icon = Icons.Rounded.BatteryChargingFull,
                         accent = Color(0xFF10B981),
                         title = "Keep Sync Running",
-                        description = "Keeps your cross-app listening history up to date and playback responsive even with your screen off.",
+                        description = "Select TuneMind in Battery settings and choose Unrestricted so cross-app music detection stays live with your screen off.",
                         primaryButtonText = "Allow Background Sync",
-                        onPrimaryClick = { settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context)) },
+                        helperActionText = "Open App Battery Settings directly",
+                        onHelperActionClick = {
+                            runCatching {
+                                settingsLauncher.launch(PermissionUtils.getAppDetailsSettingsIntent(context))
+                            }.onFailure {
+                                PermissionUtils.openAppDetailsSettings(context)
+                            }
+                        },
+                        onPrimaryClick = {
+                            runCatching {
+                                settingsLauncher.launch(PermissionUtils.getBatteryOptimizationIntent(context))
+                            }.onFailure {
+                                PermissionUtils.openBatteryOptimizationSettings(context)
+                            }
+                        },
                         onSkipClick = { viewModel.skipCurrentPermissionStep() }
                     )
                 }
@@ -1044,6 +1121,9 @@ private fun PermissionSetupStep(
     title: String,
     description: String,
     primaryButtonText: String,
+    helperNote: String? = null,
+    helperActionText: String? = null,
+    onHelperActionClick: (() -> Unit)? = null,
     onPrimaryClick: () -> Unit,
     onSkipClick: () -> Unit
 ) {
@@ -1125,14 +1205,24 @@ private fun PermissionSetupStep(
                     textAlign = TextAlign.Center,
                     lineHeight = 22.sp
                 )
+                if (!helperNote.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = helperNote,
+                        color = accent.copy(alpha = 0.88f),
+                        fontSize = 12.5.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+                }
             }
         }
 
-        // Bottom-pinned primary action + quiet skip
+        // Bottom-pinned primary action + optional helper + quiet skip
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Button(
                 onClick = onPrimaryClick,
@@ -1150,6 +1240,17 @@ private fun PermissionSetupStep(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+
+            if (!helperActionText.isNullOrBlank() && onHelperActionClick != null) {
+                TextButton(onClick = onHelperActionClick) {
+                    Text(
+                        text = helperActionText,
+                        color = accent.copy(alpha = 0.90f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             TextButton(onClick = onSkipClick) {

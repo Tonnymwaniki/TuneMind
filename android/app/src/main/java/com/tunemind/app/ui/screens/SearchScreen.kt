@@ -30,6 +30,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.provider.LocalAudioMatch
 import com.tunemind.app.provider.TuneMindInAppPlayer
 import com.tunemind.app.domain.vault.RestingVaultEngine
@@ -97,10 +100,31 @@ fun SearchScreen(
     val vaultAmber = Color(0xFFF59E0B)
     val electricPurple = theme.secondaryAccent
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasAudioPerm = PermissionUtils.hasAudioStoragePermission(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasAudioPerm = granted || PermissionUtils.hasAudioStoragePermission(context)
+        if (!hasAudioPerm &&
+            PermissionUtils.isRuntimePermissionPermanentlyDeniedAfterResult(
+                context = context,
+                permission = PermissionUtils.audioStoragePermissionName(),
+                granted = false
+            )
+        ) {
+            PermissionUtils.openAppDetailsSettings(context)
+            feedbackBanner = "Open Permissions → Music & Audio → Allow so TuneMind can scan your phone's songs."
+        }
     }
 
     LaunchedEffect(hasAudioPerm, query) {
@@ -468,12 +492,11 @@ fun SearchScreen(
                         )
                         Button(
                             onClick = {
-                                val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    android.Manifest.permission.READ_MEDIA_AUDIO
-                                } else {
-                                    android.Manifest.permission.READ_EXTERNAL_STORAGE
+                                runCatching {
+                                    audioPermissionLauncher.launch(PermissionUtils.audioStoragePermissionName())
+                                }.onFailure {
+                                    PermissionUtils.openAppDetailsSettings(context)
                                 }
-                                audioPermissionLauncher.launch(perm)
                             },
                             shape = RoundedCornerShape(28.dp),
                             colors = ButtonDefaults.buttonColors(

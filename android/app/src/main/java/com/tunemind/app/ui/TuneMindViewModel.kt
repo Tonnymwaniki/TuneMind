@@ -1121,22 +1121,7 @@ class TuneMindViewModel : ViewModel() {
 
     fun requestIgnoreBatteryOptimization(context: android.content.Context) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            try {
-                // Opens standard system battery optimization settings without invoking restricted
-                // REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest permission (Play Store policy safe).
-                val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-            } catch (_: Exception) {
-                try {
-                    val appDetails = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = android.net.Uri.parse("package:${context.packageName}")
-                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    context.startActivity(appDetails)
-                } catch (_: Exception) {}
-            }
+            com.tunemind.app.util.PermissionUtils.openBatteryOptimizationSettings(context)
         }
     }
 

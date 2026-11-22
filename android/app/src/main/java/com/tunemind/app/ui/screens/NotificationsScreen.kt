@@ -33,6 +33,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.domain.memory.StatsTimeWindow
@@ -149,6 +152,27 @@ fun NotificationsScreen(
 
     var dismissedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    var hasListenerAccess by remember {
+        mutableStateOf(PermissionUtils.hasNotificationListenerPermission(context))
+    }
+    var hasPostNotifAccess by remember {
+        mutableStateOf(PermissionUtils.hasPostNotificationsPermission(context))
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasListenerAccess = PermissionUtils.hasNotificationListenerPermission(context)
+                hasPostNotifAccess = PermissionUtils.hasPostNotificationsPermission(context)
+                if (hasListenerAccess) {
+                    PermissionUtils.kickstartMediaObservation(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(Unit) {
         AgentSettingsStore.ensureLoaded(context)
         vm.refreshLiveListeningStatsNow()
@@ -157,7 +181,8 @@ fun NotificationsScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
+        hasPostNotifAccess = granted || PermissionUtils.hasPostNotificationsPermission(context)
+        if (hasPostNotifAccess) {
             val sent = WeeklyShareDropWorker.postInstantDropPreviewNotification(
                 context = context,
                 isMonthly = selectedPeriod == ShareRecapPeriod.MONTHLY
@@ -167,6 +192,15 @@ fun NotificationsScreen(
             } else {
                 "Notifications enabled for Sunday & Monthly drops."
             }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            PermissionUtils.isRuntimePermissionPermanentlyDeniedAfterResult(
+                context = context,
+                permission = Manifest.permission.POST_NOTIFICATIONS,
+                granted = false
+            )
+        ) {
+            PermissionUtils.openAppNotificationSettings(context)
+            shareFeedback = "Turn on Notifications in Android Settings for Sunday drop alerts."
         } else {
             shareFeedback = "Notification permission denied. Enable notifications in Android Settings for Sunday drop alerts."
         }
@@ -188,7 +222,9 @@ fun NotificationsScreen(
         hearingAlertsEnabled,
         syncAlertsEnabled,
         dismissedIds,
-        isSundayToday
+        isSundayToday,
+        hasListenerAccess,
+        hasPostNotifAccess
     ) {
         buildList {
             if (weeklyRecapEnabled && (isSundayToday || weeklyTrackCount > 0)) {
@@ -215,7 +251,7 @@ fun NotificationsScreen(
                 )
             }
 
-            if (syncAlertsEnabled && !PermissionUtils.hasNotificationListenerPermission(context)) {
+            if (syncAlertsEnabled && !hasListenerAccess) {
                 add(
                     TuneMindAlertItem(
                         id = "perm_listener",
@@ -225,12 +261,26 @@ fun NotificationsScreen(
                         accent = warnAmber,
                         actionLabel = "Enable Access",
                         onAction = {
+                            PermissionUtils.openNotificationListenerSettings(context)
+                        }
+                    )
+                )
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPostNotifAccess) {
+                add(
+                    TuneMindAlertItem(
+                        id = "perm_post_notifications",
+                        title = "Phone notifications are off",
+                        body = "Allow notifications so TuneMind can send Sunday Roast Drop alerts and playback recovery banners.",
+                        icon = Icons.Rounded.NotificationsOff,
+                        accent = neonCyan,
+                        actionLabel = "Allow Alerts",
+                        onAction = {
                             runCatching {
-                                context.startActivity(
-                                    PermissionUtils.getNotificationListenerIntent().apply {
-                                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                )
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }.onFailure {
+                                PermissionUtils.openAppNotificationSettings(context)
                             }
                         }
                     )

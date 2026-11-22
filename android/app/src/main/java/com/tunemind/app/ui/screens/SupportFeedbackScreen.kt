@@ -230,13 +230,7 @@ fun SupportFeedbackScreen(
                         actionLabel = "Notification Access",
                         onToggle = { expandedGuideIdx = if (expandedGuideIdx == 1) -1 else 1 },
                         onAction = {
-                            runCatching {
-                                context.startActivity(
-                                    PermissionUtils.getNotificationListenerIntent().apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                )
-                            }
+                            PermissionUtils.openNotificationListenerSettings(context)
                         }
                     )
                     StudioHairlineDivider()

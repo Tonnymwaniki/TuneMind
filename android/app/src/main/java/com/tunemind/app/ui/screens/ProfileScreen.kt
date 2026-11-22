@@ -1,6 +1,9 @@
 package com.tunemind.app.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -131,8 +134,27 @@ fun ProfileScreen(
             hasMicPermission = PermissionUtils.hasMicrophonePermission(context)
             hasNotificationAccess = PermissionUtils.hasNotificationListenerPermission(context)
             isBatteryIgnored = PermissionUtils.isIgnoringBatteryOptimizations(context)
+            if (hasNotificationAccess) {
+                PermissionUtils.kickstartMediaObservation(context)
+            }
             authManager.refreshSessionState()
         }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMicPermission = granted || PermissionUtils.hasMicrophonePermission(context)
+        if (!hasMicPermission &&
+            PermissionUtils.isRuntimePermissionPermanentlyDeniedAfterResult(
+                context = context,
+                permission = Manifest.permission.RECORD_AUDIO,
+                granted = false
+            )
+        ) {
+            PermissionUtils.openAppDetailsSettings(context)
+        }
+        refreshPermissions()
     }
 
     LaunchedEffect(Unit) {
@@ -464,11 +486,7 @@ fun ProfileScreen(
                         title = "Cross-App Music Detection",
                         actionLabel = if (hasNotificationAccess) "Live" else "Enable Access",
                         onActionClick = {
-                            context.startActivity(
-                                PermissionUtils.getNotificationListenerIntent().apply {
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                            )
+                            PermissionUtils.openNotificationListenerSettings(context)
                         }
                     )
 
@@ -566,13 +584,14 @@ fun ProfileScreen(
                     safeGreen = safeGreen,
                     warnAmber = warnAmber,
                     onClick = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    android.net.Uri.parse("package:${context.packageName}")
-                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                            )
+                        if (!hasMicPermission) {
+                            runCatching {
+                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }.onFailure {
+                                PermissionUtils.openAppDetailsSettings(context)
+                            }
+                        } else {
+                            PermissionUtils.openAppDetailsSettings(context)
                         }
                     }
                 )
@@ -585,15 +604,20 @@ fun ProfileScreen(
                     safeGreen = safeGreen,
                     warnAmber = warnAmber,
                     onClick = {
-                        runCatching {
-                            context.startActivity(
-                                PermissionUtils.getNotificationListenerIntent().apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                            )
-                        }
+                        PermissionUtils.openNotificationListenerSettings(context)
                     }
                 )
+                if (!hasNotificationAccess && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    Text(
+                        text = "Toggle grayed out? Open App Info → ⋮ (top right) → Allow restricted settings",
+                        fontSize = 11.5.sp,
+                        color = warnAmber.copy(alpha = 0.88f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { PermissionUtils.openAppDetailsSettings(context) }
+                            .padding(bottom = 10.dp)
+                    )
+                }
                 StudioHairlineDivider()
 
                 ProfilePermissionRow(

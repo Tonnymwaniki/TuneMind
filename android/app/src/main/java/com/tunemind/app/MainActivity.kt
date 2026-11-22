@@ -2047,6 +2047,13 @@ open class MainActivity : ComponentActivity() {
                         ComponentName(context, TuneMindListenerService::class.java)
                     )
                 }
+                TuneMindListenerService.instance?.observerOrNull()?.let { obs ->
+                    if (!obs.isStarted) {
+                        obs.start()
+                    } else {
+                        obs.refreshSessions(force = true)
+                    }
+                }
             } catch (t: Throwable) {
                 Log.w("MainActivity", "forceRebindListener notice: ${t.message}")
             }

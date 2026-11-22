@@ -19,12 +19,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tunemind.app.service.NotificationAccess
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
 import com.tunemind.app.ui.components.TuneMindLogoMark
 import com.tunemind.app.ui.theme.*
+import com.tunemind.app.util.PermissionUtils
 
 @Composable
 fun PersonalOnboardingDialog(
@@ -38,7 +42,20 @@ fun PersonalOnboardingDialog(
         if (detected.isNotEmpty()) detected else com.tunemind.app.provider.MusicProviderRegistry.getInstance(context).getAllProviders()
     }
     var selectedProviderId by remember { mutableStateOf(vm.getPreferredProviderId(context)) }
-    val hasNotificationAccess = NotificationAccess.isEnabled(context)
+    var hasNotificationAccess by remember { mutableStateOf(NotificationAccess.isEnabled(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasNotificationAccess = NotificationAccess.isEnabled(context)
+                if (hasNotificationAccess) {
+                    PermissionUtils.kickstartMediaObservation(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     StudioAmbientBackground {
         Column(
@@ -131,7 +148,7 @@ fun PersonalOnboardingDialog(
                     )
                     OutlinedButton(
                         onClick = {
-                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            PermissionUtils.openNotificationListenerSettings(context)
                         },
                         shape = RoundedCornerShape(28.dp),
                         modifier = Modifier.fillMaxWidth()

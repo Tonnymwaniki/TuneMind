@@ -137,7 +137,10 @@ fun SettingsScreen(
             vm.checkBatteryOptimization(context)
             hasNotificationAccess = com.tunemind.app.util.PermissionUtils.hasNotificationListenerPermission(context)
             hasAudioPermission = com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
-            hasOverlayPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || android.provider.Settings.canDrawOverlays(context)
+            hasOverlayPermission = com.tunemind.app.util.PermissionUtils.hasOverlayPermission(context)
+            if (hasNotificationAccess) {
+                com.tunemind.app.util.PermissionUtils.kickstartMediaObservation(context)
+            }
             selectedProviderId = registry.getPreferredProviderId()
             alwaysAsk = registry.isAlwaysAskEnabled()
         }
@@ -147,6 +150,15 @@ fun SettingsScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasAudioPermission = granted || com.tunemind.app.util.PermissionUtils.hasAudioStoragePermission(context)
+        if (!hasAudioPermission &&
+            com.tunemind.app.util.PermissionUtils.isRuntimePermissionPermanentlyDeniedAfterResult(
+                context = context,
+                permission = com.tunemind.app.util.PermissionUtils.audioStoragePermissionName(),
+                granted = false
+            )
+        ) {
+            com.tunemind.app.util.PermissionUtils.openAppDetailsSettings(context)
+        }
         refreshAllSystemStates()
     }
 
@@ -724,16 +736,7 @@ fun SettingsScreen(
                                 onCheckedChange = { enable ->
                                     if (enable && !hasOverlayPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                         com.tunemind.app.domain.voice.AgentSettingsStore.setAutoReturnAfterSpotifyWakeEnabled(context, true)
-                                        runCatching {
-                                            context.startActivity(
-                                                android.content.Intent(
-                                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                    android.net.Uri.parse("package:${context.packageName}")
-                                                ).apply {
-                                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                }
-                                            )
-                                        }
+                                        com.tunemind.app.util.PermissionUtils.openOverlayPermissionSettings(context)
                                     } else {
                                         com.tunemind.app.domain.voice.AgentSettingsStore.setAutoReturnAfterSpotifyWakeEnabled(context, enable)
                                     }
@@ -847,15 +850,22 @@ fun SettingsScreen(
                 isEnabled = hasNotificationAccess,
                 colors = colors,
                 onClick = {
-                    runCatching {
-                        context.startActivity(
-                            com.tunemind.app.util.PermissionUtils.getNotificationListenerIntent().apply {
-                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                        )
-                    }
+                    com.tunemind.app.util.PermissionUtils.openNotificationListenerSettings(context)
                 }
             )
+            if (!hasNotificationAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                Text(
+                    text = "Grayed out in Android Settings? Tap here → App Info → ⋮ → Allow restricted settings",
+                    fontSize = 11.5.sp,
+                    color = warnAmber.copy(alpha = 0.88f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            com.tunemind.app.util.PermissionUtils.openAppDetailsSettings(context)
+                        }
+                        .padding(bottom = 10.dp)
+                )
+            }
             StudioHairlineDivider()
 
             SettingsPermissionRow(
@@ -869,23 +879,15 @@ fun SettingsScreen(
                 colors = colors,
                 onClick = {
                     if (!hasAudioPermission) {
-                        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            android.Manifest.permission.READ_MEDIA_AUDIO
-                        } else {
-                            android.Manifest.permission.READ_EXTERNAL_STORAGE
-                        }
-                        audioPermissionLauncher.launch(perm)
-                    } else {
                         runCatching {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                    android.net.Uri.parse("package:${context.packageName}")
-                                ).apply {
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
+                            audioPermissionLauncher.launch(
+                                com.tunemind.app.util.PermissionUtils.audioStoragePermissionName()
                             )
+                        }.onFailure {
+                            com.tunemind.app.util.PermissionUtils.openAppDetailsSettings(context)
                         }
+                    } else {
+                        com.tunemind.app.util.PermissionUtils.openAppDetailsSettings(context)
                     }
                 }
             )
