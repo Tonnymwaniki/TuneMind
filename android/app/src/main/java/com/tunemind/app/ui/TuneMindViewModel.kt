@@ -394,6 +394,128 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var cachedRestoredVaultMap: Map<String, Long>? = null
 
+    private class TrackLookupIndex<T>(
+        private val byTrackId: Map<String, T> = emptyMap(),
+        private val byUri: Map<String, T> = emptyMap(),
+        private val byNormKey: Map<String, T> = emptyMap(),
+        private val byTitleBucket: Map<String, List<Pair<String, T>>> = emptyMap()
+    ) {
+        fun findMatch(
+            title: String?,
+            artist: String?,
+            spotifyUri: String?,
+            canonicalId: String?
+        ): T? {
+            if (!canonicalId.isNullOrBlank()) {
+                byTrackId[canonicalId]?.let { return it }
+            }
+            val cleanUri = spotifyUri?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotBlank() }
+            if (cleanUri != null) {
+                byUri[cleanUri]?.let { return it }
+            }
+            val normKey = TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normTitle.isBlank()) return null
+            if (normArtist.isNotBlank()) {
+                byNormKey[normKey]?.let { return it }
+            }
+            val bucket = byTitleBucket[normTitle] ?: return null
+            if (normArtist.isBlank()) {
+                return bucket.firstOrNull()?.second
+            }
+            for ((itemArtist, item) in bucket) {
+                if (itemArtist.isBlank() || itemArtist == normArtist) return item
+            }
+            return null
+        }
+    }
+
+    private inline fun <T> buildLookupIndex(
+        items: List<T>,
+        crossinline getTrackId: (T) -> String?,
+        crossinline getTitle: (T) -> String?,
+        crossinline getArtist: (T) -> String?,
+        crossinline getUri: (T) -> String?
+    ): TrackLookupIndex<T> {
+        if (items.isEmpty()) return TrackLookupIndex()
+        val byTrackId = HashMap<String, T>(items.size * 2)
+        val byUri = HashMap<String, T>(items.size)
+        val byNormKey = HashMap<String, T>(items.size * 2)
+        val byTitleBucket = HashMap<String, MutableList<Pair<String, T>>>(items.size * 2)
+        for (item in items) {
+            val tid = getTrackId(item)?.takeIf { it.isNotBlank() }
+            if (tid != null) byTrackId.putIfAbsent(tid, item)
+            val uri = getUri(item)?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotBlank() }
+            if (uri != null) byUri.putIfAbsent(uri, item)
+            val normKey = TrackIdentityResolver.buildNormalizedMatchKey(getTitle(item), getArtist(item))
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normTitle.isNotBlank()) {
+                if (normArtist.isNotBlank()) {
+                    byNormKey.putIfAbsent(normKey, item)
+                }
+                byTitleBucket.getOrPut(normTitle) { mutableListOf() }.add(normArtist to item)
+            }
+        }
+        return TrackLookupIndex(byTrackId, byUri, byNormKey, byTitleBucket)
+    }
+
+    @Volatile private var cachedUnifiedIdx: Pair<List<UnifiedTrackStats>, TrackLookupIndex<UnifiedTrackStats>>? = null
+    @Volatile private var cachedVaultIdx: Pair<List<VaultTrack>, TrackLookupIndex<VaultTrack>>? = null
+    @Volatile private var cachedManualFreshIdx: Pair<List<ManualFreshTrack>, TrackLookupIndex<ManualFreshTrack>>? = null
+    @Volatile private var cachedLikedLibIdx: Pair<List<CrossAppTrackEntity>, TrackLookupIndex<CrossAppTrackEntity>>? = null
+    @Volatile private var cachedGraduatedIdx: Pair<List<GraduatedVaultSummary>, TrackLookupIndex<GraduatedVaultSummary>>? = null
+
+    private fun buildUnifiedIndex(list: List<UnifiedTrackStats>): TrackLookupIndex<UnifiedTrackStats> =
+        buildLookupIndex(list, { it.trackId }, { it.title }, { it.artist }, { it.spotifyUri })
+
+    private fun getUnifiedIndex(): TrackLookupIndex<UnifiedTrackStats> {
+        val cur = _unifiedTracks.value
+        val existing = cachedUnifiedIdx
+        if (existing != null && existing.first === cur) return existing.second
+        val built = buildUnifiedIndex(cur)
+        cachedUnifiedIdx = cur to built
+        return built
+    }
+
+    private fun getVaultIndex(): TrackLookupIndex<VaultTrack> {
+        val cur = _vaultState.value
+        val existing = cachedVaultIdx
+        if (existing != null && existing.first === cur) return existing.second
+        val built = buildLookupIndex(cur, { it.resolvedCanonicalTrackId() }, { it.title }, { it.artist }, { it.spotifyUri })
+        cachedVaultIdx = cur to built
+        return built
+    }
+
+    private fun getManualFreshIndex(): TrackLookupIndex<ManualFreshTrack> {
+        val cur = _manualFreshTracks.value
+        val existing = cachedManualFreshIdx
+        if (existing != null && existing.first === cur) return existing.second
+        val built = buildLookupIndex(cur, { it.resolvedCanonicalTrackId() }, { it.title }, { it.artist }, { it.spotifyUri })
+        cachedManualFreshIdx = cur to built
+        return built
+    }
+
+    private fun getLikedLibraryIndex(): TrackLookupIndex<CrossAppTrackEntity> {
+        val cur = _crossAppLibraryTracks.value
+        val existing = cachedLikedLibIdx
+        if (existing != null && existing.first === cur) return existing.second
+        val likedOnly = cur.filter { it.isLiked }
+        val built = buildLookupIndex(likedOnly, { it.trackId }, { it.title }, { it.artist }, { null })
+        cachedLikedLibIdx = cur to built
+        return built
+    }
+
+    private fun getGraduatedVaultIndex(): TrackLookupIndex<GraduatedVaultSummary> {
+        val cur = _recentlyGraduatedVaultTracks.value
+        val existing = cachedGraduatedIdx
+        if (existing != null && existing.first === cur) return existing.second
+        val built = buildLookupIndex(cur, { it.trackId }, { it.title }, { it.artist }, { it.spotifyUri })
+        cachedGraduatedIdx = cur to built
+        return built
+    }
+
     fun setUiForegroundActive(active: Boolean) {
         uiForegroundActive = active
         if (active) {
@@ -744,16 +866,13 @@ class TuneMindViewModel : ViewModel() {
         if (normKey.isNotBlank() && normKey != "|") {
             _playCountByKey.value[normKey]?.let { return it }
         }
-        val cleanTitle = ListeningPlayDeduplicator.normalizeText(title)
-        if (cleanTitle.isNotBlank()) {
-            val fuzzy = _unifiedTracks.value.firstOrNull {
-                (canonical.trackId.isNotBlank() && it.trackId == canonical.trackId) ||
-                    ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, title, artist, canonical.spotifyUri) ||
-                    (normKey.isNotBlank() && normKey != "|" && TrackIdentityResolver.buildNormalizedMatchKey(it.title, it.artist) == normKey)
-            }
-            if (fuzzy != null) return fuzzy.verifiedPlayCount
-        }
-        return 0
+        val fuzzy = getUnifiedIndex().findMatch(
+            title = title,
+            artist = artist,
+            spotifyUri = canonical.spotifyUri,
+            canonicalId = canonical.trackId
+        )
+        return fuzzy?.verifiedPlayCount ?: 0
     }
 
     fun isTrackCurrentlyPlaying(title: String?, artist: String?, spotifyUri: String? = null): Boolean {
@@ -1467,23 +1586,27 @@ class TuneMindViewModel : ViewModel() {
     val currentTimeSlot: TimeSlot
         get() = TimeSlot.currentSlot()
 
-    fun getRestoredVaultTimestampsSnapshot(): Map<String, Long> = loadRestoredVaultMapFromPrefs()
+    fun getRestoredVaultTimestampsSnapshot(): Map<String, Long> = cachedRestoredVaultMap ?: emptyMap()
 
     private fun buildFreshQueueCandidates(): List<DopamineCapsuleTrack> {
         val slot = currentTimeSlot
         val nowMs = System.currentTimeMillis()
         val vault = _vaultState.value
-        val coolingKeys = vault
-            .filter {
-                !com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
-                    quarantinedAtMs = it.quarantinedAtMs,
-                    totalDays = it.totalDays,
-                    baseSatietyScore = it.satietyScore,
-                    nowMs = nowMs
-                ).isGraduated
-            }
-            .map { ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) }
-            .toSet()
+        val activeCoolingVault = vault.filter {
+            !com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
+                quarantinedAtMs = it.quarantinedAtMs,
+                totalDays = it.totalDays,
+                baseSatietyScore = it.satietyScore,
+                nowMs = nowMs
+            ).isGraduated
+        }
+        val coolingIndex = buildLookupIndex(
+            activeCoolingVault,
+            { it.resolvedCanonicalTrackId() },
+            { it.title },
+            { it.artist },
+            { it.spotifyUri }
+        )
 
         val inAppCurrent = isInAppPlayerCurrent()
         val activeTitle = if (inAppCurrent) {
@@ -1496,32 +1619,40 @@ class TuneMindViewModel : ViewModel() {
         } else {
             _homeState.value.nowPlaying?.artist
         }
-        val activeKey = ListeningPlayDeduplicator.canonicalTrackKey(activeTitle, activeArtist)
-        val activeCleanTitle = ListeningPlayDeduplicator.normalizeText(activeTitle)
 
         val excludedFresh = runCatching { _freshExcludedKeys.value }.getOrDefault(emptySet())
         val rawCandidates = mutableListOf<DopamineCapsuleTrack>()
-        val seenKeys = mutableSetOf<String>()
+        val seenKeys = HashSet<String>()
+        val seenUris = HashSet<String>()
+        val seenTitlesWithKnownArtist = HashSet<String>()
 
         fun addCandidateIfEligible(track: DopamineCapsuleTrack) {
             val cleanTitle = track.title.trim()
             if (cleanTitle.length < 2) return
-            val key = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, track.artist)
-            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, track.artist)
+            val canonicalTrackId = track.resolvedCanonicalTrackId()
             if (!activeTitle.isNullOrBlank() && ListeningPlayDeduplicator.isSameTrack(activeTitle, activeArtist, null, cleanTitle, track.artist, track.spotifyUri)) {
                 return
             }
-            if (key in coolingKeys || vault.any { v ->
-                    ListeningPlayDeduplicator.canonicalTrackKey(v.title, v.artist) in coolingKeys &&
-                        ListeningPlayDeduplicator.isSameTrack(v.title, v.artist, v.spotifyUri, cleanTitle, track.artist, track.spotifyUri)
-                }
-            ) return
-            if (normKey in excludedFresh || track.resolvedCanonicalTrackId() in excludedFresh) return
-            if (!seenKeys.add(key)) return
-            if (rawCandidates.any { existing ->
-                    ListeningPlayDeduplicator.isSameTrack(existing.title, existing.artist, existing.spotifyUri, cleanTitle, track.artist, track.spotifyUri)
-                }
-            ) return
+            if (coolingIndex.findMatch(cleanTitle, track.artist, track.spotifyUri, canonicalTrackId) != null) {
+                return
+            }
+            val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, track.artist)
+            if (normKey in excludedFresh || canonicalTrackId in excludedFresh) return
+            val cleanUri = track.spotifyUri?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.isNotBlank() }
+            if (cleanUri != null && cleanUri in seenUris) return
+
+            val cKey = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, track.artist)
+            val normTitle = cKey.substringBefore('|', "")
+            val normArtist = cKey.substringAfter('|', "")
+            if (normTitle.isBlank()) return
+            if (normArtist.isBlank()) {
+                if (normTitle in seenTitlesWithKnownArtist) return
+            } else {
+                if ("$normTitle|" in seenKeys) return
+                seenTitlesWithKnownArtist.add(normTitle)
+            }
+            if (!seenKeys.add(cKey)) return
+            if (cleanUri != null) seenUris.add(cleanUri)
             rawCandidates.add(track)
         }
 
@@ -1824,9 +1955,13 @@ class TuneMindViewModel : ViewModel() {
     fun compileDopamineCapsule(): DopamineCapsuleState {
         val current = _upNextQueueState.value
         if (current.tracks.isEmpty()) {
-            computeUpNextQueueSync(forceRebuild = true)
+            syncUpNextQueueWithSources(forceRebuild = true)
         }
-        return _upNextQueueState.value
+        return current
+    }
+
+    fun requestDopamineCapsuleCompileAsync() {
+        syncUpNextQueueWithSources(forceRebuild = _upNextQueueState.value.tracks.isEmpty())
     }
 
     fun markTrackPlayedFromQueueOrExternal(
@@ -2281,6 +2416,7 @@ class TuneMindViewModel : ViewModel() {
                 _userProfile.value = loadUserProfile()
                 _audioFocusBehavior.value = loadAudioFocusBehavior()
                 _isDecibelSafetyAlertEnabled.value = loadDecibelSafetyAlert()
+                loadRestoredVaultMapFromPrefs()
                 _vaultState.value = loadVaultFromPrefs()
                 _manualFreshTracks.value = loadManualFreshFromPrefs()
                 _freshExcludedKeys.value = loadFreshExcludedKeysFromPrefs()
@@ -2403,11 +2539,11 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Stagger WorkManager & telemetry initialization off main thread so startup stays ultra-light
+        // Stagger WorkManager & telemetry initialization off main thread so startup renders immediately
         viewModelScope.launch(Dispatchers.IO) {
             AppHolder.context?.let { ctx ->
                 _reasoningReport.value = com.tunemind.app.domain.ai.ClaudeReasoningEngine.getLatestReport(ctx)
-                kotlinx.coroutines.delay(450L)
+                kotlinx.coroutines.delay(2_500L)
                 com.tunemind.app.domain.ai.ClaudeTelemetryReasoningWorker.schedulePeriodic(ctx)
                 com.tunemind.app.domain.ai.ForYouDailyDropWorker.scheduleNextNoonDrop(ctx)
             }
@@ -2458,9 +2594,10 @@ class TuneMindViewModel : ViewModel() {
                 android.util.Log.e("TuneMindDB", "Failed observing TuneMind playlists: ${err.message}", err)
             }
         }
+        @OptIn(FlowPreview::class)
         viewModelScope.launch(Dispatchers.Default) {
             runCatching {
-                crossAppDao?.observeAllLibraryTracks()?.collect { rawLibTracks ->
+                crossAppDao?.observeAllLibraryTracks()?.debounce(350L)?.collect { rawLibTracks ->
                     val libTracks = canonicallyCollapseLibraryTracks(rawLibTracks)
                     _crossAppLibraryTracks.value = libTracks
                     _detectedPlayerTabs.value = computeDetectedPlayerTabs(libTracks)
@@ -2475,9 +2612,10 @@ class TuneMindViewModel : ViewModel() {
                 }
             }
         }
+        @OptIn(FlowPreview::class)
         viewModelScope.launch(Dispatchers.Default) {
             runCatching {
-                crossAppDao?.observePlayLogs(500)?.collect { logs ->
+                crossAppDao?.observePlayLogs(500)?.debounce(400L)?.collect { logs ->
                     _crossAppPlayLogs.value = logs
                 }
             }
@@ -2515,8 +2653,8 @@ class TuneMindViewModel : ViewModel() {
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Stagger heavy network & visual hydration slightly so first frame + taps stay 100% responsive
-            kotlinx.coroutines.delay(1_200L)
+            // Stagger heavy network & visual hydration so first frame + taps stay 100% responsive
+            kotlinx.coroutines.delay(3_000L)
             runCatching {
                 refreshLiveListeningStatsNow()
                 val missingArt = _crossAppLibraryTracks.value
@@ -3748,17 +3886,11 @@ class TuneMindViewModel : ViewModel() {
             artist = artist
         )
         val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, artist)
-        val isManualFresh = _manualFreshTracks.value.any { mf ->
-            ListeningPlayDeduplicator.isSameTrack(mf.title, mf.artist, mf.spotifyUri, cleanTitle, artist, spotifyUri) ||
-                mf.resolvedCanonicalTrackId() == canonicalId
-        }
+        val isManualFresh = getManualFreshIndex().findMatch(cleanTitle, artist, spotifyUri, canonicalId) != null
         val excludedSet = _freshExcludedKeys.value
         val isExcludedFresh = normKey in excludedSet || canonicalId in excludedSet
 
-        val vaultMatch = _vaultState.value.firstOrNull { vt ->
-            ListeningPlayDeduplicator.isSameTrack(vt.title, vt.artist, vt.spotifyUri, cleanTitle, artist, spotifyUri) ||
-                vt.resolvedCanonicalTrackId() == canonicalId
-        }
+        val vaultMatch = getVaultIndex().findMatch(cleanTitle, artist, spotifyUri, canonicalId)
         if (vaultMatch != null) {
             val rec = com.tunemind.app.domain.vault.RestingVaultEngine.computeRecoveryState(
                 quarantinedAtMs = vaultMatch.quarantinedAtMs,
@@ -3778,14 +3910,11 @@ class TuneMindViewModel : ViewModel() {
                 entryReason = vaultMatch.entryReason,
                 isManualFresh = isManualFresh,
                 isExcludedFromFresh = isExcludedFresh,
-                isInFresh = !inVaultActive && !isExcludedFresh && (isManualFresh || true)
+                isInFresh = !inVaultActive && !isExcludedFresh
             )
         }
 
-        val statsMatch = _unifiedTracks.value.firstOrNull { ut ->
-            ListeningPlayDeduplicator.isSameTrack(ut.title, ut.artist, ut.spotifyUri, cleanTitle, artist, spotifyUri) ||
-                ut.trackId == canonicalId
-        }
+        val statsMatch = getUnifiedIndex().findMatch(cleanTitle, artist, spotifyUri, canonicalId)
         if (statsMatch != null) {
             val effectiveCooling = if (isManualFresh) false else statsMatch.isCoolingDown
             val inFresh = isManualFresh || (!statsMatch.isCoolingDown && !isExcludedFresh)
@@ -3805,12 +3934,8 @@ class TuneMindViewModel : ViewModel() {
         }
 
         val inLibraryOrRecentlyKnown = isManualFresh ||
-            _crossAppLibraryTracks.value.any {
-                it.isLiked && ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, null, cleanTitle, artist, spotifyUri)
-            } ||
-            _recentlyGraduatedVaultTracks.value.any {
-                ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, cleanTitle, artist, spotifyUri)
-            }
+            getLikedLibraryIndex().findMatch(cleanTitle, artist, null, canonicalId) != null ||
+            getGraduatedVaultIndex().findMatch(cleanTitle, artist, spotifyUri, canonicalId) != null
 
         return TrackVaultUiStatus(
             isInVault = false,
@@ -3868,6 +3993,7 @@ class TuneMindViewModel : ViewModel() {
 
         val existing = _vaultState.value
         val existingKeys = mutableSetOf<String>()
+        val unifiedIdx = buildUnifiedIndex(unifiedList)
 
         for (v in existing) {
             val canonicalId = v.resolvedCanonicalTrackId()
@@ -3885,10 +4011,7 @@ class TuneMindViewModel : ViewModel() {
             var effectiveTotalDays = v.totalDays
             var effectivePenaltyPlayMs = v.lastPenaltyPlayAtMs
             var effectiveReason = v.entryReason
-            val matchedStats = unifiedList.firstOrNull { ut ->
-                ListeningPlayDeduplicator.isSameTrack(ut.title, ut.artist, ut.spotifyUri, v.title, v.artist, v.spotifyUri) ||
-                    ut.trackId == canonicalId
-            }
+            val matchedStats = unifiedIdx.findMatch(v.title, v.artist, v.spotifyUri, canonicalId)
             if (matchedStats != null &&
                 matchedStats.lastPlayedAtMs > v.quarantinedAtMs + 15L * 60_000L &&
                 matchedStats.lastPlayedAtMs > effectivePenaltyPlayMs

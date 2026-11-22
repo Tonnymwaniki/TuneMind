@@ -63,9 +63,16 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     private val appContext: Context = context.applicationContext
 
+    private val fastPrefs: SharedPreferences by lazy {
+        appContext.getSharedPreferences(FAST_META_PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
     private val prefs: SharedPreferences by lazy {
         createEncryptedPrefs(appContext)
     }
+
+    @Volatile
+    private var hasInitializedOnce = false
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -110,8 +117,61 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
     }
 
-    fun refreshSessionState() {
-        val current = readCurrentSession()
+    /**
+     * Ultra-fast startup path (< 2ms): avoids initializing Android Keystore / EncryptedSharedPreferences
+     * on cold launch when fast metadata already exists OR on a brand-new install with no encrypted file yet.
+     */
+    fun ensureFastInitialized() {
+        if (hasInitializedOnce) return
+        val fastReady = fastPrefs.getBoolean(KEY_FAST_META_READY, false)
+        if (fastReady) {
+            applySessionFromStore(fastPrefs)
+            hasInitializedOnce = true
+            return
+        }
+        val encryptedXml = java.io.File(appContext.filesDir.parentFile, "shared_prefs/${PREFS_NAME}.xml")
+        if (!encryptedXml.exists()) {
+            fastPrefs.edit().putBoolean(KEY_FAST_META_READY, true).apply()
+            applySessionFromStore(fastPrefs)
+            hasInitializedOnce = true
+            return
+        }
+        // Upgrading user: migrate non-secret metadata from EncryptedSharedPreferences once
+        refreshSessionState(forceReloadEncrypted = true)
+    }
+
+    fun refreshSessionStateIfNeeded() {
+        if (!hasInitializedOnce) {
+            ensureFastInitialized()
+        }
+    }
+
+    fun refreshSessionState(forceReloadEncrypted: Boolean = false) {
+        if (!forceReloadEncrypted && fastPrefs.getBoolean(KEY_FAST_META_READY, false)) {
+            applySessionFromStore(fastPrefs)
+            hasInitializedOnce = true
+            return
+        }
+        val current = readCurrentSession(prefs)
+        val saved = readSavedAccounts(prefs)
+        syncFastMetaFromSession(
+            session = current,
+            accounts = saved,
+            hasSupabaseToken = !(prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: "").isBlank(),
+            customUrl = prefs.getString(KEY_SUPABASE_URL, null),
+            customAnonKey = prefs.getString(KEY_SUPABASE_ANON_KEY, null)
+        )
+        applyResolvedSession(current, saved)
+        hasInitializedOnce = true
+    }
+
+    private fun applySessionFromStore(store: SharedPreferences) {
+        val current = readCurrentSession(store)
+        val saved = readSavedAccounts(store)
+        applyResolvedSession(current, saved)
+    }
+
+    private fun applyResolvedSession(current: TuneMindUserSession, saved: List<SavedAccountProfile>) {
         val hasExplicit = current.primaryProvider == "GOOGLE" || current.primaryProvider == "EMAIL"
         val partition = if (hasExplicit) {
             TuneMindAccountStorage.activateAccount(appContext, current.userId, current.email)
@@ -120,7 +180,41 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
         _activePartitionKeyFlow.value = partition
         _sessionFlow.value = current
-        _savedAccountsFlow.value = readSavedAccounts()
+        _savedAccountsFlow.value = saved
+    }
+
+    private fun syncFastMetaFromSession(
+        session: TuneMindUserSession,
+        accounts: List<SavedAccountProfile>? = null,
+        hasSupabaseToken: Boolean? = null,
+        customUrl: String? = null,
+        customAnonKey: String? = null
+    ) {
+        val forceReopen = prefs.getBoolean(KEY_FORCE_REOPEN_AUTH, false)
+        fastPrefs.edit().apply {
+            putBoolean(KEY_FAST_META_READY, true)
+            putBoolean(KEY_IS_LOGGED_IN, session.isLoggedIn)
+            putBoolean(KEY_HAS_COMPLETED_START_FLOW, session.hasCompletedStartFlow)
+            putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, session.hasCompletedAccountOnboarding)
+            putBoolean(KEY_FORCE_REOPEN_AUTH, forceReopen)
+            putBoolean(KEY_GOOGLE_CONNECTED, session.isGoogleConnected)
+            putString(KEY_USER_ID, session.userId)
+            putString(KEY_USER_EMAIL, session.email)
+            putString(KEY_DISPLAY_NAME, session.displayName)
+            putString(KEY_AVATAR_URL, session.avatarUrl)
+            putString(KEY_TASTE_ARCHETYPE, session.tasteArchetype)
+            putString(KEY_PRIMARY_PROVIDER, session.primaryProvider)
+            if (hasSupabaseToken != null) {
+                putBoolean(KEY_HAS_SUPABASE_TOKEN_FLAG, hasSupabaseToken)
+            } else {
+                putBoolean(KEY_HAS_SUPABASE_TOKEN_FLAG, session.isSupabaseAuthenticated)
+            }
+            if (customUrl != null) putString(KEY_SUPABASE_URL, customUrl)
+            if (customAnonKey != null) putString(KEY_SUPABASE_ANON_KEY, customAnonKey)
+            if (accounts != null) {
+                putString(KEY_SAVED_ACCOUNTS_JSON, encodeSavedAccountsJson(accounts, includeTokens = false))
+            }
+        }.apply()
     }
 
     fun getAccessToken(): String = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: ""
@@ -183,49 +277,53 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                         supabaseRefreshToken = newRefresh
                     )
                 }
-                refreshSessionState()
+                refreshSessionState(forceReloadEncrypted = true)
                 newAccess
             }
         }.getOrDefault(currentAccess)
     }
 
-    private fun readCurrentSession(): TuneMindUserSession {
-        val googleConnected = prefs.getBoolean(KEY_GOOGLE_CONNECTED, false)
-        val email = prefs.getString(KEY_USER_EMAIL, "") ?: ""
-        val storedProvider = prefs.getString(KEY_PRIMARY_PROVIDER, "") ?: ""
+    private fun readCurrentSession(store: SharedPreferences = prefs): TuneMindUserSession {
+        val googleConnected = store.getBoolean(KEY_GOOGLE_CONNECTED, false)
+        val email = store.getString(KEY_USER_EMAIL, "") ?: ""
+        val storedProvider = store.getString(KEY_PRIMARY_PROVIDER, "") ?: ""
         val sanitizedProvider = when {
             storedProvider.equals("GOOGLE", ignoreCase = true) || googleConnected -> "GOOGLE"
             storedProvider.equals("EMAIL", ignoreCase = true) || email.isNotBlank() -> "EMAIL"
             else -> ""
         }
-        val forceReopenAuth = prefs.getBoolean(KEY_FORCE_REOPEN_AUTH, false)
+        val forceReopenAuth = store.getBoolean(KEY_FORCE_REOPEN_AUTH, false)
         val hasExplicitAccount = sanitizedProvider == "GOOGLE" || sanitizedProvider == "EMAIL"
         val explicitLoggedIn = hasExplicitAccount &&
-            (prefs.getBoolean(KEY_IS_LOGGED_IN, false) || googleConnected || email.isNotBlank())
-        val completedStart = hasExplicitAccount && prefs.getBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
+            (store.getBoolean(KEY_IS_LOGGED_IN, false) || googleConnected || email.isNotBlank())
+        val completedStart = hasExplicitAccount && store.getBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
         val seenAccountOnboarding = !forceReopenAuth && hasExplicitAccount && (
-            prefs.getBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false) ||
+            store.getBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false) ||
                 googleConnected ||
                 email.isNotBlank()
             )
-        val name = prefs.getString(KEY_DISPLAY_NAME, "")?.ifBlank {
+        val name = store.getString(KEY_DISPLAY_NAME, "")?.ifBlank {
             if (email.isNotBlank()) email.substringBefore("@") else "TuneMind Listener"
         } ?: "TuneMind Listener"
-        val supabaseToken = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: ""
+        val hasSupabaseToken = if (store === fastPrefs) {
+            store.getBoolean(KEY_HAS_SUPABASE_TOKEN_FLAG, false)
+        } else {
+            (store.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: "").isNotBlank()
+        }
 
         return TuneMindUserSession(
             isLoggedIn = explicitLoggedIn,
             hasCompletedStartFlow = completedStart,
             hasCompletedAccountOnboarding = seenAccountOnboarding,
-            userId = prefs.getString(KEY_USER_ID, "") ?: "",
+            userId = store.getString(KEY_USER_ID, "") ?: "",
             email = email,
             displayName = name,
-            avatarUrl = prefs.getString(KEY_AVATAR_URL, "") ?: "",
+            avatarUrl = store.getString(KEY_AVATAR_URL, "") ?: "",
             primaryProvider = sanitizedProvider,
             isGoogleConnected = googleConnected,
-            isSupabaseAuthenticated = supabaseToken.isNotBlank() && isSupabaseConfigured(),
-            tasteArchetype = prefs.getString(KEY_TASTE_ARCHETYPE, "") ?: "",
-            supabaseUrl = getSupabaseUrl(),
+            isSupabaseAuthenticated = hasSupabaseToken && isSupabaseConfiguredFrom(store),
+            tasteArchetype = store.getString(KEY_TASTE_ARCHETYPE, "") ?: "",
+            supabaseUrl = getSupabaseUrlFrom(store),
             lastAuthCompletedAtMs = lastAuthSuccessWallMs
         )
     }
@@ -252,8 +350,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     // SAVED ACCOUNTS ROSTER (FOR REAL SWITCH ACCOUNTS)
     // ========================================================================
 
-    private fun readSavedAccounts(): List<SavedAccountProfile> {
-        val raw = prefs.getString(KEY_SAVED_ACCOUNTS_JSON, null) ?: return emptyList()
+    private fun readSavedAccounts(store: SharedPreferences = prefs): List<SavedAccountProfile> {
+        val raw = store.getString(KEY_SAVED_ACCOUNTS_JSON, null) ?: return emptyList()
         return try {
             val arr = JSONArray(raw)
             val list = mutableListOf<SavedAccountProfile>()
@@ -283,7 +381,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
     }
 
-    private fun writeSavedAccounts(accounts: List<SavedAccountProfile>) {
+    private fun encodeSavedAccountsJson(accounts: List<SavedAccountProfile>, includeTokens: Boolean): String {
         val arr = JSONArray()
         accounts.sortedByDescending { it.lastActiveAtMs }.take(8).forEach { acc ->
             arr.put(
@@ -294,14 +392,23 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                     put("displayName", acc.displayName)
                     put("provider", acc.provider)
                     put("avatarUrl", acc.avatarUrl)
-                    put("supabaseAccessToken", acc.supabaseAccessToken)
-                    put("supabaseRefreshToken", acc.supabaseRefreshToken)
+                    put("supabaseAccessToken", if (includeTokens) acc.supabaseAccessToken else "")
+                    put("supabaseRefreshToken", if (includeTokens) acc.supabaseRefreshToken else "")
                     put("lastActiveAtMs", acc.lastActiveAtMs)
                 }
             )
         }
-        prefs.edit().putString(KEY_SAVED_ACCOUNTS_JSON, arr.toString()).apply()
-        _savedAccountsFlow.value = readSavedAccounts()
+        return arr.toString()
+    }
+
+    private fun writeSavedAccounts(accounts: List<SavedAccountProfile>) {
+        val sorted = accounts.sortedByDescending { it.lastActiveAtMs }.take(8)
+        prefs.edit().putString(KEY_SAVED_ACCOUNTS_JSON, encodeSavedAccountsJson(sorted, includeTokens = true)).apply()
+        fastPrefs.edit()
+            .putBoolean(KEY_FAST_META_READY, true)
+            .putString(KEY_SAVED_ACCOUNTS_JSON, encodeSavedAccountsJson(sorted, includeTokens = false))
+            .apply()
+        _savedAccountsFlow.value = readSavedAccounts(prefs)
     }
 
     private fun upsertSavedAccount(
@@ -336,36 +443,39 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     }
 
     suspend fun switchToAccount(account: SavedAccountProfile): Result<TuneMindUserSession> = withContext(Dispatchers.IO) {
-        val isGoogle = account.provider.equals("GOOGLE", ignoreCase = true)
-        val partition = TuneMindAccountStorage.activateAccount(appContext, account.userId, account.email)
+        val resolvedAccount = if (account.supabaseAccessToken.isBlank()) {
+            readSavedAccounts(prefs).firstOrNull { it.accountKey.equals(account.accountKey, ignoreCase = true) } ?: account
+        } else account
+        val isGoogle = resolvedAccount.provider.equals("GOOGLE", ignoreCase = true)
+        val partition = TuneMindAccountStorage.activateAccount(appContext, resolvedAccount.userId, resolvedAccount.email)
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .putBoolean(KEY_HAS_COMPLETED_START_FLOW, true)
             .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
             .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
             .putBoolean(KEY_GOOGLE_CONNECTED, isGoogle)
-            .putString(KEY_USER_ID, account.userId)
-            .putString(KEY_USER_EMAIL, account.email)
-            .putString(KEY_DISPLAY_NAME, account.displayName)
-            .putString(KEY_AVATAR_URL, account.avatarUrl)
+            .putString(KEY_USER_ID, resolvedAccount.userId)
+            .putString(KEY_USER_EMAIL, resolvedAccount.email)
+            .putString(KEY_DISPLAY_NAME, resolvedAccount.displayName)
+            .putString(KEY_AVATAR_URL, resolvedAccount.avatarUrl)
             .putString(KEY_PRIMARY_PROVIDER, if (isGoogle) "GOOGLE" else "EMAIL")
-            .putString(KEY_SUPABASE_ACCESS_TOKEN, account.supabaseAccessToken)
-            .putString(KEY_SUPABASE_REFRESH_TOKEN, account.supabaseRefreshToken)
+            .putString(KEY_SUPABASE_ACCESS_TOKEN, resolvedAccount.supabaseAccessToken)
+            .putString(KEY_SUPABASE_REFRESH_TOKEN, resolvedAccount.supabaseRefreshToken)
             .apply()
 
         upsertSavedAccount(
-            userId = account.userId,
-            email = account.email,
-            displayName = account.displayName,
-            provider = account.provider,
-            avatarUrl = account.avatarUrl,
-            supabaseAccessToken = account.supabaseAccessToken,
-            supabaseRefreshToken = account.supabaseRefreshToken
+            userId = resolvedAccount.userId,
+            email = resolvedAccount.email,
+            displayName = resolvedAccount.displayName,
+            provider = resolvedAccount.provider,
+            avatarUrl = resolvedAccount.avatarUrl,
+            supabaseAccessToken = resolvedAccount.supabaseAccessToken,
+            supabaseRefreshToken = resolvedAccount.supabaseRefreshToken
         )
-        mirrorIdentityToUserPrefs(account.displayName, account.email)
+        mirrorIdentityToUserPrefs(resolvedAccount.displayName, resolvedAccount.email)
         resetVolatileRecorderCachesForAccountSwitch()
 
-        if (account.supabaseAccessToken.isNotBlank() && isSupabaseConfigured()) {
+        if (resolvedAccount.supabaseAccessToken.isNotBlank() && isSupabaseConfigured()) {
             ensureFreshAccessToken()
             syncProfileFromSupabase()
         }
@@ -373,12 +483,12 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
         _activePartitionKeyFlow.value = partition
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
         Result.success(_sessionFlow.value)
     }
 
     fun removeSavedAccount(accountKey: String) {
-        val remaining = readSavedAccounts().filterNot { it.accountKey == accountKey }
+        val remaining = readSavedAccounts(prefs).filterNot { it.accountKey == accountKey }
         writeSavedAccounts(remaining)
         val current = _sessionFlow.value
         val activeKey = if (current.email.isNotBlank() && (current.primaryProvider == "GOOGLE" || current.primaryProvider == "EMAIL")) {
@@ -389,7 +499,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         if (activeKey == accountKey) {
             signOut(removeFromSavedRoster = true)
         } else {
-            refreshSessionState()
+            refreshSessionState(forceReloadEncrypted = true)
         }
     }
 
@@ -397,16 +507,38 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     // SUPABASE CONFIGURATION HELPERS
     // ========================================================================
 
-    fun getSupabaseUrl(): String {
-        val custom = prefs.getString(KEY_SUPABASE_URL, null)?.trim()
+    private fun getSupabaseUrlFrom(store: SharedPreferences): String {
+        val custom = store.getString(KEY_SUPABASE_URL, null)?.trim()
         if (!custom.isNullOrBlank()) return custom.trimEnd('/')
         return BuildConfig.SUPABASE_URL.trim().trimEnd('/')
     }
 
-    fun getSupabaseAnonKey(): String {
-        val custom = prefs.getString(KEY_SUPABASE_ANON_KEY, null)?.trim()
+    private fun getSupabaseAnonKeyFrom(store: SharedPreferences): String {
+        val custom = store.getString(KEY_SUPABASE_ANON_KEY, null)?.trim()
         if (!custom.isNullOrBlank()) return custom
         return BuildConfig.SUPABASE_ANON_KEY.trim()
+    }
+
+    private fun isSupabaseConfiguredFrom(store: SharedPreferences): Boolean {
+        return getSupabaseUrlFrom(store).startsWith("https://") && getSupabaseAnonKeyFrom(store).isNotBlank()
+    }
+
+    fun getSupabaseUrl(): String {
+        val fastUrl = fastPrefs.getString(KEY_SUPABASE_URL, null)?.trim()
+        if (!fastUrl.isNullOrBlank()) return fastUrl.trimEnd('/')
+        if (fastPrefs.getBoolean(KEY_FAST_META_READY, false)) {
+            return BuildConfig.SUPABASE_URL.trim().trimEnd('/')
+        }
+        return getSupabaseUrlFrom(prefs)
+    }
+
+    fun getSupabaseAnonKey(): String {
+        val fastKey = fastPrefs.getString(KEY_SUPABASE_ANON_KEY, null)?.trim()
+        if (!fastKey.isNullOrBlank()) return fastKey
+        if (fastPrefs.getBoolean(KEY_FAST_META_READY, false)) {
+            return BuildConfig.SUPABASE_ANON_KEY.trim()
+        }
+        return getSupabaseAnonKeyFrom(prefs)
     }
 
     fun isSupabaseConfigured(): Boolean {
@@ -418,7 +550,11 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .putString(KEY_SUPABASE_URL, projectUrl.trim().trimEnd('/'))
             .putString(KEY_SUPABASE_ANON_KEY, anonKey.trim())
             .apply()
-        refreshSessionState()
+        fastPrefs.edit()
+            .putString(KEY_SUPABASE_URL, projectUrl.trim().trimEnd('/'))
+            .putString(KEY_SUPABASE_ANON_KEY, anonKey.trim())
+            .apply()
+        refreshSessionState(forceReloadEncrypted = true)
     }
 
     // ========================================================================
@@ -468,7 +604,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         resetVolatileRecorderCachesForAccountSwitch()
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
     }
 
     // ========================================================================
@@ -565,7 +701,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                     syncProfileFromSupabase()
                     lastAuthSuccessWallMs = System.currentTimeMillis()
                     _lastAuthErrorFlow.value = null
-                    refreshSessionState()
+                    refreshSessionState(forceReloadEncrypted = true)
                     return@withContext Result.success(_sessionFlow.value)
                 }
             } catch (e: Exception) {
@@ -654,7 +790,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         resetVolatileRecorderCachesForAccountSwitch()
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
         Result.success(_sessionFlow.value)
     }
 
@@ -759,7 +895,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         syncProfileFromSupabase()
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
         true
     }
 
@@ -798,7 +934,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                 if (remoteEmail.isNotBlank() && remoteName.isNotBlank()) {
                     mirrorIdentityToUserPrefs(remoteName, remoteEmail, remoteArchetype.ifBlank { null })
                 }
-                refreshSessionState()
+                refreshSessionState(forceReloadEncrypted = true)
                 true
             }
         }.getOrDefault(false)
@@ -899,7 +1035,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             )
         }
 
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
         Result.success(_sessionFlow.value)
     }
 
@@ -978,7 +1114,12 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
             .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
             .apply()
-        refreshSessionState()
+        fastPrefs.edit()
+            .putBoolean(KEY_FAST_META_READY, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
+            .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
+            .apply()
+        refreshSessionState(forceReloadEncrypted = false)
     }
 
     fun reopenAccountOnboarding() {
@@ -986,7 +1127,12 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false)
             .putBoolean(KEY_FORCE_REOPEN_AUTH, true)
             .apply()
-        refreshSessionState()
+        fastPrefs.edit()
+            .putBoolean(KEY_FAST_META_READY, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false)
+            .putBoolean(KEY_FORCE_REOPEN_AUTH, true)
+            .apply()
+        refreshSessionState(forceReloadEncrypted = false)
     }
 
     fun markStartFlowCompleted() {
@@ -996,7 +1142,14 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .apply()
-        refreshSessionState()
+        fastPrefs.edit()
+            .putBoolean(KEY_FAST_META_READY, true)
+            .putBoolean(KEY_HAS_COMPLETED_START_FLOW, true)
+            .putBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, true)
+            .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
+            .putBoolean(KEY_IS_LOGGED_IN, true)
+            .apply()
+        refreshSessionState(forceReloadEncrypted = false)
     }
 
     suspend fun signOutRemoteAndLocal(
@@ -1024,7 +1177,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         val oldPartition = TuneMindAccountStorage.computePartitionKey(currentUserId, currentEmail)
         if (removeFromSavedRoster && currentEmail.isNotBlank()) {
             val activeKey = "${currentProvider}:${currentEmail.lowercase()}"
-            writeSavedAccounts(readSavedAccounts().filterNot {
+            writeSavedAccounts(readSavedAccounts(prefs).filterNot {
                 it.accountKey.equals(activeKey, ignoreCase = true) ||
                     (it.email.equals(currentEmail, ignoreCase = true) && it.provider == currentProvider)
             })
@@ -1051,7 +1204,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             TuneMindAccountStorage.wipeAccountStorage(appContext, oldPartition)
         }
         resetVolatileRecorderCachesForAccountSwitch()
-        refreshSessionState()
+        refreshSessionState(forceReloadEncrypted = true)
     }
 
     suspend fun deleteProfileAndSignOut(onWipeLocalAppData: suspend () -> Unit) = withContext(Dispatchers.IO) {
@@ -1133,8 +1286,11 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     companion object {
         private const val TAG = "TuneMindAuthSession"
         private const val PREFS_NAME = "tunemind_user_auth_session"
+        private const val FAST_META_PREFS_NAME = "tunemind_auth_fast_meta"
         const val SUPABASE_REDIRECT_URI = "tunemind://supabase-auth-callback"
 
+        private const val KEY_FAST_META_READY = "fast_meta_ready_v1"
+        private const val KEY_HAS_SUPABASE_TOKEN_FLAG = "has_supabase_token_flag"
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_HAS_COMPLETED_START_FLOW = "has_completed_start_flow"
         private const val KEY_HAS_SEEN_ACCOUNT_ONBOARDING = "has_seen_account_onboarding_v3"

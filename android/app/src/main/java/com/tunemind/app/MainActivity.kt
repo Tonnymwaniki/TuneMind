@@ -81,14 +81,16 @@ open class MainActivity : ComponentActivity() {
             !isInitializationComplete
         }
 
-        // 3. Background startup initialization (lightweight auth session & settings only)
+        // 3. Fast startup initialization (lightweight fast meta & settings, hard-capped so splash never hangs)
         lifecycleScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(applicationContext)
-                    com.tunemind.app.data.auth.TuneMindAuthSessionManager
-                        .getInstance(applicationContext)
-                        .refreshSessionState()
+                kotlinx.coroutines.withTimeoutOrNull(800L) {
+                    withContext(Dispatchers.IO) {
+                        com.tunemind.app.domain.voice.AgentSettingsStore.ensureLoaded(applicationContext)
+                        com.tunemind.app.data.auth.TuneMindAuthSessionManager
+                            .getInstance(applicationContext)
+                            .ensureFastInitialized()
+                    }
                 }
             } finally {
                 isInitializationComplete = true
@@ -138,7 +140,7 @@ open class MainActivity : ComponentActivity() {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 lifecycleScope.launch(Dispatchers.IO) {
-                                    authSessionManager.refreshSessionState()
+                                    authSessionManager.refreshSessionStateIfNeeded()
                                 }
                             }
                         }
@@ -1036,10 +1038,15 @@ open class MainActivity : ComponentActivity() {
             }
         }
 
+        var hasNotificationListenerAccess by remember { mutableStateOf(true) }
+
         LaunchedEffect(Unit) {
             orchestrator.start()
             agentVoiceManager.setForegroundActive(true)
             vm.setUiForegroundActive(true)
+            withContext(Dispatchers.IO) {
+                hasNotificationListenerAccess = PermissionUtils.hasNotificationListenerPermission(context)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 !PermissionUtils.hasPostNotificationsPermission(context) &&
                 !playerPrefs.getBoolean("prompted_post_notifications", false)
@@ -1082,6 +1089,9 @@ open class MainActivity : ComponentActivity() {
                         orchestrator.start()
                         agentVoiceManager.setForegroundActive(true)
                         vm.setUiForegroundActive(true)
+                        coroutineScope.launch(Dispatchers.IO) {
+                            hasNotificationListenerAccess = PermissionUtils.hasNotificationListenerPermission(context)
+                        }
                         val stalled = com.tunemind.app.provider.MusicPlayerAutoLauncher
                             .consumeFreshStalledPlaybackAttempt()
                         val isPlayingTarget = stalled?.let {
@@ -1157,7 +1167,7 @@ open class MainActivity : ComponentActivity() {
 
         val dopamineCapsule by vm.upNextQueueState.collectAsState()
         LaunchedEffect(combinedRecentTracks.isEmpty(), nowPlaying?.title) {
-            vm.compileDopamineCapsule()
+            vm.requestDopamineCapsuleCompileAsync()
         }
 
         TuneMindTheme(adaptiveState = adaptiveState) {
@@ -1270,6 +1280,7 @@ open class MainActivity : ComponentActivity() {
             ) {
                 HorizontalPager(
                     state = pagerState,
+                    beyondViewportPageCount = 0,
                     key = { it },
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
@@ -1418,7 +1429,7 @@ open class MainActivity : ComponentActivity() {
                                 hasUnreadNotifications = com.tunemind.app.sync.WeeklyShareDropWorker.isSundayToday() ||
                                     vaultState.any { it.recoveryProgress >= 0.75f } ||
                                     hearingInsights.currentHeadroomDb < 6f ||
-                                    !PermissionUtils.hasNotificationListenerPermission(context),
+                                    !hasNotificationListenerAccess,
                                 onOpenNowPlaying = {
                                     showNowPlayingScreen = true
                                 },
@@ -1437,6 +1448,7 @@ open class MainActivity : ComponentActivity() {
                                 tuneMindPlaylistCount = tuneMindPlaylists.size,
                                 kidsModeEnabled = kidsModeEnabled,
                                 hasExternalMiniVideoDock = ytHasActiveVideo && !showNowPlayingScreen,
+                                isOrbActive = !hasOverlayOpen && currentPagerPage == 1,
                                 onOpenPlaylists = {
                                     selectedPlaylistNavName = null
                                     showPlaylistsScreen = true

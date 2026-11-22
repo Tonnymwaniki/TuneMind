@@ -44,6 +44,9 @@ object TuneMindAccountStorage {
         "tunemind_sync_prefs"
     )
 
+    @Volatile
+    private var cachedPartitionKey: String? = null
+
     private fun metaPrefs(context: Context): SharedPreferences {
         return context.applicationContext.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE)
     }
@@ -72,10 +75,12 @@ object TuneMindAccountStorage {
     }
 
     fun resolveActivePartitionKey(context: Context): String {
+        cachedPartitionKey?.let { return it }
         val appCtx = context.applicationContext
         val stored = metaPrefs(appCtx).getString(KEY_ACTIVE_PARTITION, null)?.trim()
-        if (!stored.isNullOrBlank()) return stored
-        return SIGNED_OUT_PARTITION
+        val resolved = if (!stored.isNullOrBlank()) stored else SIGNED_OUT_PARTITION
+        cachedPartitionKey = resolved
+        return resolved
     }
 
     fun resolveDatabaseName(context: Context): String {
@@ -93,12 +98,14 @@ object TuneMindAccountStorage {
         if (key != SIGNED_OUT_PARTITION) {
             claimLegacyDataIfFirstAccount(appCtx, key)
         }
+        cachedPartitionKey = key
         metaPrefs(appCtx).edit().putString(KEY_ACTIVE_PARTITION, key).apply()
         return key
     }
 
     fun clearActivePartition(context: Context): String {
         val appCtx = context.applicationContext
+        cachedPartitionKey = SIGNED_OUT_PARTITION
         metaPrefs(appCtx).edit().putString(KEY_ACTIVE_PARTITION, SIGNED_OUT_PARTITION).apply()
         return SIGNED_OUT_PARTITION
     }

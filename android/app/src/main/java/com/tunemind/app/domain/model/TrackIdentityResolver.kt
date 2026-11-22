@@ -57,11 +57,18 @@ object TrackIdentityResolver {
         return "spotify:track:$id"
     }
 
+    private val RE_NON_ALNUM = Regex("[^a-z0-9]+")
+    private val RE_PARENS = Regex("\\s*\\([^)]*\\)")
+    private val RE_BRACKETS = Regex("\\s*\\[[^\\]]*\\]")
+    private val RE_FEAT_TITLE = Regex("\\s+(feat\\.?|ft\\.?|featuring|with)\\s+.*$")
+    private val RE_SUFFIX_DASH = Regex("\\s+-\\s+((\\d{4}\\s+)?remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean|official\\s+(audio|video|lyric.*)|lyric\\s+video|audio|video).*$")
+    private val RE_ARTIST_SPLIT = Regex("\\s*(,|&|;|/|feat\\.?|ft\\.?|featuring|\\bx\\b|\\bwith\\b)\\s*")
+
     fun slugifyPart(raw: String?, fallback: String = "unknown"): String {
         val cleaned = raw.orEmpty()
             .trim()
             .lowercase()
-            .replace(Regex("[^a-z0-9]+"), "_")
+            .replace(RE_NON_ALNUM, "_")
             .trim('_')
         return cleaned.ifEmpty { fallback }
     }
@@ -94,14 +101,15 @@ object TrackIdentityResolver {
     )
 
     fun normalizedTitleOnly(title: String?): String {
-        return title.orEmpty()
+        if (title.isNullOrBlank()) return ""
+        return title
             .trim()
             .lowercase()
-            .replace(Regex("\\s*\\([^)]*\\)"), "")
-            .replace(Regex("\\s*\\[[^\\]]*\\]"), "")
-            .replace(Regex("\\s+(feat\\.?|ft\\.?|featuring|with)\\s+.*$"), "")
-            .replace(Regex("\\s+-\\s+((\\d{4}\\s+)?remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean|official\\s+(audio|video|lyric.*)|lyric\\s+video|audio|video).*$"), "")
-            .replace(Regex("[^a-z0-9]+"), " ")
+            .replace(RE_PARENS, "")
+            .replace(RE_BRACKETS, "")
+            .replace(RE_FEAT_TITLE, "")
+            .replace(RE_SUFFIX_DASH, "")
+            .replace(RE_NON_ALNUM, " ")
             .trim()
     }
 
@@ -111,16 +119,20 @@ object TrackIdentityResolver {
      */
     fun buildNormalizedMatchKey(title: String?, artist: String?): String {
         val cleanTitle = normalizedTitleOnly(title)
-        val primaryArtist = artist.orEmpty()
-            .trim()
-            .lowercase()
-            .split(Regex("\\s*(,|&|;|/|feat\\.?|ft\\.?|featuring|\\bx\\b|\\bwith\\b)\\s*"), limit = 2)
-            .firstOrNull()
-            .orEmpty()
-            .replace(Regex("[^a-z0-9]+"), " ")
-            .trim()
-            .takeIf { it.isNotBlank() && it !in NON_ARTIST_PLACEHOLDERS }
-            .orEmpty()
+        val primaryArtist = if (artist.isNullOrBlank()) {
+            ""
+        } else {
+            artist
+                .trim()
+                .lowercase()
+                .split(RE_ARTIST_SPLIT, limit = 2)
+                .firstOrNull()
+                .orEmpty()
+                .replace(RE_NON_ALNUM, " ")
+                .trim()
+                .takeIf { it.isNotBlank() && it !in NON_ARTIST_PLACEHOLDERS }
+                .orEmpty()
+        }
         return "$cleanTitle|$primaryArtist"
     }
 

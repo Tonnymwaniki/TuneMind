@@ -169,15 +169,21 @@ fun RhythmDnaScreen(
 
     val powerTracks = remember(recentTracks, selectedPhaseIndex) {
         val unique = mutableListOf<TrackMemoryEntry>()
+        val seenKeys = HashSet<String>(minOf(32, recentTracks.size + 1))
+        val seenTitles = HashSet<String>(minOf(32, recentTracks.size + 1))
         for (entry in recentTracks) {
-            if (entry.title.isNullOrBlank()) continue
-            val dup = unique.any { prev ->
-                com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
-                    prev.title, prev.artist, prev.providerTrackId,
-                    entry.title, entry.artist, entry.providerTrackId
-                )
+            val t = entry.title
+            if (t.isNullOrBlank()) continue
+            val key = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.canonicalTrackKey(t, entry.artist)
+            val normTitle = key.substringBefore('|', "")
+            val normArtist = key.substringAfter('|', "")
+            val isDup = key in seenKeys || (normArtist.isBlank() && normTitle in seenTitles)
+            if (!isDup) {
+                seenKeys.add(key)
+                if (normTitle.isNotBlank()) seenTitles.add(normTitle)
+                unique.add(entry)
+                if (unique.size >= 16) break
             }
-            if (!dup) unique.add(entry)
         }
         if (unique.size <= 5) unique
         else {

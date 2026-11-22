@@ -146,11 +146,14 @@ object ListeningPlayDeduplicator {
 
     private const val CROSS_APP_MIRROR_WINDOW_MS = 90_000L
 
-    fun normalizeText(value: String?): String =
-        value?.trim()
-            ?.lowercase(Locale.ROOT)
-            ?.replace(Regex("\\s+"), " ")
-            .orEmpty()
+    private val RE_WHITESPACE = Regex("\\s+")
+
+    fun normalizeText(value: String?): String {
+        if (value.isNullOrBlank()) return ""
+        return value.trim()
+            .lowercase(Locale.ROOT)
+            .replace(RE_WHITESPACE, " ")
+    }
 
     fun canonicalTrackKey(title: String?, artist: String?): String =
         TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
@@ -494,21 +497,74 @@ object ListeningPlayDeduplicator {
             .associateBy { TrackIdentityResolver.normalizedTitleOnly(it.title) }
 
         // 2. Seed permanent cross-app play logs across ALL music apps (never pruned!)
+        // Use normalized-title bucket index so duplicate merging is O(N) instead of O(N^2) regex scans
         val mergedEvents = mutableListOf<UnifiedPlayEvent>()
+        val mergedNormMeta = mutableListOf<Pair<String, String>>() // normTitle to normArtist
+        val mergedIndicesByTitle = HashMap<String, MutableList<Int>>(256)
+        val mergedIndexByUri = HashMap<String, MutableList<Int>>(64)
+
+        fun findMatchingMergedIndex(
+            normTitle: String,
+            normArtist: String,
+            cleanUri: String?,
+            playedAtMs: Long,
+            sourcePkg: String
+        ): Int {
+            if (!mergeDuplicatePlays) return -1
+            if (cleanUri != null) {
+                val uriIndices = mergedIndexByUri[cleanUri.lowercase(Locale.ROOT)]
+                if (uriIndices != null) {
+                    for (idx in uriIndices) {
+                        val existing = mergedEvents[idx]
+                        val diffMs = kotlin.math.abs(existing.playedAtMs - playedAtMs)
+                        val sameWindow = if (existing.sourcePackage == sourcePkg) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
+                        if (sameWindow) return idx
+                    }
+                }
+            }
+            if (normTitle.isBlank()) return -1
+            val bucket = mergedIndicesByTitle[normTitle] ?: return -1
+            for (idx in bucket) {
+                val existing = mergedEvents[idx]
+                val diffMs = kotlin.math.abs(existing.playedAtMs - playedAtMs)
+                val sameWindow = if (existing.sourcePackage == sourcePkg) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
+                if (!sameWindow) continue
+                val existingArtist = mergedNormMeta[idx].second
+                if (existingArtist.isBlank() || normArtist.isBlank() || existingArtist == normArtist) {
+                    return idx
+                }
+            }
+            return -1
+        }
+
+        fun appendMergedEvent(event: UnifiedPlayEvent, normTitle: String, normArtist: String) {
+            val idx = mergedEvents.size
+            mergedEvents.add(event)
+            mergedNormMeta.add(normTitle to normArtist)
+            if (normTitle.isNotBlank()) {
+                mergedIndicesByTitle.getOrPut(normTitle) { mutableListOf() }.add(idx)
+            }
+            val cleanUri = event.spotifyUri?.trim()?.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT)
+            if (cleanUri != null) {
+                mergedIndexByUri.getOrPut(cleanUri) { mutableListOf() }.add(idx)
+            }
+        }
 
         for (row in crossAppLogs.filter { it.title.isNotBlank() }.sortedByDescending { it.playedAtMs }) {
             val key = canonicalTrackKey(row.title, row.artist)
+            val normTitle = key.substringBefore('|', "")
+            val normArtist = key.substringAfter('|', "")
             val rowPkg = row.sourcePackage.ifBlank { "unknown_player" }
-            val existingIdx = if (mergeDuplicatePlays) {
-                mergedEvents.indexOfFirst { existing ->
-                    val diffMs = kotlin.math.abs(existing.playedAtMs - row.playedAtMs)
-                    val sameWindow = if (existing.sourcePackage == rowPkg) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
-                    sameWindow && isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.title, row.artist, null)
-                }
-            } else -1
+            val existingIdx = findMatchingMergedIndex(
+                normTitle = normTitle,
+                normArtist = normArtist,
+                cleanUri = null,
+                playedAtMs = row.playedAtMs,
+                sourcePkg = rowPkg
+            )
 
             val durMs = row.trackDurationMs.takeIf { it > 0L } ?: 195_000L
-            val libRow = libraryByKey[key] ?: libraryByTitleOnly[TrackIdentityResolver.normalizedTitleOnly(row.title)]
+            val libRow = libraryByKey[key] ?: libraryByTitleOnly[normTitle]
             val cleanRowArtist = row.artist.trim().ifBlank { "Unknown Artist" }
             val resolvedId = TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = row.trackId,
@@ -520,8 +576,12 @@ object ListeningPlayDeduplicator {
                 val existing = mergedEvents[existingIdx]
                 val betterArtist = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(cleanRowArtist)) cleanRowArtist else existing.artist
                 val betterTitle = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(cleanRowArtist)) row.title.trim() else existing.title
+                val updatedKey = if (betterArtist !== existing.artist || betterTitle !== existing.title) {
+                    canonicalTrackKey(betterTitle, betterArtist)
+                } else existing.trackKey
+                mergedNormMeta[existingIdx] = updatedKey.substringBefore('|', "") to updatedKey.substringAfter('|', "")
                 mergedEvents[existingIdx] = existing.copy(
-                    trackKey = canonicalTrackKey(betterTitle, betterArtist),
+                    trackKey = updatedKey,
                     title = betterTitle,
                     artist = betterArtist,
                     album = existing.album ?: row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
@@ -531,39 +591,49 @@ object ListeningPlayDeduplicator {
                 continue
             }
 
-            mergedEvents += UnifiedPlayEvent(
-                playId = "calog_${row.playLogId}",
-                trackKey = key,
-                title = row.title.trim(),
-                artist = cleanRowArtist,
-                album = row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
-                albumArtUrl = libRow?.albumArtUrl,
-                spotifyUri = null,
-                sourcePackage = rowPkg,
-                appDisplayName = resolveAppDisplayName(rowPkg),
-                playedAtMs = row.playedAtMs,
-                durationMs = durMs,
-                listenedMs = row.listenedMs.coerceAtLeast(1_000L).coerceAtMost(durMs),
-                isNowPlaying = false,
-                trackId = resolvedId
+            appendMergedEvent(
+                UnifiedPlayEvent(
+                    playId = "calog_${row.playLogId}",
+                    trackKey = key,
+                    title = row.title.trim(),
+                    artist = cleanRowArtist,
+                    album = row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
+                    albumArtUrl = libRow?.albumArtUrl,
+                    spotifyUri = null,
+                    sourcePackage = rowPkg,
+                    appDisplayName = resolveAppDisplayName(rowPkg),
+                    playedAtMs = row.playedAtMs,
+                    durationMs = durMs,
+                    listenedMs = row.listenedMs.coerceAtLeast(1_000L).coerceAtMost(durMs),
+                    isNowPlaying = false,
+                    trackId = resolvedId
+                ),
+                normTitle = normTitle,
+                normArtist = normArtist
             )
         }
 
         // Merge live OS event_queue segments without double counting permanent log entries or multi-controller mirrors
         for (localEvent in localPlayEvents) {
-            val matchingIdx = if (mergeDuplicatePlays) {
-                mergedEvents.indexOfFirst { existing ->
-                    val diffMs = kotlin.math.abs(existing.playedAtMs - localEvent.playedAtMs)
-                    val sameWindow = if (existing.sourcePackage == localEvent.sourcePackage) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
-                    sameWindow && isSameTrack(existing.title, existing.artist, existing.spotifyUri, localEvent.title, localEvent.artist, localEvent.spotifyUri)
-                }
-            } else -1
+            val normTitle = localEvent.trackKey.substringBefore('|', "")
+            val normArtist = localEvent.trackKey.substringAfter('|', "")
+            val matchingIdx = findMatchingMergedIndex(
+                normTitle = normTitle,
+                normArtist = normArtist,
+                cleanUri = localEvent.spotifyUri,
+                playedAtMs = localEvent.playedAtMs,
+                sourcePkg = localEvent.sourcePackage
+            )
             if (matchingIdx >= 0) {
                 val existing = mergedEvents[matchingIdx]
                 val betterArtist = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(localEvent.artist)) localEvent.artist else existing.artist
                 val betterTitle = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(localEvent.artist)) localEvent.title else existing.title
+                val updatedKey = if (betterArtist !== existing.artist || betterTitle !== existing.title) {
+                    canonicalTrackKey(betterTitle, betterArtist)
+                } else existing.trackKey
+                mergedNormMeta[matchingIdx] = updatedKey.substringBefore('|', "") to updatedKey.substringAfter('|', "")
                 mergedEvents[matchingIdx] = existing.copy(
-                    trackKey = canonicalTrackKey(betterTitle, betterArtist),
+                    trackKey = updatedKey,
                     title = betterTitle,
                     artist = betterArtist,
                     album = existing.album ?: localEvent.album,
@@ -573,7 +643,7 @@ object ListeningPlayDeduplicator {
                     isNowPlaying = existing.isNowPlaying || localEvent.isNowPlaying
                 )
             } else {
-                mergedEvents += localEvent
+                appendMergedEvent(localEvent, normTitle = normTitle, normArtist = normArtist)
             }
         }
 

@@ -61,17 +61,17 @@ fun TuneMindSplashOverlay(
 
     val logoAlpha by animateFloatAsState(
         targetValue = if (startReveal) 1f else 0f,
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
         label = "SplashLogoAlpha"
     )
     val logoScale by animateFloatAsState(
-        targetValue = if (startReveal) 1.0f else 0.88f,
-        animationSpec = tween(durationMillis = 620, easing = FastOutSlowInEasing),
+        targetValue = if (startReveal) 1.0f else 0.94f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "SplashLogoScale"
     )
     val wordmarkAlpha by animateFloatAsState(
         targetValue = if (startReveal) 1f else 0f,
-        animationSpec = tween(durationMillis = 560, delayMillis = 160, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 180, delayMillis = 40, easing = FastOutSlowInEasing),
         label = "SplashWordmarkAlpha"
     )
 
@@ -80,7 +80,7 @@ fun TuneMindSplashOverlay(
         initialValue = 0.25f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(520, easing = FastOutSlowInEasing),
+            animation = tween(420, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "splash_eq_phase"
@@ -90,12 +90,11 @@ fun TuneMindSplashOverlay(
         startReveal = true
         ringWave.animateTo(
             targetValue = 1f,
-            animationSpec = tween(durationMillis = 1100, easing = FastOutSlowInEasing)
+            animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
         )
-        delay(180L)
         overlayAlpha.animateTo(
             targetValue = 0f,
-            animationSpec = tween(durationMillis = 240, easing = FastOutLinearInEasing)
+            animationSpec = tween(durationMillis = 140, easing = FastOutLinearInEasing)
         )
         onFinished()
     }

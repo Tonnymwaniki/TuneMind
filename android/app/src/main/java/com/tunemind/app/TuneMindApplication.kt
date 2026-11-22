@@ -26,14 +26,16 @@ class TuneMindApplication : Application() {
 
         // Bind user ID + pre-warm Render instance + schedule Sunday/Monthly drop reminders off the main thread
         Thread {
+            runCatching { Thread.sleep(1_500L) }
             runCatching {
                 com.tunemind.app.sync.WeeklyShareDropWorker.ensureChannel(applicationContext)
                 com.tunemind.app.sync.SyncScheduler.scheduleRecapDropReminders(applicationContext)
             }
             runCatching {
                 if (FirebaseApp.getApps(this).isNotEmpty()) {
-                    TuneMindAuthSessionManager.getInstance(applicationContext)
-                        .sessionFlow.value.userId
+                    val sessionMgr = TuneMindAuthSessionManager.getInstance(applicationContext)
+                    sessionMgr.ensureFastInitialized()
+                    sessionMgr.sessionFlow.value.userId
                         .takeIf { it.isNotBlank() }
                         ?.let { FirebaseCrashlytics.getInstance().setUserId(it) }
                 }

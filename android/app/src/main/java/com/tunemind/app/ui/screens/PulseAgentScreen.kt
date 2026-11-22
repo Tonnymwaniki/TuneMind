@@ -38,6 +38,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -105,6 +106,7 @@ fun PulseAgentScreen(
     tuneMindPlaylistCount: Int = 0,
     kidsModeEnabled: Boolean = false,
     hasExternalMiniVideoDock: Boolean = false,
+    isOrbActive: Boolean = true,
     onOpenPlaylists: () -> Unit = {}
 ) {
     val colors = LocalAdaptiveTheme.current
@@ -276,6 +278,7 @@ fun PulseAgentScreen(
                         energy = energy,
                         primaryAccent = activeAccent,
                         secondaryAccent = colors.secondaryAccent,
+                        isActive = isOrbActive,
                         modifier = Modifier.size(258.dp)
                     )
                 }
@@ -544,76 +547,88 @@ private fun TuneMindLivingOrb(
     energy: Float,
     primaryAccent: Color,
     secondaryAccent: Color,
+    isActive: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "living_orb")
+    val wavePhase: Float
+    val breathScale: Float
+    val rippleProgress: Float
+    val swirlAngle: Float
+    if (isActive) {
+        val infiniteTransition = rememberInfiniteTransition(label = "living_orb")
 
-    val wavePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (agentState) {
-                    AgentState.SPEAKING -> 1100
-                    AgentState.LISTENING -> 1400
-                    AgentState.THINKING -> 1700
-                    else -> if (isMusicPlaying) 1900 else 3600
-                },
-                easing = LinearEasing
+        wavePhase = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2f * PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = when (agentState) {
+                        AgentState.SPEAKING -> 1100
+                        AgentState.LISTENING -> 1400
+                        AgentState.THINKING -> 1700
+                        else -> if (isMusicPlaying) 1900 else 3600
+                    },
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Restart
             ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_wave_phase"
-    )
+            label = "orb_wave_phase"
+        ).value
 
-    val breathScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = when (agentState) {
-            AgentState.SPEAKING -> 1.09f
-            AgentState.LISTENING -> 1.07f
-            AgentState.THINKING -> 1.03f
-            else -> if (isMusicPlaying) 1.05f else 1.02f
-        },
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (agentState) {
-                    AgentState.SPEAKING -> 520
-                    AgentState.LISTENING -> 780
-                    AgentState.THINKING -> 1150
-                    else -> if (isMusicPlaying) 880 else 2400
-                },
-                easing = FastOutSlowInEasing
+        breathScale = infiniteTransition.animateFloat(
+            initialValue = 0.95f,
+            targetValue = when (agentState) {
+                AgentState.SPEAKING -> 1.09f
+                AgentState.LISTENING -> 1.07f
+                AgentState.THINKING -> 1.03f
+                else -> if (isMusicPlaying) 1.05f else 1.02f
+            },
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = when (agentState) {
+                        AgentState.SPEAKING -> 520
+                        AgentState.LISTENING -> 780
+                        AgentState.THINKING -> 1150
+                        else -> if (isMusicPlaying) 880 else 2400
+                    },
+                    easing = FastOutSlowInEasing
+                ),
+                repeatMode = RepeatMode.Reverse
             ),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "orb_breath"
-    )
+            label = "orb_breath"
+        ).value
 
-    val rippleProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (agentState == AgentState.LISTENING) 1500 else 2200,
-                easing = FastOutSlowInEasing
+        rippleProgress = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (agentState == AgentState.LISTENING) 1500 else 2200,
+                    easing = FastOutSlowInEasing
+                ),
+                repeatMode = RepeatMode.Restart
             ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_ripple"
-    )
+            label = "orb_ripple"
+        ).value
 
-    val swirlAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (agentState == AgentState.THINKING) 2800 else 12000,
-                easing = LinearEasing
+        swirlAngle = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (agentState == AgentState.THINKING) 2800 else 12000,
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Restart
             ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_swirl"
-    )
+            label = "orb_swirl"
+        ).value
+    } else {
+        wavePhase = 0f
+        breathScale = 1f
+        rippleProgress = 0f
+        swirlAngle = 0f
+    }
 
     val tickCount = 36
     val tickCos = remember {
@@ -705,217 +720,236 @@ private fun TuneMindLivingOrb(
         )
     }
 
-    Canvas(modifier = modifier) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val baseRadius = size.minDimension * 0.285f * breathScale
-
-        drawCircle(
-            brush = Brush.radialGradient(
+    Spacer(
+        modifier = modifier.drawWithCache {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val nominalRadius = (size.minDimension * 0.285f).coerceAtLeast(1f)
+            val haloBrush = Brush.radialGradient(
                 colors = haloColors,
                 center = center,
-                radius = baseRadius * 2.15f
-            ),
-            radius = baseRadius * 2.15f,
-            center = center
-        )
-
-        // Subtle 36-tick acoustic studio dial around the orb (zero trig allocation per frame)
-        val dialRadiusInner = size.minDimension * 0.39f
-        val majorTickLen = 7.dp.toPx()
-        val minorTickLen = 3.5.dp.toPx()
-        val majorStroke = 1.4.dp.toPx()
-        val minorStroke = 1.dp.toPx()
-        val cosWave = cos(wavePhase)
-        val sinWave = sin(wavePhase)
-        val cosWave2 = cos(wavePhase * 2f)
-        val sinWave2 = sin(wavePhase * 2f)
-        val sinWave3 = sin(wavePhase * 3f)
-        val cosWave3 = cos(wavePhase * 3f)
-
-        for (t in 0 until tickCount) {
-            val isMajor = t % 3 == 0
-            val c = tickCos[t]
-            val s = tickSin[t]
-            val tickLen = if (isMajor) majorTickLen else minorTickLen
-            val tickAlpha = when {
-                agentState != AgentState.IDLE || isMusicPlaying -> {
-                    val angleSin2 = 2f * s * c
-                    val angleCos2 = c * c - s * s
-                    val pulseWave = 0.5f + 0.5f * (angleSin2 * cosWave - angleCos2 * sinWave)
-                    if (agentState != AgentState.IDLE) 0.18f + 0.32f * pulseWave else 0.14f + 0.22f * pulseWave
-                }
-                isMajor -> 0.22f
-                else -> 0.10f
-            }
-            val start = Offset(center.x + dialRadiusInner * c, center.y + dialRadiusInner * s)
-            val end = Offset(center.x + (dialRadiusInner + tickLen) * c, center.y + (dialRadiusInner + tickLen) * s)
-            drawLine(
-                color = (if (isMajor) primaryAccent else Color.White).copy(alpha = tickAlpha),
-                start = start,
-                end = end,
-                strokeWidth = if (isMajor) majorStroke else minorStroke,
-                cap = StrokeCap.Round
+                radius = nominalRadius * 2.25f
             )
-        }
+            val thinkingOuterBrush = Brush.sweepGradient(
+                colors = thinkingOuterColors,
+                center = center
+            )
+            val thinkingInnerBrush = Brush.sweepGradient(
+                colors = thinkingInnerColors,
+                center = center
+            )
+            val idleArcBrush = Brush.sweepGradient(
+                colors = idleArcColors,
+                center = center
+            )
+            val dialRadiusInner = size.minDimension * 0.39f
+            val majorTickLen = 7.dp.toPx()
+            val minorTickLen = 3.5.dp.toPx()
+            val majorStrokeWidth = 1.4.dp.toPx()
+            val minorStrokeWidth = 1.dp.toPx()
+            val tickStarts = Array(tickCount) { t ->
+                Offset(center.x + dialRadiusInner * tickCos[t], center.y + dialRadiusInner * tickSin[t])
+            }
+            val tickEnds = Array(tickCount) { t ->
+                val len = if (t % 3 == 0) majorTickLen else minorTickLen
+                Offset(center.x + (dialRadiusInner + len) * tickCos[t], center.y + (dialRadiusInner + len) * tickSin[t])
+            }
+            val thinkOuterStroke = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+            val thinkInnerStroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+            val voiceStroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            val listenStroke = Stroke(width = 2.dp.toPx())
+            val idleArcStroke = Stroke(width = if (isMusicPlaying) 2.dp.toPx() else 1.4.dp.toPx(), cap = StrokeCap.Round)
+            val rimStroke = Stroke(width = 1.4.dp.toPx())
 
-        if (agentState == AgentState.LISTENING || isMusicPlaying || hasPendingApproval) {
-            for (ringIdx in 0..1) {
-                val p = (rippleProgress + ringIdx * 0.5f) % 1f
-                val r = baseRadius * (1.06f + p * 0.62f)
-                val alpha = (1f - p) * if (agentState == AgentState.LISTENING) 0.48f else 0.26f
+            onDrawBehind {
+                val baseRadius = nominalRadius * breathScale
+
                 drawCircle(
-                    color = primaryAccent.copy(alpha = alpha),
-                    radius = r,
-                    center = center,
-                    style = Stroke(width = (2.2f * (1f - p * 0.5f)).dp.toPx())
+                    brush = haloBrush,
+                    radius = baseRadius * 2.15f,
+                    center = center
                 )
-            }
-        }
 
-        val wobbleAmp = when (agentState) {
-            AgentState.SPEAKING -> baseRadius * 0.085f
-            AgentState.LISTENING -> baseRadius * 0.048f
-            AgentState.THINKING -> baseRadius * 0.032f
-            else -> if (isMusicPlaying) baseRadius * (0.034f * energy.coerceIn(0.6f, 1.1f)) else baseRadius * 0.012f
-        }
+                val cosWave = cos(wavePhase)
+                val sinWave = sin(wavePhase)
+                val cosWave2 = cos(wavePhase * 2f)
+                val sinWave2 = sin(wavePhase * 2f)
+                val sinWave3 = sin(wavePhase * 3f)
+                val cosWave3 = cos(wavePhase * 3f)
 
-        orbPath.rewind()
-        for (i in 0..sampleCount) {
-            val c1 = sampleCos1[i]
-            val s1 = sampleSin1[i]
-            val c2 = sampleCos2[i]
-            val s2 = sampleSin2[i]
-            val c3 = sampleCos3[i]
-            val s3 = sampleSin3[i]
-            val harmonic = when (agentState) {
-                AgentState.SPEAKING -> {
-                    val sin3p2 = s3 * cosWave2 + c3 * sinWave2
-                    val cos5 = sampleCos5[i]
-                    val sin5m3 = sampleSin5[i] * cosWave3 - cos5 * sinWave3
-                    val cos2p1 = c2 * cosWave - s2 * sinWave
-                    0.55f * sin3p2 + 0.35f * sin5m3 + 0.20f * cos2p1
-                }
-                AgentState.THINKING -> {
-                    val sin2p1 = s2 * cosWave + c2 * sinWave
-                    val sin4 = sampleSin4[i]
-                    val cos4m2 = sampleCos4[i] * cosWave2 + sin4 * sinWave2
-                    0.65f * sin2p1 + 0.35f * cos4m2
-                }
-                else -> {
-                    val sin3p1 = s3 * cosWave + c3 * sinWave
-                    val cos2m1 = c2 * cosWave + s2 * sinWave
-                    0.70f * sin3p1 + 0.30f * cos2m1
-                }
-            }
-            val r = baseRadius + wobbleAmp * harmonic
-            val x = center.x + r * c1
-            val y = center.y + r * s1
-            if (i == 0) orbPath.moveTo(x, y) else orbPath.lineTo(x, y)
-        }
-        orbPath.close()
-
-        val focalOffset = Offset(
-            center.x - baseRadius * 0.24f + cosWave * baseRadius * 0.08f,
-            center.y - baseRadius * 0.28f + sinWave * baseRadius * 0.08f
-        )
-
-        drawPath(
-            path = orbPath,
-            brush = Brush.radialGradient(
-                colors = coreColors,
-                center = focalOffset,
-                radius = baseRadius * 1.45f
-            )
-        )
-
-        val cloudCenter = Offset(
-            center.x + sinWave * baseRadius * 0.16f,
-            center.y + cos(wavePhase * 0.8f) * baseRadius * 0.14f
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = cloudColors,
-                center = cloudCenter,
-                radius = baseRadius * 0.78f
-            ),
-            radius = baseRadius * 0.78f,
-            center = cloudCenter
-        )
-
-        when (agentState) {
-            AgentState.THINKING -> {
-                rotate(degrees = swirlAngle, pivot = center) {
-                    drawOval(
-                        brush = Brush.sweepGradient(
-                            colors = thinkingOuterColors,
-                            center = center
-                        ),
-                        topLeft = Offset(center.x - baseRadius * 0.78f, center.y - baseRadius * 0.36f),
-                        size = Size(baseRadius * 1.56f, baseRadius * 0.72f),
-                        style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+                for (t in 0 until tickCount) {
+                    val isMajor = t % 3 == 0
+                    val c = tickCos[t]
+                    val s = tickSin[t]
+                    val tickAlpha = when {
+                        agentState != AgentState.IDLE || isMusicPlaying -> {
+                            val angleSin2 = 2f * s * c
+                            val angleCos2 = c * c - s * s
+                            val pulseWave = 0.5f + 0.5f * (angleSin2 * cosWave - angleCos2 * sinWave)
+                            if (agentState != AgentState.IDLE) 0.18f + 0.32f * pulseWave else 0.14f + 0.22f * pulseWave
+                        }
+                        isMajor -> 0.22f
+                        else -> 0.10f
+                    }
+                    drawLine(
+                        color = (if (isMajor) primaryAccent else Color.White).copy(alpha = tickAlpha),
+                        start = tickStarts[t],
+                        end = tickEnds[t],
+                        strokeWidth = if (isMajor) majorStrokeWidth else minorStrokeWidth,
+                        cap = StrokeCap.Round
                     )
                 }
-                rotate(degrees = -swirlAngle * 1.3f + 60f, pivot = center) {
-                    drawOval(
-                        brush = Brush.sweepGradient(
-                            colors = thinkingInnerColors,
-                            center = center
-                        ),
-                        topLeft = Offset(center.x - baseRadius * 0.72f, center.y - baseRadius * 0.32f),
-                        size = Size(baseRadius * 1.44f, baseRadius * 0.64f),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                    )
+
+                if (agentState == AgentState.LISTENING || isMusicPlaying || hasPendingApproval) {
+                    for (ringIdx in 0..1) {
+                        val p = (rippleProgress + ringIdx * 0.5f) % 1f
+                        val r = baseRadius * (1.06f + p * 0.62f)
+                        val alpha = (1f - p) * if (agentState == AgentState.LISTENING) 0.48f else 0.26f
+                        drawCircle(
+                            color = primaryAccent.copy(alpha = alpha),
+                            radius = r,
+                            center = center,
+                            style = Stroke(width = (2.2f * (1f - p * 0.5f)).dp.toPx())
+                        )
+                    }
                 }
-            }
-            AgentState.SPEAKING -> {
-                innerVoicePath.rewind()
-                val widthSpan = baseRadius * 1.05f
-                val segments = 24
-                for (i in 0..segments) {
-                    val t = i.toFloat() / segments
-                    val x = center.x - widthSpan / 2f + widthSpan * t
-                    val envelope = sin(t * PI).toFloat()
-                    val y = center.y + sin(t * 4f * PI.toFloat() + wavePhase * 2f) * (baseRadius * 0.22f) * envelope
-                    if (i == 0) innerVoicePath.moveTo(x, y) else innerVoicePath.lineTo(x, y)
+
+                val wobbleAmp = when (agentState) {
+                    AgentState.SPEAKING -> baseRadius * 0.085f
+                    AgentState.LISTENING -> baseRadius * 0.048f
+                    AgentState.THINKING -> baseRadius * 0.032f
+                    else -> if (isMusicPlaying) baseRadius * (0.034f * energy.coerceIn(0.6f, 1.1f)) else baseRadius * 0.012f
                 }
+
+                orbPath.rewind()
+                for (i in 0..sampleCount) {
+                    val c1 = sampleCos1[i]
+                    val s1 = sampleSin1[i]
+                    val c2 = sampleCos2[i]
+                    val s2 = sampleSin2[i]
+                    val c3 = sampleCos3[i]
+                    val s3 = sampleSin3[i]
+                    val harmonic = when (agentState) {
+                        AgentState.SPEAKING -> {
+                            val sin3p2 = s3 * cosWave2 + c3 * sinWave2
+                            val cos5 = sampleCos5[i]
+                            val sin5m3 = sampleSin5[i] * cosWave3 - cos5 * sinWave3
+                            val cos2p1 = c2 * cosWave - s2 * sinWave
+                            0.55f * sin3p2 + 0.35f * sin5m3 + 0.20f * cos2p1
+                        }
+                        AgentState.THINKING -> {
+                            val sin2p1 = s2 * cosWave + c2 * sinWave
+                            val sin4 = sampleSin4[i]
+                            val cos4m2 = sampleCos4[i] * cosWave2 + sin4 * sinWave2
+                            0.65f * sin2p1 + 0.35f * cos4m2
+                        }
+                        else -> {
+                            val sin3p1 = s3 * cosWave + c3 * sinWave
+                            val cos2m1 = c2 * cosWave + s2 * sinWave
+                            0.70f * sin3p1 + 0.30f * cos2m1
+                        }
+                    }
+                    val r = baseRadius + wobbleAmp * harmonic
+                    val x = center.x + r * c1
+                    val y = center.y + r * s1
+                    if (i == 0) orbPath.moveTo(x, y) else orbPath.lineTo(x, y)
+                }
+                orbPath.close()
+
+                val focalOffset = Offset(
+                    center.x - baseRadius * 0.24f + cosWave * baseRadius * 0.08f,
+                    center.y - baseRadius * 0.28f + sinWave * baseRadius * 0.08f
+                )
+
                 drawPath(
-                    path = innerVoicePath,
-                    color = luminousWhite.copy(alpha = 0.90f),
-                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-            AgentState.LISTENING -> {
-                drawCircle(
-                    color = luminousWhite.copy(alpha = 0.52f),
-                    radius = baseRadius * (0.48f + 0.08f * sinWave),
-                    center = center,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-            }
-            else -> {
-                rotate(degrees = swirlAngle * if (isMusicPlaying) 0.6f else 0.25f, pivot = center) {
-                    drawArc(
-                        brush = Brush.sweepGradient(
-                            colors = idleArcColors,
-                            center = center
-                        ),
-                        startAngle = 0f,
-                        sweepAngle = if (isMusicPlaying) 220f else 170f,
-                        useCenter = false,
-                        topLeft = Offset(center.x - baseRadius * 1.18f, center.y - baseRadius * 1.18f),
-                        size = Size(baseRadius * 2.36f, baseRadius * 2.36f),
-                        style = Stroke(width = if (isMusicPlaying) 2.dp.toPx() else 1.4.dp.toPx(), cap = StrokeCap.Round)
+                    path = orbPath,
+                    brush = Brush.radialGradient(
+                        colors = coreColors,
+                        center = focalOffset,
+                        radius = baseRadius * 1.45f
                     )
+                )
+
+                val cloudCenter = Offset(
+                    center.x + sinWave * baseRadius * 0.16f,
+                    center.y + cos(wavePhase * 0.8f) * baseRadius * 0.14f
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = cloudColors,
+                        center = cloudCenter,
+                        radius = baseRadius * 0.78f
+                    ),
+                    radius = baseRadius * 0.78f,
+                    center = cloudCenter
+                )
+
+                when (agentState) {
+                    AgentState.THINKING -> {
+                        rotate(degrees = swirlAngle, pivot = center) {
+                            drawOval(
+                                brush = thinkingOuterBrush,
+                                topLeft = Offset(center.x - baseRadius * 0.78f, center.y - baseRadius * 0.36f),
+                                size = Size(baseRadius * 1.56f, baseRadius * 0.72f),
+                                style = thinkOuterStroke
+                            )
+                        }
+                        rotate(degrees = -swirlAngle * 1.3f + 60f, pivot = center) {
+                            drawOval(
+                                brush = thinkingInnerBrush,
+                                topLeft = Offset(center.x - baseRadius * 0.72f, center.y - baseRadius * 0.32f),
+                                size = Size(baseRadius * 1.44f, baseRadius * 0.64f),
+                                style = thinkInnerStroke
+                            )
+                        }
+                    }
+                    AgentState.SPEAKING -> {
+                        innerVoicePath.rewind()
+                        val widthSpan = baseRadius * 1.05f
+                        val segments = 24
+                        for (i in 0..segments) {
+                            val t = i.toFloat() / segments
+                            val x = center.x - widthSpan / 2f + widthSpan * t
+                            val envelope = sin(t * PI).toFloat()
+                            val y = center.y + sin(t * 4f * PI.toFloat() + wavePhase * 2f) * (baseRadius * 0.22f) * envelope
+                            if (i == 0) innerVoicePath.moveTo(x, y) else innerVoicePath.lineTo(x, y)
+                        }
+                        drawPath(
+                            path = innerVoicePath,
+                            color = luminousWhite.copy(alpha = 0.90f),
+                            style = voiceStroke
+                        )
+                    }
+                    AgentState.LISTENING -> {
+                        drawCircle(
+                            color = luminousWhite.copy(alpha = 0.52f),
+                            radius = baseRadius * (0.48f + 0.08f * sinWave),
+                            center = center,
+                            style = listenStroke
+                        )
+                    }
+                    else -> {
+                        rotate(degrees = swirlAngle * if (isMusicPlaying) 0.6f else 0.25f, pivot = center) {
+                            drawArc(
+                                brush = idleArcBrush,
+                                startAngle = 0f,
+                                sweepAngle = if (isMusicPlaying) 220f else 170f,
+                                useCenter = false,
+                                topLeft = Offset(center.x - baseRadius * 1.18f, center.y - baseRadius * 1.18f),
+                                size = Size(baseRadius * 2.36f, baseRadius * 2.36f),
+                                style = idleArcStroke
+                            )
+                        }
+                    }
                 }
+
+                drawPath(
+                    path = orbPath,
+                    brush = rimBrush,
+                    style = rimStroke
+                )
             }
         }
-
-        drawPath(
-            path = orbPath,
-            brush = rimBrush,
-            style = Stroke(width = 1.4.dp.toPx())
-        )
-    }
+    )
 }
 
 @Composable

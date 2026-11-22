@@ -298,6 +298,7 @@ class AgentVoiceManager(
 
     private fun refreshUnifiedTracksCacheAsync() {
         scope.launch(Dispatchers.IO) {
+            delay(3_500L)
             runCatching {
                 val fromCallback = getCrossAppLibraryTracks?.invoke().orEmpty()
                 cachedCrossAppLibrary = if (fromCallback.isNotEmpty()) {
@@ -534,7 +535,7 @@ class AgentVoiceManager(
             if (hasMicPermission && !hasStartedWakeEngineInit) {
                 hasStartedWakeEngineInit = true
                 scope.launch {
-                    delay(2_000L)
+                    delay(4_500L)
                     if (isAppInForeground &&
                         ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                     ) {
@@ -630,6 +631,7 @@ class AgentVoiceManager(
 
     private fun startCloudKeepAlivePing() {
         scope.launch {
+            delay(4_000L)
             while (isActive) {
                 try {
                     if (isAppInForeground) {
