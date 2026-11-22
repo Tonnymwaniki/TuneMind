@@ -582,9 +582,43 @@ class TuneMindViewModel : ViewModel() {
         val nowMs = System.currentTimeMillis()
         val appPkg = AppHolder.context?.packageName
         if (incomingSnap != null) {
-            latestLiveSnapshot = incomingSnap
-            latestLiveSnapshotWallMs = nowMs
-            if (incomingSnap.title.isNotBlank() && incomingSnap.packageName != appPkg) {
+            val currentSnap = latestLiveSnapshot
+            val currentSnapIsFreshPlaying = currentSnap != null &&
+                currentSnap.isPlaying &&
+                currentSnap.title.isNotBlank() &&
+                (nowMs - latestLiveSnapshotWallMs) < 10 * 60 * 1000L
+            val samePackage = incomingSnap.packageName.isNotBlank() &&
+                incomingSnap.packageName.equals(currentSnap?.packageName, ignoreCase = true)
+
+            if (incomingSnap.title.isBlank() && !incomingSnap.isPlaying) {
+                if (currentSnap == null || samePackage || currentSnap.packageName.isBlank()) {
+                    latestLiveSnapshot = incomingSnap
+                    latestLiveSnapshotWallMs = nowMs
+                }
+                val cur = _homeState.value.nowPlaying
+                if (cur != null && cur.sourcePackage == incomingSnap.packageName && nowMs >= manualLaunchPendingUntilMs) {
+                    manualActiveTrackOverride = null
+                    _homeState.value = _homeState.value.copy(
+                        nowPlaying = cur.copy(
+                            isPlaying = false,
+                            playbackStateCode = incomingSnap.playbackStateCode,
+                            updatedAtMs = nowMs
+                        )
+                    )
+                    recomputeAdaptiveTheme()
+                    refreshLiveListeningStatsNow()
+                }
+                return
+            }
+
+            if (incomingSnap.isPlaying || !currentSnapIsFreshPlaying || samePackage) {
+                latestLiveSnapshot = incomingSnap
+                latestLiveSnapshotWallMs = nowMs
+            }
+
+            if (incomingSnap.title.isNotBlank() && incomingSnap.packageName != appPkg &&
+                (incomingSnap.isPlaying || !currentSnapIsFreshPlaying || samePackage)
+            ) {
                 if (incomingSnap.isPlaying) {
                     com.tunemind.app.provider.TuneMindInAppPlayer.clearIfNotPlaying()
                     com.tunemind.app.provider.TuneMindYouTubeEmbedController.clearIfNotPlaying()
@@ -612,22 +646,6 @@ class TuneMindViewModel : ViewModel() {
                         manualActiveTrackOverride = null
                     }
                 }
-            } else if (incomingSnap.title.isBlank() && !incomingSnap.isPlaying) {
-                // External MediaSession destroyed or stopped cleanly
-                val cur = _homeState.value.nowPlaying
-                if (cur != null && cur.sourcePackage == incomingSnap.packageName && nowMs >= manualLaunchPendingUntilMs) {
-                    manualActiveTrackOverride = null
-                    _homeState.value = _homeState.value.copy(
-                        nowPlaying = cur.copy(
-                            isPlaying = false,
-                            playbackStateCode = incomingSnap.playbackStateCode,
-                            updatedAtMs = nowMs
-                        )
-                    )
-                    recomputeAdaptiveTheme()
-                    refreshLiveListeningStatsNow()
-                }
-                return
             }
         }
 
@@ -1505,11 +1523,20 @@ class TuneMindViewModel : ViewModel() {
             if (cleanTitle.length < 2) return
             val key = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, track.artist)
             val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(cleanTitle, track.artist)
-            val normTitle = ListeningPlayDeduplicator.normalizeText(cleanTitle)
-            if (key == activeKey || (activeCleanTitle.isNotBlank() && normTitle == activeCleanTitle)) return
-            if (key in coolingKeys) return
+            if (!activeTitle.isNullOrBlank() && ListeningPlayDeduplicator.isSameTrack(activeTitle, activeArtist, null, cleanTitle, track.artist, track.spotifyUri)) {
+                return
+            }
+            if (key in coolingKeys || vault.any { v ->
+                    ListeningPlayDeduplicator.canonicalTrackKey(v.title, v.artist) in coolingKeys &&
+                        ListeningPlayDeduplicator.isSameTrack(v.title, v.artist, v.spotifyUri, cleanTitle, track.artist, track.spotifyUri)
+                }
+            ) return
             if (normKey in excludedFresh || track.resolvedCanonicalTrackId() in excludedFresh) return
             if (!seenKeys.add(key)) return
+            if (rawCandidates.any { existing ->
+                    ListeningPlayDeduplicator.isSameTrack(existing.title, existing.artist, existing.spotifyUri, cleanTitle, track.artist, track.spotifyUri)
+                }
+            ) return
             rawCandidates.add(track)
         }
 
@@ -1728,17 +1755,22 @@ class TuneMindViewModel : ViewModel() {
             .toSet()
 
         val excludedFresh = _freshExcludedKeys.value
-        val activeNormTitle = ListeningPlayDeduplicator.normalizeText(activeTitle)
         val existingFiltered = if (forceRebuild) {
             emptyList()
         } else {
+            val seenExisting = mutableListOf<DopamineCapsuleTrack>()
             _upNextQueueState.value.tracks.filter { item ->
                 val key = ListeningPlayDeduplicator.canonicalTrackKey(item.title, item.artist)
                 val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(item.title, item.artist)
-                val itemNormTitle = ListeningPlayDeduplicator.normalizeText(item.title)
-                val matchesActive = activeNormTitle.isNotBlank() && itemNormTitle == activeNormTitle
+                val matchesActive = !activeTitle.isNullOrBlank() &&
+                    ListeningPlayDeduplicator.isSameTrack(activeTitle, activeArtist, null, item.title, item.artist, item.spotifyUri)
                 val isExcluded = normKey in excludedFresh || item.resolvedCanonicalTrackId() in excludedFresh
-                !matchesActive && !isConsumedKey(key) && key !in coolingKeys && !isExcluded
+                val isDuplicateExisting = seenExisting.any { prev ->
+                    ListeningPlayDeduplicator.isSameTrack(prev.title, prev.artist, prev.spotifyUri, item.title, item.artist, item.spotifyUri)
+                }
+                val keep = !matchesActive && !isConsumedKey(key) && key !in coolingKeys && !isExcluded && !isDuplicateExisting
+                if (keep) seenExisting.add(item)
+                keep
             }
         }
 
@@ -1748,7 +1780,10 @@ class TuneMindViewModel : ViewModel() {
         for (cand in candidates) {
             if (combined.size >= 5) break
             val key = ListeningPlayDeduplicator.canonicalTrackKey(cand.title, cand.artist)
-            if (existingKeys.add(key)) {
+            val dupBySameTrack = combined.any { prev ->
+                ListeningPlayDeduplicator.isSameTrack(prev.title, prev.artist, prev.spotifyUri, cand.title, cand.artist, cand.spotifyUri)
+            }
+            if (!dupBySameTrack && existingKeys.add(key)) {
                 combined.add(cand)
             }
         }
@@ -1954,8 +1989,11 @@ class TuneMindViewModel : ViewModel() {
             val key = ListeningPlayDeduplicator.canonicalTrackKey(item.title, item.artist)
             val normKey = com.tunemind.app.domain.vault.RestingVaultEngine.normalizeTrackKey(item.title, item.artist)
             if (key in queuedKeys || key in coolingKeys || key == activeKey) return
+            if (!activeTitle.isNullOrBlank() && ListeningPlayDeduplicator.isSameTrack(activeTitle, activeArtist, null, item.title, item.artist, item.spotifyUri)) return
+            if (_upNextQueueState.value.tracks.any { ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, item.title, item.artist, item.spotifyUri) }) return
             if (normKey in excluded || item.resolvedCanonicalTrackId() in excluded) return
             if (!seen.add(key)) return
+            if (recs.any { ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.spotifyUri, item.title, item.artist, item.spotifyUri) }) return
             recs.add(item)
         }
 
@@ -2437,7 +2475,8 @@ class TuneMindViewModel : ViewModel() {
         }
         viewModelScope.launch(Dispatchers.Default) {
             runCatching {
-                crossAppDao?.observeAllLibraryTracks()?.collect { libTracks ->
+                crossAppDao?.observeAllLibraryTracks()?.collect { rawLibTracks ->
+                    val libTracks = canonicallyCollapseLibraryTracks(rawLibTracks)
                     _crossAppLibraryTracks.value = libTracks
                     _detectedPlayerTabs.value = computeDetectedPlayerTabs(libTracks)
                     visualRepo?.let { vr ->
@@ -2841,6 +2880,64 @@ class TuneMindViewModel : ViewModel() {
             .takeIf { it.isNotBlank() && it != "*" }
             ?: _detectedPlayerTabs.value.firstOrNull()?.packageName
             ?: ctx.packageName
+    }
+
+    private fun canonicallyCollapseLibraryTracks(tracks: List<CrossAppTrackEntity>): List<CrossAppTrackEntity> {
+        if (tracks.size <= 1) return tracks
+        val knownKeysByTitle = mutableMapOf<String, String>()
+        val byNormKey = tracks.groupBy { TrackIdentityResolver.buildNormalizedMatchKey(it.title, it.artist) }
+        for ((normKey, group) in byNormKey) {
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normTitle.isNotBlank() && normArtist.isNotBlank()) {
+                val existing = knownKeysByTitle[normTitle]
+                if (existing == null || group.sumOf { it.playCount } > (byNormKey[existing]?.sumOf { it.playCount } ?: 0)) {
+                    knownKeysByTitle[normTitle] = normKey
+                }
+            }
+        }
+        val grouped = tracks.groupBy { entity ->
+            val normKey = TrackIdentityResolver.buildNormalizedMatchKey(entity.title, entity.artist)
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normArtist.isBlank() && normTitle.isNotBlank()) {
+                knownKeysByTitle[normTitle] ?: normKey
+            } else {
+                normKey
+            }
+        }
+        return grouped.values.map { list ->
+            if (list.size == 1) {
+                list.first()
+            } else {
+                val sorted = list.sortedWith(
+                    compareByDescending<CrossAppTrackEntity> {
+                        !it.artist.equals("Unknown Artist", ignoreCase = true) && it.artist.isNotBlank()
+                    }.thenByDescending { it.playCount }.thenByDescending { it.lastPlayedAtMs }
+                )
+                val primary = sorted.first()
+                val mergedPackages = sorted.flatMap { entity ->
+                    buildList {
+                        if (entity.primarySourcePackage.isNotBlank()) add(entity.primarySourcePackage.trim())
+                        entity.sourcePackagesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.let { addAll(it) }
+                    }
+                }.distinct().sorted().joinToString(",")
+                primary.copy(
+                    album = sorted.firstOrNull { it.album.isNotBlank() }?.album ?: primary.album,
+                    albumArtUrl = sorted.firstOrNull { !it.albumArtUrl.isNullOrBlank() }?.albumArtUrl ?: primary.albumArtUrl,
+                    ytmVideoId = sorted.firstOrNull { !it.ytmVideoId.isNullOrBlank() }?.ytmVideoId ?: primary.ytmVideoId,
+                    deezerUrl = sorted.firstOrNull { !it.deezerUrl.isNullOrBlank() }?.deezerUrl ?: primary.deezerUrl,
+                    previewUrl = sorted.firstOrNull { !it.previewUrl.isNullOrBlank() }?.previewUrl ?: primary.previewUrl,
+                    sourcePackagesCsv = mergedPackages,
+                    playCount = sorted.maxOf { it.playCount },
+                    totalListenedMs = sorted.maxOf { it.totalListenedMs },
+                    firstPlayedAtMs = sorted.minOf { it.firstPlayedAtMs },
+                    lastPlayedAtMs = sorted.maxOf { it.lastPlayedAtMs },
+                    isLiked = sorted.any { it.isLiked },
+                    isInVault = sorted.any { it.isInVault }
+                )
+            }
+        }.sortedByDescending { it.lastPlayedAtMs }
     }
 
     private fun computeDetectedPlayerTabs(tracks: List<CrossAppTrackEntity>): List<DetectedPlayerTab> {
@@ -5370,7 +5467,7 @@ class TuneMindViewModel : ViewModel() {
                         )
                         val dedupKey = ListeningPlayDeduplicator.canonicalTrackKey(cleanTitle, cleanArtist)
                         val alreadyHas = existingTracks.any {
-                            ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist) == dedupKey
+                            ListeningPlayDeduplicator.isSameTrack(it.title, it.artist, it.externalUri, cleanTitle, cleanArtist, t.spotify_uri ?: canonical.spotifyUri)
                         }
                         if (!alreadyHas) {
                             newEntities.add(

@@ -161,11 +161,29 @@ fun DopamineVaultScreen(
         repetitionSensitivity
     ) {
         value = withContext(Dispatchers.Default) {
-            val list = mutableListOf<DopamineSongItem>()
+        val list = mutableListOf<DopamineSongItem>()
         val seenKeys = mutableSetOf<String>()
+        val seenTitlesWithKnownArtist = mutableSetOf<String>()
         val seenIds = mutableSetOf<String>()
         val nowMs = System.currentTimeMillis()
         val sevenDaysMs = 7L * RestingVaultEngine.DAY_MS
+
+        fun claimTrackSlot(title: String, artist: String): Boolean {
+            val cKey = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.canonicalTrackKey(title, artist)
+            if (cKey.isBlank() || cKey == "|") return false
+            val normTitle = cKey.substringBefore('|', "")
+            val normArtist = cKey.substringAfter('|', "")
+            if (normArtist.isBlank()) {
+                if (normTitle in seenTitlesWithKnownArtist) return false
+            } else {
+                if ("$normTitle|" in seenKeys) {
+                    // Already added an Unknown Artist stub for this title; avoid duplicate row
+                    return false
+                }
+                seenTitlesWithKnownArtist.add(normTitle)
+            }
+            return seenKeys.add(cKey)
+        }
 
         fun isFreshExcluded(title: String, artist: String, canonicalId: String?): Boolean {
             if (freshExcludedKeys.isEmpty()) return false
@@ -178,8 +196,7 @@ fun DopamineVaultScreen(
         for (mf in manualFreshTracks) {
             val title = mf.title.trim().takeIf { it.isNotEmpty() } ?: continue
             val artist = mf.artist.trim().ifBlank { "Music" }
-            val key = "${title.lowercase()}|${artist.lowercase()}"
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(title, artist)) continue
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(mf.spotifyUri)
             val canonicalId = com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = mf.trackId,
@@ -214,8 +231,7 @@ fun DopamineVaultScreen(
 
         // 1. Active Resting Vault entries (live ease-out recovery curve & remaining cooldown)
         for (v in vaultTracks) {
-            val key = "${v.title.trim().lowercase()}|${v.artist.trim().lowercase()}"
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(v.title, v.artist)) continue
             val safeId = v.id.takeIf { it.isNotBlank() && seenIds.add(it) } ?: "vault_${list.size}"
             seenIds.add(safeId)
             val rec = RestingVaultEngine.computeRecoveryState(
@@ -251,9 +267,8 @@ fun DopamineVaultScreen(
 
         // 2. Graduated Vault Comebacks (completed full rest cleanly & ready to replay)
         for (grad in graduatedTracks) {
-            val key = "${grad.title.trim().lowercase()}|${grad.artist.trim().lowercase()}"
             if (isFreshExcluded(grad.title, grad.artist, grad.trackId)) continue
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(grad.title, grad.artist)) continue
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(grad.spotifyUri)
             val resolvedPlays = resolvePlayCount(grad.title, grad.artist, cleanUri).coerceAtLeast(0)
             val readiness = RestingVaultEngine.computeFreshReadiness(
@@ -287,8 +302,8 @@ fun DopamineVaultScreen(
         for (t in recentTracks) {
             val title = t.title?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             val artist = t.artist?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown Artist"
-            val key = "${title.lowercase()}|${artist.lowercase()}"
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(title, artist)) continue
+            val key = com.tunemind.app.domain.memory.ListeningPlayDeduplicator.canonicalTrackKey(title, artist)
 
             val safeId = t.entryId.takeIf { it.isNotBlank() && seenIds.add(it) }
                 ?: "track_${key.hashCode()}_${list.size}".also { seenIds.add(it) }
@@ -351,8 +366,7 @@ fun DopamineVaultScreen(
         for (rec in savedRecommendations.filter { !it.isDismissed }) {
             val title = rec.title.trim().takeIf { it.isNotEmpty() } ?: continue
             val artist = rec.artist.trim().ifBlank { "Discovery" }
-            val key = "${title.lowercase()}|${artist.lowercase()}"
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(title, artist)) continue
             val cleanUri = com.tunemind.app.domain.model.TrackIdentityResolver.normalizeSpotifyUri(rec.spotifyUri)
             val canonicalId = rec.resolvedCanonicalTrackId()
             val vaultStatus = resolveTrackVaultStatus(title, artist, cleanUri, canonicalId)
@@ -388,8 +402,7 @@ fun DopamineVaultScreen(
         for (lib in crossAppLibraryTracks.take(100)) {
             val title = lib.title.trim().takeIf { it.isNotEmpty() } ?: continue
             val artist = lib.artist.trim().ifBlank { "Music" }
-            val key = "${title.lowercase()}|${artist.lowercase()}"
-            if (!seenKeys.add(key)) continue
+            if (!claimTrackSlot(title, artist)) continue
             val canonicalId = lib.trackId.ifBlank {
                 com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
             }
@@ -432,8 +445,7 @@ fun DopamineVaultScreen(
                 if (playlistGemsAdded >= 60) break
                 val title = tr.title.trim().takeIf { it.isNotEmpty() } ?: continue
                 val artist = tr.artist.trim().ifBlank { "Playlist" }
-                val key = "${title.lowercase()}|${artist.lowercase()}"
-                if (!seenKeys.add(key)) continue
+                if (!claimTrackSlot(title, artist)) continue
                 val canonicalId = tr.trackId.ifBlank {
                     com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
                 }
@@ -1005,13 +1017,20 @@ private fun ManualVaultFreshPickerSheet(
         tuneMindPlaylists
     ) {
         value = withContext(Dispatchers.Default) {
-            val seen = mutableSetOf<String>()
+            val seen = mutableListOf<Pair<String, String>>()
             val items = mutableListOf<ManualPickerCandidate>()
+            fun claimPickerTrack(t: String, a: String): Boolean {
+                val dup = seen.any { (prevT, prevA) ->
+                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(prevT, prevA, null, t, a, null)
+                }
+                if (dup) return false
+                seen.add(t to a)
+                return true
+            }
         for (t in recentTracks) {
             val title = t.title?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             val artist = t.artist?.trim()?.ifBlank { "Music" } ?: "Music"
-            val key = RestingVaultEngine.normalizeTrackKey(title, artist)
-            if (seen.add(key)) {
+            if (claimPickerTrack(title, artist)) {
                 items.add(
                     ManualPickerCandidate(
                         title = title,
@@ -1027,8 +1046,7 @@ private fun ManualVaultFreshPickerSheet(
         for (lib in crossAppLibraryTracks.take(100)) {
             val title = lib.title.trim().takeIf { it.isNotEmpty() } ?: continue
             val artist = lib.artist.trim().ifBlank { "Library" }
-            val key = RestingVaultEngine.normalizeTrackKey(title, artist)
-            if (seen.add(key)) {
+            if (claimPickerTrack(title, artist)) {
                 val tid = lib.trackId.ifBlank {
                     com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
                 }
@@ -1048,8 +1066,7 @@ private fun ManualVaultFreshPickerSheet(
             for (tr in pl.tracks.take(30)) {
                 val title = tr.title.trim().takeIf { it.isNotEmpty() } ?: continue
                 val artist = tr.artist.trim().ifBlank { "Playlist" }
-                val key = RestingVaultEngine.normalizeTrackKey(title, artist)
-                if (seen.add(key)) {
+                if (claimPickerTrack(title, artist)) {
                     val tid = tr.trackId.ifBlank {
                         com.tunemind.app.domain.model.TrackIdentityResolver.buildDeterministicTrackId(title, artist)
                     }

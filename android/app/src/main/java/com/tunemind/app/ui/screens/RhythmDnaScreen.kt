@@ -166,9 +166,17 @@ fun RhythmDnaScreen(
     var activeSyncTrack by remember { mutableStateOf<TrackMemoryEntry?>(null) }
 
     val powerTracks = remember(recentTracks, selectedPhaseIndex) {
-        val unique = recentTracks
-            .filter { !it.title.isNullOrBlank() }
-            .distinctBy { "${it.title?.trim()?.lowercase()}|${it.artist?.trim()?.lowercase()}" }
+        val unique = mutableListOf<TrackMemoryEntry>()
+        for (entry in recentTracks) {
+            if (entry.title.isNullOrBlank()) continue
+            val dup = unique.any { prev ->
+                com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                    prev.title, prev.artist, prev.providerTrackId,
+                    entry.title, entry.artist, entry.providerTrackId
+                )
+            }
+            if (!dup) unique.add(entry)
+        }
         if (unique.size <= 5) unique
         else {
             val offset = (selectedPhaseIndex * 2) % maxOf(1, unique.size)

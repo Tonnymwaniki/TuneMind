@@ -284,13 +284,13 @@ fun SearchScreen(
         }
 
         list.distinctBy {
-            "${it.origin.name}:${it.title.lowercase().trim()}:${it.artist.lowercase().trim()}"
+            "${it.origin.name}:${com.tunemind.app.domain.memory.ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist)}"
         }
     }
 
     val filteredItems = remember(allSearchItems, query, selectedTab) {
         val cleanQuery = query.trim().lowercase()
-        allSearchItems.filter { item ->
+        val tabMatched = allSearchItems.filter { item ->
             val tabOk = when (selectedTab) {
                 1 -> item.origin == SearchOrigin.HISTORY
                 2 -> item.origin == SearchOrigin.LIBRARY
@@ -303,6 +303,21 @@ fun SearchScreen(
             item.title.lowercase().contains(cleanQuery) ||
                 item.artist.lowercase().contains(cleanQuery) ||
                 item.subtitle.lowercase().contains(cleanQuery)
+        }
+        if (selectedTab != 0) {
+            tabMatched
+        } else {
+            val deduped = mutableListOf<UniversalSearchItem>()
+            for (item in tabMatched) {
+                val dup = deduped.any { prev ->
+                    com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                        prev.title, prev.artist, prev.spotifyUri,
+                        item.title, item.artist, item.spotifyUri
+                    )
+                }
+                if (!dup) deduped.add(item)
+            }
+            deduped
         }
     }
 

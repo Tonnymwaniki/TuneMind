@@ -675,7 +675,25 @@ fun NowPlayingSheet(
             }
 
             // Up Next Queue (Fixed 5-track sliding Fresh window: 1 playing + 5 queued)
-            val queueTracks = effectiveUpNext.tracks.take(5)
+            val queueTracks = remember(effectiveUpNext.tracks, effectiveTitle, effectiveArtist, hasTrack) {
+                val deduped = mutableListOf<com.tunemind.app.ui.DopamineCapsuleTrack>()
+                for (t in effectiveUpNext.tracks) {
+                    val matchesActive = hasTrack && com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                        effectiveTitle, effectiveArtist, null,
+                        t.title, t.artist, t.spotifyUri
+                    )
+                    val alreadyInQueue = deduped.any { prev ->
+                        com.tunemind.app.domain.memory.ListeningPlayDeduplicator.isSameTrack(
+                            prev.title, prev.artist, prev.spotifyUri,
+                            t.title, t.artist, t.spotifyUri
+                        )
+                    }
+                    if (!matchesActive && !alreadyInQueue) {
+                        deduped.add(t)
+                    }
+                }
+                deduped.take(5)
+            }
             SoftGlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(

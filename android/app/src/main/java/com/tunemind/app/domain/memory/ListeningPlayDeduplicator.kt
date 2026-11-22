@@ -144,18 +144,25 @@ object ListeningPlayDeduplicator {
     private const val QUICK_SKIP_THRESHOLD_MS = 14_000L
     private const val MAX_SESSION_ESTIMATE_MS = 600_000L
 
+    private const val CROSS_APP_MIRROR_WINDOW_MS = 90_000L
+
     fun normalizeText(value: String?): String =
         value?.trim()
             ?.lowercase(Locale.ROOT)
             ?.replace(Regex("\\s+"), " ")
             .orEmpty()
 
-    fun canonicalTrackKey(title: String?, artist: String?): String {
-        val cleanTitle = normalizeText(title)
-        val cleanArtist = normalizeText(artist)
-            .takeIf { it.isNotBlank() && it != "unknown artist" }
-            .orEmpty()
-        return "$cleanTitle|$cleanArtist"
+    fun canonicalTrackKey(title: String?, artist: String?): String =
+        TrackIdentityResolver.buildNormalizedMatchKey(title, artist)
+
+    private fun isUnknownOrBlankArtist(artist: String?): Boolean {
+        val clean = normalizeText(artist)
+        return clean.isBlank() ||
+            clean == "unknown artist" ||
+            clean == "unknown" ||
+            clean == "your library" ||
+            clean == "music app" ||
+            clean == "music"
     }
 
     fun isSameTrack(
@@ -171,13 +178,45 @@ object ListeningPlayDeduplicator {
         if (cleanUriA != null && cleanUriB != null && cleanUriA.equals(cleanUriB, ignoreCase = true)) {
             return true
         }
-        val tA = normalizeText(titleA)
-        val tB = normalizeText(titleB)
+        val tA = TrackIdentityResolver.normalizedTitleOnly(titleA)
+        val tB = TrackIdentityResolver.normalizedTitleOnly(titleB)
         if (tA.isBlank() || tB.isBlank() || tA != tB) return false
 
-        val aA = normalizeText(artistA).takeIf { it.isNotBlank() && it != "unknown artist" }
-        val aB = normalizeText(artistB).takeIf { it.isNotBlank() && it != "unknown artist" }
-        return aA == null || aB == null || aA == aB
+        val aA = canonicalTrackKey(titleA, artistA).substringAfter('|', "")
+        val aB = canonicalTrackKey(titleB, artistB).substringAfter('|', "")
+        return aA.isBlank() || aB.isBlank() || aA == aB
+    }
+
+    private fun groupEventsByCanonicalTrack(events: List<UnifiedPlayEvent>): Map<String, List<UnifiedPlayEvent>> {
+        if (events.isEmpty()) return emptyMap()
+        val knownKeysByTitle = mutableMapOf<String, String>()
+        // First register strongest known-artist canonical key per normalized title
+        val byNormKey = events.groupBy { canonicalTrackKey(it.title, it.artist) }
+        for ((normKey, group) in byNormKey) {
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normTitle.isNotBlank() && normArtist.isNotBlank()) {
+                val existingBest = knownKeysByTitle[normTitle]
+                if (existingBest == null) {
+                    knownKeysByTitle[normTitle] = normKey
+                } else {
+                    val existingCount = byNormKey[existingBest]?.size ?: 0
+                    if (group.size > existingCount) {
+                        knownKeysByTitle[normTitle] = normKey
+                    }
+                }
+            }
+        }
+        return events.groupBy { ev ->
+            val normKey = canonicalTrackKey(ev.title, ev.artist)
+            val normTitle = normKey.substringBefore('|', "")
+            val normArtist = normKey.substringAfter('|', "")
+            if (normArtist.isBlank() && normTitle.isNotBlank()) {
+                knownKeysByTitle[normTitle] ?: normKey
+            } else {
+                normKey
+            }
+        }
     }
 
     fun resolveAppDisplayName(packageName: String?): String {
@@ -218,12 +257,12 @@ object ListeningPlayDeduplicator {
     }
 
     private data class CandidateSegment(
-        val key: String,
-        val trackId: String?,
-        val title: String,
-        val artist: String,
-        val album: String?,
-        val spotifyUri: String?,
+        var key: String,
+        var trackId: String?,
+        var title: String,
+        var artist: String,
+        var album: String?,
+        var spotifyUri: String?,
         val sourcePackage: String,
         val startMs: Long,
         var endMs: Long,
@@ -285,7 +324,7 @@ object ListeningPlayDeduplicator {
             val obsState = obs.playbackStateCode
 
             if (prev != null &&
-                prev.key == key &&
+                isSameTrack(prev.title, prev.artist, prev.spotifyUri, title, artist, obsUri) &&
                 (obs.eventTimeMs - prev.endMs) <= MERGE_WINDOW_MS
             ) {
                 val delta = (obs.eventTimeMs - prev.endMs).coerceIn(0L, MAX_SESSION_ESTIMATE_MS)
@@ -296,6 +335,19 @@ object ListeningPlayDeduplicator {
                 }
                 if (obsState == 2 || obsState == 1 || obsState == 0) {
                     prev.hadPauseGap = true
+                }
+                // Upgrade metadata in-place if initial OS frame arrived without full artist/album/URI
+                if (isUnknownOrBlankArtist(prev.artist) && !isUnknownOrBlankArtist(artist)) {
+                    prev.artist = artist
+                    prev.title = title
+                    prev.key = key
+                    prev.trackId = obsCanonicalId
+                }
+                if (prev.album.isNullOrBlank() && !obs.trackAlbum.isNullOrBlank()) {
+                    prev.album = obs.trackAlbum.trim()
+                }
+                if (prev.spotifyUri.isNullOrBlank() && obsUri != null) {
+                    prev.spotifyUri = obsUri
                 }
                 prev.endMs = maxOf(prev.endMs, obs.eventTimeMs)
                 if (obsDur > 0L) prev.durationMs = maxOf(prev.durationMs, obsDur)
@@ -437,6 +489,9 @@ object ListeningPlayDeduplicator {
         }
 
         val libraryByKey = crossAppTracks.associateBy { canonicalTrackKey(it.title, it.artist) }
+        val libraryByTitleOnly = crossAppTracks
+            .filter { !it.albumArtUrl.isNullOrBlank() || it.album.isNotBlank() }
+            .associateBy { TrackIdentityResolver.normalizedTitleOnly(it.title) }
 
         // 2. Seed permanent cross-app play logs across ALL music apps (never pruned!)
         val mergedEvents = mutableListOf<UnifiedPlayEvent>()
@@ -444,26 +499,43 @@ object ListeningPlayDeduplicator {
         for (row in crossAppLogs.filter { it.title.isNotBlank() }.sortedByDescending { it.playedAtMs }) {
             val key = canonicalTrackKey(row.title, row.artist)
             val rowPkg = row.sourcePackage.ifBlank { "unknown_player" }
-            val alreadyNear = mergeDuplicatePlays && mergedEvents.any { existing ->
-                existing.sourcePackage == rowPkg &&
-                    isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.title, row.artist, null) &&
-                    kotlin.math.abs(existing.playedAtMs - row.playedAtMs) <= MERGE_WINDOW_MS
-            }
-            if (alreadyNear) continue
+            val existingIdx = if (mergeDuplicatePlays) {
+                mergedEvents.indexOfFirst { existing ->
+                    val diffMs = kotlin.math.abs(existing.playedAtMs - row.playedAtMs)
+                    val sameWindow = if (existing.sourcePackage == rowPkg) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
+                    sameWindow && isSameTrack(existing.title, existing.artist, existing.spotifyUri, row.title, row.artist, null)
+                }
+            } else -1
 
             val durMs = row.trackDurationMs.takeIf { it > 0L } ?: 195_000L
-            val libRow = libraryByKey[key]
+            val libRow = libraryByKey[key] ?: libraryByTitleOnly[TrackIdentityResolver.normalizedTitleOnly(row.title)]
+            val cleanRowArtist = row.artist.trim().ifBlank { "Unknown Artist" }
             val resolvedId = TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = row.trackId,
                 spotifyUri = null,
                 title = row.title,
-                artist = row.artist
+                artist = cleanRowArtist
             )
+            if (existingIdx >= 0) {
+                val existing = mergedEvents[existingIdx]
+                val betterArtist = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(cleanRowArtist)) cleanRowArtist else existing.artist
+                val betterTitle = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(cleanRowArtist)) row.title.trim() else existing.title
+                mergedEvents[existingIdx] = existing.copy(
+                    trackKey = canonicalTrackKey(betterTitle, betterArtist),
+                    title = betterTitle,
+                    artist = betterArtist,
+                    album = existing.album ?: row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
+                    albumArtUrl = existing.albumArtUrl ?: libRow?.albumArtUrl,
+                    listenedMs = maxOf(existing.listenedMs, row.listenedMs.coerceAtLeast(1_000L).coerceAtMost(durMs))
+                )
+                continue
+            }
+
             mergedEvents += UnifiedPlayEvent(
                 playId = "calog_${row.playLogId}",
                 trackKey = key,
                 title = row.title.trim(),
-                artist = row.artist.trim().ifBlank { "Unknown Artist" },
+                artist = cleanRowArtist,
                 album = row.album.trim().takeIf { it.isNotEmpty() } ?: libRow?.album?.takeIf { it.isNotBlank() },
                 albumArtUrl = libRow?.albumArtUrl,
                 spotifyUri = null,
@@ -477,20 +549,28 @@ object ListeningPlayDeduplicator {
             )
         }
 
-        // Merge live OS event_queue segments without double counting permanent log entries within ±4 mins
+        // Merge live OS event_queue segments without double counting permanent log entries or multi-controller mirrors
         for (localEvent in localPlayEvents) {
             val matchingIdx = if (mergeDuplicatePlays) {
                 mergedEvents.indexOfFirst { existing ->
-                    existing.sourcePackage == localEvent.sourcePackage &&
-                        isSameTrack(existing.title, existing.artist, existing.spotifyUri, localEvent.title, localEvent.artist, localEvent.spotifyUri) &&
-                        kotlin.math.abs(existing.playedAtMs - localEvent.playedAtMs) <= MERGE_WINDOW_MS
+                    val diffMs = kotlin.math.abs(existing.playedAtMs - localEvent.playedAtMs)
+                    val sameWindow = if (existing.sourcePackage == localEvent.sourcePackage) diffMs <= MERGE_WINDOW_MS else diffMs <= CROSS_APP_MIRROR_WINDOW_MS
+                    sameWindow && isSameTrack(existing.title, existing.artist, existing.spotifyUri, localEvent.title, localEvent.artist, localEvent.spotifyUri)
                 }
             } else -1
             if (matchingIdx >= 0) {
                 val existing = mergedEvents[matchingIdx]
+                val betterArtist = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(localEvent.artist)) localEvent.artist else existing.artist
+                val betterTitle = if (isUnknownOrBlankArtist(existing.artist) && !isUnknownOrBlankArtist(localEvent.artist)) localEvent.title else existing.title
                 mergedEvents[matchingIdx] = existing.copy(
+                    trackKey = canonicalTrackKey(betterTitle, betterArtist),
+                    title = betterTitle,
+                    artist = betterArtist,
                     album = existing.album ?: localEvent.album,
-                    listenedMs = maxOf(existing.listenedMs, localEvent.listenedMs)
+                    spotifyUri = existing.spotifyUri ?: localEvent.spotifyUri,
+                    listenedMs = maxOf(existing.listenedMs, localEvent.listenedMs),
+                    durationMs = maxOf(existing.durationMs, localEvent.durationMs),
+                    isNowPlaying = existing.isNowPlaying || localEvent.isNowPlaying
                 )
             } else {
                 mergedEvents += localEvent
@@ -563,21 +643,29 @@ object ListeningPlayDeduplicator {
         val artMap = crossAppTracks
             .filter { !it.albumArtUrl.isNullOrBlank() }
             .associate { canonicalTrackKey(it.title, it.artist) to it.albumArtUrl }
+        val artByTitleMap = crossAppTracks
+            .filter { !it.albumArtUrl.isNullOrBlank() }
+            .associate { TrackIdentityResolver.normalizedTitleOnly(it.title) to it.albumArtUrl }
 
         val sensitivity = repetitionSensitivity.coerceIn(0.2f, 1.0f)
 
-        val groupedByTrack = finalTimeline.groupBy { it.trackKey }
+        val groupedByTrack = groupEventsByCanonicalTrack(finalTimeline)
         val unifiedTracks = groupedByTrack.map { (key, events) ->
             val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
+            val bestNamedEvent = events
+                .sortedByDescending { it.playedAtMs }
+                .firstOrNull { !isUnknownOrBlankArtist(it.artist) } ?: latest
+            val displayTitle = bestNamedEvent.title
+            val displayArtist = bestNamedEvent.artist
             val plays = events.size
             val bestUri = events.firstNotNullOfOrNull { it.spotifyUri?.let { uri -> TrackIdentityResolver.normalizeSpotifyUri(uri) } }
             val bestTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
                 trackId = events.firstOrNull { it.trackId.isNotBlank() }?.trackId,
                 spotifyUri = bestUri,
-                title = latest.title,
-                artist = latest.artist
+                title = displayTitle,
+                artist = displayArtist
             )
-            val normKey = RestingVaultEngine.normalizeTrackKey(latest.title, latest.artist)
+            val normKey = RestingVaultEngine.normalizeTrackKey(displayTitle, displayArtist)
             val restoredAtMs = maxOf(
                 restoredAtByKey[bestTrackId] ?: 0L,
                 restoredAtByKey[normKey] ?: 0L
@@ -602,15 +690,17 @@ object ListeningPlayDeduplicator {
             val freshness = vaultFreshness ?: fatigue.freshnessPercent
             val cooling = isRestingInVault || fatigue.shouldAutoQuarantine
             val bestAlbum = events.firstNotNullOfOrNull { it.album }
-            val bestArt = events.firstNotNullOfOrNull { it.albumArtUrl } ?: artMap[key]
+            val bestArt = events.firstNotNullOfOrNull { it.albumArtUrl }
+                ?: artMap[key]
+                ?: artByTitleMap[TrackIdentityResolver.normalizedTitleOnly(displayTitle)]
             val bestDur = events.maxOfOrNull { it.durationMs } ?: 195_000L
             val totalListen = events.sumOf { it.listenedMs }
 
             UnifiedTrackStats(
                 trackKey = key,
                 entryId = bestUri?.let { "spotify:${it.substringAfterLast(':')}" } ?: "track:$bestTrackId",
-                title = latest.title,
-                artist = latest.artist,
+                title = displayTitle,
+                artist = displayArtist,
                 album = bestAlbum,
                 albumArtUrl = bestArt,
                 spotifyUri = bestUri,
@@ -634,6 +724,10 @@ object ListeningPlayDeduplicator {
                 val normMatch = TrackIdentityResolver.buildNormalizedMatchKey(track.title, track.artist)
                 if (normMatch.isNotBlank() && normMatch != "|") {
                     put(normMatch, maxOf(get(normMatch) ?: 0, track.verifiedPlayCount))
+                }
+                val rawLower = "${normalizeText(track.title)}|${normalizeText(track.artist)}"
+                if (rawLower.isNotBlank() && rawLower != "|") {
+                    put(rawLower, maxOf(get(rawLower) ?: 0, track.verifiedPlayCount))
                 }
             }
         }
@@ -863,20 +957,24 @@ object ListeningPlayDeduplicator {
             .sortedWith(compareByDescending<ArtistListeningStats> { it.playCount }.thenByDescending { it.listeningMs })
 
         val baseTrackByKey = overallStats.topTracks.associateBy { it.trackKey }
-        val windowTracks = filteredEvents
-            .groupBy { it.trackKey }
+        val windowTracks = groupEventsByCanonicalTrack(filteredEvents)
             .map { (key, events) ->
                 val latest = events.maxByOrNull { it.playedAtMs } ?: events.first()
+                val bestNamedEvent = events
+                    .sortedByDescending { it.playedAtMs }
+                    .firstOrNull { !isUnknownOrBlankArtist(it.artist) } ?: latest
+                val displayTitle = bestNamedEvent.title
+                val displayArtist = bestNamedEvent.artist
                 val plays = events.size
                 val baseTrack = baseTrackByKey[key]
                 val bestUri = events.firstNotNullOfOrNull { it.spotifyUri?.let { uri -> TrackIdentityResolver.normalizeSpotifyUri(uri) } } ?: baseTrack?.spotifyUri
                 val bestTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
                     trackId = events.firstOrNull { it.trackId.isNotBlank() }?.trackId ?: baseTrack?.trackId,
                     spotifyUri = bestUri,
-                    title = latest.title,
-                    artist = latest.artist
+                    title = displayTitle,
+                    artist = displayArtist
                 )
-                val normKey = RestingVaultEngine.normalizeTrackKey(latest.title, latest.artist)
+                val normKey = RestingVaultEngine.normalizeTrackKey(displayTitle, displayArtist)
                 val restoredAtMs = maxOf(
                     restoredAtByKey[bestTrackId] ?: 0L,
                     restoredAtByKey[normKey] ?: 0L
@@ -904,8 +1002,8 @@ object ListeningPlayDeduplicator {
                 UnifiedTrackStats(
                     trackKey = key,
                     entryId = bestUri?.let { "spotify:${it.substringAfterLast(':')}" } ?: "track:$bestTrackId",
-                    title = latest.title,
-                    artist = latest.artist,
+                    title = displayTitle,
+                    artist = displayArtist,
                     album = bestAlbum,
                     albumArtUrl = bestArt,
                     spotifyUri = bestUri,

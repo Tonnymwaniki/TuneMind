@@ -167,7 +167,7 @@ fun CrossAppLibrarySection(
     }
 
     val visibleTracks = remember(libraryTracks, likedTracks, spotifyTracks, spotifyLikedTracks, selectedTabKey, spotifySubTab) {
-        when (selectedTabKey) {
+        val raw = when (selectedTabKey) {
             "ALL" -> libraryTracks
             "LIKED" -> likedTracks
             "TUNEMIND_PLAYLISTS" -> emptyList()
@@ -180,6 +180,9 @@ fun CrossAppLibrarySection(
                 track.primarySourcePackage.equals(selectedTabKey, ignoreCase = true) ||
                     track.sourcePackagesCsv.split(",").any { it.trim().equals(selectedTabKey, ignoreCase = true) }
             }
+        }
+        raw.distinctBy {
+            com.tunemind.app.domain.model.TrackIdentityResolver.buildNormalizedMatchKey(it.title, it.artist)
         }
     }
 

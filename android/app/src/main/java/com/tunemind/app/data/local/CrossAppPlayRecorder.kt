@@ -36,11 +36,11 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private data class ActiveSessionState(
-        val canonicalKey: String,
-        val trackId: String,
-        val title: String,
-        val artist: String,
-        val album: String,
+        var canonicalKey: String,
+        var trackId: String,
+        var title: String,
+        var artist: String,
+        var album: String,
         val sourcePackage: String,
         val startedAtMs: Long,
         var lastEventAtMs: Long,
@@ -53,6 +53,7 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
 
     private val activeByPackage = ConcurrentHashMap<String, ActiveSessionState>()
     private val lastCountedPlayAtByKey = ConcurrentHashMap<String, Long>()
+    private val lastAnyPkgPlayAtByKey = ConcurrentHashMap<String, Long>()
 
     @Volatile
     private var backfillChecked = false
@@ -77,12 +78,26 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
         val stateCode = obs.playbackStateCode
 
         val prev = activeByPackage[pkg]
-        if (prev != null && prev.canonicalKey == key && (obs.eventTimeMs - prev.lastEventAtMs) <= MERGE_WINDOW_MS) {
+        if (prev != null &&
+            ListeningPlayDeduplicator.isSameTrack(prev.title, prev.artist, null, title, artist, null) &&
+            (obs.eventTimeMs - prev.lastEventAtMs) <= MERGE_WINDOW_MS
+        ) {
             val delta = (obs.eventTimeMs - prev.lastEventAtMs).coerceIn(0L, MAX_DELTA_MS)
             val wasPlaying = prev.lastStateCode == PlaybackState.STATE_PLAYING ||
                 (prev.lastStateCode == null && (stateCode == PlaybackState.STATE_PLAYING || pos > prev.maxPositionMs))
             if (wasPlaying && delta > 0L) {
                 prev.activeDwellMs += delta
+            }
+            if ((prev.artist.equals("Unknown Artist", ignoreCase = true) || prev.canonicalKey.endsWith("|")) &&
+                !artist.equals("Unknown Artist", ignoreCase = true)
+            ) {
+                prev.canonicalKey = key
+                prev.trackId = trackId
+                prev.title = title
+                prev.artist = artist
+            }
+            if (prev.album.isBlank() && !obs.trackAlbum.isNullOrBlank()) {
+                prev.album = obs.trackAlbum.trim()
             }
             prev.lastEventAtMs = maxOf(prev.lastEventAtMs, obs.eventTimeMs)
             prev.maxPositionMs = maxOf(prev.maxPositionMs, pos)
@@ -233,10 +248,16 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
     private fun persistVerifiedSessionAsync(session: ActiveSessionState, isCompletion: Boolean) {
         val nowMs = System.currentTimeMillis()
         val dedupeLookupKey = "${session.sourcePackage}::${session.canonicalKey}"
+        val anyLookupKey = TrackIdentityResolver.normalizedTitleOnly(session.title)
         val prevCountedAt = lastCountedPlayAtByKey[dedupeLookupKey] ?: 0L
-        val shouldIncrementCount = (nowMs - prevCountedAt) > MERGE_WINDOW_MS
+        val prevAnyPkgAt = lastAnyPkgPlayAtByKey[anyLookupKey] ?: 0L
+        val shouldIncrementCount = (nowMs - prevCountedAt) > MERGE_WINDOW_MS &&
+            (nowMs - prevAnyPkgAt) > CROSS_PKG_MIRROR_WINDOW_MS
         if (shouldIncrementCount) {
             lastCountedPlayAtByKey[dedupeLookupKey] = nowMs
+            if (anyLookupKey.isNotBlank()) {
+                lastAnyPkgPlayAtByKey[anyLookupKey] = nowMs
+            }
         }
 
         val listenedMs = maxOf(session.activeDwellMs, session.maxPositionMs).coerceAtLeast(MIN_VERIFIED_PLAY_MS)
@@ -345,7 +366,11 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
                 updatedAtMs = nowMs
             )
         } else {
+            val shouldUpgradeArtist = existing.artist.equals("Unknown Artist", ignoreCase = true) &&
+                !artist.equals("Unknown Artist", ignoreCase = true)
             existing.copy(
+                title = if (shouldUpgradeArtist) title else existing.title,
+                artist = if (shouldUpgradeArtist) artist else existing.artist,
                 album = existing.album.ifBlank { album },
                 durationMs = maxOf(existing.durationMs, durationMs),
                 primarySourcePackage = sourcePackage,
@@ -363,6 +388,7 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
     companion object {
         private const val TAG = "CrossAppPlayRecorder"
         private const val MERGE_WINDOW_MS = 210_000L // 3.5 minutes same-track session collapse
+        private const val CROSS_PKG_MIRROR_WINDOW_MS = 90_000L // Prevent simultaneous cross-controller mirror duplicates
         private const val MIN_VERIFIED_PLAY_MS = 18_000L
         private const val MAX_DELTA_MS = 300_000L
 

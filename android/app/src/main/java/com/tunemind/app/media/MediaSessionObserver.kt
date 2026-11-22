@@ -633,42 +633,79 @@ class MediaSessionObserver(
             diagnosticStatus = "Skipping explicitly marked advertisement from ${source ?: "unknown source"}"
             return
         }
-        runCatching {
-            val snapTitle = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
-            val snapArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
-            val snapAlbum = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() }
-            val snapDur = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
-                ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-            val stateCode = if (eventType == ObservationEventType.SESSION_DESTROYED) {
-                android.media.session.PlaybackState.STATE_STOPPED
-            } else {
-                state?.state ?: android.media.session.PlaybackState.STATE_NONE
+        val remainingEntries = orderedEntries()
+        val anyOtherActivelyPlaying = remainingEntries.any { other ->
+            other.controller.sessionToken != entry.controller.sessionToken &&
+                other.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING &&
+                !other.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
+        }
+        val stateCode = if (eventType == ObservationEventType.SESSION_DESTROYED) {
+            android.media.session.PlaybackState.STATE_STOPPED
+        } else {
+            state?.state ?: android.media.session.PlaybackState.STATE_NONE
+        }
+        val isPlayingNow = eventType != ObservationEventType.SESSION_DESTROYED &&
+            stateCode == android.media.session.PlaybackState.STATE_PLAYING
+
+        if (isPlayingNow || !anyOtherActivelyPlaying) {
+            runCatching {
+                if (eventType == ObservationEventType.SESSION_DESTROYED) {
+                    val fallbackEntry = remainingEntries.firstOrNull {
+                        it.controller.sessionToken != entry.controller.sessionToken &&
+                            !it.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank()
+                    }
+                    if (fallbackEntry != null) {
+                        TuneMindListenerService.dispatchPlaybackSnapshot(buildSnapshotFromController(fallbackEntry.controller))
+                    } else {
+                        TuneMindListenerService.dispatchPlaybackSnapshot(
+                            ActivePlaybackSnapshot(
+                                packageName = "",
+                                title = "",
+                                artist = "",
+                                isPlaying = false,
+                                positionMs = 0L,
+                                durationMs = 0L,
+                                updatedAtElapsedMs = SystemClock.elapsedRealtime(),
+                                album = null,
+                                playbackStateCode = android.media.session.PlaybackState.STATE_STOPPED,
+                                speed = 1.0f
+                            )
+                        )
+                    }
+                } else {
+                    val snapTitle = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
+                    val snapArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.trim() ?: ""
+                    val snapAlbum = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() }
+                    val snapDur = metadata?.takeIf { it.containsKey(MediaMetadata.METADATA_KEY_DURATION) }
+                        ?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                    val basePos = state?.position ?: 0L
+                    val lastUpd = state?.lastPositionUpdateTime ?: 0L
+                    val spd = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
+                    val nowElapsed = SystemClock.elapsedRealtime()
+                    val interpPos = if (isPlayingNow && lastUpd > 0L && nowElapsed >= lastUpd) {
+                        basePos + ((nowElapsed - lastUpd) * spd).toLong()
+                    } else {
+                        basePos
+                    }
+                    // Never clobber an active song title with a transient empty-metadata frame unless genuinely stopped
+                    if (snapTitle.isNotBlank() || !isPlayingNow) {
+                        TuneMindListenerService.dispatchPlaybackSnapshot(
+                            ActivePlaybackSnapshot(
+                                packageName = source ?: "com.spotify.music",
+                                title = snapTitle,
+                                artist = snapArtist,
+                                isPlaying = isPlayingNow,
+                                positionMs = interpPos.coerceAtLeast(0L),
+                                durationMs = snapDur.coerceAtLeast(0L),
+                                updatedAtElapsedMs = nowElapsed,
+                                album = snapAlbum,
+                                playbackStateCode = stateCode,
+                                speed = spd
+                            )
+                        )
+                    }
+                }
             }
-            val isPlayingNow = eventType != ObservationEventType.SESSION_DESTROYED &&
-                stateCode == android.media.session.PlaybackState.STATE_PLAYING
-            val basePos = state?.position ?: 0L
-            val lastUpd = state?.lastPositionUpdateTime ?: 0L
-            val spd = (state?.playbackSpeed ?: 1.0f).takeIf { it > 0f } ?: 1.0f
-            val nowElapsed = SystemClock.elapsedRealtime()
-            val interpPos = if (isPlayingNow && lastUpd > 0L && nowElapsed >= lastUpd) {
-                basePos + ((nowElapsed - lastUpd) * spd).toLong()
-            } else {
-                basePos
-            }
-            TuneMindListenerService.dispatchPlaybackSnapshot(
-                ActivePlaybackSnapshot(
-                    packageName = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else (source ?: "com.spotify.music"),
-                    title = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else snapTitle,
-                    artist = if (eventType == ObservationEventType.SESSION_DESTROYED) "" else snapArtist,
-                    isPlaying = isPlayingNow,
-                    positionMs = interpPos.coerceAtLeast(0L),
-                    durationMs = snapDur.coerceAtLeast(0L),
-                    updatedAtElapsedMs = nowElapsed,
-                    album = if (eventType == ObservationEventType.SESSION_DESTROYED) null else snapAlbum,
-                    playbackStateCode = stateCode,
-                    speed = spd
-                )
-            )
         }
         val fingerprint = callbackFingerprint(
             controllerKey = entry.controller.sessionToken.toString(),
@@ -743,6 +780,8 @@ class MediaSessionObserver(
 
     private fun isExcludedSource(packageName: String?): Boolean {
         if (packageName.isNullOrBlank()) return true
+        // TuneMind's internal players already dispatch authoritative snapshots & observations directly.
+        if (packageName.equals(service.packageName, ignoreCase = true)) return true
         val pkg = packageName.lowercase()
         if (EXCLUDED_PACKAGES.any { pkg.contains(it) }) return true
         return pkg.contains("chrome") ||

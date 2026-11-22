@@ -1175,6 +1175,8 @@ private fun AddSongsToPlaylistSheet(
                 track.artist.lowercase().contains(q) ||
                 track.album.lowercase().contains(q)
             matchesPlayer && matchesQuery
+        }.distinctBy {
+            ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist)
         }
     }
 

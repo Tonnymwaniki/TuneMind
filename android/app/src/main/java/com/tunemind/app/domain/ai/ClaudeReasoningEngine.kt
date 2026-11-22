@@ -737,7 +737,7 @@ object ClaudeReasoningEngine {
             put("dismissedFeedback", dismissedArray)
 
             val playEventByKey = cleanPlayEvents.associateBy {
-                "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}"
+                TrackIdentityResolver.buildNormalizedMatchKey(it.title, it.artist)
             }
             val tracksArray = JSONArray()
             recentTracks.take(250).forEach { t ->
@@ -748,7 +748,7 @@ object ClaudeReasoningEngine {
                     artist = t.artist
                 )
                 val safeCount = t.distinctAppearanceCount.coerceAtLeast(0)
-                val evKey = "${t.title.orEmpty().trim().lowercase()}|${t.artist.orEmpty().trim().lowercase()}"
+                val evKey = TrackIdentityResolver.buildNormalizedMatchKey(t.title, t.artist)
                 val matchedEv = playEventByKey[evKey]
                 val primaryArtistKey = t.artist.orEmpty().trim().lowercase().split(Regex("[,&]|feat\\.?|ft\\.?", RegexOption.IGNORE_CASE)).firstOrNull()?.trim().orEmpty()
                 val explicitGenre = artistGenres[primaryArtistKey] ?: artistGenres[t.artist.orEmpty().trim().lowercase()]

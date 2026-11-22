@@ -76,28 +76,50 @@ object TrackIdentityResolver {
         return "$prefix:$artistSlug::$titleSlug"
     }
 
+    private val NON_ARTIST_PLACEHOLDERS = setOf(
+        "unknown",
+        "unknown artist",
+        "your library",
+        "various artists",
+        "music",
+        "playlist",
+        "tunemind playlist",
+        "device audio",
+        "discovery",
+        "music app",
+        "spotify",
+        "youtube music",
+        "boomplay",
+        "audiomack"
+    )
+
+    fun normalizedTitleOnly(title: String?): String {
+        return title.orEmpty()
+            .trim()
+            .lowercase()
+            .replace(Regex("\\s*\\([^)]*\\)"), "")
+            .replace(Regex("\\s*\\[[^\\]]*\\]"), "")
+            .replace(Regex("\\s+(feat\\.?|ft\\.?|featuring|with)\\s+.*$"), "")
+            .replace(Regex("\\s+-\\s+((\\d{4}\\s+)?remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean|official\\s+(audio|video|lyric.*)|lyric\\s+video|audio|video).*$"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+    }
+
     /**
      * Strips featuring tags, remaster/radio-edit suffixes, and secondary artists so
      * Spotify tracks and MediaSession tracks resolve to one consistent lookup key.
      */
     fun buildNormalizedMatchKey(title: String?, artist: String?): String {
-        val cleanTitle = title.orEmpty()
-            .trim()
-            .lowercase()
-            .replace(Regex("\\s*\\([^)]*\\)"), "")
-            .replace(Regex("\\s*\\[[^\\]]*\\]"), "")
-            .replace(Regex("\\s+-\\s+(remaster(ed)?|radio edit|single version|live|deluxe|acoustic|explicit|clean).*$"), "")
-            .replace(Regex("[^a-z0-9]+"), " ")
-            .trim()
+        val cleanTitle = normalizedTitleOnly(title)
         val primaryArtist = artist.orEmpty()
             .trim()
             .lowercase()
-            .split(Regex("\\s*(,|&|feat\\.?|ft\\.?|\\bx\\b)\\s*"), limit = 2)
+            .split(Regex("\\s*(,|&|;|/|feat\\.?|ft\\.?|featuring|\\bx\\b|\\bwith\\b)\\s*"), limit = 2)
             .firstOrNull()
             .orEmpty()
             .replace(Regex("[^a-z0-9]+"), " ")
             .trim()
-            .takeIf { it.isNotBlank() && it != "unknown artist" }
+            .takeIf { it.isNotBlank() && it !in NON_ARTIST_PLACEHOLDERS }
             .orEmpty()
         return "$cleanTitle|$primaryArtist"
     }
