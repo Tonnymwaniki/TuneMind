@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.Icon
@@ -179,8 +179,8 @@ fun FloatingGlassDock(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BottomDockTab(
-                    label = if (freshTrackCount > 0 && safePage == 0) "Fresh · $freshTrackCount" else "Fresh",
-                    icon = Icons.Rounded.Bolt,
+                    label = "Discover",
+                    icon = Icons.Rounded.Explore,
                     isSelected = safePage == 0,
                     activeColor = theme.primaryAccent,
                     onClick = { onSelectPage(0) },
