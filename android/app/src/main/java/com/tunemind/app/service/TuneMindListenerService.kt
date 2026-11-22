@@ -161,9 +161,38 @@ class TuneMindListenerService : NotificationListenerService() {
         }
     }
 
-    private val db: TuneMindDatabase by lazy { TuneMindDatabase.getInstance(this) }
-    private val repository: EventBufferRepository by lazy { EventBufferRepository(db.eventQueueDao()) }
-    private val experimentRepo: ExperimentRepository by lazy { ExperimentRepository(db) }
+    @Volatile
+    private var cachedDbInstance: TuneMindDatabase? = null
+    @Volatile
+    private var cachedRepo: EventBufferRepository? = null
+    @Volatile
+    private var cachedExpRepo: ExperimentRepository? = null
+
+    private val db: TuneMindDatabase
+        get() = TuneMindDatabase.getInstance(this)
+
+    private val repository: EventBufferRepository
+        get() {
+            val active = db
+            val existing = cachedRepo
+            if (existing != null && cachedDbInstance === active) return existing
+            return synchronized(this) {
+                val syncedDb = db
+                if (cachedRepo != null && cachedDbInstance === syncedDb) {
+                    cachedRepo!!
+                } else {
+                    cachedDbInstance = syncedDb
+                    cachedExpRepo = ExperimentRepository(syncedDb)
+                    EventBufferRepository(syncedDb.eventQueueDao()).also { cachedRepo = it }
+                }
+            }
+        }
+
+    private val experimentRepo: ExperimentRepository
+        get() {
+            repository
+            return cachedExpRepo ?: ExperimentRepository(db).also { cachedExpRepo = it }
+        }
 
     fun observerOrNull(): MediaSessionObserver? = observer
 

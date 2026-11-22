@@ -14,12 +14,14 @@ import com.tunemind.app.domain.model.TrackIdentityResolver
 import com.tunemind.app.provider.UniversalTrackResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -34,34 +36,48 @@ import java.util.concurrent.ConcurrentHashMap
  * Room (`universal_track_visual_cache` + `universal_artist_profile_cache` +
  * enriching `cross_app_track_library` rows).
  */
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class UniversalMusicVisualRepository private constructor(private val context: Context) {
 
     private val appContext = context.applicationContext
-    private val db: TuneMindDatabase by lazy { TuneMindDatabase.getInstance(appContext) }
-    private val dao: CrossAppLibraryDao by lazy { db.crossAppLibraryDao() }
+    private val db: TuneMindDatabase get() = TuneMindDatabase.getInstance(appContext)
+    private val dao: CrossAppLibraryDao get() = db.crossAppLibraryDao()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlightKeys = ConcurrentHashMap.newKeySet<String>()
     private val resolvedWithArtKeys = ConcurrentHashMap.newKeySet<String>()
 
     val trackVisualsMapFlow: StateFlow<Map<String, TrackVisualCacheEntity>> by lazy {
-        dao.observeAllTrackVisuals().debounce(350L).map { list ->
-            buildMap(list.size * 2) {
-                for (item in list) {
-                    put(item.trackKey, item)
-                    if (!item.albumArtUrl.isNullOrBlank()) {
-                        resolvedWithArtKeys.add(item.trackKey)
+        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(appContext)
+            .activePartitionKeyFlow
+            .flatMapLatest {
+                dao.observeAllTrackVisuals()
+            }
+            .debounce(350L)
+            .map { list ->
+                buildMap(list.size * 2) {
+                    for (item in list) {
+                        put(item.trackKey, item)
+                        if (!item.albumArtUrl.isNullOrBlank()) {
+                            resolvedWithArtKeys.add(item.trackKey)
+                        }
+                        item.trackId?.takeIf { it.isNotBlank() }?.let { put(it, item) }
                     }
-                    item.trackId?.takeIf { it.isNotBlank() }?.let { put(it, item) }
                 }
             }
-        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
     }
 
     val artistProfilesMapFlow: StateFlow<Map<String, ArtistProfileCacheEntity>> by lazy {
-        dao.observeAllArtistProfiles().debounce(350L).map { list ->
-            list.associateBy { it.artistKey }
-        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
+        com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(appContext)
+            .activePartitionKeyFlow
+            .flatMapLatest {
+                dao.observeAllArtistProfiles()
+            }
+            .debounce(350L)
+            .map { list ->
+                list.associateBy { it.artistKey }
+            }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000L), emptyMap())
     }
 
     fun observeTrackVisualsMap(): Flow<Map<String, TrackVisualCacheEntity>> = trackVisualsMapFlow

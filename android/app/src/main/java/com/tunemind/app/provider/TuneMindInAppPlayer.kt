@@ -798,7 +798,7 @@ object TuneMindInAppPlayer {
     private fun requestMediaAudioFocus(appContext: Context) {
         try {
             val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-            val sysPrefs = appContext.getSharedPreferences("tunemind_system_prefs", Context.MODE_PRIVATE)
+            val sysPrefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(appContext, "tunemind_system_prefs")
             val pauseOnLoss = sysPrefs.getString("audio_focus_behavior", "DUCK") == "PAUSE"
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

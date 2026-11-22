@@ -945,9 +945,8 @@ class AgentVoiceManager(
         }
     }
 
-    private val prefs by lazy {
-        context.getSharedPreferences("tunemind_agent_memory", Context.MODE_PRIVATE)
-    }
+    private val prefs: android.content.SharedPreferences
+        get() = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_agent_memory")
 
     private fun getRecentlyPlayedByAgent(): List<String> {
         val raw = prefs.getString("recent_agent_tracks", "") ?: ""

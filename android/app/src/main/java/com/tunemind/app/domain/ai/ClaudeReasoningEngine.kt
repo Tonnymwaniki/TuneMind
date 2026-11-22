@@ -181,7 +181,7 @@ object ClaudeReasoningEngine {
 
     fun saveLearningSummary(context: Context, summary: ForYouLearningSummary) {
         try {
-            context.applicationContext.getSharedPreferences(PREFS_FOR_YOU, Context.MODE_PRIVATE)
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_FOR_YOU)
                 .edit()
                 .putString(KEY_LEARNING_SUMMARY, summary.toJsonString())
                 .apply()
@@ -190,7 +190,7 @@ object ClaudeReasoningEngine {
 
     fun getSavedLearningSummary(context: Context): ForYouLearningSummary {
         return try {
-            val raw = context.applicationContext.getSharedPreferences(PREFS_FOR_YOU, Context.MODE_PRIVATE)
+            val raw = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_FOR_YOU)
                 .getString(KEY_LEARNING_SUMMARY, null)
             if (!raw.isNullOrBlank()) {
                 ForYouLearningSummary.fromJsonString(raw) ?: ForYouLearningSummary(dropDateKey = NoonDropSchedule.getNoonCycleKey())
@@ -590,7 +590,7 @@ object ClaudeReasoningEngine {
 
     fun getPermanentExcludedKeys(context: Context): List<String> {
         return try {
-            val prefs = context.applicationContext.getSharedPreferences(PREFS_PERM_REC_HISTORY, Context.MODE_PRIVATE)
+            val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_PERM_REC_HISTORY)
             val raw = prefs.getString(KEY_PERM_REC_KEYS_JSON, null) ?: return emptyList()
             val arr = JSONArray(raw)
             buildList(arr.length()) {
@@ -607,7 +607,7 @@ object ClaudeReasoningEngine {
     fun recordPermanentExcludedRecommendations(context: Context, items: List<AiRecommendationEntity>) {
         if (items.isEmpty()) return
         try {
-            val prefs = context.applicationContext.getSharedPreferences(PREFS_PERM_REC_HISTORY, Context.MODE_PRIVATE)
+            val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_PERM_REC_HISTORY)
             val existing = LinkedHashSet<String>(getPermanentExcludedKeys(context))
             items.forEach { rec ->
                 val normKey = TrackIdentityResolver.buildNormalizedMatchKey(rec.title, rec.artist)
@@ -1142,7 +1142,7 @@ object ClaudeReasoningEngine {
 
     fun saveLatestReport(context: Context, report: ReasoningReport) {
         try {
-            context.getSharedPreferences(PREFS_REPORT, Context.MODE_PRIVATE)
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_REPORT)
                 .edit()
                 .putString(KEY_LATEST_REPORT, report.toJson())
                 .apply()
@@ -1151,7 +1151,7 @@ object ClaudeReasoningEngine {
 
     fun getLatestReport(context: Context): ReasoningReport? {
         return try {
-            val json = context.getSharedPreferences(PREFS_REPORT, Context.MODE_PRIVATE)
+            val json = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_REPORT)
                 .getString(KEY_LATEST_REPORT, null) ?: return null
             ReasoningReport.fromJson(json)
         } catch (_: Exception) {

@@ -72,7 +72,10 @@ router.delete('/', requireAuth, async (req: Request, res: Response) => {
         'user_taste_genome',
         'support_feedback',
         'ml_user_taste_models',
-        'discovery_recommendation_outcomes'
+        'discovery_recommendation_outcomes',
+        'track_play_events',
+        'user_playlists',
+        'track_cards'
       ];
 
       for (const table of userIdTables) {

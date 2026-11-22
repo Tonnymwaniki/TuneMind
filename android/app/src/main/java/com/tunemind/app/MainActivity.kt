@@ -131,27 +131,14 @@ open class MainActivity : ComponentActivity() {
                         com.tunemind.app.data.auth.TuneMindAuthSessionManager.getInstance(context)
                     }
                     val authSession by authSessionManager.sessionFlow.collectAsState()
-
-                    var hasAllPermissions by remember {
-                        mutableStateOf(
-                            PermissionUtils.hasMicrophonePermission(context) &&
-                                PermissionUtils.hasNotificationListenerPermission(context) &&
-                                PermissionUtils.isIgnoringBatteryOptimizations(context)
-                        )
-                    }
+                    val activePartitionKey by authSessionManager.activePartitionKeyFlow.collectAsState()
 
                     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                                lifecycleScope.launch {
-                                    val permsOk = withContext(Dispatchers.IO) {
-                                        authSessionManager.refreshSessionState()
-                                        PermissionUtils.hasMicrophonePermission(context) &&
-                                            PermissionUtils.hasNotificationListenerPermission(context) &&
-                                            PermissionUtils.isIgnoringBatteryOptimizations(context)
-                                    }
-                                    hasAllPermissions = permsOk
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    authSessionManager.refreshSessionState()
                                 }
                             }
                         }
@@ -167,13 +154,18 @@ open class MainActivity : ComponentActivity() {
                     var hasPassedLaunchOnboardingGate by rememberSaveable {
                         mutableStateOf(!ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING)
                     }
+                    val hasExplicitAccount = authSession.primaryProvider == "GOOGLE" ||
+                        authSession.primaryProvider == "EMAIL"
                     val hasCompletedAccountGate = authSession.hasCompletedAccountOnboarding
 
-                    val isMainAppActive = hasPassedLaunchOnboardingGate &&
+                    // Returning users with a valid Google or Email account who finished onboarding once
+                    // go directly from the brand splash into TuneMind without re-onboarding.
+                    val isMainAppActive = authSession.isLoggedIn &&
+                        hasExplicitAccount &&
+                        hasPassedLaunchOnboardingGate &&
                         hasCompletedLaunchStartFlow &&
                         authSession.hasCompletedStartFlow &&
-                        hasCompletedAccountGate &&
-                        hasAllPermissions
+                        hasCompletedAccountGate
 
                     var showLegalOnOnboarding by rememberSaveable { mutableStateOf(false) }
                     var legalTabOnOnboarding by rememberSaveable { mutableStateOf(0) }
@@ -194,10 +186,10 @@ open class MainActivity : ComponentActivity() {
                                         alwaysShowAuthFirst = ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING,
                                         isSplashFinished = !showBrandSplash,
                                         onComplete = {
+                                            authSessionManager.markStartFlowCompleted()
+                                            authSessionManager.refreshSessionState()
                                             hasPassedLaunchOnboardingGate = true
                                             hasCompletedLaunchStartFlow = true
-                                            authSessionManager.markStartFlowCompleted()
-                                            hasAllPermissions = true
                                         },
                                         onOpenLegal = { tab ->
                                             legalTabOnOnboarding = tab
@@ -216,16 +208,23 @@ open class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
-                            TuneMindMainShell(
-                                activity = this@MainActivity,
-                                authSession = authSession,
-                                pendingRecoveryBundleFlow = pendingRecoveryBundleFlow,
-                                pendingOpenNotificationsFlow = pendingOpenNotificationsFlow,
-                                onSignedOutToAuth = {
-                                    hasCompletedLaunchStartFlow = false
-                                    hasPassedLaunchOnboardingGate = false
-                                }
-                            )
+                            key(activePartitionKey) {
+                                TuneMindMainShell(
+                                    activity = this@MainActivity,
+                                    activePartitionKey = activePartitionKey,
+                                    authSession = authSession,
+                                    pendingRecoveryBundleFlow = pendingRecoveryBundleFlow,
+                                    pendingOpenNotificationsFlow = pendingOpenNotificationsFlow,
+                                    onAccountSwitched = {
+                                        this@MainActivity.viewModelStore.clear()
+                                    },
+                                    onSignedOutToAuth = {
+                                        this@MainActivity.viewModelStore.clear()
+                                        hasCompletedLaunchStartFlow = false
+                                        hasPassedLaunchOnboardingGate = false
+                                    }
+                                )
+                            }
                         }
 
                         if (showBrandSplash) {
@@ -256,9 +255,11 @@ open class MainActivity : ComponentActivity() {
     @Composable
     private fun TuneMindMainShell(
         activity: ComponentActivity,
+        activePartitionKey: String,
         authSession: com.tunemind.app.data.auth.TuneMindUserSession,
         pendingRecoveryBundleFlow: kotlinx.coroutines.flow.MutableStateFlow<Bundle?>,
         pendingOpenNotificationsFlow: kotlinx.coroutines.flow.MutableStateFlow<Boolean>,
+        onAccountSwitched: () -> Unit,
         onSignedOutToAuth: () -> Unit
     ) {
         val context = LocalContext.current
@@ -266,6 +267,7 @@ open class MainActivity : ComponentActivity() {
         val coroutineScope = rememberCoroutineScope()
 
         val vm: com.tunemind.app.ui.TuneMindViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+            key = "tunemind_vm_$activePartitionKey",
             factory = com.tunemind.app.ui.TuneMindViewModelFactory()
         )
         val homeState by vm.homeState.collectAsState()
@@ -288,8 +290,8 @@ open class MainActivity : ComponentActivity() {
         val manualFreshTracks by vm.manualFreshTracks.collectAsState()
         val freshExcludedKeys by vm.freshExcludedKeys.collectAsState()
 
-        val playerPrefs = remember {
-            context.getSharedPreferences("tunemind_player_prefs", Context.MODE_PRIVATE)
+        val playerPrefs = remember(activePartitionKey) {
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_player_prefs")
         }
         var selectedTargetPlayer by remember {
             mutableStateOf(
@@ -335,10 +337,12 @@ open class MainActivity : ComponentActivity() {
             vm.initBilling(context)
         }
 
-        LaunchedEffect(authSession.userId, authSession.isSupabaseAuthenticated) {
+        LaunchedEffect(activePartitionKey, authSession.userId, authSession.isSupabaseAuthenticated) {
             kotlinx.coroutines.delay(250L)
             vm.refreshBillingEntitlement(context)
             withContext(Dispatchers.IO) {
+                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.restoreUserAccountSnapshotFromCloud(context)
+                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager.syncTrackCardsAndPlaylistsToBackend(context)
                 com.tunemind.app.provider.SpotifyPremiumConnectManager.syncAppDefaultClientId(context)
                 com.tunemind.app.provider.SpotifyPremiumConnectManager.restoreConnectionFromCloudIfNeeded(context)
                 if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnected(context)) {
@@ -1859,6 +1863,11 @@ open class MainActivity : ComponentActivity() {
                             legalInitialTab = tab
                             showLegalScreen = true
                         },
+                        onAccountSwitched = {
+                            showSettingsScreen = false
+                            showProfileScreen = false
+                            onAccountSwitched()
+                        },
                         onSignedOutToAuth = {
                             showSettingsScreen = false
                             showProfileScreen = false
@@ -2026,9 +2035,8 @@ open class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        // Testing toggle: keeps Splash -> Onboarding (Google / Email Login) active on every app launch.
-        // Flip to false before Play Store production release so returning signed-in users enter directly.
-        private const val ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING = true
+        // Production behavior: returning signed-in users go straight into TuneMind after splash.
+        private const val ALWAYS_SHOW_ONBOARDING_AFTER_SPLASH_FOR_TESTING = false
 
         fun forceRebindListener(context: Context) {
             try {

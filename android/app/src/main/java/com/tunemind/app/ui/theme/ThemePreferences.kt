@@ -21,8 +21,9 @@ data class ThemePreferences(
 
 class ThemePreferencesRepository(context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs: SharedPreferences
+        get() = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(appContext, PREFS_NAME)
 
     fun loadPreferences(): ThemePreferences {
         val behaviorStr = prefs.getString(KEY_BEHAVIOR, ThemeBehavior.ADAPTIVE.name)

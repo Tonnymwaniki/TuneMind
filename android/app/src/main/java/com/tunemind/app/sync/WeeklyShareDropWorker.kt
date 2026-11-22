@@ -40,7 +40,7 @@ class WeeklyShareDropWorker(
         val month = cal.get(Calendar.MONTH) + 1
         val hour = cal.get(Calendar.HOUR_OF_DAY)
 
-        val prefs = ctx.getSharedPreferences(PREFS_DROP_ALERTS, Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, PREFS_DROP_ALERTS)
 
         // Check if user actually has tracked listening history so notifications feel real & earned
         val recentCount = runCatching {

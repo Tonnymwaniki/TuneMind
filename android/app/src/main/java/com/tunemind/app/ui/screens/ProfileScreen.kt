@@ -59,6 +59,7 @@ fun ProfileScreen(
     onOpenNotifications: () -> Unit = {},
     onOpenSupport: () -> Unit = {},
     onOpenLegal: (Int) -> Unit = {},
+    onAccountSwitched: () -> Unit = {},
     onSignedOutToAuth: () -> Unit
 ) {
     val context = LocalContext.current
@@ -100,7 +101,7 @@ fun ProfileScreen(
         session.displayName.isNotBlank() && session.displayName != "TuneMind Listener" -> session.displayName
         userProfile.name.isNotBlank() -> userProfile.name
         session.email.isNotBlank() -> session.email.substringBefore("@")
-        else -> "Guest Listener"
+        else -> "TuneMind Listener"
     }
     val effectiveEmail = session.email.ifBlank {
         if (hasExplicitAccount) userProfile.email else ""
@@ -309,7 +310,7 @@ fun ProfileScreen(
                                 text = if (effectiveEmail.isNotBlank()) {
                                     effectiveEmail
                                 } else {
-                                    "Guest session · Sign in with Google or Email"
+                                    "Sign in with Google or Email to sync your profile"
                                 },
                                 fontSize = 13.sp,
                                 color = Color.White.copy(alpha = 0.72f),
@@ -320,7 +321,7 @@ fun ProfileScreen(
                             val providerText = when {
                                 session.primaryProvider == "GOOGLE" || session.isGoogleConnected -> "Google Account"
                                 session.primaryProvider == "EMAIL" -> "Email Account"
-                                else -> "Guest Mode"
+                                else -> "No Account"
                             }
                             val syncText = when {
                                 session.isSupabaseAuthenticated -> "Cloud Synced"
@@ -714,7 +715,7 @@ fun ProfileScreen(
                     Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (hasExplicitAccount) "Log Out" else "Exit Guest Session",
+                        text = if (hasExplicitAccount) "Log Out" else "Sign In",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1022,16 +1023,20 @@ fun ProfileScreen(
                                 safeGreen = safeGreen,
                                 onSelect = {
                                     scope.launch {
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            runCatching {
+                                                com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                                                    .syncTrackCardsAndPlaylistsToBackend(context)
+                                            }
+                                        }
                                         authManager.switchToAccount(acc)
-                                        vm.syncIdentityFromAuth(acc.displayName, acc.email)
                                         showSwitchAccountsSheet = false
-                                        statusBanner = "Switched to ${acc.displayName} (${acc.email})"
+                                        onAccountSwitched()
                                     }
                                 },
                                 onRemove = {
-                                    val wasOnlyActive = isActive && savedAccounts.size <= 1
                                     authManager.removeSavedAccount(acc.accountKey)
-                                    if (wasOnlyActive) {
+                                    if (isActive) {
                                         showSwitchAccountsSheet = false
                                         onSignedOutToAuth()
                                     }
@@ -1082,7 +1087,7 @@ fun ProfileScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    text = if (hasExplicitAccount) "Log Out of TuneMind?" else "Exit Guest Session?",
+                    text = "Log Out of TuneMind?",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFFF8FAFC)
@@ -1122,6 +1127,12 @@ fun ProfileScreen(
                         onClick = {
                             isLoggingOut = true
                             scope.launch {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    runCatching {
+                                        com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
+                                            .syncTrackCardsAndPlaylistsToBackend(context)
+                                    }
+                                }
                                 authManager.signOutRemoteAndLocal(
                                     removeFromSavedRoster = !keepForQuickSwitch
                                 )

@@ -2,11 +2,15 @@ package com.tunemind.app.ui.onboarding
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
+import com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
 import com.tunemind.app.util.PermissionUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 enum class OnboardingStep {
     WELCOME,
@@ -43,17 +47,17 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     private fun evaluateInitialStep(): OnboardingStep {
         val session = authSessionManager.sessionFlow.value
         val app = getApplication<Application>()
+        val hasExplicitAccount = session.primaryProvider == "GOOGLE" || session.primaryProvider == "EMAIL"
         if (alwaysShowAuthFirstOnLaunch && !authCompletedForThisLaunch) {
             return OnboardingStep.AUTH_LOGIN
         }
-        if (!session.isLoggedIn || !session.hasCompletedAccountOnboarding || !session.hasCompletedStartFlow) {
+        if (!session.isLoggedIn || !hasExplicitAccount || !session.hasCompletedAccountOnboarding) {
             return OnboardingStep.AUTH_LOGIN
         }
-        return if (PermissionUtils.hasMicrophonePermission(app)) {
-            OnboardingStep.COMPLETE
-        } else {
-            evaluateRemainingPermissionStep(app)
+        if (session.hasCompletedStartFlow) {
+            return OnboardingStep.COMPLETE
         }
+        return evaluateRemainingPermissionStep(app)
     }
 
     private fun evaluateRemainingPermissionStep(app: Application): OnboardingStep {
@@ -69,8 +73,8 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Routes cleanly: users who haven't completed/skipped the welcome sign-in start at AUTH_LOGIN;
-     * returning signed-in users advance directly to remaining permissions or COMPLETE.
+     * Routes cleanly: first-time or signed-out users start at AUTH_LOGIN;
+     * returning signed-in users advance directly to COMPLETE.
      */
     fun onSplashFinishedAutoRoute() {
         _currentStep.value = evaluateInitialStep()
@@ -83,8 +87,12 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
     fun proceedFromAuthToPermissions() {
         authCompletedForThisLaunch = true
         authSessionManager.markAccountOnboardingCompleted()
-        authSessionManager.markStartFlowCompleted()
         val app = getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                SupabaseIntelligenceSyncManager.restoreUserAccountSnapshotFromCloud(app, force = true)
+            }
+        }
         _currentStep.value = evaluateRemainingPermissionStep(app)
     }
 

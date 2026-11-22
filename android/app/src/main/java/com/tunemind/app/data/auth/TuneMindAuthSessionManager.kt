@@ -80,6 +80,9 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     private val _savedAccountsFlow = MutableStateFlow<List<SavedAccountProfile>>(emptyList())
     val savedAccountsFlow: StateFlow<List<SavedAccountProfile>> = _savedAccountsFlow.asStateFlow()
 
+    private val _activePartitionKeyFlow = MutableStateFlow(TuneMindAccountStorage.SIGNED_OUT_PARTITION)
+    val activePartitionKeyFlow: StateFlow<String> = _activePartitionKeyFlow.asStateFlow()
+
     private val _lastAuthErrorFlow = MutableStateFlow<String?>(null)
     val lastAuthErrorFlow: StateFlow<String?> = _lastAuthErrorFlow.asStateFlow()
 
@@ -108,11 +111,83 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     }
 
     fun refreshSessionState() {
-        _sessionFlow.value = readCurrentSession()
+        val current = readCurrentSession()
+        val hasExplicit = current.primaryProvider == "GOOGLE" || current.primaryProvider == "EMAIL"
+        val partition = if (hasExplicit) {
+            TuneMindAccountStorage.activateAccount(appContext, current.userId, current.email)
+        } else {
+            TuneMindAccountStorage.clearActivePartition(appContext)
+        }
+        _activePartitionKeyFlow.value = partition
+        _sessionFlow.value = current
         _savedAccountsFlow.value = readSavedAccounts()
     }
 
     fun getAccessToken(): String = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "") ?: ""
+
+    private fun isJwtExpiringSoon(jwt: String, bufferSeconds: Long = 300L): Boolean {
+        if (jwt.isBlank()) return true
+        val parts = jwt.split(".")
+        if (parts.size < 2) return false
+        return try {
+            val payloadBytes = android.util.Base64.decode(
+                parts[1],
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+            )
+            val json = JSONObject(String(payloadBytes, Charsets.UTF_8))
+            val exp = json.optLong("exp", 0L)
+            if (exp <= 0L) false else (System.currentTimeMillis() / 1000L) + bufferSeconds >= exp
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun ensureFreshAccessToken(): String = withContext(Dispatchers.IO) {
+        val currentAccess = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, "")?.trim().orEmpty()
+        val refreshToken = prefs.getString(KEY_SUPABASE_REFRESH_TOKEN, "")?.trim().orEmpty()
+        if (currentAccess.isNotBlank() && !isJwtExpiringSoon(currentAccess)) {
+            return@withContext currentAccess
+        }
+        if (refreshToken.isBlank() || !isSupabaseConfigured()) {
+            return@withContext currentAccess
+        }
+        return@withContext runCatching {
+            val payload = JSONObject().put("refresh_token", refreshToken)
+            val req = Request.Builder()
+                .url("${getSupabaseUrl()}/auth/v1/token?grant_type=refresh_token")
+                .addHeader("apikey", getSupabaseAnonKey())
+                .addHeader("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching currentAccess
+                val json = JSONObject(resp.body?.string() ?: "{}")
+                val newAccess = json.optString("access_token", "").trim()
+                val newRefresh = json.optString("refresh_token", refreshToken).trim()
+                if (newAccess.isBlank()) return@runCatching currentAccess
+
+                prefs.edit()
+                    .putString(KEY_SUPABASE_ACCESS_TOKEN, newAccess)
+                    .putString(KEY_SUPABASE_REFRESH_TOKEN, newRefresh)
+                    .apply()
+
+                val cur = _sessionFlow.value
+                if (cur.email.isNotBlank() && (cur.primaryProvider == "GOOGLE" || cur.primaryProvider == "EMAIL")) {
+                    upsertSavedAccount(
+                        userId = cur.userId,
+                        email = cur.email,
+                        displayName = cur.displayName,
+                        provider = cur.primaryProvider,
+                        avatarUrl = cur.avatarUrl,
+                        supabaseAccessToken = newAccess,
+                        supabaseRefreshToken = newRefresh
+                    )
+                }
+                refreshSessionState()
+                newAccess
+            }
+        }.getOrDefault(currentAccess)
+    }
 
     private fun readCurrentSession(): TuneMindUserSession {
         val googleConnected = prefs.getBoolean(KEY_GOOGLE_CONNECTED, false)
@@ -121,13 +196,14 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         val sanitizedProvider = when {
             storedProvider.equals("GOOGLE", ignoreCase = true) || googleConnected -> "GOOGLE"
             storedProvider.equals("EMAIL", ignoreCase = true) || email.isNotBlank() -> "EMAIL"
-            prefs.getBoolean(KEY_IS_LOGGED_IN, false) -> "GUEST"
             else -> ""
         }
         val forceReopenAuth = prefs.getBoolean(KEY_FORCE_REOPEN_AUTH, false)
-        val explicitLoggedIn = prefs.getBoolean(KEY_IS_LOGGED_IN, false) || googleConnected || email.isNotBlank()
-        val completedStart = prefs.getBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
-        val seenAccountOnboarding = !forceReopenAuth && (
+        val hasExplicitAccount = sanitizedProvider == "GOOGLE" || sanitizedProvider == "EMAIL"
+        val explicitLoggedIn = hasExplicitAccount &&
+            (prefs.getBoolean(KEY_IS_LOGGED_IN, false) || googleConnected || email.isNotBlank())
+        val completedStart = hasExplicitAccount && prefs.getBoolean(KEY_HAS_COMPLETED_START_FLOW, false)
+        val seenAccountOnboarding = !forceReopenAuth && hasExplicitAccount && (
             prefs.getBoolean(KEY_HAS_SEEN_ACCOUNT_ONBOARDING, false) ||
                 googleConnected ||
                 email.isNotBlank()
@@ -155,12 +231,21 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     }
 
     private fun mirrorIdentityToUserPrefs(displayName: String, email: String, archetype: String? = null) {
-        val userPrefs = appContext.getSharedPreferences("tunemind_user_prefs", Context.MODE_PRIVATE)
+        val userPrefs = TuneMindAccountStorage.getUserPrefs(appContext, "tunemind_user_prefs")
         val editor = userPrefs.edit()
         if (displayName.isNotBlank()) editor.putString("user_name", displayName)
         if (email.isNotBlank()) editor.putString("user_email", email)
         if (!archetype.isNullOrBlank()) editor.putString("user_archetype", archetype)
         editor.apply()
+    }
+
+    private fun resetVolatileRecorderCachesForAccountSwitch() {
+        runCatching {
+            com.tunemind.app.data.local.CrossAppPlayRecorder.getInstance(appContext).resetInMemoryState()
+        }
+        runCatching {
+            com.tunemind.app.domain.voice.AgentSettingsStore.reloadForActiveAccount(appContext)
+        }
     }
 
     // ========================================================================
@@ -252,6 +337,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     suspend fun switchToAccount(account: SavedAccountProfile): Result<TuneMindUserSession> = withContext(Dispatchers.IO) {
         val isGoogle = account.provider.equals("GOOGLE", ignoreCase = true)
+        val partition = TuneMindAccountStorage.activateAccount(appContext, account.userId, account.email)
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .putBoolean(KEY_HAS_COMPLETED_START_FLOW, true)
@@ -277,13 +363,16 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             supabaseRefreshToken = account.supabaseRefreshToken
         )
         mirrorIdentityToUserPrefs(account.displayName, account.email)
+        resetVolatileRecorderCachesForAccountSwitch()
 
         if (account.supabaseAccessToken.isNotBlank() && isSupabaseConfigured()) {
+            ensureFreshAccessToken()
             syncProfileFromSupabase()
         }
 
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
+        _activePartitionKeyFlow.value = partition
         refreshSessionState()
         Result.success(_sessionFlow.value)
     }
@@ -355,7 +444,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
     fun completeOnDeviceGoogleSignIn(email: String, displayName: String) {
         val cleanEmail = email.trim()
         val cleanName = displayName.trim().ifBlank { cleanEmail.substringBefore("@") }
-        val uid = "google_${cleanEmail.lowercase().hashCode()}"
+        val uid = "google_${java.security.MessageDigest.getInstance("SHA-256").digest(cleanEmail.lowercase().toByteArray()).take(6).joinToString("") { "%02x".format(it) }}"
+        TuneMindAccountStorage.activateAccount(appContext, uid, cleanEmail)
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .putBoolean(KEY_GOOGLE_CONNECTED, true)
@@ -375,6 +465,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             provider = "GOOGLE"
         )
         mirrorIdentityToUserPrefs(cleanName, cleanEmail)
+        resetVolatileRecorderCachesForAccountSwitch()
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
         refreshSessionState()
@@ -440,6 +531,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                         )
                     }
 
+                    TuneMindAccountStorage.activateAccount(appContext, uid, cleanEmail)
                     prefs.edit()
                         .putBoolean(KEY_IS_LOGGED_IN, true)
                         .putBoolean(KEY_GOOGLE_CONNECTED, false)
@@ -462,6 +554,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
                         supabaseRefreshToken = refreshToken
                     )
                     mirrorIdentityToUserPrefs(resolvedName, cleanEmail)
+                    resetVolatileRecorderCachesForAccountSwitch()
                     upsertSupabaseProfileRow(
                         userId = uid,
                         accessToken = accessToken,
@@ -482,7 +575,63 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
 
         // Local Encrypted Vault Authentication (when Supabase URL/Key is not configured)
-        val localUid = "local_${cleanEmail.lowercase().hashCode()}"
+        val emailDigest = sha256Hex(cleanEmail.lowercase())
+        val hashKey = "local_vault_pwd_hash_$emailDigest"
+        val saltKey = "local_vault_pwd_salt_$emailDigest"
+        val nameKey = "local_vault_display_name_$emailDigest"
+        val existingHash = prefs.getString(hashKey, null)
+        val existingSaved = readSavedAccounts().firstOrNull {
+            it.email.equals(cleanEmail, ignoreCase = true) && it.provider == "EMAIL"
+        }
+
+        if (isSignUp) {
+            if (!existingHash.isNullOrBlank() || existingSaved != null) {
+                return@withContext Result.failure(
+                    IllegalStateException("An account for $cleanEmail already exists. Please log in instead.")
+                )
+            }
+            val salt = java.util.UUID.randomUUID().toString()
+            val pwdHash = sha256Hex("$salt:$password")
+            prefs.edit()
+                .putString(saltKey, salt)
+                .putString(hashKey, pwdHash)
+                .putString(nameKey, cleanName)
+                .apply()
+        } else {
+            if (!existingHash.isNullOrBlank()) {
+                val salt = prefs.getString(saltKey, "") ?: ""
+                val candidateHash = sha256Hex("$salt:$password")
+                if (candidateHash != existingHash) {
+                    return@withContext Result.failure(
+                        IllegalStateException("Incorrect email or password.")
+                    )
+                }
+            } else if (existingSaved == null) {
+                return@withContext Result.failure(
+                    IllegalStateException("No account found for $cleanEmail. Tap \"Create one\" below to register.")
+                )
+            } else {
+                // Legacy saved account without stored local hash: store hash cleanly now
+                val salt = java.util.UUID.randomUUID().toString()
+                val pwdHash = sha256Hex("$salt:$password")
+                prefs.edit()
+                    .putString(saltKey, salt)
+                    .putString(hashKey, pwdHash)
+                    .putString(nameKey, existingSaved.displayName)
+                    .apply()
+            }
+        }
+
+        val resolvedLocalName = if (isSignUp) {
+            cleanName
+        } else {
+            prefs.getString(nameKey, null)?.takeIf { it.isNotBlank() }
+                ?: existingSaved?.displayName
+                ?: cleanName
+        }
+        val localUid = existingSaved?.userId?.takeIf { it.isNotBlank() }
+            ?: "local_${emailDigest.take(12)}"
+        TuneMindAccountStorage.activateAccount(appContext, localUid, cleanEmail)
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
             .putBoolean(KEY_GOOGLE_CONNECTED, false)
@@ -490,7 +639,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .putBoolean(KEY_FORCE_REOPEN_AUTH, false)
             .putString(KEY_USER_ID, localUid)
             .putString(KEY_USER_EMAIL, cleanEmail)
-            .putString(KEY_DISPLAY_NAME, cleanName)
+            .putString(KEY_DISPLAY_NAME, resolvedLocalName)
             .putString(KEY_PRIMARY_PROVIDER, "EMAIL")
             .remove(KEY_SUPABASE_ACCESS_TOKEN)
             .remove(KEY_SUPABASE_REFRESH_TOKEN)
@@ -498,14 +647,21 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         upsertSavedAccount(
             userId = localUid,
             email = cleanEmail,
-            displayName = cleanName,
+            displayName = resolvedLocalName,
             provider = "EMAIL"
         )
-        mirrorIdentityToUserPrefs(cleanName, cleanEmail)
+        mirrorIdentityToUserPrefs(resolvedLocalName, cleanEmail)
+        resetVolatileRecorderCachesForAccountSwitch()
         lastAuthSuccessWallMs = System.currentTimeMillis()
         _lastAuthErrorFlow.value = null
         refreshSessionState()
         Result.success(_sessionFlow.value)
+    }
+
+    private fun sha256Hex(value: String): String {
+        val bytes = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     // ========================================================================
@@ -567,7 +723,8 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
         }
 
         val finalName = displayName.ifBlank { email.substringBefore("@").ifBlank { "Google Listener" } }
-        val finalUid = uid.ifBlank { "google_${email.ifBlank { "oauth" }.lowercase().hashCode()}" }
+        val finalUid = uid.ifBlank { "google_${sha256Hex(email.ifBlank { "oauth" }.lowercase()).take(12)}" }
+        TuneMindAccountStorage.activateAccount(appContext, finalUid, email)
 
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, true)
@@ -597,6 +754,7 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             )
             mirrorIdentityToUserPrefs(finalName, email)
         }
+        resetVolatileRecorderCachesForAccountSwitch()
 
         syncProfileFromSupabase()
         lastAuthSuccessWallMs = System.currentTimeMillis()
@@ -861,7 +1019,9 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
 
     fun signOut(removeFromSavedRoster: Boolean = false) {
         val currentEmail = prefs.getString(KEY_USER_EMAIL, "") ?: ""
+        val currentUserId = prefs.getString(KEY_USER_ID, "") ?: ""
         val currentProvider = prefs.getString(KEY_PRIMARY_PROVIDER, "") ?: ""
+        val oldPartition = TuneMindAccountStorage.computePartitionKey(currentUserId, currentEmail)
         if (removeFromSavedRoster && currentEmail.isNotBlank()) {
             val activeKey = "${currentProvider}:${currentEmail.lowercase()}"
             writeSavedAccounts(readSavedAccounts().filterNot {
@@ -886,12 +1046,19 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .remove(KEY_PRIMARY_PROVIDER)
             .apply()
 
+        TuneMindAccountStorage.clearActivePartition(appContext)
+        if (removeFromSavedRoster) {
+            TuneMindAccountStorage.wipeAccountStorage(appContext, oldPartition)
+        }
+        resetVolatileRecorderCachesForAccountSwitch()
         refreshSessionState()
     }
 
     suspend fun deleteProfileAndSignOut(onWipeLocalAppData: suspend () -> Unit) = withContext(Dispatchers.IO) {
-        val accessToken = prefs.getString(KEY_SUPABASE_ACCESS_TOKEN, null)?.takeIf { it.isNotBlank() }
+        val accessToken = ensureFreshAccessToken().ifBlank { null }
         val uid = prefs.getString(KEY_USER_ID, null)?.takeIf { it.isNotBlank() }
+        val email = prefs.getString(KEY_USER_EMAIL, null)?.takeIf { it.isNotBlank() }
+        val partitionToWipe = TuneMindAccountStorage.computePartitionKey(uid, email)
 
         // 1. Delete cloud account, intelligence records & auth user via hardened backend endpoint
         if (accessToken != null) {
@@ -923,7 +1090,17 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             }
         }
 
+        if (!email.isNullOrBlank()) {
+            val digest = sha256Hex(email.lowercase())
+            prefs.edit()
+                .remove("local_vault_pwd_hash_$digest")
+                .remove("local_vault_pwd_salt_$digest")
+                .remove("local_vault_display_name_$digest")
+                .apply()
+        }
+
         onWipeLocalAppData()
+        TuneMindAccountStorage.wipeAccountStorage(appContext, partitionToWipe)
         signOutRemoteAndLocal(removeFromSavedRoster = true)
     }
 

@@ -77,7 +77,7 @@ class ClaudeTelemetryReasoningWorker(
             } else null
 
             // Read vault tracks from SharedPreferences
-            val vaultPrefs = applicationContext.getSharedPreferences("tunemind_vault_prefs", Context.MODE_PRIVATE)
+            val vaultPrefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(applicationContext, "tunemind_vault_prefs")
             val vaultJson = vaultPrefs.getString("vault_items", null) ?: vaultPrefs.getString("vault_tracks_json", null)
             val vaultTracks = mutableListOf<VaultTrack>()
             if (!vaultJson.isNullOrBlank()) {

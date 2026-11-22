@@ -30,8 +30,8 @@ import java.util.concurrent.ConcurrentHashMap
 class CrossAppPlayRecorder private constructor(private val context: Context) {
 
     private val appContext = context.applicationContext
-    private val db: TuneMindDatabase by lazy { TuneMindDatabase.getInstance(appContext) }
-    private val dao: CrossAppLibraryDao by lazy { db.crossAppLibraryDao() }
+    private val db: TuneMindDatabase get() = TuneMindDatabase.getInstance(appContext)
+    private val dao: CrossAppLibraryDao get() = db.crossAppLibraryDao()
     private val visualRepo: UniversalMusicVisualRepository by lazy { UniversalMusicVisualRepository.getInstance(appContext) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -57,6 +57,13 @@ class CrossAppPlayRecorder private constructor(private val context: Context) {
 
     @Volatile
     private var backfillChecked = false
+
+    fun resetInMemoryState() {
+        activeByPackage.clear()
+        lastCountedPlayAtByKey.clear()
+        lastAnyPkgPlayAtByKey.clear()
+        backfillChecked = false
+    }
 
     fun onObservation(obs: PlaybackObservation) {
         if (AgentSettingsStore.isPrivateSessionEnabled(appContext)) return

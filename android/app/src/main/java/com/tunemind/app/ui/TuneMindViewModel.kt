@@ -66,7 +66,7 @@ data class HearingInsightsState(
 )
 
 data class UserProfileState(
-    val name: String = "Guest Listener",
+    val name: String = "TuneMind Listener",
     val email: String = "",
     val tier: String = "Acoustic Intelligence Tier 1",
     val archetype: String = "Adaptive Listener",
@@ -991,7 +991,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadTasteAnchorsFromPrefs(): List<String> {
         val ctx = AppHolder.context ?: return listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop")
-        val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_taste_prefs")
         val raw = prefs.getString("taste_anchors", null)
             ?: return listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop")
         val list = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -1001,7 +1001,7 @@ class TuneMindViewModel : ViewModel() {
     fun saveTasteAnchors(anchors: List<String>) {
         _userTasteAnchors.value = anchors.distinct()
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_taste_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_taste_prefs")
         prefs.edit().putString("taste_anchors", anchors.joinToString(",")).apply()
         triggerChronoDiscovery(forceRefresh = false)
     }
@@ -1029,9 +1029,9 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadUserProfile(): UserProfileState {
         val ctx = AppHolder.context ?: return UserProfileState()
-        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_user_prefs")
         return UserProfileState(
-            name = prefs.getString("user_name", null)?.takeIf { it.isNotBlank() } ?: "Guest Listener",
+            name = prefs.getString("user_name", null)?.takeIf { it.isNotBlank() } ?: "TuneMind Listener",
             email = prefs.getString("user_email", null).orEmpty(),
             tier = prefs.getString("user_tier", "Acoustic Intelligence Tier 1") ?: "Acoustic Intelligence Tier 1",
             archetype = prefs.getString("user_archetype", null)?.takeIf { it.isNotBlank() } ?: "Adaptive Listener",
@@ -1047,7 +1047,7 @@ class TuneMindViewModel : ViewModel() {
         val updated = current.copy(name = name, archetype = archetype)
         _userProfile.value = updated
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_user_prefs")
         prefs.edit()
             .putString("user_name", name)
             .putString("user_archetype", archetype)
@@ -1065,7 +1065,7 @@ class TuneMindViewModel : ViewModel() {
             archetype = resolvedArchetype
         )
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_user_prefs")
         prefs.edit()
             .putString("user_name", resolvedName)
             .putString("user_email", resolvedEmail)
@@ -1085,7 +1085,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadAudioFocusBehavior(): AudioFocusBehavior {
         val ctx = AppHolder.context ?: return AudioFocusBehavior.DUCK
-        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_system_prefs")
         val raw = prefs.getString("audio_focus_behavior", "DUCK")
         return runCatching { AudioFocusBehavior.valueOf(raw ?: "DUCK") }.getOrDefault(AudioFocusBehavior.DUCK)
     }
@@ -1093,20 +1093,20 @@ class TuneMindViewModel : ViewModel() {
     fun setAudioFocusBehavior(behavior: AudioFocusBehavior) {
         _audioFocusBehavior.value = behavior
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_system_prefs")
         prefs.edit().putString("audio_focus_behavior", behavior.name).apply()
     }
 
     private fun loadDecibelSafetyAlert(): Boolean {
         val ctx = AppHolder.context ?: return true
-        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_system_prefs")
         return prefs.getBoolean("decibel_safety_alert", true)
     }
 
     fun setDecibelSafetyAlertEnabled(enabled: Boolean) {
         _isDecibelSafetyAlertEnabled.value = enabled
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_system_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_system_prefs")
         prefs.edit().putBoolean("decibel_safety_alert", enabled).apply()
     }
 
@@ -3359,7 +3359,7 @@ class TuneMindViewModel : ViewModel() {
     private fun loadRestoredVaultMapFromPrefs(): MutableMap<String, Long> {
         cachedRestoredVaultMap?.let { return HashMap(it) }
         val ctx = AppHolder.context ?: return mutableMapOf()
-        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_vault_prefs")
         val raw = prefs.getString("vault_restored_map", null) ?: run {
             cachedRestoredVaultMap = emptyMap()
             return mutableMapOf()
@@ -3388,7 +3388,7 @@ class TuneMindViewModel : ViewModel() {
             .take(120)
             .associate { it.key to it.value }
         cachedRestoredVaultMap = trimmed
-        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_vault_prefs")
         val obj = org.json.JSONObject()
         trimmed.forEach { (k, v) -> obj.put(k, v) }
         prefs.edit().putString("vault_restored_map", obj.toString()).apply()
@@ -3417,7 +3417,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadVaultFromPrefs(): List<VaultTrack> {
         val ctx = AppHolder.context ?: return defaultSeedVault()
-        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_vault_prefs")
         val raw = prefs.getString("vault_items", null) ?: return defaultSeedVault()
         val restoredMap = loadRestoredVaultMapFromPrefs()
         return try {
@@ -3513,7 +3513,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun saveVaultToPrefs(items: List<VaultTrack>) {
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_vault_prefs")
         val array = org.json.JSONArray()
         for (item in items) {
             val obj = org.json.JSONObject().apply {
@@ -3547,7 +3547,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadManualFreshFromPrefs(): List<ManualFreshTrack> {
         val ctx = AppHolder.context ?: return emptyList()
-        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_fresh_prefs")
         val raw = prefs.getString("manual_fresh_items", null) ?: return emptyList()
         return try {
             val array = org.json.JSONArray(raw)
@@ -3585,7 +3585,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun saveManualFreshToPrefs(items: List<ManualFreshTrack>) {
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_fresh_prefs")
         val array = org.json.JSONArray()
         for (item in items) {
             array.put(org.json.JSONObject().apply {
@@ -3604,7 +3604,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadFreshExcludedKeysFromPrefs(): Set<String> {
         val ctx = AppHolder.context ?: return emptySet()
-        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_fresh_prefs")
         val raw = prefs.getString("fresh_excluded_keys", null) ?: return emptySet()
         return try {
             val array = org.json.JSONArray(raw)
@@ -3621,7 +3621,7 @@ class TuneMindViewModel : ViewModel() {
 
     private fun saveFreshExcludedKeysToPrefs(keys: Set<String>) {
         val ctx = AppHolder.context ?: return
-        val prefs = ctx.getSharedPreferences("tunemind_fresh_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_fresh_prefs")
         val array = org.json.JSONArray()
         keys.take(250).forEach { array.put(it) }
         prefs.edit().putString("fresh_excluded_keys", array.toString()).apply()
@@ -4606,12 +4606,12 @@ class TuneMindViewModel : ViewModel() {
 
     private fun loadOnboardingState(): Boolean {
         val ctx = AppHolder.context ?: return true
-        val prefs = ctx.getSharedPreferences("tunemind_agent_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_agent_prefs")
         return prefs.getBoolean("has_completed_onboarding", false)
     }
 
     fun completeOnboarding(context: android.content.Context, preferredProviderId: String) {
-        val prefs = context.getSharedPreferences("tunemind_agent_prefs", android.content.Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_agent_prefs")
         prefs.edit().putBoolean("has_completed_onboarding", true).apply()
         setPreferredProviderId(context, preferredProviderId)
         _hasCompletedOnboarding.value = true
@@ -4651,10 +4651,11 @@ class TuneMindViewModel : ViewModel() {
                 repo?.clear()
             }
             _vaultState.value = emptyList()
+            cachedRestoredVaultMap = null
             val ctx = AppHolder.context
             if (ctx != null) {
-                val prefs = ctx.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE)
-                prefs.edit().clear().apply()
+                com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(ctx, "tunemind_vault_prefs")
+                    .edit().clear().apply()
             }
             refreshRecommendations()
         }
@@ -4671,7 +4672,7 @@ class TuneMindViewModel : ViewModel() {
                 put("user_id", authSession.userId)
                 put("display_name", authSession.displayName.ifBlank { profile.name })
                 put("email", authSession.email.ifBlank { profile.email })
-                put("provider", authSession.primaryProvider.ifBlank { "GUEST" })
+                put("provider", authSession.primaryProvider.ifBlank { "NONE" })
                 put("cross_app_library_tracks", _crossAppLibraryTracks.value.size)
                 put("detected_players", org.json.JSONArray(_detectedPlayerTabs.value.map { it.displayName }))
                 put("archetype", profile.archetype)
@@ -4726,9 +4727,11 @@ class TuneMindViewModel : ViewModel() {
         runCatching { repo?.clear() }
         _vaultState.value = emptyList()
         _userTasteAnchors.value = emptyList()
+        cachedRestoredVaultMap = null
         runCatching {
-            context.getSharedPreferences("tunemind_vault_prefs", android.content.Context.MODE_PRIVATE).edit().clear().apply()
-            context.getSharedPreferences("tunemind_user_prefs", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_vault_prefs").edit().clear().apply()
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_user_prefs").edit().clear().apply()
+            com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, "tunemind_fresh_prefs").edit().clear().apply()
         }
         withContext(Dispatchers.Main) {
             _userProfile.value = loadUserProfile()

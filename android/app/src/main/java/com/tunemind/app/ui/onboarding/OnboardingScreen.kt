@@ -25,7 +25,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Visibility
@@ -59,8 +58,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tunemind.app.R
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.data.auth.TuneMindUserSession
-import com.tunemind.app.ui.components.MagicalSegmentedTabs
-import com.tunemind.app.ui.components.MagicalTabItem
 import com.tunemind.app.ui.components.SoftGlassCard
 import com.tunemind.app.ui.components.StudioAmbientBackground
 import com.tunemind.app.ui.components.StudioHairlineDivider
@@ -218,21 +215,22 @@ private fun AuthLoginStep(
     val savedAccounts by authManager.savedAccountsFlow.collectAsState()
     val remoteAuthError by authManager.lastAuthErrorFlow.collectAsState()
 
-    var isSignUpMode by remember { mutableStateOf(true) }
-    var emailInput by remember { mutableStateOf(session.email) }
+    var isSignUpMode by remember { mutableStateOf(false) }
+    var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var nameInput by remember { mutableStateOf(session.displayName) }
+    var nameInput by remember { mutableStateOf("") }
     var authError by remember { mutableStateOf<String?>(null) }
     var authInfoNotice by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var isSwitchingSavedAccount by remember { mutableStateOf(false) }
 
     var showEmailSheet by remember { mutableStateOf(false) }
     var showGoogleConfirmSheet by remember { mutableStateOf(false) }
     var awaitingGoogleOAuthCallback by remember { mutableStateOf(false) }
     var googleLaunchStartedAtMs by remember { mutableStateOf(0L) }
-    var selectedGoogleEmail by remember { mutableStateOf(session.email.ifBlank { "" }) }
-    var selectedGoogleName by remember { mutableStateOf(session.displayName) }
+    var selectedGoogleEmail by remember { mutableStateOf("") }
+    var selectedGoogleName by remember { mutableStateOf("") }
 
     LaunchedEffect(session.lastAuthCompletedAtMs, awaitingGoogleOAuthCallback) {
         if (awaitingGoogleOAuthCallback && session.lastAuthCompletedAtMs > googleLaunchStartedAtMs) {
@@ -405,22 +403,6 @@ private fun AuthLoginStep(
                 contentScale = ContentScale.Fit
             )
 
-            // Subtle Guest Pass-through in top-right safe area
-            TextButton(
-                onClick = onContinue,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 6.dp, end = 12.dp)
-            ) {
-                Text(
-                    text = "Continue as Guest",
-                    color = Color(0xFF38BDF8),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
             // Soft bottom fade transitioning graphic seamlessly into obsidian container
             Box(
                 modifier = Modifier
@@ -471,7 +453,7 @@ private fun AuthLoginStep(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Sync your music mind with personal listening intelligence.",
+                    text = "Personal listening intelligence, synced to your account.",
                     fontSize = 14.sp,
                     color = Color.White.copy(alpha = 0.68f),
                     textAlign = TextAlign.Center,
@@ -482,74 +464,61 @@ private fun AuthLoginStep(
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (savedAccounts.isNotEmpty()) {
-                    Column(
+                    val primarySaved = savedAccounts.first()
+                    Surface(
+                        shape = RoundedCornerShape(28.dp),
+                        color = Color(0xFF38BDF8).copy(alpha = 0.08f),
+                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.36f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "Saved accounts on this device",
-                            color = Color.White.copy(alpha = 0.56f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        )
-                        savedAccounts.take(2).forEach { saved ->
-                            Surface(
-                                shape = RoundedCornerShape(28.dp),
-                                color = Color(0xFF38BDF8).copy(alpha = 0.08f),
-                                border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.36f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(28.dp))
-                                    .clickable {
-                                        scope.launch {
-                                            authManager.switchToAccount(saved)
-                                            onContinue()
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Continue as ${saved.displayName}",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${saved.email} · ${if (saved.provider == "GOOGLE") "Google" else "Email"}",
-                                            color = Color.White.copy(alpha = 0.58f),
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Text(
-                                        text = "Switch",
-                                        color = Color(0xFF38BDF8),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                            .clip(RoundedCornerShape(28.dp))
+                            .clickable(enabled = !isSwitchingSavedAccount) {
+                                isSwitchingSavedAccount = true
+                                scope.launch {
+                                    authManager.switchToAccount(primarySaved)
+                                    isSwitchingSavedAccount = false
+                                    onContinue()
                                 }
                             }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Continue as ${primarySaved.displayName}",
+                                    color = Color.White,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${primarySaved.email} · ${if (primarySaved.provider == "GOOGLE") "Google" else "Email"}",
+                                    color = Color.White.copy(alpha = 0.58f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                text = if (isSwitchingSavedAccount) "Opening…" else "Switch",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
 
-                // Button 1: Continue with Google (TuneMind Account)
+                // Primary CTA 1: Continue with Google (1-tap Login or Auto-Create Account)
                 Button(
                     onClick = {
                         authError = null
@@ -586,13 +555,6 @@ private fun AuthLoginStep(
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(18.dp)
                             )
-                        } else if (session.isGoogleConnected) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(20.dp)
-                            )
                         } else {
                             Image(
                                 painter = painterResource(id = R.drawable.ic_google_logo),
@@ -602,10 +564,10 @@ private fun AuthLoginStep(
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = when {
-                                awaitingGoogleOAuthCallback -> "Finishing Google Sign-In…"
-                                session.isGoogleConnected -> "Google · ${session.email.ifBlank { session.displayName }}"
-                                else -> "Continue with Google"
+                            text = if (awaitingGoogleOAuthCallback) {
+                                "Finishing Google Sign-In…"
+                            } else {
+                                "Continue with Google"
                             },
                             color = Color(0xFF0D0D0D),
                             fontSize = 15.sp,
@@ -644,7 +606,7 @@ private fun AuthLoginStep(
                     )
                 }
 
-                // Button 2: Continue with Email (TuneMind Account)
+                // Primary CTA 2: Continue with Email (defaults to Log In)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -653,7 +615,7 @@ private fun AuthLoginStep(
                         .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(28.dp))
                         .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(28.dp))
                         .clickable {
-                            isSignUpMode = true
+                            isSignUpMode = false
                             authError = null
                             authInfoNotice = null
                             showEmailSheet = true
@@ -679,50 +641,33 @@ private fun AuthLoginStep(
                         )
                     }
                 }
-
-                if (session.isGoogleConnected || session.primaryProvider == "EMAIL") {
-                    Button(
-                        onClick = onContinue,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF38BDF8),
-                            contentColor = Color(0xFF09090B)
-                        )
-                    ) {
-                        Text(
-                            text = "Enter TuneMind",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             }
 
-            // Bottom-most Log In Action & Subtle Legal Link
+            // Bottom Footer: "Don't have an account? Create one" + Subtle Legal Links
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)
             ) {
                 Row(
-                    modifier = Modifier.clickable {
-                        isSignUpMode = false
-                        authError = null
-                        authInfoNotice = null
-                        showEmailSheet = true
-                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            isSignUpMode = true
+                            authError = null
+                            authInfoNotice = null
+                            showEmailSheet = true
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Already have an account? ",
-                        color = Color.White.copy(alpha = 0.56f),
+                        text = "Don't have an account? ",
+                        color = Color.White.copy(alpha = 0.62f),
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Log In",
+                        text = "Create one",
                         color = Color(0xFF38BDF8),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -783,23 +728,20 @@ private fun AuthLoginStep(
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Text(
-                    text = if (isSignUpMode) "Create your TuneMind" else "Welcome back",
+                    text = if (isSignUpMode) "Create your account" else "Log in to TuneMind",
                     color = Color(0xFFF8FAFC),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold
                 )
-
-                MagicalSegmentedTabs(
-                    tabs = listOf(
-                        MagicalTabItem("Create Account", Color(0xFF38BDF8)),
-                        MagicalTabItem("Log In", Color(0xFFA78BFA))
-                    ),
-                    selectedIndex = if (isSignUpMode) 0 else 1,
-                    onSelectTab = { idx ->
-                        isSignUpMode = idx == 0
-                        authError = null
-                        authInfoNotice = null
-                    }
+                Text(
+                    text = if (isSignUpMode) {
+                        "Your listening intelligence & history stay backed up privately to this account."
+                    } else {
+                        "Welcome back. Sign in to restore your playlists, history, and stats."
+                    },
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
 
                 OutlinedTextField(
@@ -939,6 +881,34 @@ private fun AuthLoginStep(
                         },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isSignUpMode) "Already have an account? " else "Don't have an account? ",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 13.5.sp
+                    )
+                    Text(
+                        text = if (isSignUpMode) "Log in" else "Create one",
+                        color = Color(0xFF38BDF8),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = !isSubmitting) {
+                                isSignUpMode = !isSignUpMode
+                                authError = null
+                                authInfoNotice = null
+                            }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
             }

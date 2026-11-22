@@ -66,18 +66,33 @@ abstract class TuneMindDatabase : RoomDatabase() {
     abstract fun tuneMindPlaylistDao(): TuneMindPlaylistDao
 
     companion object {
-        private const val DATABASE_NAME = "tunemind.db"
-
         @Volatile
         private var INSTANCE: TuneMindDatabase? = null
 
+        @Volatile
+        private var currentDatabaseName: String? = null
+
         fun getInstance(context: Context): TuneMindDatabase {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: try {
+            val appCtx = context.applicationContext
+            val targetDbName = com.tunemind.app.data.auth.TuneMindAccountStorage.resolveDatabaseName(appCtx)
+            val existing = INSTANCE
+            if (existing != null && currentDatabaseName == targetDbName) {
+                return existing
+            }
+            return synchronized(this) {
+                val syncedExisting = INSTANCE
+                if (syncedExisting != null && currentDatabaseName == targetDbName) {
+                    return@synchronized syncedExisting
+                }
+                if (syncedExisting != null && currentDatabaseName != targetDbName) {
+                    runCatching { syncedExisting.close() }
+                    INSTANCE = null
+                }
+                val built = try {
                     Room.databaseBuilder(
-                        context.applicationContext,
+                        appCtx,
                         TuneMindDatabase::class.java,
-                        DATABASE_NAME,
+                        targetDbName,
                     ).addMigrations(
                         MIGRATION_1_2,
                         MIGRATION_2_3,
@@ -101,26 +116,34 @@ abstract class TuneMindDatabase : RoomDatabase() {
                     )
                         .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                         .fallbackToDestructiveMigration()
-                        .build().also { INSTANCE = it }
+                        .build()
                 } catch (e: Throwable) {
                     android.util.Log.e("TuneMindDB", "Database initialization fallback triggered: ${e.message}")
                     Room.databaseBuilder(
-                        context.applicationContext,
+                        appCtx,
                         TuneMindDatabase::class.java,
-                        DATABASE_NAME,
+                        targetDbName,
                     )
                         .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                         .fallbackToDestructiveMigration()
-                        .build().also { INSTANCE = it }
+                        .build()
                 }
+                currentDatabaseName = targetDbName
+                INSTANCE = built
+                built
             }
         }
 
         fun resetDatabase(context: Context) {
             try {
-                INSTANCE?.close()
-                INSTANCE = null
-                context.deleteDatabase(DATABASE_NAME)
+                val appCtx = context.applicationContext
+                val dbName = com.tunemind.app.data.auth.TuneMindAccountStorage.resolveDatabaseName(appCtx)
+                synchronized(this) {
+                    INSTANCE?.close()
+                    INSTANCE = null
+                    currentDatabaseName = null
+                    appCtx.deleteDatabase(dbName)
+                }
             } catch (e: Exception) {
                 android.util.Log.e("TuneMindDB", "Error resetting database", e)
             }

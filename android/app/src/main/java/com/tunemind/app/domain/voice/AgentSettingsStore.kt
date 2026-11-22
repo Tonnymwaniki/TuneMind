@@ -99,7 +99,12 @@ object AgentSettingsStore {
     val autoReturnAfterSpotifyWakeEnabled: StateFlow<Boolean> = _autoReturnAfterSpotifyWakeEnabled.asStateFlow()
 
     private fun prefs(context: Context): SharedPreferences {
-        return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_NAME)
+    }
+
+    fun reloadForActiveAccount(context: Context) {
+        initialized = false
+        ensureLoaded(context)
     }
 
     fun ensureLoaded(context: Context) {

@@ -546,7 +546,7 @@ object TuneMindAutonomousBrain {
         context: Context,
         tracks: List<TrackMemoryEntry>
     ): Map<String, TrackLlmTag> = withContext(Dispatchers.IO) {
-        val prefs = context.getSharedPreferences(PREFS_TAGS, Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_TAGS)
         val result = mutableMapOf<String, TrackLlmTag>()
 
         val untagged = mutableListOf<TrackMemoryEntry>()
