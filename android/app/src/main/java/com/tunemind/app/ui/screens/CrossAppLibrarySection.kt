@@ -23,13 +23,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.LibraryMusic
-import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Sync
@@ -61,8 +59,7 @@ import com.tunemind.app.data.local.DetectedPlayerTab
 import com.tunemind.app.data.local.TuneMindPlaylistWithTracks
 import com.tunemind.app.provider.SpotifyMusicProvider
 import com.tunemind.app.provider.SpotifyPremiumConnectManager
-import com.tunemind.app.ui.components.LayeredSongArtistBadge
-import com.tunemind.app.ui.components.rememberResolvedTrackMedia
+import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -645,15 +642,9 @@ fun CrossAppLibrarySection(
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 110.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(bottom = 110.dp)
                 ) {
                     items(visibleTracks, key = { it.canonicalTrackKey }) { track ->
-                        val resolvedVisual = rememberResolvedTrackMedia(
-                            title = track.title,
-                            artist = track.artist,
-                            fallbackAlbumArtUrl = track.albumArtUrl
-                        )
                         val isPlaying = isTrackCurrentlyPlaying(track.title, track.artist)
                         val (inVault, freshness) = resolveTrackVaultStatus(track.title, track.artist)
                         val playerPkg = if (selectedTabKey != "ALL" && selectedTabKey != "LIKED") {
@@ -662,7 +653,7 @@ fun CrossAppLibrarySection(
                             track.primarySourcePackage
                         }
                         val playerLabel = CrossAppPlayRecorder.resolveFriendlyPlayerName(playerPkg)
-                        val accent = if (isPlaying) Color(0xFF1DB954) else playerAccentColor(playerPkg)
+                        val accent = if (isPlaying) Color(0xFF10B981) else playerAccentColor(playerPkg)
 
                         // Exact verified play count resolved across permanent relational Track Cards & Play Ledger
                         val resolvedPlays = resolvePlayCount(
@@ -672,113 +663,45 @@ fun CrossAppLibrarySection(
                         )
                         val truePlayCount = maxOf(resolvedPlays, track.playCount)
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(
-                                    if (isPlaying) accent.copy(alpha = 0.14f) else Color(0xFF0E1422)
-                                )
-                                .border(
-                                    width = if (isPlaying) 1.2.dp else 1.dp,
-                                    color = if (isPlaying) accent.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.07f),
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .clickable {
-                                    onPlayTrack(
-                                        track.title,
-                                        track.artist,
-                                        playerPkg.takeIf { it != "unknown_player" }
-                                    )
-                                }
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            LayeredSongArtistBadge(
-                                albumArtUrl = resolvedVisual.albumArtUrl ?: track.albumArtUrl,
-                                artistImageUrl = resolvedVisual.artistImageUrl,
-                                title = track.title,
-                                artist = track.artist,
-                                accentColor = accent,
-                                size = 48.dp
-                            )
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = track.title,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${track.artist} · ${formatTruePlayCount(truePlayCount)}",
-                                    color = Color.White.copy(alpha = 0.68f),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(3.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                        TuneMindTrackCard(
+                            title = track.title,
+                            artist = track.artist,
+                            subtitle = track.genre.takeIf { it.isNotBlank() && it != "Music" },
+                            appLabel = playerLabel,
+                            playCount = truePlayCount,
+                            showUnplayedLabel = true,
+                            zeroPlayLabel = "Not played yet",
+                            isCurrentlyPlaying = isPlaying,
+                            freshnessPercent = if (inVault || freshness > 0) freshness else null,
+                            isCoolingDown = inVault,
+                            accentColor = accent,
+                            spotifyUri = track.trackId.takeIf { it.startsWith("spotify:track:") },
+                            albumArtUrl = track.albumArtUrl,
+                            trackId = track.trackId,
+                            trailingActions = {
+                                IconButton(
+                                    onClick = { onToggleLike(track.canonicalTrackKey, !track.isLiked) },
+                                    modifier = Modifier.size(32.dp)
                                 ) {
-                                    Text(
-                                        text = playerLabel,
-                                        color = accent,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(accent.copy(alpha = 0.14f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    Icon(
+                                        imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        contentDescription = "Favorite",
+                                        tint = if (track.isLiked) Color(0xFFFB7185) else Color.White.copy(alpha = 0.45f),
+                                        modifier = Modifier.size(18.dp)
                                     )
-                                    if (track.genre.isNotBlank() && track.genre != "Music") {
-                                        Text(
-                                            text = track.genre,
-                                            color = Color.White.copy(alpha = 0.52f),
-                                            fontSize = 10.5.sp,
-                                            maxLines = 1
-                                        )
-                                    }
-                                    if (inVault) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Lock,
-                                            contentDescription = "In Resting Vault ($freshness% fresh)",
-                                            tint = Color(0xFFF59E0B),
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
                                 }
-                            }
-
-                            IconButton(
-                                onClick = { onToggleLike(track.canonicalTrackKey, !track.isLiked) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (track.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                    contentDescription = "Favorite",
-                                    tint = if (track.isLiked) Color(0xFFFB7185) else Color.White.copy(alpha = 0.45f),
-                                    modifier = Modifier.size(18.dp)
+                            },
+                            onPlayClick = {
+                                onPlayTrack(
+                                    track.title,
+                                    track.artist,
+                                    playerPkg.takeIf { it != "unknown_player" }
                                 )
+                            },
+                            onSyncClick = {
+                                onAskAgentAboutTrack(track.title, track.artist)
                             }
-
-                            IconButton(
-                                onClick = { onAskAgentAboutTrack(track.title, track.artist) },
-                                modifier = Modifier.size(34.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.AutoAwesome,
-                                    contentDescription = "Ask TuneMind",
-                                    tint = theme.primaryAccent.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             }

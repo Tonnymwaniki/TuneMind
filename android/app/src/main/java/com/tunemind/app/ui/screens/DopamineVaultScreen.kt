@@ -1173,86 +1173,72 @@ private fun ManualVaultFreshPickerSheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(filtered, key = { "${it.title}|${it.artist}|${it.trackId}" }) { item ->
                     val status = resolveTrackVaultStatus(item.title, item.artist, item.spotifyUri, item.trackId)
                     val plays = resolvePlayCount(item.title, item.artist, item.spotifyUri)
-                    val playsLabel = "$plays ${if (plays == 1) "play" else "plays"}"
                     val activeInTarget = if (isRestingMode) status.isInVault || status.isCoolingDown else status.isInFresh && !status.isCoolingDown
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .border(
-                                width = 1.dp,
-                                color = if (activeInTarget) accent.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.07f),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.title,
-                                color = Color(0xFFFAFAFA),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${item.artist} · $playsLabel · ${status.freshnessPercent}% fresh",
-                                color = Color.White.copy(alpha = 0.58f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(100.dp))
-                                .background(
-                                    if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.16f)
-                                    else accent.copy(alpha = 0.18f)
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.55f) else accent.copy(alpha = 0.55f),
-                                    shape = RoundedCornerShape(100.dp)
-                                )
-                                .clickable {
-                                    if (isRestingMode) {
-                                        if (status.isInVault && status.vaultId != null) {
-                                            onRestoreVaultTrack(status.vaultId)
-                                        } else {
-                                            onQuarantineTrack(item.title, item.artist)
-                                        }
-                                    } else {
-                                        if (activeInTarget) {
-                                            onRemoveFromFresh(item.title, item.artist, item.spotifyUri, item.trackId)
-                                        } else {
-                                            onAddToFresh(item.title, item.artist, item.sourcePackage, item.spotifyUri, item.trackId, item.albumArtUrl)
-                                        }
-                                    }
-                                }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = if (isRestingMode) {
-                                    if (activeInTarget) "In Vault · Remove" else "+ Rest"
-                                } else {
-                                    if (activeInTarget) "In Fresh · Remove" else "+ Fresh"
-                                },
-                                color = if (activeInTarget) Color(0xFF34D399) else accent,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                    val toggleTarget = {
+                        if (isRestingMode) {
+                            if (status.isInVault && status.vaultId != null) {
+                                onRestoreVaultTrack(status.vaultId)
+                            } else {
+                                onQuarantineTrack(item.title, item.artist)
+                            }
+                        } else {
+                            if (activeInTarget) {
+                                onRemoveFromFresh(item.title, item.artist, item.spotifyUri, item.trackId)
+                            } else {
+                                onAddToFresh(item.title, item.artist, item.sourcePackage, item.spotifyUri, item.trackId, item.albumArtUrl)
+                            }
                         }
                     }
+                    TuneMindTrackCard(
+                        title = item.title,
+                        artist = item.artist,
+                        playCount = plays,
+                        showUnplayedLabel = true,
+                        isCurrentlyPlaying = false,
+                        freshnessPercent = status.freshnessPercent,
+                        isCoolingDown = status.isCoolingDown,
+                        cooldownRemainingLabel = status.cooldownRemainingLabel,
+                        recoveryPercent = status.recoveryPercent.takeIf { status.isInVault },
+                        accentColor = accent,
+                        spotifyUri = item.spotifyUri,
+                        albumArtUrl = item.albumArtUrl,
+                        trackId = item.trackId,
+                        trailingActions = {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(
+                                        if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.16f)
+                                        else accent.copy(alpha = 0.18f)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (activeInTarget) Color(0xFF10B981).copy(alpha = 0.55f) else accent.copy(alpha = 0.55f),
+                                        shape = RoundedCornerShape(100.dp)
+                                    )
+                                    .clickable { toggleTarget() }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = if (isRestingMode) {
+                                        if (activeInTarget) "In Vault · Remove" else "+ Rest"
+                                    } else {
+                                        if (activeInTarget) "In Fresh · Remove" else "+ Fresh"
+                                    },
+                                    color = if (activeInTarget) Color(0xFF34D399) else accent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        },
+                        onPlayClick = toggleTarget,
+                        onCardClick = toggleTarget
+                    )
                 }
             }
         }

@@ -20,14 +20,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine
 import com.tunemind.app.data.local.CrossAppPlayRecorder
 import com.tunemind.app.data.local.CrossAppTrackEntity
@@ -37,7 +34,7 @@ import com.tunemind.app.domain.memory.ListeningPlayDeduplicator
 import com.tunemind.app.provider.SpotifyPremiumConnectManager
 import com.tunemind.app.ui.TuneMindViewModel
 import com.tunemind.app.ui.components.StudioHairlineDivider
-import com.tunemind.app.ui.components.rememberResolvedTrackMedia
+import com.tunemind.app.ui.components.TuneMindTrackCard
 import com.tunemind.app.ui.theme.LocalAdaptiveTheme
 
 private fun formatPlaylistPlayCount(plays: Int): String = when {
@@ -230,6 +227,7 @@ fun TuneMindPlaylistsScreen(
                     playlistWithTracks = activePlaylist,
                     nowPlayingTitle = nowPlaying?.title,
                     nowPlayingArtist = nowPlaying?.artist,
+                    nowPlayingIsPlaying = nowPlaying?.isPlaying == true,
                     selectedTargetPlayer = selectedTargetPlayer,
                     accentColor = if (isSyncedFromSpotify) Color(0xFF1DB954) else colors.primaryAccent,
                     cardSurface = colors.cardSurface,
@@ -779,6 +777,7 @@ private fun PlaylistDetailContent(
     playlistWithTracks: TuneMindPlaylistWithTracks,
     nowPlayingTitle: String?,
     nowPlayingArtist: String?,
+    nowPlayingIsPlaying: Boolean,
     selectedTargetPlayer: String,
     accentColor: Color,
     cardSurface: Color,
@@ -795,11 +794,15 @@ private fun PlaylistDetailContent(
     onPlayTrack: (title: String, artist: String, spotifyUri: String?, sourcePackage: String) -> Unit,
     onRemoveTrack: (entryId: String) -> Unit
 ) {
-    val context = LocalContext.current
+    val dedupedTracks = remember(playlistWithTracks.tracks) {
+        playlistWithTracks.tracks.distinctBy {
+            ListeningPlayDeduplicator.canonicalTrackKey(it.title, it.artist)
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -980,7 +983,7 @@ private fun PlaylistDetailContent(
             }
         }
 
-        if (playlistWithTracks.tracks.isEmpty()) {
+        if (dedupedTracks.isEmpty()) {
             item {
                 Column(
                     modifier = Modifier
@@ -1008,124 +1011,61 @@ private fun PlaylistDetailContent(
                 }
             }
         } else {
-            itemsIndexed(playlistWithTracks.tracks, key = { _, tr -> tr.entryId }) { idx, tr ->
-                val visuals = rememberResolvedTrackMedia(
-                    title = tr.title,
-                    artist = tr.artist,
-                    spotifyUri = tr.externalUri.takeIf { it.isNotBlank() }
-                )
+            itemsIndexed(dedupedTracks, key = { _, tr -> tr.entryId }) { idx, tr ->
+                val extUri = tr.externalUri.takeIf { it.isNotBlank() }
                 val truePlays = resolvePlayCount(
                     tr.title,
                     tr.artist,
-                    tr.externalUri.takeIf { it.isNotBlank() },
+                    extUri,
                     tr.trackId.takeIf { it.isNotBlank() }
                 )
                 val sourceAppLabel = ListeningPlayDeduplicator.resolveAppDisplayName(
                     tr.sourcePlayer.ifBlank { selectedTargetPlayer }
                 )
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = cardSurface.copy(alpha = 0.88f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            onPlayTrack(
-                                tr.title,
-                                tr.artist,
-                                tr.externalUri.takeIf { it.isNotBlank() },
-                                tr.sourcePlayer.ifBlank { selectedTargetPlayer }
-                            )
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "${idx + 1}",
-                            color = Color.White.copy(alpha = 0.45f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.width(20.dp)
-                        )
-                        if (!visuals.albumArtUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context).data(visuals.albumArtUrl).crossfade(true).build(),
-                                contentDescription = tr.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(accentColor.copy(alpha = 0.14f)),
-                                contentAlignment = Alignment.Center
+                val isPlaying = nowPlayingIsPlaying && ListeningPlayDeduplicator.isSameTrack(
+                    nowPlayingTitle,
+                    nowPlayingArtist,
+                    null,
+                    tr.title,
+                    tr.artist,
+                    extUri
+                )
+                TuneMindTrackCard(
+                    title = tr.title,
+                    artist = tr.artist.ifBlank { "Music Track" },
+                    appLabel = sourceAppLabel,
+                    playCount = truePlays,
+                    showUnplayedLabel = true,
+                    zeroPlayLabel = "Not played yet",
+                    isCurrentlyPlaying = isPlaying,
+                    accentColor = accentColor,
+                    leadingIndex = idx + 1,
+                    spotifyUri = extUri,
+                    trackId = tr.trackId,
+                    trailingActions = if (!isSyncedFromSpotify) {
+                        {
+                            IconButton(
+                                onClick = { onRemoveTrack(tr.entryId) },
+                                modifier = Modifier.size(30.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.MusicNote,
-                                    contentDescription = null,
-                                    tint = accentColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = tr.title,
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${tr.artist.ifBlank { "Music Track" }} · ${formatPlaylistPlayCount(truePlays)}",
-                                color = Color.White.copy(alpha = 0.62f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = sourceAppLabel,
-                                color = accentColor.copy(alpha = 0.9f),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
-
-                        if (!isSyncedFromSpotify) {
-                            IconButton(onClick = { onRemoveTrack(tr.entryId) }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
                                     contentDescription = "Remove from playlist",
-                                    tint = Color.White.copy(alpha = 0.45f),
+                                    tint = Color.White.copy(alpha = 0.48f),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = "Play song",
-                                tint = accentColor,
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
+                    } else null,
+                    onPlayClick = {
+                        onPlayTrack(
+                            tr.title,
+                            tr.artist,
+                            extUri,
+                            tr.sourcePlayer.ifBlank { selectedTargetPlayer }
+                        )
                     }
-                }
+                )
             }
         }
     }
@@ -1275,8 +1215,7 @@ private fun AddSongsToPlaylistSheet(
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(bottom = 28.dp)
                 ) {
                     items(filteredTracks, key = { it.canonicalTrackKey }) { track ->
                         val dedupKey = ListeningPlayDeduplicator.canonicalTrackKey(track.title, track.artist)
@@ -1291,91 +1230,32 @@ private fun AddSongsToPlaylistSheet(
                             ),
                             track.playCount
                         )
-                        val visuals = rememberResolvedTrackMedia(
+                        val toggleSelection = {
+                            if (isAdded && existingEntry != null) {
+                                onRemoveEntry(existingEntry.entryId)
+                            } else {
+                                onAddTrack(track)
+                            }
+                        }
+                        TuneMindTrackCard(
                             title = track.title,
                             artist = track.artist,
-                            fallbackAlbumArtUrl = track.albumArtUrl
-                        )
-
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isAdded) accentColor.copy(alpha = 0.12f) else Color(0xFF0E1422),
-                            border = BorderStroke(
-                                1.dp,
-                                if (isAdded) accentColor.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable {
-                                    if (isAdded && existingEntry != null) {
-                                        onRemoveEntry(existingEntry.entryId)
-                                    } else {
-                                        onAddTrack(track)
-                                    }
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                val art = visuals.albumArtUrl ?: track.albumArtUrl
-                                if (!art.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context).data(art).crossfade(true).build(),
-                                        contentDescription = track.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(accentColor.copy(alpha = 0.14f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.MusicNote,
-                                            contentDescription = null,
-                                            tint = accentColor,
-                                            modifier = Modifier.size(19.dp)
-                                        )
-                                    }
-                                }
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = track.title,
-                                        color = Color.White,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${track.artist} · ${formatPlaylistPlayCount(truePlays)}",
-                                        color = Color.White.copy(alpha = 0.62f),
-                                        fontSize = 11.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = CrossAppPlayRecorder.resolveFriendlyPlayerName(track.primarySourcePackage),
-                                        color = accentColor.copy(alpha = 0.85f),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
+                            appLabel = CrossAppPlayRecorder.resolveFriendlyPlayerName(track.primarySourcePackage),
+                            playCount = truePlays,
+                            showUnplayedLabel = true,
+                            zeroPlayLabel = "Not played yet",
+                            isCurrentlyPlaying = false,
+                            accentColor = accentColor,
+                            spotifyUri = track.trackId.takeIf { it.startsWith("spotify:track:") },
+                            albumArtUrl = track.albumArtUrl,
+                            trackId = track.trackId,
+                            trailingActions = {
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (isAdded) accentColor else Color.White.copy(alpha = 0.1f)
+                                    color = if (isAdded) accentColor else Color.White.copy(alpha = 0.1f),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { toggleSelection() }
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1396,8 +1276,10 @@ private fun AddSongsToPlaylistSheet(
                                         )
                                     }
                                 }
-                            }
-                        }
+                            },
+                            onPlayClick = toggleSelection,
+                            onCardClick = toggleSelection
+                        )
                     }
                 }
             }
