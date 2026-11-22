@@ -32,8 +32,8 @@ import com.tunemind.app.data.local.CrossAppPlayRecorder
 import com.tunemind.app.data.local.CrossAppTasteShiftSummary
 import com.tunemind.app.domain.memory.WindowedListeningStats
 import com.tunemind.app.domain.model.TrackIdentityResolver
-import com.tunemind.app.domain.vault.VaultTrack
 import com.tunemind.app.ui.NowPlayingObservation
+import com.tunemind.app.ui.VaultTrack
 import com.tunemind.app.ui.screens.formatListeningDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -275,7 +275,7 @@ object ViralShareCardEngine {
             topTrackPlays
         }
         val vibeSourceApp = if (liveTitle != null) {
-            CrossAppPlayRecorder.resolveFriendlyPlayerName(nowPlaying?.sourcePackage)
+            CrossAppPlayRecorder.resolveFriendlyPlayerName(nowPlaying?.sourcePackage.orEmpty())
         } else {
             topTrack?.primaryAppName ?: "TuneMind"
         }
