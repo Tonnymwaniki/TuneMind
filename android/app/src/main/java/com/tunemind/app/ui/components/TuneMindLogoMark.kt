@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -27,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.airbnb.lottie.RenderMode
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
@@ -61,7 +63,25 @@ fun TuneMindLogoMark(
         1.0f
     }
 
-    val shape = RoundedCornerShape(size * 0.24f)
+    val shape = remember(size) { RoundedCornerShape(size * 0.24f) }
+    val glowBrush = remember {
+        Brush.radialGradient(
+            colors = listOf(
+                Color(0xFF22D3EE).copy(alpha = 0.14f),
+                Color(0xFF6366F1).copy(alpha = 0.10f),
+                Color.Transparent
+            )
+        )
+    }
+    val borderBrush = remember {
+        Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF22D3EE).copy(alpha = 0.36f),
+                Color(0xFF6366F1).copy(alpha = 0.34f),
+                Color(0xFF2DD4BF).copy(alpha = 0.30f)
+            )
+        )
+    }
 
     Box(
         modifier = modifier.size(size),
@@ -74,13 +94,7 @@ fun TuneMindLogoMark(
                     .scale(glowPulse)
             ) {
                 drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF22D3EE).copy(alpha = 0.14f),
-                            Color(0xFF6366F1).copy(alpha = 0.10f),
-                            Color.Transparent
-                        )
-                    ),
+                    brush = glowBrush,
                     radius = this.size.minDimension * 0.62f
                 )
             }
@@ -93,13 +107,7 @@ fun TuneMindLogoMark(
                 .background(Color(0xFF07020F))
                 .border(
                     width = 1.dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF22D3EE).copy(alpha = 0.36f),
-                            Color(0xFF6366F1).copy(alpha = 0.34f),
-                            Color(0xFF2DD4BF).copy(alpha = 0.30f)
-                        )
-                    ),
+                    brush = borderBrush,
                     shape = shape
                 )
         } else {
@@ -140,6 +148,7 @@ fun TuneMindAiIntelligenceLoop(
         LottieAnimation(
             composition = composition,
             progress = { progress },
+            renderMode = RenderMode.HARDWARE,
             modifier = modifier.alpha(alpha)
         )
     }

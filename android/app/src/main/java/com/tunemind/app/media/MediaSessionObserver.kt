@@ -6,7 +6,8 @@ import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
+import android.os.Process
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
@@ -38,8 +39,13 @@ class MediaSessionObserver(
     private val onObservation: suspend (PlaybackObservation) -> Unit,
 ) {
     private val manager = service.getSystemService(MediaSessionManager::class.java)
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val handlerLock = Any()
+    @Volatile
+    private var callbackThread: HandlerThread? = null
+    @Volatile
+    private var callbackHandler: Handler? = null
     private val adapter = GenericMediaAdapter()
+    private val controllersLock = Any()
     private val controllers = mutableMapOf<MediaSession.Token, Entry>()
     @Volatile
     private var orderedTokens: List<MediaSession.Token> = emptyList()
@@ -47,10 +53,33 @@ class MediaSessionObserver(
     private val deduplicator = CallbackDeduplicator()
     @Volatile
     private var started = false
+    @Volatile
+    private var lastRefreshElapsedMs = 0L
 
-    private fun orderedEntries(): List<Entry> {
+    private fun ensureCallbackHandler(): Handler {
+        val existing = callbackHandler
+        val thread = callbackThread
+        if (existing != null && thread?.isAlive == true) return existing
+        return synchronized(handlerLock) {
+            val recheckHandler = callbackHandler
+            val recheckThread = callbackThread
+            if (recheckHandler != null && recheckThread?.isAlive == true) {
+                recheckHandler
+            } else {
+                val newThread = HandlerThread("TuneMindMediaObserver", Process.THREAD_PRIORITY_BACKGROUND).apply {
+                    start()
+                }
+                val newHandler = Handler(newThread.looper)
+                callbackThread = newThread
+                callbackHandler = newHandler
+                newHandler
+            }
+        }
+    }
+
+    private fun orderedEntries(): List<Entry> = synchronized(controllersLock) {
         val tokenOrder = orderedTokens
-        if (tokenOrder.isEmpty()) return controllers.values.toList()
+        if (tokenOrder.isEmpty()) return@synchronized controllers.values.toList()
         val seen = HashSet<MediaSession.Token>(controllers.size)
         val ordered = ArrayList<Entry>(controllers.size)
         for (tok in tokenOrder) {
@@ -64,13 +93,14 @@ class MediaSessionObserver(
                 ordered.add(entry)
             }
         }
-        return ordered
+        ordered
     }
 
     /** True when callbacks are registered and media-session access is active. */
     val isStarted: Boolean get() = started
 
     private val activeSessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { active ->
+        lastRefreshElapsedMs = SystemClock.elapsedRealtime()
         reconcile(active.orEmpty())
     }
 
@@ -88,12 +118,14 @@ class MediaSessionObserver(
         diagnosticStatus = "Checking active media sessions…"
         started = true
         return try {
+            val bgHandler = ensureCallbackHandler()
             mgr.addOnActiveSessionsChangedListener(
                 activeSessionsListener,
                 ComponentName(service, TuneMindListenerService::class.java),
-                mainHandler,
+                bgHandler,
             )
             val active = mgr.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
+            lastRefreshElapsedMs = SystemClock.elapsedRealtime()
             diagnosticStatus = "Watching ${active.size} active media session(s)"
             Log.i(TAG, "Observer started with ${active.size} active media sessions")
             reconcile(active)
@@ -123,17 +155,26 @@ class MediaSessionObserver(
         return false
     }
 
+    private fun refreshIfStale() {
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = now - lastRefreshElapsedMs
+        val isEmpty = synchronized(controllersLock) { controllers.isEmpty() }
+        if (!started || (isEmpty && elapsed >= REFRESH_COOLDOWN_MS) || elapsed >= STALE_REFRESH_MS) {
+            refreshSessions(force = false)
+        }
+    }
+
     fun isPlaying(targetPackage: String? = null): Boolean {
-        refreshSessions()
-        return controllers.values.any { entry ->
+        refreshIfStale()
+        return orderedEntries().any { entry ->
             matchesTargetPackage(sourcePackage(entry.controller), targetPackage) &&
                 entry.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         }
     }
 
     fun isPlayingOrBuffering(targetPackage: String? = null): Boolean {
-        refreshSessions()
-        return controllers.values.any { entry ->
+        refreshIfStale()
+        return orderedEntries().any { entry ->
             val pkgOk = matchesTargetPackage(sourcePackage(entry.controller), targetPackage)
             val state = entry.controller.playbackState?.state
             pkgOk && (
@@ -145,14 +186,14 @@ class MediaSessionObserver(
     }
 
     fun hasActiveSession(targetPackage: String? = null): Boolean {
-        refreshSessions()
-        return controllers.values.any { entry ->
+        refreshIfStale()
+        return orderedEntries().any { entry ->
             matchesTargetPackage(sourcePackage(entry.controller), targetPackage)
         }
     }
 
     fun getActiveTitle(targetPackage: String? = null): String? {
-        refreshSessions()
+        refreshIfStale()
         val entries = orderedEntries()
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
         val entry = if (cleanPkg != null) {
@@ -176,7 +217,7 @@ class MediaSessionObserver(
      * its end even when the phone screen is off.
      */
     fun getActivePlaybackSnapshot(targetPackage: String? = null): ActivePlaybackSnapshot? {
-        refreshSessions()
+        refreshIfStale()
         val entries = orderedEntries()
         if (entries.isEmpty()) return null
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
@@ -246,7 +287,7 @@ class MediaSessionObserver(
     }
 
     private fun resolveTargetController(targetPackage: String? = null): Entry? {
-        refreshSessions()
+        refreshIfStale()
         val entries = orderedEntries()
         if (entries.isEmpty()) return null
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
@@ -306,10 +347,10 @@ class MediaSessionObserver(
     }
 
     fun pause(targetPackage: String? = null): Boolean {
-        refreshSessions()
+        refreshIfStale()
         var dispatched = false
         val cleanPkg = targetPackage?.trim()?.takeIf { it.isNotBlank() && it != "*" }
-        controllers.values.forEach { entry ->
+        orderedEntries().forEach { entry ->
             val pkg = sourcePackage(entry.controller)
             val isTarget = cleanPkg == null ||
                 (pkg != null && (pkg.equals(cleanPkg, ignoreCase = true) || pkg.contains(cleanPkg, ignoreCase = true)))
@@ -430,13 +471,18 @@ class MediaSessionObserver(
         }
     }
 
-    fun refreshSessions() {
+    fun refreshSessions(force: Boolean = false) {
         if (!started) {
             start()
             return
         }
+        val now = SystemClock.elapsedRealtime()
+        if (!force && (now - lastRefreshElapsedMs) < REFRESH_COOLDOWN_MS) {
+            return
+        }
+        lastRefreshElapsedMs = now
         try {
-            val active = manager.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
+            val active = manager?.getActiveSessions(ComponentName(service, TuneMindListenerService::class.java)).orEmpty()
             reconcile(active)
         } catch (e: Exception) {
             Log.w(TAG, "refreshSessions error: ${e.message}")
@@ -444,14 +490,24 @@ class MediaSessionObserver(
     }
 
     fun stop() {
-        if (!started && controllers.isEmpty()) return
-        started = false
+        val entriesToUnregister = synchronized(controllersLock) {
+            if (!started && controllers.isEmpty()) return
+            started = false
+            val copy = controllers.values.toList()
+            controllers.clear()
+            orderedTokens = emptyList()
+            copy
+        }
         diagnosticStatus = "Observer stopped"
-        runCatching { manager.removeOnActiveSessionsChangedListener(activeSessionsListener) }
-        controllers.values.forEach { entry ->
+        runCatching { manager?.removeOnActiveSessionsChangedListener(activeSessionsListener) }
+        entriesToUnregister.forEach { entry ->
             runCatching { entry.controller.unregisterCallback(entry.callback) }
         }
-        controllers.clear()
+        synchronized(handlerLock) {
+            runCatching { callbackThread?.quitSafely() }
+            callbackThread = null
+            callbackHandler = null
+        }
     }
 
     private fun hasNotificationAccess(): Boolean = NotificationAccess.isEnabled(service)
@@ -471,47 +527,61 @@ class MediaSessionObserver(
             if (excludedCount > 0) append("; non-music sessions excluded")
         }
         val previousTopToken = orderedTokens.firstOrNull()
-        orderedTokens = eligibleControllers.map { it.sessionToken }
         val activeByToken = eligibleControllers.associateBy { it.sessionToken }
+        val bgHandler = ensureCallbackHandler()
 
-        val removedAny = (controllers.keys - activeByToken.keys).isNotEmpty()
-        (controllers.keys - activeByToken.keys).forEach { token ->
-            controllers.remove(token)?.let { entry ->
-                runCatching { entry.controller.unregisterCallback(entry.callback) }
-                emit(entry, ObservationEventType.SESSION_DESTROYED)
+        val removedEntries = mutableListOf<Entry>()
+        val newlyRegisteredEntries = mutableListOf<Entry>()
+
+        synchronized(controllersLock) {
+            orderedTokens = eligibleControllers.map { it.sessionToken }
+            val staleTokens = controllers.keys - activeByToken.keys
+            staleTokens.forEach { token ->
+                controllers.remove(token)?.let { removedEntries.add(it) }
+            }
+
+            activeByToken.forEach { (token, controller) ->
+                if (token !in controllers) {
+                    val entry = Entry(controller)
+                    entry.callback = object : MediaController.Callback() {
+                        override fun onPlaybackStateChanged(state: android.media.session.PlaybackState?) {
+                            emit(entry, ObservationEventType.PLAYBACK_STATE_CHANGED, state = state)
+                        }
+
+                        override fun onMetadataChanged(metadata: MediaMetadata?) {
+                            emit(entry, ObservationEventType.METADATA_CHANGED, metadata = metadata)
+                        }
+
+                        override fun onSessionDestroyed() {
+                            synchronized(controllersLock) {
+                                controllers.remove(token)?.let { removed ->
+                                    runCatching { removed.controller.unregisterCallback(this) }
+                                }
+                                orderedTokens = orderedTokens.filter { it != token }
+                            }
+                            emit(entry, ObservationEventType.SESSION_DESTROYED)
+                        }
+                    }
+                    controllers[token] = entry
+                    try {
+                        controller.registerCallback(entry.callback, bgHandler)
+                        newlyRegisteredEntries.add(entry)
+                    } catch (_: SecurityException) {
+                        controllers.remove(token)
+                    } catch (_: IllegalStateException) {
+                        controllers.remove(token)
+                    }
+                }
             }
         }
 
-        activeByToken.forEach { (token, controller) ->
-            if (token !in controllers) {
-                val entry = Entry(controller)
-                entry.callback = object : MediaController.Callback() {
-                    override fun onPlaybackStateChanged(state: android.media.session.PlaybackState?) {
-                        emit(entry, ObservationEventType.PLAYBACK_STATE_CHANGED, state = state)
-                    }
-
-                    override fun onMetadataChanged(metadata: MediaMetadata?) {
-                        emit(entry, ObservationEventType.METADATA_CHANGED, metadata = metadata)
-                    }
-
-                    override fun onSessionDestroyed() {
-                        controllers.remove(token)?.let { removed ->
-                            runCatching { removed.controller.unregisterCallback(this) }
-                        }
-                        orderedTokens = orderedTokens.filter { it != token }
-                        emit(entry, ObservationEventType.SESSION_DESTROYED)
-                    }
-                }
-                controllers[token] = entry
-                try {
-                    controller.registerCallback(entry.callback, mainHandler)
-                    emit(entry, ObservationEventType.SESSION_CREATED)
-                } catch (_: SecurityException) {
-                    controllers.remove(token)
-                } catch (_: IllegalStateException) {
-                    controllers.remove(token)
-                }
-            }
+        val removedAny = removedEntries.isNotEmpty()
+        removedEntries.forEach { entry ->
+            runCatching { entry.controller.unregisterCallback(entry.callback) }
+            emit(entry, ObservationEventType.SESSION_DESTROYED)
+        }
+        newlyRegisteredEntries.forEach { entry ->
+            emit(entry, ObservationEventType.SESSION_CREATED)
         }
 
         val currentTop = orderedEntries().firstOrNull()
@@ -724,6 +794,8 @@ class MediaSessionObserver(
 
     companion object {
         private const val TAG = "TuneMindObserver"
+        private const val REFRESH_COOLDOWN_MS = 1_500L
+        private const val STALE_REFRESH_MS = 4_000L
         private val EXCLUDED_PACKAGES = setOf(
             "com.google.android.youtube",
             "com.android.chrome",

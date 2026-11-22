@@ -1,12 +1,14 @@
 package com.tunemind.app.ui.components
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -32,56 +34,59 @@ fun StudioAmbientBackground(
 
     val topBg = theme.primaryBackground
     val midBg = theme.secondaryBackground
-    val deepBg = lerp(theme.secondaryBackground, theme.recessedBackground, 0.42f)
+    val deepBg = remember(midBg, theme.recessedBackground) {
+        lerp(midBg, theme.recessedBackground, 0.42f)
+    }
 
     val topGlowAlpha = if (isActivePulse) (0.20f * intensity).coerceIn(0.10f, 0.24f)
     else (0.14f * intensity).coerceIn(0.07f, 0.17f)
     val bottomGlowAlpha = if (isActivePulse) (0.11f * intensity).coerceIn(0.05f, 0.14f)
     else (0.07f * intensity).coerceIn(0.03f, 0.10f)
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(topBg, midBg, deepBg)
-                )
-            )
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
+    val bgBrush = remember(topBg, midBg, deepBg) {
+        Brush.verticalGradient(colors = listOf(topBg, midBg, deepBg))
+    }
 
-            val topCenter = Offset(w * 0.50f, h * 0.08f)
-            drawCircle(
-                brush = Brush.radialGradient(
+    val glowModifier = remember(topAccent, bottomAccent, topGlowAlpha, bottomGlowAlpha) {
+        Modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val w = size.width
+                val h = size.height
+                val topCenter = Offset(w * 0.50f, h * 0.08f)
+                val topRadius = (w * 1.05f).coerceAtLeast(1f)
+                val topBrush = Brush.radialGradient(
                     colors = listOf(
                         topAccent.copy(alpha = topGlowAlpha),
                         topAccent.copy(alpha = topGlowAlpha * 0.32f),
                         Color.Transparent
                     ),
                     center = topCenter,
-                    radius = w * 1.05f
-                ),
-                center = topCenter,
-                radius = w * 1.05f
-            )
-
-            val lowerCenter = Offset(w * 0.82f, h * 0.84f)
-            drawCircle(
-                brush = Brush.radialGradient(
+                    radius = topRadius
+                )
+                val lowerCenter = Offset(w * 0.82f, h * 0.84f)
+                val lowerRadius = (w * 0.90f).coerceAtLeast(1f)
+                val lowerBrush = Brush.radialGradient(
                     colors = listOf(
                         bottomAccent.copy(alpha = bottomGlowAlpha),
                         Color.Transparent
                     ),
                     center = lowerCenter,
-                    radius = w * 0.90f
-                ),
-                center = lowerCenter,
-                radius = w * 0.90f
-            )
-        }
+                    radius = lowerRadius
+                )
+                onDrawBehind {
+                    drawCircle(brush = topBrush, center = topCenter, radius = topRadius)
+                    drawCircle(brush = lowerBrush, center = lowerCenter, radius = lowerRadius)
+                }
+            }
+    }
 
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(brush = bgBrush)
+    ) {
+        Spacer(modifier = glowModifier)
         content()
     }
 }

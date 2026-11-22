@@ -14,7 +14,9 @@ import android.media.MediaRecorder
 import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.Process
 import android.speech.RecognitionListener as AndroidSpeechListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer as AndroidSpeechRecognizer
@@ -166,6 +168,7 @@ class AgentVoiceManager(
     private var wakeOpenAppOverride: (() -> Unit)? = onWakeOpenAppRequested
 
     private var audioRecordingCallback: AudioManager.AudioRecordingCallback? = null
+    private var audioMonitorThread: HandlerThread? = null
     private var wakeRestartJob: Job? = null
     private var noSpeechAfterWakeJob: Job? = null
     private var chimeToneGenerator: ToneGenerator? = null
@@ -469,8 +472,10 @@ class AgentVoiceManager(
                     }
                 }
             }
+            val bgThread = HandlerThread("TuneMindVoiceMonitor", Process.THREAD_PRIORITY_BACKGROUND).apply { start() }
+            audioMonitorThread = bgThread
             audioRecordingCallback = cb
-            audioManager.registerAudioRecordingCallback(cb, mainHandler)
+            audioManager.registerAudioRecordingCallback(cb, Handler(bgThread.looper))
         } catch (e: Exception) {
             Log.w(TAG, "AudioRecordingCallback registration notice: ${e.message}")
         }
@@ -522,18 +527,26 @@ class AgentVoiceManager(
             }
             Log.d(TAG, "App left foreground (autonomousHandover=$isExecutingAutonomousHandover) — Vosk wake-word paused; End-of-Song DJ remains active.")
         } else {
-            if (!hasStartedWakeEngineInit) {
+            val hasMicPermission = ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasMicPermission && !hasStartedWakeEngineInit) {
                 hasStartedWakeEngineInit = true
                 scope.launch {
-                    delay(600L)
-                    if (isAppInForeground) {
+                    delay(2_000L)
+                    if (isAppInForeground &&
+                        ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    ) {
                         initWakeWordEngine()
                     } else {
                         hasStartedWakeEngineInit = false
                     }
                 }
             }
-            resumeWakeWordListening()
+            if (hasMicPermission) {
+                resumeWakeWordListening()
+            }
         }
     }
 
@@ -4844,6 +4857,8 @@ class AgentVoiceManager(
             runCatching { audioManager.unregisterAudioRecordingCallback(it) }
         }
         audioRecordingCallback = null
+        audioMonitorThread?.quitSafely()
+        audioMonitorThread = null
         runCatching { chimeToneGenerator?.release() }
         chimeToneGenerator = null
         stopMicrophoneStream()

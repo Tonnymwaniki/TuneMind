@@ -101,7 +101,7 @@ fun rememberResolvedTrackMedia(
         resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
     }
 
-    LaunchedEffect(cleanTitle, cleanArtist, resolved.albumArtUrl) {
+    LaunchedEffect(tKey) {
         if (cleanTitle.isNotBlank() && resolved.albumArtUrl.isNullOrBlank()) {
             repo.enqueueVisualEnrichment(listOf(cleanTitle to cleanArtist))
         }
@@ -128,7 +128,7 @@ fun rememberResolvedArtistPhoto(
             }
     }
 
-    LaunchedEffect(cleanArtist, photo) {
+    LaunchedEffect(aKey) {
         if (cleanArtist.isNotBlank() && photo.isNullOrBlank()) {
             repo.enqueueVisualEnrichment(listOf("" to cleanArtist))
         }
@@ -152,19 +152,21 @@ fun TuneMindAvatarCircle(
     var imageFailed by remember(cleanUrl) { mutableStateOf(false) }
     val letter = fallbackInitial.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "T"
 
+    val avatarBrush = remember(accentColor) {
+        Brush.linearGradient(
+            colors = listOf(
+                accentColor.copy(alpha = 0.28f),
+                Color(0xFF101726)
+            )
+        )
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        accentColor.copy(alpha = 0.28f),
-                        Color(0xFF101726)
-                    )
-                )
-            )
+            .background(avatarBrush)
             .border(borderWidth, borderColor, CircleShape)
     ) {
         Text(

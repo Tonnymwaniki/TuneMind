@@ -382,6 +382,12 @@ class TuneMindViewModel : ViewModel() {
     @Volatile
     private var liveStatsRecomputeJob: kotlinx.coroutines.Job? = null
     @Volatile
+    private var lastLiveStatsRecomputeWallMs: Long = 0L
+    @Volatile
+    private var snapshotDispatchJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var foregroundHearingThread: android.os.HandlerThread? = null
+    @Volatile
     private var queueSyncJob: kotlinx.coroutines.Job? = null
     @Volatile
     private var lastVisualTasteSize: Int = -1
@@ -655,7 +661,9 @@ class TuneMindViewModel : ViewModel() {
         val crossTracks = cachedCrossAppTracksForStats
         val crossLogs = cachedCrossAppLogsForStats
         if (rows.isEmpty() && crossTracks.isEmpty() && _homeState.value.nowPlaying == null) return
-        if (liveStatsRecomputeJob?.isActive == true) return
+        val nowWall = System.currentTimeMillis()
+        if (liveStatsRecomputeJob?.isActive == true || (nowWall - lastLiveStatsRecomputeWallMs) < 1_000L) return
+        lastLiveStatsRecomputeWallMs = nowWall
         liveStatsRecomputeJob = viewModelScope.launch(Dispatchers.Default) {
             val nowMs = System.currentTimeMillis()
             val np = resolveBestNowPlayingForStats(rows)
@@ -939,7 +947,11 @@ class TuneMindViewModel : ViewModel() {
     private val _dismissedRecCount = MutableStateFlow(0)
     val dismissedRecCount: StateFlow<Int> = _dismissedRecCount.asStateFlow()
 
-    private val _forYouLearningState = MutableStateFlow(loadInitialForYouLearningState())
+    private val _forYouLearningState = MutableStateFlow(
+        com.tunemind.app.domain.ai.ForYouLearningSummary(
+            dropDateKey = com.tunemind.app.domain.ai.NoonDropSchedule.getNoonCycleKey()
+        )
+    )
     val forYouLearningState: StateFlow<com.tunemind.app.domain.ai.ForYouLearningSummary> = _forYouLearningState.asStateFlow()
 
     private fun loadInitialForYouLearningState(): com.tunemind.app.domain.ai.ForYouLearningSummary {
@@ -954,7 +966,9 @@ class TuneMindViewModel : ViewModel() {
     }
 
     // Personal Taste Genome & Explicit Anchors (e.g. Afrobeats, Hip-Hop, Burna Boy, Drake)
-    private val _userTasteAnchors = MutableStateFlow<List<String>>(loadTasteAnchorsFromPrefs())
+    private val _userTasteAnchors = MutableStateFlow(
+        listOf("Afrobeats", "Synthwave", "Lo-Fi", "Neo-Soul", "Hip-Hop")
+    )
     val userTasteAnchors: StateFlow<List<String>> = _userTasteAnchors.asStateFlow()
 
     private fun loadTasteAnchorsFromPrefs(): List<String> {
@@ -992,7 +1006,7 @@ class TuneMindViewModel : ViewModel() {
     }
 
     // User Profile & Acoustic Archetype
-    private val _userProfile = MutableStateFlow(loadUserProfile())
+    private val _userProfile = MutableStateFlow(UserProfileState())
     val userProfile: StateFlow<UserProfileState> = _userProfile.asStateFlow()
 
     private fun loadUserProfile(): UserProfileState {
@@ -1045,10 +1059,10 @@ class TuneMindViewModel : ViewModel() {
     private val _isBatteryOptimizationIgnored = MutableStateFlow<Boolean>(false)
     val isBatteryOptimizationIgnored: StateFlow<Boolean> = _isBatteryOptimizationIgnored.asStateFlow()
 
-    private val _audioFocusBehavior = MutableStateFlow(loadAudioFocusBehavior())
+    private val _audioFocusBehavior = MutableStateFlow(AudioFocusBehavior.DUCK)
     val audioFocusBehavior: StateFlow<AudioFocusBehavior> = _audioFocusBehavior.asStateFlow()
 
-    private val _isDecibelSafetyAlertEnabled = MutableStateFlow(loadDecibelSafetyAlert())
+    private val _isDecibelSafetyAlertEnabled = MutableStateFlow(true)
     val isDecibelSafetyAlertEnabled: StateFlow<Boolean> = _isDecibelSafetyAlertEnabled.asStateFlow()
 
     private fun loadAudioFocusBehavior(): AudioFocusBehavior {
@@ -1112,13 +1126,13 @@ class TuneMindViewModel : ViewModel() {
     private val _recentlyGraduatedVaultTracks = MutableStateFlow<List<GraduatedVaultSummary>>(emptyList())
     val recentlyGraduatedVaultTracks: StateFlow<List<GraduatedVaultSummary>> = _recentlyGraduatedVaultTracks.asStateFlow()
 
-    private val _vaultState = MutableStateFlow<List<VaultTrack>>(loadVaultFromPrefs())
+    private val _vaultState = MutableStateFlow<List<VaultTrack>>(emptyList())
     val vaultState: StateFlow<List<VaultTrack>> = _vaultState.asStateFlow()
 
-    private val _manualFreshTracks = MutableStateFlow<List<ManualFreshTrack>>(loadManualFreshFromPrefs())
+    private val _manualFreshTracks = MutableStateFlow<List<ManualFreshTrack>>(emptyList())
     val manualFreshTracks: StateFlow<List<ManualFreshTrack>> = _manualFreshTracks.asStateFlow()
 
-    private val _freshExcludedKeys = MutableStateFlow<Set<String>>(loadFreshExcludedKeysFromPrefs())
+    private val _freshExcludedKeys = MutableStateFlow<Set<String>>(emptySet())
     val freshExcludedKeys: StateFlow<Set<String>> = _freshExcludedKeys.asStateFlow()
 
     @Volatile
@@ -1165,16 +1179,14 @@ class TuneMindViewModel : ViewModel() {
     val playbackLaunchFeedback: StateFlow<com.tunemind.app.provider.PlaybackLaunchResult?> = _playbackLaunchFeedback.asStateFlow()
 
     // Onboarding State
-    private val _hasCompletedOnboarding = MutableStateFlow(loadOnboardingState())
+    private val _hasCompletedOnboarding = MutableStateFlow(true)
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
     // Adaptive Personal Atmosphere Theme Engine
     private val themePrefsRepo: com.tunemind.app.ui.theme.ThemePreferencesRepository? by lazy {
         AppHolder.context?.let { com.tunemind.app.ui.theme.ThemePreferencesRepository(it) }
     }
-    private val _themePreferences = MutableStateFlow(
-        themePrefsRepo?.loadPreferences() ?: com.tunemind.app.ui.theme.ThemePreferences()
-    )
+    private val _themePreferences = MutableStateFlow(com.tunemind.app.ui.theme.ThemePreferences())
     val themePreferences: StateFlow<com.tunemind.app.ui.theme.ThemePreferences> = _themePreferences.asStateFlow()
 
     private val _adaptiveThemeState = MutableStateFlow(
@@ -2238,15 +2250,29 @@ class TuneMindViewModel : ViewModel() {
             } catch (_: Throwable) {}
         }
 
-        // Defer non-critical readiness IPC & hearing monitor slightly so first UI frame renders instantaneously
-        viewModelScope.launch(Dispatchers.Main) {
+        // Hydrate SharedPreferences, JSON caches, hearing monitor & readiness off Main Thread
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                _forYouLearningState.value = loadInitialForYouLearningState()
+                _userTasteAnchors.value = loadTasteAnchorsFromPrefs()
+                _userProfile.value = loadUserProfile()
+                _audioFocusBehavior.value = loadAudioFocusBehavior()
+                _isDecibelSafetyAlertEnabled.value = loadDecibelSafetyAlert()
+                _vaultState.value = loadVaultFromPrefs()
+                _manualFreshTracks.value = loadManualFreshFromPrefs()
+                _freshExcludedKeys.value = loadFreshExcludedKeysFromPrefs()
+                _hasCompletedOnboarding.value = loadOnboardingState()
+                val loadedTheme = themePrefsRepo?.loadPreferences() ?: com.tunemind.app.ui.theme.ThemePreferences()
+                _themePreferences.value = loadedTheme
+                _adaptiveThemeState.value = com.tunemind.app.ui.theme.AdaptiveThemeEngine.composeTheme(
+                    preferences = loadedTheme
+                )
+            }
             registerForegroundHearingMonitor()
             refreshHearingInsights()
             kotlinx.coroutines.delay(350L)
-            withContext(Dispatchers.IO) {
-                refreshReadiness()
-                refreshClaudeState()
-            }
+            refreshReadiness()
+            refreshClaudeState()
             requestClaudeSessionReasoning()
         }
 
@@ -2273,10 +2299,13 @@ class TuneMindViewModel : ViewModel() {
         inAppCompletionQueueListener = completionListener
         com.tunemind.app.provider.TuneMindInAppPlayer.addOnTrackCompletedListener(completionListener)
 
-        // Real-time Auto Queue Override + immediate Now Playing sync loop
+        // Real-time Auto Queue Override + immediate Now Playing sync loop (dispatched off caller/Main thread)
         val snapListener: (com.tunemind.app.media.ActivePlaybackSnapshot) -> Unit = { snap ->
-            publishAuthoritativeNowPlayingNow(snap)
-            handleSnapshotForUpNextAutoOverride(snap)
+            snapshotDispatchJob?.cancel()
+            snapshotDispatchJob = viewModelScope.launch(Dispatchers.Default) {
+                publishAuthoritativeNowPlayingNow(snap)
+                handleSnapshotForUpNextAutoOverride(snap)
+            }
         }
         snapshotMonitorListener = snapListener
         com.tunemind.app.service.TuneMindListenerService.addPlaybackSnapshotListener(snapListener)
@@ -2287,16 +2316,13 @@ class TuneMindViewModel : ViewModel() {
                 val isPlayingNow = _homeState.value.nowPlaying?.isPlaying == true
                 kotlinx.coroutines.delay(
                     when {
-                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 1000L
-                        uiForegroundActive -> 2500L
+                        overrideOn && (isPlayingNow || expectedHandoverTargetTrack != null) -> 1200L
+                        uiForegroundActive -> 3000L
                         else -> 8000L
                     }
                 )
                 if (ctx == null) continue
                 val listener = com.tunemind.app.service.TuneMindListenerService.instance
-                if (uiForegroundActive || (overrideOn && isPlayingNow)) {
-                    listener?.observerOrNull()?.refreshSessions()
-                }
                 val snap = listener?.getActivePlaybackSnapshot()
                 if (snap != null) {
                     publishAuthoritativeNowPlayingNow(snap)
@@ -4196,10 +4222,15 @@ class TuneMindViewModel : ViewModel() {
     private fun registerForegroundHearingMonitor() {
         val ctx = AppHolder.context ?: return
         if (foregroundVolumeObserver != null) return
-        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val bgThread = android.os.HandlerThread(
+            "TuneMindHearingMonitor",
+            android.os.Process.THREAD_PRIORITY_BACKGROUND
+        ).apply { start() }
+        foregroundHearingThread = bgThread
+        val bgHandler = android.os.Handler(bgThread.looper)
         val audioMgr = ctx.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
 
-        val volObserver = object : android.database.ContentObserver(mainHandler) {
+        val volObserver = object : android.database.ContentObserver(bgHandler) {
             override fun onChange(selfChange: Boolean) {
                 super.onChange(selfChange)
                 refreshHearingInsights()
@@ -4216,12 +4247,15 @@ class TuneMindViewModel : ViewModel() {
 
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                when (intent?.action) {
-                    "android.media.VOLUME_CHANGED_ACTION",
-                    android.media.AudioManager.ACTION_HEADSET_PLUG,
-                    android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
-                    android.bluetooth.BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
-                        refreshHearingInsights()
+                val action = intent?.action ?: return
+                viewModelScope.launch(Dispatchers.Default) {
+                    when (action) {
+                        "android.media.VOLUME_CHANGED_ACTION",
+                        android.media.AudioManager.ACTION_HEADSET_PLUG,
+                        android.bluetooth.BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+                        android.bluetooth.BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                            refreshHearingInsights()
+                        }
                     }
                 }
             }
@@ -4238,6 +4272,8 @@ class TuneMindViewModel : ViewModel() {
                 ctx,
                 receiver,
                 filter,
+                null,
+                bgHandler,
                 androidx.core.content.ContextCompat.RECEIVER_EXPORTED
             )
         }
@@ -4253,13 +4289,14 @@ class TuneMindViewModel : ViewModel() {
                 }
             }
             foregroundDeviceCallback = cb
-            runCatching { audioMgr.registerAudioDeviceCallback(cb, mainHandler) }
+            runCatching { audioMgr.registerAudioDeviceCallback(cb, bgHandler) }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
         statusClearJob?.cancel()
+        snapshotDispatchJob?.cancel()
         snapshotMonitorListener?.let {
             com.tunemind.app.service.TuneMindListenerService.removePlaybackSnapshotListener(it)
         }
@@ -4268,6 +4305,8 @@ class TuneMindViewModel : ViewModel() {
             com.tunemind.app.provider.TuneMindInAppPlayer.removeOnTrackCompletedListener(it)
         }
         inAppCompletionQueueListener = null
+        runCatching { foregroundHearingThread?.quitSafely() }
+        foregroundHearingThread = null
         val ctx = AppHolder.context ?: return
         foregroundVolumeObserver?.let { obs ->
             runCatching { ctx.contentResolver.unregisterContentObserver(obs) }

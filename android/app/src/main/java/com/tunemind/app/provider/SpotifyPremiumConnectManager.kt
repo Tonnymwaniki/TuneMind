@@ -20,9 +20,13 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.tunemind.app.BuildConfig
 import com.tunemind.app.domain.network.BackendEndpointManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -203,6 +207,14 @@ object SpotifyPremiumConnectManager {
     @Volatile
     private var cachedPrefs: SharedPreferences? = null
 
+    @Volatile
+    private var hasLoadedOnce = false
+
+    @Volatile
+    private var asyncLoadStarted = false
+
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     private val tokenRefreshLock = Any()
 
     private val _statusFlow = MutableStateFlow(SpotifyPremiumStatus())
@@ -249,6 +261,20 @@ object SpotifyPremiumConnectManager {
     }
 
     fun ensureLoaded(context: Context): SpotifyPremiumStatus {
+        val isMainThread = Looper.myLooper() == Looper.getMainLooper()
+        if (isMainThread) {
+            if (hasLoadedOnce && cachedPrefs != null) {
+                return _statusFlow.value
+            }
+            if (!asyncLoadStarted) {
+                asyncLoadStarted = true
+                val appCtx = context.applicationContext
+                ioScope.launch {
+                    runCatching { ensureLoaded(appCtx) }
+                }
+            }
+            return _statusFlow.value
+        }
         val prefs = getPrefs(context)
         val prev = _statusFlow.value
         val status = readStatusFromPrefs(
@@ -257,6 +283,7 @@ object SpotifyPremiumConnectManager {
             errorHintType = prev.errorHintType,
             isAuthorizing = prev.isAuthorizing
         )
+        hasLoadedOnce = true
         _statusFlow.value = status
         return status
     }

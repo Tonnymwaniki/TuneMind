@@ -102,10 +102,6 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     private var pendingSpeech: Pair<String, () -> Unit>? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
-    init {
-        mainHandler.postDelayed({ ensureTtsStarted() }, 500L)
-    }
-
     private fun ensureTtsStarted(): TextToSpeech? {
         if (isShutDown) return null
         if (tts == null) {

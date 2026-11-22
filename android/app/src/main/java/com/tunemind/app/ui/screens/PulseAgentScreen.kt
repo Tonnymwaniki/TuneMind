@@ -622,30 +622,85 @@ private fun TuneMindLivingOrb(
     val sampleCos3 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 3f) } }
     val sampleSin3 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 3f) } }
     val sampleCos4 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 4f) } }
+    val sampleSin4 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 4f) } }
+    val sampleCos5 = remember { FloatArray(sampleCount + 1) { i -> cos(sampleThetas[i] * 5f) } }
     val sampleSin5 = remember { FloatArray(sampleCount + 1) { i -> sin(sampleThetas[i] * 5f) } }
 
     val orbPath = remember { Path() }
     val innerVoicePath = remember { Path() }
 
+    val luminousWhite = Color.White
+    val haloAlpha = when {
+        agentState == AgentState.SPEAKING -> 0.28f
+        agentState == AgentState.LISTENING -> 0.24f
+        agentState == AgentState.THINKING -> 0.22f
+        isMusicPlaying -> 0.20f
+        else -> 0.12f
+    }
+    val haloColors = remember(primaryAccent, secondaryAccent, haloAlpha) {
+        listOf(
+            primaryAccent.copy(alpha = haloAlpha),
+            secondaryAccent.copy(alpha = haloAlpha * 0.45f),
+            Color.Transparent
+        )
+    }
+    val coreColors = remember(primaryAccent, secondaryAccent) {
+        val coreTop = lerp(luminousWhite, primaryAccent, 0.42f)
+        val coreDeep = lerp(secondaryAccent, Color(0xFF0A0D18), 0.55f)
+        listOf(
+            coreTop.copy(alpha = 0.96f),
+            primaryAccent.copy(alpha = 0.88f),
+            coreDeep.copy(alpha = 0.94f)
+        )
+    }
+    val cloudColors = remember(secondaryAccent, agentState) {
+        listOf(
+            luminousWhite.copy(alpha = if (agentState == AgentState.SPEAKING) 0.48f else 0.30f),
+            secondaryAccent.copy(alpha = 0.24f),
+            Color.Transparent
+        )
+    }
+    val thinkingOuterColors = remember(primaryAccent) {
+        listOf(
+            Color.Transparent,
+            luminousWhite.copy(alpha = 0.88f),
+            primaryAccent.copy(alpha = 0.55f),
+            Color.Transparent
+        )
+    }
+    val thinkingInnerColors = remember(secondaryAccent) {
+        listOf(
+            Color.Transparent,
+            secondaryAccent.copy(alpha = 0.82f),
+            luminousWhite.copy(alpha = 0.45f),
+            Color.Transparent
+        )
+    }
+    val idleArcColors = remember(primaryAccent, secondaryAccent, isMusicPlaying) {
+        listOf(
+            Color.Transparent,
+            primaryAccent.copy(alpha = if (isMusicPlaying) 0.65f else 0.35f),
+            secondaryAccent.copy(alpha = if (isMusicPlaying) 0.45f else 0.22f),
+            Color.Transparent
+        )
+    }
+    val rimBrush = remember(primaryAccent) {
+        Brush.linearGradient(
+            colors = listOf(
+                luminousWhite.copy(alpha = 0.55f),
+                primaryAccent.copy(alpha = 0.35f),
+                Color.Transparent
+            )
+        )
+    }
+
     Canvas(modifier = modifier) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val baseRadius = size.minDimension * 0.285f * breathScale
-        val luminousWhite = Color.White
 
-        val haloAlpha = when {
-            agentState == AgentState.SPEAKING -> 0.28f
-            agentState == AgentState.LISTENING -> 0.24f
-            agentState == AgentState.THINKING -> 0.22f
-            isMusicPlaying -> 0.20f
-            else -> 0.12f
-        }
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    primaryAccent.copy(alpha = haloAlpha),
-                    secondaryAccent.copy(alpha = haloAlpha * 0.45f),
-                    Color.Transparent
-                ),
+                colors = haloColors,
                 center = center,
                 radius = baseRadius * 2.15f
             ),
@@ -724,14 +779,14 @@ private fun TuneMindLivingOrb(
             val harmonic = when (agentState) {
                 AgentState.SPEAKING -> {
                     val sin3p2 = s3 * cosWave2 + c3 * sinWave2
-                    val cos5 = kotlin.math.cos(sampleThetas[i] * 5f)
+                    val cos5 = sampleCos5[i]
                     val sin5m3 = sampleSin5[i] * cosWave3 - cos5 * sinWave3
                     val cos2p1 = c2 * cosWave - s2 * sinWave
                     0.55f * sin3p2 + 0.35f * sin5m3 + 0.20f * cos2p1
                 }
                 AgentState.THINKING -> {
                     val sin2p1 = s2 * cosWave + c2 * sinWave
-                    val sin4 = kotlin.math.sin(sampleThetas[i] * 4f)
+                    val sin4 = sampleSin4[i]
                     val cos4m2 = sampleCos4[i] * cosWave2 + sin4 * sinWave2
                     0.65f * sin2p1 + 0.35f * cos4m2
                 }
@@ -748,10 +803,6 @@ private fun TuneMindLivingOrb(
         }
         orbPath.close()
 
-        val coreTop = lerp(luminousWhite, primaryAccent, 0.42f)
-        val coreMid = primaryAccent
-        val coreDeep = lerp(secondaryAccent, Color(0xFF0A0D18), 0.55f)
-
         val focalOffset = Offset(
             center.x - baseRadius * 0.24f + cosWave * baseRadius * 0.08f,
             center.y - baseRadius * 0.28f + sinWave * baseRadius * 0.08f
@@ -760,11 +811,7 @@ private fun TuneMindLivingOrb(
         drawPath(
             path = orbPath,
             brush = Brush.radialGradient(
-                colors = listOf(
-                    coreTop.copy(alpha = 0.96f),
-                    coreMid.copy(alpha = 0.88f),
-                    coreDeep.copy(alpha = 0.94f)
-                ),
+                colors = coreColors,
                 center = focalOffset,
                 radius = baseRadius * 1.45f
             )
@@ -776,11 +823,7 @@ private fun TuneMindLivingOrb(
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    luminousWhite.copy(alpha = if (agentState == AgentState.SPEAKING) 0.48f else 0.30f),
-                    secondaryAccent.copy(alpha = 0.24f),
-                    Color.Transparent
-                ),
+                colors = cloudColors,
                 center = cloudCenter,
                 radius = baseRadius * 0.78f
             ),
@@ -793,12 +836,7 @@ private fun TuneMindLivingOrb(
                 rotate(degrees = swirlAngle, pivot = center) {
                     drawOval(
                         brush = Brush.sweepGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                luminousWhite.copy(alpha = 0.88f),
-                                primaryAccent.copy(alpha = 0.55f),
-                                Color.Transparent
-                            ),
+                            colors = thinkingOuterColors,
                             center = center
                         ),
                         topLeft = Offset(center.x - baseRadius * 0.78f, center.y - baseRadius * 0.36f),
@@ -809,12 +847,7 @@ private fun TuneMindLivingOrb(
                 rotate(degrees = -swirlAngle * 1.3f + 60f, pivot = center) {
                     drawOval(
                         brush = Brush.sweepGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                secondaryAccent.copy(alpha = 0.82f),
-                                luminousWhite.copy(alpha = 0.45f),
-                                Color.Transparent
-                            ),
+                            colors = thinkingInnerColors,
                             center = center
                         ),
                         topLeft = Offset(center.x - baseRadius * 0.72f, center.y - baseRadius * 0.32f),
@@ -852,12 +885,7 @@ private fun TuneMindLivingOrb(
                 rotate(degrees = swirlAngle * if (isMusicPlaying) 0.6f else 0.25f, pivot = center) {
                     drawArc(
                         brush = Brush.sweepGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                primaryAccent.copy(alpha = if (isMusicPlaying) 0.65f else 0.35f),
-                                secondaryAccent.copy(alpha = if (isMusicPlaying) 0.45f else 0.22f),
-                                Color.Transparent
-                            ),
+                            colors = idleArcColors,
                             center = center
                         ),
                         startAngle = 0f,
@@ -873,13 +901,7 @@ private fun TuneMindLivingOrb(
 
         drawPath(
             path = orbPath,
-            brush = Brush.linearGradient(
-                colors = listOf(
-                    luminousWhite.copy(alpha = 0.55f),
-                    primaryAccent.copy(alpha = 0.35f),
-                    Color.Transparent
-                )
-            ),
+            brush = rimBrush,
             style = Stroke(width = 1.4.dp.toPx())
         )
     }

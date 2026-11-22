@@ -158,9 +158,7 @@ fun DopamineVaultScreen(
         restoredAtMap,
         manualFreshTracks,
         freshExcludedKeys,
-        resolvePlayCount,
-        repetitionSensitivity,
-        resolveTrackVaultStatus
+        repetitionSensitivity
     ) {
         value = withContext(Dispatchers.Default) {
             val list = mutableListOf<DopamineSongItem>()

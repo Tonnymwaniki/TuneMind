@@ -74,10 +74,10 @@ class TuneMindAuthSessionManager private constructor(context: Context) {
             .build()
     }
 
-    private val _sessionFlow = MutableStateFlow(readCurrentSession())
+    private val _sessionFlow = MutableStateFlow(TuneMindUserSession())
     val sessionFlow: StateFlow<TuneMindUserSession> = _sessionFlow.asStateFlow()
 
-    private val _savedAccountsFlow = MutableStateFlow(readSavedAccounts())
+    private val _savedAccountsFlow = MutableStateFlow<List<SavedAccountProfile>>(emptyList())
     val savedAccountsFlow: StateFlow<List<SavedAccountProfile>> = _savedAccountsFlow.asStateFlow()
 
     private val _lastAuthErrorFlow = MutableStateFlow<String?>(null)

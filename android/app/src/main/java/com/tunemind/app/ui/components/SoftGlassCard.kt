@@ -69,28 +69,29 @@ fun SoftGlassCard(
     content: @Composable () -> Unit
 ) {
     val theme = LocalAdaptiveTheme.current
-    val shape = RoundedCornerShape(cornerRadius)
+    val shape = remember(cornerRadius) { RoundedCornerShape(cornerRadius) }
     val rimAccent = accentTint ?: theme.primaryAccent
 
-    val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.03f).copy(alpha = 0.88f)
-    val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.18f).copy(alpha = 0.94f)
+    val bgBrush = remember(theme.elevatedSurface, theme.cardSurface, theme.primaryBackground, rimAccent) {
+        val topSurface = lerp(theme.elevatedSurface, rimAccent, 0.03f).copy(alpha = 0.88f)
+        val bottomSurface = lerp(theme.cardSurface, theme.primaryBackground, 0.18f).copy(alpha = 0.94f)
+        Brush.verticalGradient(colors = listOf(topSurface, bottomSurface))
+    }
 
-    val borderBrush = Brush.verticalGradient(
-        colors = listOf(
-            Color.White.copy(alpha = 0.10f),
-            rimAccent.copy(alpha = 0.10f),
-            Color.White.copy(alpha = 0.05f)
+    val borderBrush = remember(rimAccent) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.10f),
+                rimAccent.copy(alpha = 0.10f),
+                Color.White.copy(alpha = 0.05f)
+            )
         )
-    )
+    }
 
     Box(
         modifier = modifier
             .clip(shape)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(topSurface, bottomSurface)
-                )
-            )
+            .background(brush = bgBrush)
             .border(
                 width = 1.dp,
                 brush = borderBrush,
@@ -134,6 +135,26 @@ private fun CompactAiTabLogo(
     val aiCyan = Color(0xFF38BDF8)
     val aiViolet = Color(0xFFA855F7)
     val aiGold = Color(0xFFFBBF24)
+    val orbitBrush = remember {
+        Brush.sweepGradient(
+            colors = listOf(
+                aiCyan,
+                aiViolet,
+                aiGold,
+                aiCyan.copy(alpha = 0.2f)
+            )
+        )
+    }
+    val starBrush = remember(hasFreshDrop) {
+        Brush.linearGradient(
+            colors = if (hasFreshDrop) {
+                listOf(Color(0xFFF8FAFC), aiCyan)
+            } else {
+                listOf(Color(0xFFE2E8F0), aiViolet)
+            }
+        )
+    }
+    val starPath = remember { Path() }
 
     Canvas(modifier = modifier) {
         val cx = size.width / 2f
@@ -142,14 +163,7 @@ private fun CompactAiTabLogo(
 
         rotate(degrees = orbitAngle, pivot = Offset(cx, cy)) {
             drawArc(
-                brush = Brush.sweepGradient(
-                    colors = listOf(
-                        aiCyan,
-                        aiViolet,
-                        aiGold,
-                        aiCyan.copy(alpha = 0.2f)
-                    )
-                ),
+                brush = orbitBrush,
                 startAngle = 0f,
                 sweepAngle = 275f,
                 useCenter = false,
@@ -161,26 +175,19 @@ private fun CompactAiTabLogo(
 
         val starR = r * 0.52f * (if (isSelected) pulse else 0.92f)
         val innerR = starR * 0.32f
-        val starPath = Path().apply {
-            moveTo(cx, cy - starR)
-            lineTo(cx + innerR, cy - innerR)
-            lineTo(cx + starR, cy)
-            lineTo(cx + innerR, cy + innerR)
-            lineTo(cx, cy + starR)
-            lineTo(cx - innerR, cy + innerR)
-            lineTo(cx - starR, cy)
-            lineTo(cx - innerR, cy - innerR)
-            close()
-        }
+        starPath.rewind()
+        starPath.moveTo(cx, cy - starR)
+        starPath.lineTo(cx + innerR, cy - innerR)
+        starPath.lineTo(cx + starR, cy)
+        starPath.lineTo(cx + innerR, cy + innerR)
+        starPath.lineTo(cx, cy + starR)
+        starPath.lineTo(cx - innerR, cy + innerR)
+        starPath.lineTo(cx - starR, cy)
+        starPath.lineTo(cx - innerR, cy - innerR)
+        starPath.close()
         drawPath(
             path = starPath,
-            brush = Brush.linearGradient(
-                colors = if (hasFreshDrop) {
-                    listOf(Color(0xFFF8FAFC), aiCyan)
-                } else {
-                    listOf(Color(0xFFE2E8F0), aiViolet)
-                }
-            )
+            brush = starBrush
         )
     }
 }

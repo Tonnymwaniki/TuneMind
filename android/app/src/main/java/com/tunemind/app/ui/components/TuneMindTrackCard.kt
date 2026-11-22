@@ -30,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,13 +119,9 @@ fun TuneMindTrackCard(
 ) {
     val liveGreen = Color(0xFF10B981)
     val coolingAmber = Color(0xFFFFB000)
-    val canonicalTrackId = TrackIdentityResolver.resolveCanonicalTrackId(
-        trackId = trackId.ifBlank { null },
-        spotifyUri = spotifyUri,
-        title = title,
-        artist = artist
-    )
-    val normalizedSpotifyUri = TrackIdentityResolver.normalizeSpotifyUri(spotifyUri)
+    val normalizedSpotifyUri = remember(spotifyUri) {
+        TrackIdentityResolver.normalizeSpotifyUri(spotifyUri)
+    }
 
     val effectiveAccent = when {
         isCurrentlyPlaying -> liveGreen
@@ -142,31 +139,43 @@ fun TuneMindTrackCard(
     val effectiveArtistUrl = artistImageUrl?.takeIf { it.isNotBlank() } ?: resolvedMedia.artistImageUrl
 
     val safePlayCount = playCount.coerceAtLeast(0)
-    val playSummary = when {
-        safePlayCount > 0 -> "$safePlayCount ${if (safePlayCount == 1) "play" else "plays"}"
-        showUnplayedLabel -> zeroPlayLabel.ifBlank { "0 plays" }
-        else -> null
-    }
-    val freshnessSummary = when {
-        isCoolingDown -> buildString {
-            append("Resting")
-            if (!cooldownRemainingLabel.isNullOrBlank()) {
-                append(" · $cooldownRemainingLabel")
-            } else if (recoveryPercent != null && recoveryPercent > 0) {
-                append(" · $recoveryPercent% recovered")
-            }
+    val metadataLine = remember(
+        artist,
+        subtitle,
+        safePlayCount,
+        showUnplayedLabel,
+        zeroPlayLabel,
+        isCoolingDown,
+        cooldownRemainingLabel,
+        recoveryPercent,
+        freshnessPercent,
+        appLabel
+    ) {
+        val playSummary = when {
+            safePlayCount > 0 -> "$safePlayCount ${if (safePlayCount == 1) "play" else "plays"}"
+            showUnplayedLabel -> zeroPlayLabel.ifBlank { "0 plays" }
+            else -> null
         }
-        freshnessPercent != null -> "${freshnessPercent}% fresh"
-        else -> null
+        val freshnessSummary = when {
+            isCoolingDown -> buildString {
+                append("Resting")
+                if (!cooldownRemainingLabel.isNullOrBlank()) {
+                    append(" · $cooldownRemainingLabel")
+                } else if (recoveryPercent != null && recoveryPercent > 0) {
+                    append(" · $recoveryPercent% recovered")
+                }
+            }
+            freshnessPercent != null -> "${freshnessPercent}% fresh"
+            else -> null
+        }
+        listOfNotNull(
+            artist.ifBlank { "Unknown Artist" },
+            subtitle?.takeIf { it.isNotBlank() },
+            playSummary,
+            freshnessSummary,
+            appLabel?.takeIf { it.isNotBlank() }
+        ).joinToString(" · ")
     }
-
-    val metadataLine = listOfNotNull(
-        artist.ifBlank { "Unknown Artist" },
-        subtitle?.takeIf { it.isNotBlank() },
-        playSummary,
-        freshnessSummary,
-        appLabel?.takeIf { it.isNotBlank() }
-    ).joinToString(" · ")
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(

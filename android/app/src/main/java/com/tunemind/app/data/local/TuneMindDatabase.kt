@@ -99,6 +99,7 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         MIGRATION_15_17,
                         MIGRATION_17_18
                     )
+                        .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                         .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
                 } catch (e: Throwable) {
@@ -107,7 +108,9 @@ abstract class TuneMindDatabase : RoomDatabase() {
                         context.applicationContext,
                         TuneMindDatabase::class.java,
                         DATABASE_NAME,
-                    ).fallbackToDestructiveMigration()
+                    )
+                        .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                        .fallbackToDestructiveMigration()
                         .build().also { INSTANCE = it }
                 }
             }

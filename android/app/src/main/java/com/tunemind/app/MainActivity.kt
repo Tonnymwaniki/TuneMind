@@ -95,8 +95,10 @@ open class MainActivity : ComponentActivity() {
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
-        // Safe rebind attempt without touching component enabled settings
-        forceRebindListener(this)
+        // Safe rebind attempt on IO thread without touching component enabled settings
+        lifecycleScope.launch(Dispatchers.IO) {
+            forceRebindListener(this@MainActivity)
+        }
 
         enableEdgeToEdge()
         try {
@@ -136,12 +138,13 @@ open class MainActivity : ComponentActivity() {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 lifecycleScope.launch {
-                                    withContext(Dispatchers.IO) {
+                                    val permsOk = withContext(Dispatchers.IO) {
                                         authSessionManager.refreshSessionState()
+                                        PermissionUtils.hasMicrophonePermission(context) &&
+                                            PermissionUtils.hasNotificationListenerPermission(context) &&
+                                            PermissionUtils.isIgnoringBatteryOptimizations(context)
                                     }
-                                    hasAllPermissions = PermissionUtils.hasMicrophonePermission(context) &&
-                                        PermissionUtils.hasNotificationListenerPermission(context) &&
-                                        PermissionUtils.isIgnoringBatteryOptimizations(context)
+                                    hasAllPermissions = permsOk
                                 }
                             }
                         }
@@ -1194,6 +1197,19 @@ open class MainActivity : ComponentActivity() {
             }
             playAnyTrackCallback = ::playAnyTrack
 
+            val stableResolvePlayCount: (String?, String?, String?) -> Int = remember(vm) {
+                { title, artist, uri -> vm.resolvePlayCount(title, artist, uri) }
+            }
+            val stableIsTrackPlaying: (String?, String?, String?) -> Boolean = remember(vm) {
+                { title, artist, uri -> vm.isTrackCurrentlyPlaying(title, artist, uri) }
+            }
+            val stableResolveVaultStatus: (String?, String?, String?, String?) -> com.tunemind.app.ui.TrackVaultUiStatus = remember(vm) {
+                { t, a, uri, id -> vm.resolveTrackVaultStatus(t, a, uri, id) }
+            }
+            val stableRestoredAtMap = remember(vaultState, recentlyGraduatedVault) {
+                vm.getRestoredVaultTimestampsSnapshot()
+            }
+
             val hasOverlayOpen = showLegalScreen ||
                 showSupportScreen ||
                 showNotificationsScreen ||
@@ -1270,12 +1286,8 @@ open class MainActivity : ComponentActivity() {
                                 forYouPicks = aiDiscoveryCrate,
                                 learningState = forYouLearningState,
                                 isDiscovering = isDiscovering,
-                                resolvePlayCount = { title, artist, uri ->
-                                    vm.resolvePlayCount(title, artist, uri)
-                                },
-                                isTrackCurrentlyPlaying = { title, artist, uri ->
-                                    vm.isTrackCurrentlyPlaying(title, artist, uri)
-                                },
+                                resolvePlayCount = stableResolvePlayCount,
+                                isTrackCurrentlyPlaying = stableIsTrackPlaying,
                                 onRefreshForYou = {
                                     vm.triggerChronoDiscovery(forceRefresh = true)
                                 },
@@ -1327,13 +1339,11 @@ open class MainActivity : ComponentActivity() {
                                 onConsumeRequestedSubTab = { requestedDopamineSubTab = null },
                                 graduatedTracks = recentlyGraduatedVault,
                                 onTickVaultLifecycle = { vm.refreshVaultLifecycleNow(syncWithBackend = false) },
-                                resolveTrackVaultStatus = { t, a, uri, id ->
-                                    vm.resolveTrackVaultStatus(t, a, uri, id)
-                                },
+                                resolveTrackVaultStatus = stableResolveVaultStatus,
                                 crossAppLibraryTracks = crossAppLibraryTracks,
                                 tuneMindPlaylists = tuneMindPlaylists,
                                 savedRecommendations = savedAiRecommendations,
-                                restoredAtMap = vm.getRestoredVaultTimestampsSnapshot(),
+                                restoredAtMap = stableRestoredAtMap,
                                 manualFreshTracks = manualFreshTracks,
                                 freshExcludedKeys = freshExcludedKeys,
                                 onAddToFresh = { title, artist, pkg, uri, tid, art ->
@@ -1445,12 +1455,8 @@ open class MainActivity : ComponentActivity() {
                                 crossAppLibraryTracks = crossAppLibraryTracks,
                                 detectedPlayerTabs = detectedPlayerTabs,
                                 tuneMindPlaylists = tuneMindPlaylists,
-                                resolvePlayCount = { title, artist, uri ->
-                                    vm.resolvePlayCount(title, artist, uri)
-                                },
-                                isTrackCurrentlyPlaying = { title, artist, uri ->
-                                    vm.isTrackCurrentlyPlaying(title, artist, uri)
-                                },
+                                resolvePlayCount = stableResolvePlayCount,
+                                isTrackCurrentlyPlaying = stableIsTrackPlaying,
                                 onToggleLibraryLike = { canonicalTrackKey, liked ->
                                     vm.toggleLibraryTrackLike(canonicalTrackKey, liked)
                                 },
@@ -1470,9 +1476,7 @@ open class MainActivity : ComponentActivity() {
                                 onRefreshStats = { vm.refreshLiveListeningStatsNow() },
                                 requestedSubDeck = requestedRhythmSubDeck,
                                 onConsumeRequestedSubDeck = { requestedRhythmSubDeck = null },
-                                resolveTrackVaultStatus = { t, a, uri, id ->
-                                    vm.resolveTrackVaultStatus(t, a, uri, id)
-                                },
+                                resolveTrackVaultStatus = stableResolveVaultStatus,
                                 onToggleTrackVault = { t, a, pkg, uri, id ->
                                     vm.toggleTrackVaultStatus(t, a, pkg, uri, id)
                                 },
@@ -1994,7 +1998,9 @@ open class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         com.tunemind.app.provider.MusicPlayerAutoLauncher.cancelReturnNotification(this)
-        forceRebindListener(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            forceRebindListener(this@MainActivity)
+        }
     }
 
     companion object {

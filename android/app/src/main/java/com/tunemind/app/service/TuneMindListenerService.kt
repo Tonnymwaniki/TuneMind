@@ -23,68 +23,85 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** System-bound observer; active media access is available only with Notification Access. */
 class TuneMindListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private lateinit var observer: MediaSessionObserver
+    @Volatile
+    private var observer: MediaSessionObserver? = null
+    @Volatile
     private var audioDeviceObserver: com.tunemind.app.domain.audio.AudioDeviceObserver? = null
+    @Volatile
+    private var listenerConnectedFlag = false
     private val stopEmitted = AtomicBoolean(false)
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        try {
-            stopEmitted.set(false)
-            audioDeviceObserver = com.tunemind.app.domain.audio.AudioDeviceObserver(this, serviceScope, db.audioDeviceDao()).also {
-                it.start()
-            }
-            observer = MediaSessionObserver(this, serviceScope) { observation ->
-                if (com.tunemind.app.domain.voice.AgentSettingsStore.isPrivateSessionEnabled(this@TuneMindListenerService)) {
-                    return@MediaSessionObserver
-                }
-                repository.record(observation)
-                com.tunemind.app.data.local.CrossAppPlayRecorder.getInstance(this@TuneMindListenerService)
-                    .onObservation(observation)
-                serviceScope.launch {
-                    SyncScheduler.schedule(this@TuneMindListenerService)
-                }
-                // Ensure 7-day study is active and store observation with zero loss
-                serviceScope.launch {
-                    try {
-                        var exp = experimentRepo.getExperiment()
-                        if (exp == null || exp.status == ExperimentStatus.NOT_STARTED.name) {
-                            exp = experimentRepo.start(this@TuneMindListenerService)
-                            Log.i(TAG, "Auto-started 7-day listening study from today: ${exp.experimentId}")
-                        }
-                        if (exp.status == ExperimentStatus.ACTIVE.name) {
-                            val windowEnd = exp.endDateMs ?: (System.currentTimeMillis() + 7L * 86_400_000L)
-                            if (observation.eventTimeMs > 0L && observation.eventTimeMs <= windowEnd) {
-                                experimentRepo.recordObservation(observation, exp.experimentId)
+        listenerConnectedFlag = true
+        stopEmitted.set(false)
+        isConnected = true
+        instance = this
+        Log.i(TAG, "Notification listener connected; scheduling background observer init")
+
+        serviceScope.launch(Dispatchers.IO) {
+            if (!listenerConnectedFlag) return@launch
+            try {
+                val localAudioObserver = com.tunemind.app.domain.audio.AudioDeviceObserver(
+                    this@TuneMindListenerService,
+                    serviceScope,
+                    db.audioDeviceDao()
+                ).also { it.start() }
+
+                val localMediaObserver = MediaSessionObserver(this@TuneMindListenerService, serviceScope) { observation ->
+                    if (com.tunemind.app.domain.voice.AgentSettingsStore.isPrivateSessionEnabled(this@TuneMindListenerService)) {
+                        return@MediaSessionObserver
+                    }
+                    repository.record(observation)
+                    com.tunemind.app.data.local.CrossAppPlayRecorder.getInstance(this@TuneMindListenerService)
+                        .onObservation(observation)
+                    serviceScope.launch {
+                        SyncScheduler.schedule(this@TuneMindListenerService)
+                    }
+                    // Ensure 7-day study is active and store observation with zero loss
+                    serviceScope.launch {
+                        try {
+                            var exp = experimentRepo.getExperiment()
+                            if (exp == null || exp.status == ExperimentStatus.NOT_STARTED.name) {
+                                exp = experimentRepo.start(this@TuneMindListenerService)
+                                Log.i(TAG, "Auto-started 7-day listening study from today: ${exp.experimentId}")
                             }
+                            if (exp.status == ExperimentStatus.ACTIVE.name) {
+                                val windowEnd = exp.endDateMs ?: (System.currentTimeMillis() + 7L * 86_400_000L)
+                                if (observation.eventTimeMs > 0L && observation.eventTimeMs <= windowEnd) {
+                                    experimentRepo.recordObservation(observation, exp.experimentId)
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Experiment tracking error: ${t.message}")
                         }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Experiment tracking error: ${t.message}")
                     }
                 }
-            }
-            observer.start()
-            isConnected = true
-            instance = this
-            Log.i(TAG, "Notification listener connected; observer initialization requested")
 
-            // Schedule background sync.
-            serviceScope.launch {
+                if (!listenerConnectedFlag) {
+                    localAudioObserver.stop()
+                    return@launch
+                }
+
+                audioDeviceObserver = localAudioObserver
+                observer = localMediaObserver
+                localMediaObserver.start()
+
                 SyncScheduler.schedule(this@TuneMindListenerService)
-                Log.i(TAG, "Sync work scheduled")
+                Log.i(TAG, "Background observers started & sync work scheduled")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error in background onListenerConnected: ${t.message}", t)
             }
-
-
-        } catch (t: Throwable) {
-            Log.e(TAG, "Error in onListenerConnected: ${t.message}", t)
         }
     }
 
     override fun onListenerDisconnected() {
+        listenerConnectedFlag = false
         emitObservationStop()
         audioDeviceObserver?.stop()
         audioDeviceObserver = null
-        observerOrNull()?.stop()
+        observer?.stop()
+        observer = null
         isConnected = false
         instance = null
         Log.i(TAG, "Notification listener disconnected")
@@ -92,10 +109,12 @@ class TuneMindListenerService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        listenerConnectedFlag = false
         emitObservationStop()
         audioDeviceObserver?.stop()
         audioDeviceObserver = null
-        observerOrNull()?.stop()
+        observer?.stop()
+        observer = null
         isConnected = false
         instance = null
         serviceScope.cancel()
@@ -146,7 +165,7 @@ class TuneMindListenerService : NotificationListenerService() {
     private val repository: EventBufferRepository by lazy { EventBufferRepository(db.eventQueueDao()) }
     private val experimentRepo: ExperimentRepository by lazy { ExperimentRepository(db) }
 
-    fun observerOrNull(): MediaSessionObserver? = if (::observer.isInitialized) observer else null
+    fun observerOrNull(): MediaSessionObserver? = observer
 
     fun isPlaying(targetPackage: String? = null): Boolean = observerOrNull()?.isPlaying(targetPackage) ?: false
 

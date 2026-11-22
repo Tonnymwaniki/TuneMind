@@ -12,13 +12,16 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Observed snapshot of the active audio output hardware and real-time decibel headroom.
@@ -48,10 +51,33 @@ class AudioDeviceObserver(
     private val onLiveUpdate: ((AudioDeviceSnapshot) -> Unit)? = null
 ) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val activeSessionMap = mutableMapOf<Int, String>() // deviceId -> sessionId
+    private val handlerLock = Any()
+    @Volatile private var observerThread: HandlerThread? = null
+    @Volatile private var observerHandler: Handler? = null
+    private val activeSessionMap = ConcurrentHashMap<Int, String>() // deviceId -> sessionId
     @Volatile private var lastObservedVolIndex: Int = -1
     @Volatile private var lastObservedCategory: String = ""
+
+    private fun ensureObserverHandler(): Handler {
+        val existing = observerHandler
+        val thread = observerThread
+        if (existing != null && thread?.isAlive == true) return existing
+        return synchronized(handlerLock) {
+            val recheckHandler = observerHandler
+            val recheckThread = observerThread
+            if (recheckHandler != null && recheckThread?.isAlive == true) {
+                recheckHandler
+            } else {
+                val newThread = HandlerThread("TuneMindAudioObserver", Process.THREAD_PRIORITY_BACKGROUND).apply {
+                    start()
+                }
+                val newHandler = Handler(newThread.looper)
+                observerThread = newThread
+                observerHandler = newHandler
+                newHandler
+            }
+        }
+    }
 
     private val deviceCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         object : AudioDeviceCallback() {
@@ -67,69 +93,67 @@ class AudioDeviceObserver(
         }
     } else null
 
-    private val volumeContentObserver = object : ContentObserver(mainHandler) {
-        override fun onChange(selfChange: Boolean) {
-            super.onChange(selfChange)
-            val am = audioManager ?: return
-            val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            val snapshot = getActiveAudioDeviceSnapshot(context)
-            if (currentVol != lastObservedVolIndex || snapshot.transducerCategory != lastObservedCategory) {
-                recordVolumeChange(currentVol, maxVol)
-            } else {
-                onLiveUpdate?.invoke(snapshot)
-            }
-        }
-    }
+    @Volatile private var volumeContentObserver: ContentObserver? = null
 
     private val volumeReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
-            when (intent?.action) {
-                "android.media.VOLUME_CHANGED_ACTION" -> {
-                    val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
-                    if (streamType == AudioManager.STREAM_MUSIC || streamType == -1) {
-                        val am = audioManager
-                        val currentVol = intent.getIntExtra(
-                            "android.media.EXTRA_VOLUME_STREAM_VALUE",
-                            am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
-                        )
-                        val maxVol = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-                        recordVolumeChange(currentVol, maxVol)
+            val action = intent?.action ?: return
+            scope.launch(Dispatchers.IO) {
+                when (action) {
+                    "android.media.VOLUME_CHANGED_ACTION" -> {
+                        val streamType = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1)
+                        if (streamType == AudioManager.STREAM_MUSIC || streamType == -1) {
+                            val am = audioManager
+                            val currentVol = intent.getIntExtra(
+                                "android.media.EXTRA_VOLUME_STREAM_VALUE",
+                                am?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: -1
+                            )
+                            val maxVol = am?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+                            recordVolumeChange(currentVol, maxVol)
+                        }
                     }
-                }
-                AudioManager.ACTION_HEADSET_PLUG,
-                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
-                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
-                    emitLiveSnapshot()
+                    AudioManager.ACTION_HEADSET_PLUG,
+                    BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
+                    BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                        emitLiveSnapshot()
+                    }
                 }
             }
         }
     }
 
-    private var isRegistered = false
+    @Volatile private var isRegistered = false
 
     fun start() {
         if (isRegistered) return
         isRegistered = true
 
         try {
+            val bgHandler = ensureObserverHandler()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && deviceCallback != null) {
-                audioManager?.registerAudioDeviceCallback(deviceCallback, mainHandler)
-                audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.forEach {
-                    handleDeviceAdded(it)
-                }
+                audioManager?.registerAudioDeviceCallback(deviceCallback, bgHandler)
             }
 
-            audioManager?.let { am ->
-                val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                recordVolumeChange(currentVol, maxVol)
+            val volObserver = object : ContentObserver(bgHandler) {
+                override fun onChange(selfChange: Boolean) {
+                    super.onChange(selfChange)
+                    val am = audioManager ?: return
+                    val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val snapshot = getActiveAudioDeviceSnapshot(context)
+                    if (currentVol != lastObservedVolIndex || snapshot.transducerCategory != lastObservedCategory) {
+                        recordVolumeChange(currentVol, maxVol)
+                    } else {
+                        onLiveUpdate?.invoke(snapshot)
+                    }
+                }
             }
+            volumeContentObserver = volObserver
 
             context.contentResolver.registerContentObserver(
                 Settings.System.CONTENT_URI,
                 true,
-                volumeContentObserver
+                volObserver
             )
 
             val filter = IntentFilter().apply {
@@ -142,8 +166,28 @@ class AudioDeviceObserver(
                 context,
                 volumeReceiver,
                 filter,
+                null,
+                bgHandler,
                 ContextCompat.RECEIVER_EXPORTED
             )
+
+            // Defer initial hardware scan + initial Room writes onto background IO
+            scope.launch(Dispatchers.IO) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && deviceCallback != null) {
+                        audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.forEach {
+                            handleDeviceAdded(it)
+                        }
+                    }
+                    audioManager?.let { am ->
+                        val currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        recordVolumeChange(currentVol, maxVol)
+                    }
+                } catch (e: Exception) {
+                    Log.w("AudioDeviceObserver", "Initial audio device scan failed: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
             Log.w("AudioDeviceObserver", "Failed to register audio device or volume observer: ${e.message}")
         }
@@ -156,10 +200,19 @@ class AudioDeviceObserver(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && deviceCallback != null) {
                 audioManager?.unregisterAudioDeviceCallback(deviceCallback)
             }
-            runCatching { context.contentResolver.unregisterContentObserver(volumeContentObserver) }
+            volumeContentObserver?.let { obs ->
+                runCatching { context.contentResolver.unregisterContentObserver(obs) }
+            }
+            volumeContentObserver = null
             runCatching { context.unregisterReceiver(volumeReceiver) }
         } catch (e: Exception) {
             Log.w("AudioDeviceObserver", "Error stopping audio device observer: ${e.message}")
+        } finally {
+            synchronized(handlerLock) {
+                runCatching { observerThread?.quitSafely() }
+                observerThread = null
+                observerHandler = null
+            }
         }
     }
 
@@ -179,7 +232,7 @@ class AudioDeviceObserver(
         val connType = resolveConnectionType(device.type)
         val name = resolveFriendlyDeviceName(device, typeLabel)
 
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             try {
                 dao.insertDeviceSession(
                     AudioDeviceSessionEntity(
@@ -198,7 +251,7 @@ class AudioDeviceObserver(
 
     private fun handleDeviceRemoved(device: AudioDeviceInfo) {
         val sessionId = activeSessionMap.remove(device.id) ?: return
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             try {
                 dao.closeDeviceSession(sessionId, System.currentTimeMillis())
             } catch (e: Exception) {
@@ -220,7 +273,7 @@ class AudioDeviceObserver(
 
         val estDb = snapshot.estimatedDb
 
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             try {
                 dao.insertVolumeObservation(
                     VolumeObservationEntity(
