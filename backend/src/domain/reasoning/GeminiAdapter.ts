@@ -54,6 +54,12 @@ function convertAnthropicMessagesToGemini(messages: any[]): any[] {
     }
 
     if (Array.isArray(rawContent)) {
+      // Preserve exact raw Gemini model parts (including thoughtSignature) when replaying tool_use turns
+      const rawGeminiHolder = rawContent.find((b: any) => b && Array.isArray(b._rawGeminiParts));
+      if (role === 'model' && rawGeminiHolder) {
+        contents.push({ role: 'model', parts: rawGeminiHolder._rawGeminiParts });
+        continue;
+      }
       const parts: any[] = [];
       for (const block of rawContent) {
         if (!block || typeof block !== 'object') continue;
@@ -119,7 +125,8 @@ function convertGeminiResponseToAnthropicShape(geminiJson: any, modelId: string)
         type: 'tool_use',
         id: `gemini_call_${Date.now()}_${i}`,
         name: String(part.functionCall.name || ''),
-        input: part.functionCall.args && typeof part.functionCall.args === 'object' ? part.functionCall.args : {}
+        input: part.functionCall.args && typeof part.functionCall.args === 'object' ? part.functionCall.args : {},
+        ...(i === 0 ? { _rawGeminiParts: parts } : {})
       });
     }
   }

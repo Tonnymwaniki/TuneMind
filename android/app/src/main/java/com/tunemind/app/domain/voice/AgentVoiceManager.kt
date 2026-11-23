@@ -1464,7 +1464,7 @@ class AgentVoiceManager(
         noSpeechAfterWakeJob?.cancel()
         if (!wasTurnTriggeredByWakeWord || hasSpokenMorningPromptThisTurn) return
         noSpeechAfterWakeJob = scope.launch {
-            delay(1_950L)
+            delay(3_200L)
             if (_agentState.value == AgentState.LISTENING &&
                 isRecording &&
                 wasTurnTriggeredByWakeWord &&

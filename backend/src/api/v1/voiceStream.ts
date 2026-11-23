@@ -45,8 +45,23 @@ export function setupVoiceStreamSocket(server: Server) {
       headers: { Authorization: apiKey || '' }
     });
 
+    const pendingAudioFrames: string[] = [];
+
     aaiSocket.on('open', () => {
       console.log('[VoiceStream] AssemblyAI connection opened.');
+      // Allow natural breathing pauses (1150ms) so multi-word artist/song requests aren't cut off early
+      try {
+        aaiSocket.send(JSON.stringify({ end_utterance_silence_threshold: 1150 }));
+      } catch {
+        // ignore if unsupported
+      }
+      // Flush any audio buffered while AssemblyAI was handshaking so first syllables are never lost
+      while (pendingAudioFrames.length > 0 && aaiSocket.readyState === NodeWebSocket.OPEN) {
+        const b64 = pendingAudioFrames.shift();
+        if (b64) {
+          aaiSocket.send(JSON.stringify({ audio_data: b64 }));
+        }
+      }
     });
 
     aaiSocket.on('message', (data: any) => {
@@ -96,10 +111,12 @@ export function setupVoiceStreamSocket(server: Server) {
     // Receive raw PCM audio buffer from Android, encode to Base64, and send to AssemblyAI
     ws.on('message', (message: any) => {
       resetIdleTimer();
+      const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+      const audioData = buffer.toString('base64');
       if (aaiSocket.readyState === NodeWebSocket.OPEN) {
-        const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-        const audioData = buffer.toString('base64');
         aaiSocket.send(JSON.stringify({ audio_data: audioData }));
+      } else if (aaiSocket.readyState === NodeWebSocket.CONNECTING && pendingAudioFrames.length < 150) {
+        pendingAudioFrames.push(audioData);
       }
     });
 

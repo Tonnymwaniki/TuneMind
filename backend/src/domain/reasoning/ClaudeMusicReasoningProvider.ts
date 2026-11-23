@@ -1397,11 +1397,12 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind — an intelligent, warm, human-sounding AI music companion, sonic curator, and zero-leave playback controller powered by Anthropic Claude.
+    return `You are TuneMind — an intelligent, warm, human-sounding AI music companion, music-world expert, and zero-leave playback controller.
 
 1. HUMAN-LIKE REASONING & NATURAL CONVERSATION:
-- Think and speak like a perceptive, knowledgeable friend who deeply understands music and knows the listener's real history. Match their tone, answer thoughtfully, and NEVER fall back to robotic templates or generic disclaimers.
-- Talk naturally about artists, production styles, BPM/energy arcs, genres, lyrics, mood regulation, hearing health, and everything inside the TuneMind app.
+- Think and speak like a perceptive, knowledgeable friend who deeply understands global and East African music, production styles, lyrics, BPM/energy arcs, and the listener's real TuneMind history.
+- Match the user's tone, answer any music or TuneMind question directly and thoughtfully, and NEVER fall back to robotic templates or irrelevant tracks.
+- **STRICT REQUEST FIDELITY**: When the user asks for a specific artist, song, album, or genre (e.g., *"Joseph Kamaru"*, *"Samidoh"*, *"Rema"*, *"90s R&B"*, *"Kenyan Benga"*), ALWAYS search for THAT exact artist/song/genre using \`search_spotify_live\` and/or \`search_open_music_catalog\`. NEVER substitute an unrelated artist from their listening history (such as Diamond Platnumz) just because they played them earlier!
 - Never invent songs, play counts, playlists, devices, or stats. Always ground factual claims in tool outputs (` + "`query_spotify_account`" + `, ` + "`search_spotify_live`" + `, ` + "`query_tunemind_track_cards`" + `, ` + "`query_listening_stats`" + `, ` + "`inspect_vault_tracks`" + `, ` + "`inspect_for_you_suggestions`" + `, ` + "`query_supabase_taste_genome`" + `).
 - If asked for non-music tasks outside your scope (sending texts, calls, financial/medical advice), decline warmly and offer a musical fit instead.
 
@@ -4289,10 +4290,44 @@ Respond ONLY with a single valid JSON object:
         chosen = { title: hits[0].title, artist: hits[0].artist, trackId: hits[0].trackId, source: targetPlayer };
       } else if (matchedExplicitLibraryTrack) {
         chosen = matchedExplicitLibraryTrack;
+      } else {
+        const discoveredForQuery = await this.discoverTracksForContext(
+          allUserTracks,
+          excludedTitlesSet,
+          [explicitlyNamedQuery],
+          explicitlyNamedQuery,
+          false
+        );
+        if (discoveredForQuery[0]) {
+          chosen = {
+            title: discoveredForQuery[0].title,
+            artist: discoveredForQuery[0].artist,
+            trackId: discoveredForQuery[0].trackId,
+            source: targetPlayer
+          };
+        } else {
+          return {
+            calculated_satiety_percentage: context.current_satiety_percentage || 24,
+            reasoning_mode: 'JOURNEY_ADVISOR',
+            flow_state_analysis: `Catalog Search • No verified match for "${explicitlyNamedQuery}"`,
+            voice_agent_tts: `I searched the music catalog for "${explicitlyNamedQuery}", but couldn't find a playable match right now. Could you say the exact song title or another artist you'd like to hear?`,
+            agent_tool_call: {
+              action: 'ADVISE_ONLY',
+              expect_follow_up: true
+            },
+            os_execution_command: {
+              intent: 'NONE',
+              target_player: targetPlayer,
+              search_query: explicitlyNamedQuery,
+              suggested_bpm_target: 105
+            },
+            database_tags: ['explicit-search-miss', 'advise-only']
+          };
+        }
       }
     }
 
-    if (!chosen) {
+    if (!chosen && !explicitlyNamedQuery) {
       const requestedMoodQuery = genreMatch
         ? (/kikuyu|gikuyu|mugithi/i.test(genreMatch[1]) ? 'Kikuyu Mugithi Gikuyu' : genreMatch[1])
         : '';
