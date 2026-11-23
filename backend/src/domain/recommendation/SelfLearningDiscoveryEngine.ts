@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { callGeminiSingleShot, isGeminiActive } from '../reasoning/GeminiAdapter';
+import { callOpenAISingleShot, isOpenAIActive } from '../reasoning/OpenAIAdapter';
 import { getLiveSupabaseClient } from '../../config/supabase';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 import { TrackCardStore } from '../storage/TrackCardStore';
@@ -1625,7 +1626,7 @@ export class SelfLearningDiscoveryEngine {
     }
 
     // Batch-classify any unknown played regional/global artists ONCE and cache persistently (skip for Free $0-AI mode)
-    if (!payload.skipClaude && (isGeminiActive() || this.anthropic) && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
+    if (!payload.skipClaude && (isOpenAIActive() || isGeminiActive() || this.anthropic) && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
       const unknownArtists = Array.from(
         new Set(
           payload.recentTracks
@@ -1637,7 +1638,9 @@ export class SelfLearningDiscoveryEngine {
       if (unknownArtists.length > 0) {
         try {
           const clsPrompt = `Classify each music artist into ONE primary canonical genre (prefer exact East African/African & global labels like "Gikuyu / Mugithi", "Bongo Flava", "Gospel", "Kenyan Pop & Gengetone", "Ohangla & Benga", "Lingala & Rumba", "Afrobeats", "Amapiano", "Hip-Hop", "R&B", "Dancehall & Reggae", "Pop"). Return ONLY JSON object {"artist":"genre"}:\n${unknownArtists.join(', ')}`;
-          const clsResp = isGeminiActive()
+          const clsResp = isOpenAIActive()
+            ? await callOpenAISingleShot(undefined, clsPrompt, 260)
+            : isGeminiActive()
             ? await callGeminiSingleShot(undefined, clsPrompt, 260)
             : await (async () => {
                 const models = await this.getCandidateClaudeModels();
@@ -1903,7 +1906,7 @@ export class SelfLearningDiscoveryEngine {
     let modelUsed = payload.skipClaude ? 'free-open-catalog-2picks' : 'tunemind-contextual-bandit';
 
     // 4. AI Deep Reasoning Synthesis (Single cost-capped Haiku-first pass per daily cycle; skipped for Free $0 mode)
-    if (!payload.skipClaude && (isGeminiActive() || this.anthropic)) {
+    if (!payload.skipClaude && (isOpenAIActive() || isGeminiActive() || this.anthropic)) {
       const allocationInstruction = genreAllocation
         .map((g) => `- ${g.slots} UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
         .join('\n');
@@ -1939,9 +1942,11 @@ NEVER repeat any excluded song: ${excludedPromptSample}
 Return ONLY a raw JSON array:
 [{"title":"","artist":"","album":"","genre":"","category":"DOPAMINE_FLOW|PALATE_CLEANSER|CHRONO_RESTORE|NOVEL_EXPLORATION","subTier":"GENRE_PICK|GLOBAL_WILDCARD","isWildcard":false,"reason":"1 short sentence","confidence":0.93}]`;
 
-      if (isGeminiActive()) {
+      if (isOpenAIActive() || isGeminiActive()) {
         try {
-          const aiResp = await callGeminiSingleShot(undefined, prompt, 1850);
+          const aiResp = isOpenAIActive()
+            ? await callOpenAISingleShot(undefined, prompt, 1850)
+            : await callGeminiSingleShot(undefined, prompt, 1850);
           const rawText = (aiResp.content || [])
             .filter((b: any) => b.type === 'text')
             .map((b: any) => b.text)

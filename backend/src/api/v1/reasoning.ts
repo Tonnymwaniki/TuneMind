@@ -186,10 +186,16 @@ router.post('/evaluate-satiety', requireAuthInProduction, async (req: Request, r
     const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.evaluateSatiety(payload);
 
-    // Inject ElevenLabs Base64 Audio
+    // Inject OpenAI gpt-4o-mini-tts (primary) or ElevenLabs Base64 Audio
     let base64Audio: string | null = null;
     if (result.voice_agent_tts) {
-      base64Audio = await generateElevenLabsAudio(result.voice_agent_tts);
+      const { generateOpenAISpeechBase64, isOpenAIActive } = await import('../../domain/reasoning/OpenAIAdapter');
+      if (isOpenAIActive()) {
+        base64Audio = await generateOpenAISpeechBase64(result.voice_agent_tts);
+      }
+      if (!base64Audio) {
+        base64Audio = await generateElevenLabsAudio(result.voice_agent_tts);
+      }
     }
     (result as any).voice_agent_audio_base64 = base64Audio;
 

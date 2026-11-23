@@ -15,6 +15,13 @@ import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import { buildCrisisSupportMessage, detectCrisisRisk } from './CrisisSafetyGuardrail';
 import { callGeminiMessagesWithTools, callGeminiSingleShot, getCandidateGeminiModels, getGeminiApiKey, isGeminiActive } from './GeminiAdapter';
 import {
+  callOpenAIMessagesWithTools,
+  callOpenAISingleShot,
+  getCandidateOpenAIModels,
+  getOpenAIApiKey,
+  isOpenAIActive
+} from './OpenAIAdapter';
+import {
   coerceNonNegativePlayCount,
   normalizeSpotifyUri,
   resolveCanonicalTrackIdentity
@@ -540,16 +547,30 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   getLastDiagnostics() {
+    const openAiActive = isOpenAIActive();
+    const openAiKey = getOpenAIApiKey();
     const geminiActive = isGeminiActive();
     const geminiKey = getGeminiApiKey();
     const rawAnthropicKey = process.env.ANTHROPIC_API_KEY;
     return {
-      provider: geminiActive ? 'gemini' : 'anthropic',
-      hasAiClient: geminiActive ? Boolean(geminiKey) : Boolean(this.anthropic || this.cleanKey(rawAnthropicKey)),
-      keyPresent: geminiActive ? Boolean(geminiKey) : Boolean(rawAnthropicKey && rawAnthropicKey !== 'your_key_here'),
-      keyLength: geminiActive ? geminiKey.length : (rawAnthropicKey?.length || 0),
+      provider: openAiActive ? 'openai' : geminiActive ? 'gemini' : 'anthropic',
+      hasAiClient: openAiActive
+        ? Boolean(openAiKey)
+        : geminiActive
+        ? Boolean(geminiKey)
+        : Boolean(this.anthropic || this.cleanKey(rawAnthropicKey)),
+      keyPresent: openAiActive
+        ? Boolean(openAiKey)
+        : geminiActive
+        ? Boolean(geminiKey)
+        : Boolean(rawAnthropicKey && rawAnthropicKey !== 'your_key_here'),
+      keyLength: openAiActive ? openAiKey.length : geminiActive ? geminiKey.length : (rawAnthropicKey?.length || 0),
       hasInvalidKey: this.hasInvalidKey,
-      discoveredModels: geminiActive ? getCandidateGeminiModels() : ClaudeMusicReasoningProvider.discoveredAnthropicModels,
+      discoveredModels: openAiActive
+        ? getCandidateOpenAIModels()
+        : geminiActive
+        ? getCandidateGeminiModels()
+        : ClaudeMusicReasoningProvider.discoveredAnthropicModels,
       lastErrorDetails: this.lastErrorDetails || ClaudeMusicReasoningProvider.lastStaticErrorDetails,
       activeModelUsed: ClaudeMusicReasoningProvider.lastActiveModelUsed || this.activeModelUsed
     };
@@ -700,6 +721,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     maxTokens: number = 1400
   ): Promise<any> {
     const guardedSystem = systemPrompt + ClaudeMusicReasoningProvider.PROMPT_INJECTION_GUARD;
+    if (isOpenAIActive()) {
+      try {
+        const res = await callOpenAISingleShot(guardedSystem, userContent, maxTokens);
+        this.activeModelUsed = res.model || 'gpt-4o';
+        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
+        return res;
+      } catch (err: any) {
+        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'openai' };
+        throw err;
+      }
+    }
     if (isGeminiActive()) {
       try {
         const res = await callGeminiSingleShot(guardedSystem, userContent, maxTokens);
@@ -758,6 +793,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     maxTokens: number = 1400
   ): Promise<any> {
     const guardedSystem = systemPrompt + ClaudeMusicReasoningProvider.PROMPT_INJECTION_GUARD;
+    if (isOpenAIActive()) {
+      try {
+        const res = await callOpenAIMessagesWithTools(guardedSystem, messages, tools, maxTokens);
+        this.activeModelUsed = res.model || 'gpt-4o';
+        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
+        return res;
+      } catch (err: any) {
+        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'openai' };
+        throw err;
+      }
+    }
     if (isGeminiActive()) {
       try {
         const res = await callGeminiMessagesWithTools(guardedSystem, messages, tools, maxTokens);
@@ -838,7 +887,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   public async isAvailable(): Promise<boolean> {
-    if (isGeminiActive()) return true;
+    if (isOpenAIActive() || isGeminiActive()) return true;
     const rawKey = process.env.ANTHROPIC_API_KEY;
     return Boolean(this.cleanKey(rawKey) && !this.hasInvalidKey);
   }
@@ -1436,12 +1485,14 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind — an intelligent, warm, human-sounding Gemini-powered AI music companion, global music-world expert, and zero-leave playback controller.
+    return `You are TuneMind — an intelligent, warm, human-sounding AI music companion, global music-world expert, and zero-leave playback controller.
 
 1. HUMAN-LIKE REASONING & NATURAL CONVERSATION:
 - Think and speak like a perceptive, knowledgeable friend who deeply understands music across the entire world (every genre, era, language, artist, production style, BPM/energy arc) and the listener's real TuneMind history.
 - Match the user's tone, answer any music or TuneMind question directly and thoughtfully, and NEVER fall back to robotic templates or irrelevant tracks.
+- **PHONETIC VOICE AWARENESS**: Voice transcripts can occasionally mishear artist or song names phonetically (for example, "camaro" instead of "Kamaru"). Use musical common sense to recognize likely intended artists/songs, search for the real artist/song, and if the transcript is genuinely ambiguous, ask the user warmly to confirm before playing!
 - **STRICT REQUEST FIDELITY**: When the user asks for ANY specific artist, song, album, playlist, or genre anywhere in the world, ALWAYS search for THAT exact request using \`search_spotify_live\`, \`inspect_spotify_artist_or_album\`, and/or \`search_music_catalog\`. NEVER substitute an unrelated artist from their listening history just because they played them earlier!
+- **DIALOGUE BEFORE PLAYBACK ON RECOMMENDATIONS**: Whenever the user asks for a recommendation, mood, or asks you to pick a song by an artist without naming an exact track, use \`PROPOSE_TRACK\` (with \`expect_follow_up=true\`) or \`ADVISE_ONLY\` so you propose the song warmly and **wait for the user's approval** before playing!
 - Never invent songs, play counts, playlists, devices, or stats. Always ground factual claims in tool outputs (` + "`query_spotify_account`" + `, ` + "`search_spotify_live`" + `, ` + "`inspect_spotify_artist_or_album`" + `, ` + "`query_tunemind_track_cards`" + `, ` + "`query_listening_stats`" + `, ` + "`inspect_vault_tracks`" + `, ` + "`inspect_for_you_suggestions`" + `, ` + "`query_supabase_taste_genome`" + `).
 - If asked for non-music tasks outside your scope (sending texts, calls, financial/medical advice), decline warmly and offer a musical fit instead.
 
