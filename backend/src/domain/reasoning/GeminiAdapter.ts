@@ -16,13 +16,19 @@ export function isGeminiActive(): boolean {
   return Boolean(getGeminiApiKey());
 }
 
+let cachedWorkingGeminiModel: string | null = null;
+
 export function getCandidateGeminiModels(): string[] {
   const envModel = (process.env.GEMINI_MODEL || '').trim();
   return [
+    ...(cachedWorkingGeminiModel ? [cachedWorkingGeminiModel] : []),
     ...(envModel ? [envModel] : []),
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
     'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-2.0-flash'
+    'gemini-2.5-flash'
   ].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
 }
 
@@ -84,7 +90,7 @@ function convertAnthropicMessagesToGemini(messages: any[]): any[] {
           });
         } else if (block.type === 'tool_result') {
           const toolName = toolUseNameById.get(String(block.tool_use_id || '')) || String(block.name || 'tool');
-          const resultPayload =
+          let resultPayload: any =
             typeof block.content === 'string'
               ? (() => {
                   try {
@@ -93,14 +99,18 @@ function convertAnthropicMessagesToGemini(messages: any[]): any[] {
                     return { result: block.content };
                   }
                 })()
-              : block.content && typeof block.content === 'object'
-              ? block.content
-              : { result: String(block.content ?? '') };
+              : block.content;
+
+          if (Array.isArray(resultPayload)) {
+            resultPayload = { items: resultPayload };
+          } else if (!resultPayload || typeof resultPayload !== 'object') {
+            resultPayload = { result: resultPayload ?? '' };
+          }
 
           parts.push({
             functionResponse: {
               name: toolName,
-              response: Array.isArray(resultPayload) ? { items: resultPayload } : resultPayload
+              response: resultPayload
             }
           });
         }
@@ -214,7 +224,7 @@ export async function callGeminiMessagesWithTools(
         };
       }
 
-      const json = await retryWithBackoff(
+      const json: any = await retryWithBackoff(
         async () => {
           const resp = await fetch(url, {
             method: 'POST',
@@ -223,6 +233,9 @@ export async function callGeminiMessagesWithTools(
           });
           if (!resp.ok) {
             const errText = await resp.text().catch(() => '');
+            if (resp.status === 404 || resp.status === 400 || resp.status === 401 || resp.status === 403) {
+              return { __nonRetryableError: true, status: resp.status, errText };
+            }
             const err: any = new Error(`Gemini HTTP ${resp.status}: ${errText.slice(0, 300)}`);
             err.status = resp.status;
             throw err;
@@ -232,9 +245,19 @@ export async function callGeminiMessagesWithTools(
         { maxAttempts: 3, baseDelayMs: 400, maxDelayMs: 4_500 }
       );
 
+      if (json?.__nonRetryableError) {
+        const err: any = new Error(`Gemini HTTP ${json.status}: ${String(json.errText || '').slice(0, 300)}`);
+        err.status = json.status;
+        throw err;
+      }
+
+      cachedWorkingGeminiModel = modelId;
       return convertGeminiResponseToAnthropicShape(json, modelId);
     } catch (err: any) {
       lastErr = err;
+      if (cachedWorkingGeminiModel === modelId) {
+        cachedWorkingGeminiModel = null;
+      }
       const status = Number(err?.status || 0);
       if (status === 401 || status === 403) {
         throw err;
