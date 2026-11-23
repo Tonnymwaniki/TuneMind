@@ -14,6 +14,7 @@ import { StoredTrackCardRecord, TrackCardStore } from '../storage/TrackCardStore
 import { SpotifyUserApiClient } from '../spotify/SpotifyUserApiClient';
 import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import { buildCrisisSupportMessage, detectCrisisRisk } from './CrisisSafetyGuardrail';
+import { callGeminiMessagesWithTools, callGeminiSingleShot, isGeminiActive } from './GeminiAdapter';
 import {
   coerceNonNegativePlayCount,
   normalizeSpotifyUri,
@@ -688,6 +689,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     maxTokens: number = 1400
   ): Promise<any> {
     const guardedSystem = systemPrompt + ClaudeMusicReasoningProvider.PROMPT_INJECTION_GUARD;
+    if (isGeminiActive()) {
+      try {
+        const res = await callGeminiSingleShot(guardedSystem, userContent, maxTokens);
+        this.activeModelUsed = res.model || 'gemini-2.5-flash-lite';
+        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
+        return res;
+      } catch (err: any) {
+        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'gemini' };
+        throw err;
+      }
+    }
     const candidateModels = await this.getCandidateClaudeModels();
     let lastErr: any = null;
     for (const modelId of candidateModels) {
@@ -732,6 +747,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
     maxTokens: number = 1400
   ): Promise<any> {
     const guardedSystem = systemPrompt + ClaudeMusicReasoningProvider.PROMPT_INJECTION_GUARD;
+    if (isGeminiActive()) {
+      try {
+        const res = await callGeminiMessagesWithTools(guardedSystem, messages, tools, maxTokens);
+        this.activeModelUsed = res.model || 'gemini-2.5-flash-lite';
+        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
+        this.lastErrorDetails = null;
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
+        return res;
+      } catch (err: any) {
+        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
+        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'gemini' };
+        throw err;
+      }
+    }
     const candidateModels = await this.getCandidateClaudeModels();
     let lastErr: any = null;
     for (const modelId of candidateModels) {
@@ -798,6 +827,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   public async isAvailable(): Promise<boolean> {
+    if (isGeminiActive()) return true;
     const rawKey = process.env.ANTHROPIC_API_KEY;
     return Boolean(this.cleanKey(rawKey) && !this.hasInvalidKey);
   }

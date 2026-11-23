@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { normalizeSpotifyUri, resolveCanonicalTrackIdentity } from '../identity/trackIdentity';
+import { callGeminiMessagesWithTools, isGeminiActive } from './GeminiAdapter';
 
 // ============================================================================
 // 1. INPUT & OUTPUT SCHEMAS FOR THE SATIETY REASONING ENGINE
@@ -345,35 +346,44 @@ You MUST invoke all three tools in your response:
     });
 
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-    if (apiKey && apiKey !== 'your_key_here') {
+    if (isGeminiActive() || (apiKey && apiKey !== 'your_key_here')) {
       try {
-        const envModel = (process.env.ANTHROPIC_MODEL || '').trim();
-        const modelsToTry = [
-          ...(envModel ? [envModel] : []),
-          'claude-haiku-5-5',
-          'claude-haiku-4-5',
-          'claude-3-5-haiku-20241022',
-          'claude-sonnet-4-20250514',
-          'claude-3-7-sonnet-20250219',
-          'claude-3-haiku-20240307'
-        ].filter((v, idx, arr) => arr.indexOf(v) === idx);
-
         let response: Anthropic.Message | null = null;
-        for (const modelId of modelsToTry) {
-          try {
-            response = await this.anthropic.messages.create({
-              model: modelId,
-              max_tokens: 1024,
-              system: this.buildSystemPrompt(),
-              tools: AGENTIC_TOOL_DEFINITIONS,
-              tool_choice: { type: 'any' },
-              messages: [{ role: 'user', content: userPrompt }]
-            });
-            break;
-          } catch (modelErr: any) {
-            const msg = String(modelErr?.message || modelErr);
-            if (msg.includes('404') || msg.includes('not_found')) continue;
-            throw modelErr;
+        if (isGeminiActive()) {
+          response = (await callGeminiMessagesWithTools(
+            this.buildSystemPrompt(),
+            [{ role: 'user', content: userPrompt }],
+            AGENTIC_TOOL_DEFINITIONS,
+            1024
+          )) as Anthropic.Message;
+        } else {
+          const envModel = (process.env.ANTHROPIC_MODEL || '').trim();
+          const modelsToTry = [
+            ...(envModel ? [envModel] : []),
+            'claude-haiku-5-5',
+            'claude-haiku-4-5',
+            'claude-3-5-haiku-20241022',
+            'claude-sonnet-4-20250514',
+            'claude-3-7-sonnet-20250219',
+            'claude-3-haiku-20240307'
+          ].filter((v, idx, arr) => arr.indexOf(v) === idx);
+
+          for (const modelId of modelsToTry) {
+            try {
+              response = await this.anthropic.messages.create({
+                model: modelId,
+                max_tokens: 1024,
+                system: this.buildSystemPrompt(),
+                tools: AGENTIC_TOOL_DEFINITIONS,
+                tool_choice: { type: 'any' },
+                messages: [{ role: 'user', content: userPrompt }]
+              });
+              break;
+            } catch (modelErr: any) {
+              const msg = String(modelErr?.message || modelErr);
+              if (msg.includes('404') || msg.includes('not_found')) continue;
+              throw modelErr;
+            }
           }
         }
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
+import { callGeminiSingleShot, isGeminiActive } from '../reasoning/GeminiAdapter';
 import { getLiveSupabaseClient } from '../../config/supabase';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
 import { TrackCardStore } from '../storage/TrackCardStore';
@@ -1632,19 +1633,19 @@ export class SelfLearningDiscoveryEngine {
       ).slice(0, 14);
       if (unknownArtists.length > 0) {
         try {
-          const models = await this.getCandidateClaudeModels();
-          const primaryModel = models[0] || 'claude-haiku-4-5';
-          const clsResp = await this.anthropic.messages.create({
-            model: primaryModel,
-            max_tokens: 260,
-            messages: [
-              {
-                role: 'user',
-                content: `Classify each music artist into ONE primary canonical genre (prefer exact East African/African & global labels like "Gikuyu / Mugithi", "Bongo Flava", "Gospel", "Kenyan Pop & Gengetone", "Ohangla & Benga", "Lingala & Rumba", "Afrobeats", "Amapiano", "Hip-Hop", "R&B", "Dancehall & Reggae", "Pop"). Return ONLY JSON object {"artist":"genre"}:\n${unknownArtists.join(', ')}`
-              }
-            ]
-          });
-          const clsText = clsResp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+          const clsPrompt = `Classify each music artist into ONE primary canonical genre (prefer exact East African/African & global labels like "Gikuyu / Mugithi", "Bongo Flava", "Gospel", "Kenyan Pop & Gengetone", "Ohangla & Benga", "Lingala & Rumba", "Afrobeats", "Amapiano", "Hip-Hop", "R&B", "Dancehall & Reggae", "Pop"). Return ONLY JSON object {"artist":"genre"}:\n${unknownArtists.join(', ')}`;
+          const clsResp = isGeminiActive()
+            ? await callGeminiSingleShot(undefined, clsPrompt, 260)
+            : await (async () => {
+                const models = await this.getCandidateClaudeModels();
+                const primaryModel = models[0] || 'claude-haiku-4-5';
+                return this.anthropic!.messages.create({
+                  model: primaryModel,
+                  max_tokens: 260,
+                  messages: [{ role: 'user', content: clsPrompt }]
+                });
+              })();
+          const clsText = (clsResp.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
           const objMatch = clsText.match(/\{[\s\S]*\}/);
           const mapParsed = JSON.parse(objMatch ? objMatch[0] : clsText);
           if (mapParsed && typeof mapParsed === 'object') {
@@ -1935,8 +1936,59 @@ NEVER repeat any excluded song: ${excludedPromptSample}
 Return ONLY a raw JSON array:
 [{"title":"","artist":"","album":"","genre":"","category":"DOPAMINE_FLOW|PALATE_CLEANSER|CHRONO_RESTORE|NOVEL_EXPLORATION","subTier":"GENRE_PICK|GLOBAL_WILDCARD","isWildcard":false,"reason":"1 short sentence","confidence":0.93}]`;
 
-      const candidateModels = await this.getCandidateClaudeModels();
-      for (const candidateModelId of candidateModels.slice(0, 2)) {
+      if (isGeminiActive()) {
+        try {
+          const aiResp = await callGeminiSingleShot(undefined, prompt, 1850);
+          const rawText = (aiResp.content || [])
+            .filter((b: any) => b.type === 'text')
+            .map((b: any) => b.text)
+            .join('\n')
+            .trim();
+          const match = rawText.match(/\[[\s\S]*\]/);
+          const parsed = JSON.parse(match ? match[0] : rawText);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            isAiGenerated = true;
+            for (const row of parsed) {
+              if (!row) continue;
+              const title = String(row.title || '').trim();
+              const artist = String(row.artist || '').trim();
+              if (!title || !artist) continue;
+              const genre = SelfLearningDiscoveryEngine.inferGenre(title, artist, row.genre);
+              const isWildcard = Boolean(row.isWildcard || row.subTier === 'GLOBAL_WILDCARD') && !activeGenresLower.has(genre.toLowerCase());
+              const learnedGenreScore = this.scoreGenreForContext(model, genre, timeSlot);
+              const llmConf = Math.min(0.99, Math.max(0.75, Number(row.confidence || 0.91)));
+              const mlScore = Number((llmConf * 0.55 + learnedGenreScore * 0.45).toFixed(3));
+              const identity = resolveCanonicalTrackIdentity({
+                trackId: row.trackId || row.track_id,
+                spotifyUri: row.spotifyUri || row.spotify_uri,
+                title,
+                artist,
+                prefix: 'disc'
+              });
+              candidates.push({
+                trackId: identity.trackId,
+                spotifyUri: identity.spotifyUri,
+                playCount: 0,
+                title,
+                artist,
+                album: String(row.album || '').trim(),
+                genre,
+                category: String(row.category || (isWildcard ? 'NOVEL_EXPLORATION' : 'DOPAMINE_FLOW')),
+                subTier: isWildcard ? 'GLOBAL_WILDCARD' : 'GENRE_PICK',
+                reason: String(row.reason || `Picked for your ${timeSlot} ${genre} rotation.`).trim(),
+                confidence: mlScore,
+                mlScore,
+                isWildcard,
+                _fromBank: false
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[SelfLearningDiscovery] Gemini discovery warning:', (err as Error)?.message || err);
+        }
+      } else {
+        const candidateModels = await this.getCandidateClaudeModels();
+        for (const candidateModelId of candidateModels.slice(0, 2)) {
         try {
           const aiResp = await this.anthropic.messages.create({
             model: candidateModelId,
@@ -1996,6 +2048,7 @@ Return ONLY a raw JSON array:
           }
         } catch (err) {
           console.warn(`[SelfLearningDiscovery] Model ${candidateModelId} notice:`, (err as Error)?.message);
+        }
         }
       }
     }
