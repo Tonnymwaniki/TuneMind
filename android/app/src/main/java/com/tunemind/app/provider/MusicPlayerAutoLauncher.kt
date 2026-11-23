@@ -404,8 +404,8 @@ object MusicPlayerAutoLauncher {
             }
         }
 
-        // TIER 1A: Local Audio Match inside TuneMind (full length, zero app switch)
-        if ((preferInAppPlayer || stayInTuneMind || strictNoSwitch) && TuneMindInAppPlayer.playLocalMatch(context, cleanTitle, cleanArtist)) {
+        // TIER 1A: Local Audio Match inside TuneMind (skipped when user explicitly chose Spotify)
+        if (!isSpotifyTarget && (preferInAppPlayer || stayInTuneMind || strictNoSwitch) && TuneMindInAppPlayer.playLocalMatch(context, cleanTitle, cleanArtist)) {
             val localUri = TuneMindInAppPlayer.currentUriFlow.value
             Log.i(TAG, "✅ Tier-1A In-App Local Playback started for '$cleanTitle'")
             return LaunchOutcome(
@@ -416,7 +416,7 @@ object MusicPlayerAutoLauncher {
             )
         }
 
-        // Resolve Open Catalog Links (Audius stream, YouTube Music videoId, Deezer URL, 30s preview)
+        // Resolve Open Catalog Links (Audius stream, YouTube Music videoId)
         val resolvedLinks = UniversalTrackResolver.resolveTrackBlocking(
             context = context,
             cleanTitle = cleanTitle,
@@ -424,9 +424,9 @@ object MusicPlayerAutoLauncher {
             fullQuery = fullSearchQuery
         )
 
-        // TIER 1B: Open-Catalog Full Track Stream via Audius (when preferInAppPlayer, stayInTuneMind, or strict mode is on)
+        // TIER 1B: Open-Catalog Full Track Stream via Audius (skipped when user explicitly chose Spotify)
         val audiusStream = resolvedLinks?.audiusStreamUrl?.takeIf { it.startsWith("http") }
-        if ((preferInAppPlayer || stayInTuneMind || strictNoSwitch) && audiusStream != null) {
+        if (!isSpotifyTarget && (preferInAppPlayer || stayInTuneMind || strictNoSwitch) && audiusStream != null) {
             if (TuneMindInAppPlayer.playStreamUrl(
                     context = context,
                     streamUrl = audiusStream,
@@ -448,10 +448,9 @@ object MusicPlayerAutoLauncher {
         }
 
         // TIER 1C (Option A — Audience-Gated): Visible Official YouTube IFrame Player inside TuneMind
-        // Activates immediately for YouTube Music users (Spotify/Boomplay/Audiomack still try warm MediaSession first).
         val ytmVideoId = resolvedLinks?.ytmVideoId?.takeIf { it.isNotBlank() }
             ?: track.providerTrackId?.trim()?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
-        if (shouldActivateBuiltInYouTubeTier(targetPkg, providerId, ytmVideoId, preferInAppPlayer, strictNoSwitch)) {
+        if (!isSpotifyTarget && shouldActivateBuiltInYouTubeTier(targetPkg, providerId, ytmVideoId, preferInAppPlayer, strictNoSwitch)) {
             val started = TuneMindYouTubeEmbedController.startVideo(
                 context = context,
                 videoId = ytmVideoId!!,
@@ -474,10 +473,10 @@ object MusicPlayerAutoLauncher {
         }
 
         // TIER 2: Warm Active MediaSession (boomplay / youtube music / audiomack / spotify passive / OEM)
-        val exactSpotifyUri = if (targetPkg?.contains("spotify", ignoreCase = true) == true) {
-            extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
+        val exactSpotifyUri = if (isSpotifyTarget) {
+            spotifyResolvedUriFromConnect ?: extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
         } else null
-        if ((stayInTuneMind || strictNoSwitch) &&
+        if ((stayInTuneMind || strictNoSwitch || isSpotifyTarget) &&
             tryWarmMediaSessionSwitch(
                 targetPkg = targetPkg,
                 displayName = displayName,
@@ -491,15 +490,14 @@ object MusicPlayerAutoLauncher {
             return LaunchOutcome(
                 launched = true,
                 usedInAppPlayer = false,
-                destinationUri = "mediasession:${targetPkg ?: "active"}",
+                destinationUri = exactSpotifyUri ?: "mediasession:${targetPkg ?: "active"}",
                 detailMessage = "Playing '$cleanTitle' via active $displayName session without leaving TuneMind."
             )
         }
 
-        // TIER 3 (Strict Never-Leave Mode, Stay-In-TuneMind Mode, OR Spotify Free Smart Mode):
-        // First try full-length built-in YouTube player inside TuneMind so we NEVER leave TuneMind!
-        if (strictNoSwitch || stayInTuneMind || isSpotifyFreeSmartMode) {
-            if (ytmVideoId != null && (strictNoSwitch || preferInAppPlayer || stayInTuneMind)) {
+        // TIER 3 (Strict Never-Leave Mode or Non-Spotify Stay-In-TuneMind Mode):
+        if (strictNoSwitch || (!isSpotifyTarget && (stayInTuneMind || isSpotifyFreeSmartMode))) {
+            if (!isSpotifyTarget && ytmVideoId != null && (strictNoSwitch || preferInAppPlayer || stayInTuneMind)) {
                 val startedFullInApp = TuneMindYouTubeEmbedController.startVideo(
                     context = context,
                     videoId = ytmVideoId,
@@ -507,8 +505,8 @@ object MusicPlayerAutoLauncher {
                     artist = cleanArtist.ifBlank { track.artist },
                     album = resolvedLinks?.albumName,
                     previewFallback = null,
-                    fallbackExternalPkg = if (isSpotifyFreeSmartMode || isSpotifyTarget) SpotifyMusicProvider.SPOTIFY_PACKAGE else targetPkg,
-                    fallbackExternalName = if (isSpotifyFreeSmartMode || isSpotifyTarget) "Spotify" else displayName
+                    fallbackExternalPkg = targetPkg,
+                    fallbackExternalName = displayName
                 )
                 if (startedFullInApp) {
                     Log.i(TAG, "✅ Tier-3 Full In-App Playback started via Built-In YouTube Player for '$cleanTitle' ($ytmVideoId)")
@@ -521,59 +519,27 @@ object MusicPlayerAutoLauncher {
                 }
             }
 
-            // SPOTIFY FREE SMART MODE (only when strictNoSwitch AND stayInTuneMind are NOT locking us in-app):
-            if (!strictNoSwitch && !stayInTuneMind && isSpotifyFreeSmartMode) {
-                val exactUriForSpotify = extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
-                    ?: if (SpotifyPremiumConnectManager.isConnected(context)) {
-                        SpotifyPremiumConnectManager.searchExactTrackUri(
-                            context = context,
-                            title = cleanTitle.ifBlank { track.title },
-                            artist = cleanArtist.ifBlank { track.artist },
-                            query = fullSearchQuery
-                        )
-                    } else null
-                Log.i(TAG, "✅ Spotify Free Smart Mode: skipping 30s preview and opening full track '$cleanTitle' directly in Spotify ($exactUriForSpotify)")
-                return launchExternalColdHandoff(
-                    context = context,
-                    targetPkg = SpotifyMusicProvider.SPOTIFY_PACKAGE,
-                    displayName = "Spotify",
-                    track = track,
-                    cleanTitle = cleanTitle,
-                    cleanArtist = cleanArtist,
-                    fullSearchQuery = fullSearchQuery,
-                    deepLinkUri = exactUriForSpotify ?: deepLinkUri,
-                    previousTitle = previousTitle,
-                    resolvedLinks = resolvedLinks
-                )
-            }
-
-            val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
-            // 30s preview fallback intentionally removed: never play 30s snippets when full playback via Spotify/YouTube/Audius is expected.
-            if (spotifyHadNoActiveDevice && (spotifyPremiumReady || isSpotifyTarget)) {
-                Log.w(TAG, "Spotify did not wake a Connect device in the background yet — returning without playing a 30s preview.")
-                return LaunchOutcome(
-                    launched = false,
-                    usedInAppPlayer = false,
-                    destinationUri = spotifyResolvedUriFromConnect,
-                    detailMessage = "Spotify did not finish waking in the background yet. Tap Spotify Connect once or open Spotify briefly to warm its session, then TuneMind will play full songs silently without leaving."
-                )
-            }
-
-            if (strictNoSwitch || stayInTuneMind) {
-                val failHint = if (ytmInstalled) {
+            if (strictNoSwitch) {
+                val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
+                val failHint = if (isSpotifyTarget) {
+                    "Strict Never-Leave mode kept Spotify closed. Start a song in Spotify once or turn off Strict mode so TuneMind can wake Spotify automatically."
+                } else if (ytmInstalled) {
                     "Kept $displayName closed without leaving TuneMind. Say 'use YouTube inside TuneMind' or start a song in $displayName once to warm its background session."
                 } else {
-                    "Kept $displayName closed without leaving TuneMind. Open $displayName once to warm its background session, or turn off 'Stay in TuneMind' in Settings for external handoff."
+                    "Kept $displayName closed without leaving TuneMind. Open $displayName once to warm its background session, or turn off Strict mode in Settings."
                 }
                 return LaunchOutcome(
                     launched = false,
                     usedInAppPlayer = false,
+                    destinationUri = spotifyResolvedUriFromConnect,
                     detailMessage = failHint
                 )
             }
         }
 
-        // TIER 4 (External Cold Handoff — only when BOTH Never Leave & Stay in TuneMind allow external switching):
+        // TIER 4 (Spotify Cold-Wake + Auto-Return OR External Player Cold Handoff):
+        // When user chose Spotify and silent background Connect/MediaSession could not wake it,
+        // launch exact Spotify URI directly with autoReturnAfterPlay so Spotify ALWAYS wakes & plays!
         val enrichedSpotifyUri = if (isSpotifyTarget && SpotifyPremiumConnectManager.isConnected(context)) {
             spotifyResolvedUriFromConnect
                 ?: extractSpotifyTrackUri(deepLinkUri, resolvedLinks)
@@ -596,7 +562,8 @@ object MusicPlayerAutoLauncher {
             fullSearchQuery = fullSearchQuery,
             deepLinkUri = enrichedSpotifyUri ?: deepLinkUri,
             previousTitle = previousTitle,
-            resolvedLinks = resolvedLinks
+            resolvedLinks = resolvedLinks,
+            autoReturnAfterPlay = isSpotifyTarget && !strictNoSwitch
         )
     }
 

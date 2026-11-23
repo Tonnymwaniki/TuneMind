@@ -8,8 +8,6 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import com.tunemind.app.domain.ai.AgentActionType
 import com.tunemind.app.domain.ai.BrainResponse
@@ -89,8 +87,6 @@ class TuneMindVoiceAgent(
     private val scope = CoroutineScope(Dispatchers.Main)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var tts: TextToSpeech? = null
-    private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var hasWelcomedThisSession = false
 
@@ -104,47 +100,6 @@ class TuneMindVoiceAgent(
 
     private var pendingTrack: RecommendedTrack? = null
     private var lastSuggestedTrack: RecommendedTrack? = null
-
-    init {
-        initTts()
-    }
-
-    private fun initTts() {
-        try {
-            tts = TextToSpeech(context.applicationContext) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    val result = tts?.setLanguage(Locale.getDefault())
-                    if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        tts?.setLanguage(Locale.US)
-                    }
-                    isTtsInitialized = true
-                    tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) {}
-                        override fun onDone(utteranceId: String?) {
-                            mainHandler.post {
-                                when (utteranceId) {
-                                    UTTERANCE_INITIAL_PROMPT, UTTERANCE_FOLLOW_UP_PROMPT -> {
-                                        startListeningForIntent()
-                                    }
-                                    UTTERANCE_SUGGESTION_CONFIRM -> {
-                                        startListeningForConfirmation()
-                                    }
-                                    UTTERANCE_FINAL_DISPATCH -> {
-                                        executePlayback()
-                                    }
-                                }
-                            }
-                        }
-                        override fun onError(utteranceId: String?) {
-                            Log.e(tag, "TTS Utterance error on $utteranceId")
-                        }
-                    })
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(tag, "TTS init failure: ${e.message}", e)
-        }
-    }
 
     /**
      * Welcomes the user with a personalized spoken greeting upon opening the app.
@@ -230,17 +185,14 @@ class TuneMindVoiceAgent(
     }
 
     private fun speak(text: String, utteranceId: String?) {
-        if (isTtsInitialized && tts != null) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId ?: "tunemind_general")
-        } else {
-            mainHandler.postDelayed({
-                when (utteranceId) {
-                    UTTERANCE_INITIAL_PROMPT, UTTERANCE_FOLLOW_UP_PROMPT -> startListeningForIntent()
-                    UTTERANCE_SUGGESTION_CONFIRM -> startListeningForConfirmation()
-                    UTTERANCE_FINAL_DISPATCH -> executePlayback()
-                }
-            }, 1200)
-        }
+        // Legacy on-device robotic TextToSpeech removed; proceed cleanly to next state.
+        mainHandler.postDelayed({
+            when (utteranceId) {
+                UTTERANCE_INITIAL_PROMPT, UTTERANCE_FOLLOW_UP_PROMPT -> startListeningForIntent()
+                UTTERANCE_SUGGESTION_CONFIRM -> startListeningForConfirmation()
+                UTTERANCE_FINAL_DISPATCH -> executePlayback()
+            }
+        }, 300)
     }
 
     private fun startListeningForIntent() {
@@ -526,9 +478,6 @@ class TuneMindVoiceAgent(
             speechRecognizer?.stopListening()
             speechRecognizer?.destroy()
             speechRecognizer = null
-            tts?.stop()
-            tts?.shutdown()
-            tts = null
         } catch (_: Exception) {}
         _agentState.value = _agentState.value.copy(phase = AgentPhase.IDLE)
     }

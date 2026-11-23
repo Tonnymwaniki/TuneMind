@@ -112,49 +112,9 @@ router.post('/trigger', requireAuthInProduction, async (req: Request, res: Respo
 });
 
 /**
- * Helper to fetch hyper-realistic MP3 buffer from ElevenLabs and return as Base64 string.
- */
-async function generateElevenLabsAudio(text: string): Promise<string | null> {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
-
-  if (!apiKey || !voiceId) {
-    console.warn('[ElevenLabs] API Key or Voice ID missing. Falling back to native TTS.');
-    return null;
-  }
-
-  try {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: {
-        'xi-api-key': apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        text: text,
-        model_id: 'eleven_turbo_v2_5', // Lowest latency model for conversational AI
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-      }),
-      signal: AbortSignal.timeout(1500)
-    });
-
-    if (!response.ok) {
-      console.error(`[ElevenLabs] Error: ${response.status} ${response.statusText}`);
-      return null;
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer).toString('base64'); // Send as Base64 in JSON
-  } catch (error) {
-    console.error('[ElevenLabs] Network failure:', error);
-    return null;
-  }
-}
-
-/**
  * POST /api/v1/reasoning/evaluate-satiety
- * Evaluates acoustic satiety and produces OS media execution commands using Claude 3.5 Haiku,
- * enriched with ElevenLabs voice synthesis.
+ * Evaluates acoustic satiety and taste telemetry via OpenAI gpt-4o tool-calling agent,
+ * paired with OpenAI gpt-4o-mini-tts human voice synthesis.
  */
 router.post('/evaluate-satiety', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
@@ -186,15 +146,12 @@ router.post('/evaluate-satiety', requireAuthInProduction, async (req: Request, r
     const provider = new ClaudeMusicReasoningProvider();
     const result = await provider.evaluateSatiety(payload);
 
-    // Inject OpenAI gpt-4o-mini-tts (primary) or ElevenLabs Base64 Audio
+    // Synthesize human-like voice exclusively via OpenAI gpt-4o-mini-tts
     let base64Audio: string | null = null;
     if (result.voice_agent_tts) {
       const { generateOpenAISpeechBase64, isOpenAIActive } = await import('../../domain/reasoning/OpenAIAdapter');
       if (isOpenAIActive()) {
         base64Audio = await generateOpenAISpeechBase64(result.voice_agent_tts);
-      }
-      if (!base64Audio) {
-        base64Audio = await generateElevenLabsAudio(result.voice_agent_tts);
       }
     }
     (result as any).voice_agent_audio_base64 = base64Audio;

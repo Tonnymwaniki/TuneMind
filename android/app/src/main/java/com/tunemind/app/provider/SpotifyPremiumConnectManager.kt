@@ -1586,26 +1586,33 @@ object SpotifyPremiumConnectManager {
             putBoolean("play", true)
         }
 
-        // Step 1: Warm MediaSession pulse if already present
+        // Step 1: Warm MediaSession pulse if already present (paused or sleeping Spotify session in background)
         val initialListener = com.tunemind.app.service.TuneMindListenerService.instance
         if (initialListener?.hasActiveSession("com.spotify.music") == true ||
             initialListener?.hasActiveSession("com.spotify.lite") == true
         ) {
-            Log.i(TAG, "Spotify Connect idle but MediaSession warm — pulsing Spotify before Connect play")
+            val activePkg = if (initialListener.hasActiveSession("com.spotify.music")) "com.spotify.music" else "com.spotify.lite"
+            Log.i(TAG, "Spotify Connect idle while MediaSession is warm ($activePkg) — resuming/pulsing to wake Spotify Connect socket...")
             runCatching {
-                if (uriObj != null) {
-                    initialListener.playFromUri("com.spotify.music", uriObj, playExtras)
-                } else {
-                    initialListener.play("com.spotify.music")
-                }
+                initialListener.play(activePkg)
             }
             if (!isOnMainThread) {
-                runCatching { Thread.sleep(750L) }
-                findBestConnectDevice(accessToken)?.let { dev ->
-                    return SilentColdWakeOutcome(device = dev)
+                for (waitMs in listOf(400L, 600L, 850L, 1100L)) {
+                    runCatching { Thread.sleep(waitMs) }
+                    findBestConnectDevice(accessToken)?.let { dev ->
+                        Log.i(TAG, "✅ Warm MediaSession pulse woke Spotify Connect device '${dev.second}'")
+                        return SilentColdWakeOutcome(device = dev)
+                    }
                 }
-                if (isSpotifySessionPlayingExpectedTrack(expectedTitle)) {
-                    return SilentColdWakeOutcome(mediaSessionPlayingTarget = true)
+                if (uriObj != null) {
+                    runCatching { initialListener.playFromUri(activePkg, uriObj, playExtras) }
+                    runCatching { Thread.sleep(600L) }
+                    findBestConnectDevice(accessToken)?.let { dev ->
+                        return SilentColdWakeOutcome(device = dev)
+                    }
+                    if (isSpotifySessionPlayingExpectedTrack(expectedTitle, activePkg)) {
+                        return SilentColdWakeOutcome(mediaSessionPlayingTarget = true)
+                    }
                 }
             }
         }
@@ -1687,7 +1694,7 @@ object SpotifyPremiumConnectManager {
             val sentButton = dispatchTargetedSpotifyMediaPlayBroadcast(appCtx)
             if (sentButton || browserConnected) {
                 var pushedUriToWokenSession = false
-                for (waitMs in listOf(500L, 750L, 950L, 1100L)) {
+                for (waitMs in listOf(500L, 750L, 950L, 1150L, 1300L)) {
                     runCatching { Thread.sleep(waitMs) }
                     val listener = com.tunemind.app.service.TuneMindListenerService.instance
                     if (!pushedUriToWokenSession && listener?.hasActiveSession("com.spotify.music") == true && uriObj != null) {
@@ -1876,11 +1883,19 @@ object SpotifyPremiumConnectManager {
                     Log.i(TAG, "✅ Silent Cold-Wake playing '$resolvedUri' via Spotify MediaSession without leaving TuneMind")
                     return SpotifyPlayResult.Success(resolvedUri, "Spotify (Phone)")
                 } else {
+                    // One direct Connect attempt without device_id in case Connect activated before /devices synced
+                    val blindResp = executePlay(token, null)
+                    if (blindResp.isSuccessful || blindResp.code == 204 || blindResp.code == 202) {
+                        blindResp.close()
+                        Log.i(TAG, "✅ Spotify Connect blind play succeeded for '$resolvedUri'")
+                        return SpotifyPlayResult.Success(resolvedUri, "Spotify")
+                    }
+                    blindResp.close()
                     if (wakeOutcome.sentMediaButtonPlay) {
                         runCatching { com.tunemind.app.service.TuneMindListenerService.instance?.pause("com.spotify.music") }
                     }
                     return SpotifyPlayResult.NoActiveDevice(
-                        message = "Spotify needs one automatic wake-up tap after clearing Recent Apps.",
+                        message = "Spotify Connect needs foreground wake.",
                         trackUri = resolvedUri
                     )
                 }
