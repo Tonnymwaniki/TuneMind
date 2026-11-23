@@ -1,7 +1,6 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import Anthropic from '@anthropic-ai/sdk';
 import { callGeminiSingleShot, isGeminiActive } from '../reasoning/GeminiAdapter';
 import { getLiveSupabaseClient } from '../../config/supabase';
 import { SupabaseIntelligenceStore } from '../storage/SupabaseIntelligenceStore';
@@ -425,12 +424,16 @@ export class SelfLearningDiscoveryEngine {
   private static discoveredClaudeModels: string[] | null = null;
   private static lastClaudeDiscoveryMs = 0;
   private static cachedWorkingClaudeModel: string | null = null;
-  private anthropic: Anthropic | null = null;
+  private anthropic: any = null;
 
   constructor() {
-    const key = (process.env.ANTHROPIC_API_KEY || '').trim();
-    if (key.length > 10 && !key.startsWith('your_')) {
-      this.anthropic = new Anthropic({ apiKey: key });
+    if (!isGeminiActive()) {
+      const key = (process.env.ANTHROPIC_API_KEY || '').trim();
+      if (key.length > 10 && !key.startsWith('your_')) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const AnthropicSdk = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
+        this.anthropic = new AnthropicSdk({ apiKey: key });
+      }
     }
   }
 
@@ -1622,7 +1625,7 @@ export class SelfLearningDiscoveryEngine {
     }
 
     // Batch-classify any unknown played regional/global artists ONCE and cache persistently (skip for Free $0-AI mode)
-    if (!payload.skipClaude && this.anthropic && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
+    if (!payload.skipClaude && (isGeminiActive() || this.anthropic) && Array.isArray(payload.recentTracks) && payload.recentTracks.length > 0) {
       const unknownArtists = Array.from(
         new Set(
           payload.recentTracks
@@ -1900,7 +1903,7 @@ export class SelfLearningDiscoveryEngine {
     let modelUsed = payload.skipClaude ? 'free-open-catalog-2picks' : 'tunemind-contextual-bandit';
 
     // 4. AI Deep Reasoning Synthesis (Single cost-capped Haiku-first pass per daily cycle; skipped for Free $0 mode)
-    if (!payload.skipClaude && this.anthropic) {
+    if (!payload.skipClaude && (isGeminiActive() || this.anthropic)) {
       const allocationInstruction = genreAllocation
         .map((g) => `- ${g.slots} UNHEARD real songs in "${g.genre}" (learned affinity ${(g.score * 100).toFixed(0)}%)`)
         .join('\n');
@@ -1995,9 +1998,9 @@ Return ONLY a raw JSON array:
             max_tokens: 1850,
             messages: [{ role: 'user', content: prompt }]
           });
-          const rawText = aiResp.content
-            .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-            .map((b) => b.text)
+          const rawText = (aiResp.content || [])
+            .filter((b: any) => b?.type === 'text')
+            .map((b: any) => b.text)
             .join('\n')
             .trim();
 

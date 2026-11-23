@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import { retryWithBackoff } from '../../utils/retryWithBackoff';
 import {
@@ -14,7 +13,7 @@ import { StoredTrackCardRecord, TrackCardStore } from '../storage/TrackCardStore
 import { SpotifyUserApiClient } from '../spotify/SpotifyUserApiClient';
 import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import { buildCrisisSupportMessage, detectCrisisRisk } from './CrisisSafetyGuardrail';
-import { callGeminiMessagesWithTools, callGeminiSingleShot, isGeminiActive } from './GeminiAdapter';
+import { callGeminiMessagesWithTools, callGeminiSingleShot, getCandidateGeminiModels, getGeminiApiKey, isGeminiActive } from './GeminiAdapter';
 import {
   coerceNonNegativePlayCount,
   normalizeSpotifyUri,
@@ -331,7 +330,17 @@ export interface TuneMindReasoningResponse {
 
 export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   readonly providerId = 'anthropic-claude';
-  private anthropic: Anthropic;
+  private anthropic: any = null;
+
+  private getAnthropicClient(): any {
+    if (!this.anthropic) {
+      // Lazy-load only if AI_PROVIDER=anthropic is explicitly configured
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const AnthropicSdk = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
+      this.anthropic = new AnthropicSdk();
+    }
+    return this.anthropic;
+  }
   private hasInvalidKey = false;
   private lastKeyCheckAt: number = 0;
   private activeModelUsed: string = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5';
@@ -527,18 +536,20 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   constructor() {
-    this.anthropic = new Anthropic(); // Uses ANTHROPIC_API_KEY from .env
     this.activeModelUsed = ClaudeMusicReasoningProvider.lastActiveModelUsed;
   }
 
   getLastDiagnostics() {
-    const rawKey = process.env.ANTHROPIC_API_KEY;
+    const geminiActive = isGeminiActive();
+    const geminiKey = getGeminiApiKey();
+    const rawAnthropicKey = process.env.ANTHROPIC_API_KEY;
     return {
-      hasAiClient: Boolean(this.anthropic),
-      keyPresent: Boolean(rawKey && rawKey !== 'your_key_here'),
-      keyLength: rawKey?.length || 0,
+      provider: geminiActive ? 'gemini' : 'anthropic',
+      hasAiClient: geminiActive ? Boolean(geminiKey) : Boolean(this.anthropic || this.cleanKey(rawAnthropicKey)),
+      keyPresent: geminiActive ? Boolean(geminiKey) : Boolean(rawAnthropicKey && rawAnthropicKey !== 'your_key_here'),
+      keyLength: geminiActive ? geminiKey.length : (rawAnthropicKey?.length || 0),
       hasInvalidKey: this.hasInvalidKey,
-      discoveredClaudeModels: ClaudeMusicReasoningProvider.discoveredAnthropicModels,
+      discoveredModels: geminiActive ? getCandidateGeminiModels() : ClaudeMusicReasoningProvider.discoveredAnthropicModels,
       lastErrorDetails: this.lastErrorDetails || ClaudeMusicReasoningProvider.lastStaticErrorDetails,
       activeModelUsed: ClaudeMusicReasoningProvider.lastActiveModelUsed || this.activeModelUsed
     };
@@ -709,7 +720,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       try {
         const res = await retryWithBackoff(
           () =>
-            this.anthropic.messages.create({
+            this.getAnthropicClient().messages.create({
               model: modelId,
               max_tokens: maxTokens,
               system: guardedSystem,
@@ -767,7 +778,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       try {
         const res = await retryWithBackoff(
           () =>
-            this.anthropic.messages.create({
+            this.getAnthropicClient().messages.create({
               model: modelId,
               max_tokens: maxTokens,
               system: guardedSystem,
@@ -910,6 +921,34 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
             }
           },
           required: ['query']
+        }
+      },
+      {
+        name: 'inspect_spotify_artist_or_album',
+        description:
+          'Fetches an artist\'s top tracks or an album\'s full tracklist from Spotify Web API (by artist_id/album_id or by artist_name/album_name), cross-referenced with TuneMind play counts and Resting Vault status. Use whenever a user asks for an artist\'s best songs, discography, or tracks from a specific album anywhere in the world.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            entity_type: {
+              type: 'string',
+              enum: ['artist_top_tracks', 'album_tracks'],
+              description: 'Whether to fetch an artist\'s top tracks or an album\'s tracklist.'
+            },
+            id_or_uri: {
+              type: 'string',
+              description: 'Optional Spotify artist/album ID or URI (spotify:artist:... or spotify:album:...).'
+            },
+            name_query: {
+              type: 'string',
+              description: 'Artist or album name to search on Spotify if id_or_uri is not yet known.'
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum tracks to return (1-20, default 10).'
+            }
+          },
+          required: ['entity_type']
         }
       },
       {
@@ -1397,13 +1436,13 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   private getAutonomousSystemPrompt(): string {
-    return `You are TuneMind — an intelligent, warm, human-sounding AI music companion, music-world expert, and zero-leave playback controller.
+    return `You are TuneMind — an intelligent, warm, human-sounding Gemini-powered AI music companion, global music-world expert, and zero-leave playback controller.
 
 1. HUMAN-LIKE REASONING & NATURAL CONVERSATION:
-- Think and speak like a perceptive, knowledgeable friend who deeply understands global and East African music, production styles, lyrics, BPM/energy arcs, and the listener's real TuneMind history.
+- Think and speak like a perceptive, knowledgeable friend who deeply understands music across the entire world (every genre, era, language, artist, production style, BPM/energy arc) and the listener's real TuneMind history.
 - Match the user's tone, answer any music or TuneMind question directly and thoughtfully, and NEVER fall back to robotic templates or irrelevant tracks.
-- **STRICT REQUEST FIDELITY**: When the user asks for a specific artist, song, album, or genre (e.g., *"Joseph Kamaru"*, *"Samidoh"*, *"Rema"*, *"90s R&B"*, *"Kenyan Benga"*), ALWAYS search for THAT exact artist/song/genre using \`search_spotify_live\` and/or \`search_open_music_catalog\`. NEVER substitute an unrelated artist from their listening history (such as Diamond Platnumz) just because they played them earlier!
-- Never invent songs, play counts, playlists, devices, or stats. Always ground factual claims in tool outputs (` + "`query_spotify_account`" + `, ` + "`search_spotify_live`" + `, ` + "`query_tunemind_track_cards`" + `, ` + "`query_listening_stats`" + `, ` + "`inspect_vault_tracks`" + `, ` + "`inspect_for_you_suggestions`" + `, ` + "`query_supabase_taste_genome`" + `).
+- **STRICT REQUEST FIDELITY**: When the user asks for ANY specific artist, song, album, playlist, or genre anywhere in the world, ALWAYS search for THAT exact request using \`search_spotify_live\`, \`inspect_spotify_artist_or_album\`, and/or \`search_music_catalog\`. NEVER substitute an unrelated artist from their listening history just because they played them earlier!
+- Never invent songs, play counts, playlists, devices, or stats. Always ground factual claims in tool outputs (` + "`query_spotify_account`" + `, ` + "`search_spotify_live`" + `, ` + "`inspect_spotify_artist_or_album`" + `, ` + "`query_tunemind_track_cards`" + `, ` + "`query_listening_stats`" + `, ` + "`inspect_vault_tracks`" + `, ` + "`inspect_for_you_suggestions`" + `, ` + "`query_supabase_taste_genome`" + `).
 - If asked for non-music tasks outside your scope (sending texts, calls, financial/medical advice), decline warmly and offer a musical fit instead.
 
 2. DUAL-SOURCE MOOD & TASTE CURATION (LIVE SPOTIFY + TUNEMIND STORAGE):
@@ -1438,7 +1477,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
 - **Stats & Hearing Health**: ` + "`query_listening_stats`" + ` combines Today / 7d / 30d / All-Time stats with live dB & safe headroom.
 - **Navigation, Appearance & Toggles**: ` + "`NAVIGATE_SCREEN`" + `, ` + "`SET_THEME_COLOR`" + `, ` + "`SHIFT_ATMOSPHERE`" + `, ` + "`SET_SLEEP_TIMER`" + `, ` + "`TOGGLE_KIDS_MODE`" + `, ` + "`TOGGLE_AUTONOMOUS_DJ`" + `, ` + "`TOGGLE_STAY_IN_TUNEMIND`" + `, ` + "`TOGGLE_STRICT_NO_APP_SWITCH`" + `, ` + "`OPEN_SPOTIFY_CONNECT_GUIDE`" + `, ` + "`SYNC_SPOTIFY_LIBRARY`" + `, ` + "`OPEN_SETTINGS`" + `. Use ` + "`extra_actions`" + ` to combine actions cleanly.
 - **Kids Mode Safety**: Whenever ` + "`kids_mode_enabled`" + ` is true or the user asks for kids/nursery/lullabies/family-safe music, ALWAYS pass ` + "`kids_safe_only=true`" + ` and avoid explicit tracks.
-- **East African & Global Genre Precision**: Know Gikuyu/Mugithi/Benga (Samidoh, Salim Junior, Mighty Salim, John De'Mathew, Jose Gatutura, Joyce Wa Mamaa, Grace Mwai, Kamaru), Bongo Flava (Diamond Platnumz, Mbosso, Harmonize, Marioo, Zuchu, Alikiba, Jux, Rayvanny, Jay Melody), Kenyan Pop/Gengetone (Sauti Sol, Bien, Nyashinski, Wakadinali, Khaligraph Jones, Mejja), East African Gospel, Ohangla, Lingala, Afrobeats, Amapiano, Hip-Hop, R&B, Jazz, Soul, Classical cleanly.
+- **Global Music World Precision**: Understand every genre, era, language, and regional music scene worldwide (Pop, Hip-Hop, R&B, Rock, Jazz, Soul, Classical, Country, Latin, K-Pop, Bollywood, Afrobeats, Amapiano, Bongo Flava, Benga, Mugithi, Reggae, Dancehall, Gospel, EDM, Indie, etc.) and always search Spotify/open catalog for the exact artist or style the user names.
 
 6. APPROVAL vs. REJECTION RULES:
 - **Direct Explicit Commands**: When the user directly commands playback of a named track, artist, or playlist (*"Play Calm Down by Rema"*, *"Play my Discover Weekly"*, *"Skip ahead 30 seconds"*) AND either Spotify Premium Connect or a target/default player is ready -> verify the track/URI via tools and execute immediately (` + "`PLAY_TRACK_NOW`" + ` or ` + "`PLAY_SPOTIFY_CONTEXT`" + `).
@@ -2263,6 +2302,77 @@ Always finish by calling ` + "`submit_agent_turn`" + `.`;
                     open_catalog_supplement: openCatalogSupplement.length > 0 ? openCatalogSupplement : undefined,
                     error: spRes.error
                   })
+                };
+              }
+
+              if (toolName === 'inspect_spotify_artist_or_album') {
+                const entityType = String(input.entity_type || 'artist_top_tracks');
+                let targetId = String(input.id_or_uri || '').trim();
+                const nameQuery = String(input.name_query || '').trim();
+                const limitNum = Math.min(20, Math.max(1, Number(input.limit || 10)));
+
+                const cardByTitleArtist = new Map<string, StoredTrackCardRecord>();
+                for (const card of trackCardSnapshot.track_cards || []) {
+                  cardByTitleArtist.set(`${card.title.toLowerCase().trim()} - ${card.artist.toLowerCase().trim()}`, card);
+                  cardByTitleArtist.set(card.title.toLowerCase().trim(), card);
+                }
+
+                if (entityType === 'album_tracks') {
+                  if (!targetId && nameQuery) {
+                    const searchRes = await spotifyClient.searchSpotify({
+                      query: nameQuery,
+                      types: ['album'],
+                      limit: 3
+                    });
+                    targetId = searchRes.albums[0]?.spotify_id || '';
+                  }
+                  const albumRes = await spotifyClient.getAlbumTracks(targetId, limitNum);
+                  const annotated = albumRes.tracks.map(tr => {
+                    const card = cardByTitleArtist.get(`${tr.title.toLowerCase().trim()} - ${tr.artist.toLowerCase().trim()}`)
+                      || cardByTitleArtist.get(tr.title.toLowerCase().trim());
+                    return {
+                      ...tr,
+                      verified_play_count_in_tunemind: card?.verified_play_count ?? 0,
+                      is_in_resting_vault: isLockedInVault(tr.title, card?.track_id || tr.spotify_uri)
+                    };
+                  });
+                  const freshPick = annotated.find(t => !t.is_in_resting_vault) || annotated[0];
+                  if (freshPick) {
+                    lastDiscoveredOrSearchedTrack = { title: freshPick.title, artist: freshPick.artist, uri: freshPick.spotify_uri };
+                  }
+                  return {
+                    type: 'tool_result',
+                    tool_use_id: toolCall.id,
+                    content: JSON.stringify({ ...albumRes, tracks: annotated })
+                  };
+                }
+
+                if (!targetId && nameQuery) {
+                  const searchRes = await spotifyClient.searchSpotify({
+                    query: nameQuery,
+                    types: ['artist'],
+                    limit: 3
+                  });
+                  targetId = searchRes.artists[0]?.spotify_id || '';
+                }
+                const artistRes = await spotifyClient.getArtistTopTracks(targetId);
+                const annotated = artistRes.tracks.slice(0, limitNum).map(tr => {
+                  const card = cardByTitleArtist.get(`${tr.title.toLowerCase().trim()} - ${tr.artist.toLowerCase().trim()}`)
+                    || cardByTitleArtist.get(tr.title.toLowerCase().trim());
+                  return {
+                    ...tr,
+                    verified_play_count_in_tunemind: card?.verified_play_count ?? 0,
+                    is_in_resting_vault: isLockedInVault(tr.title, card?.track_id || tr.spotify_uri)
+                  };
+                });
+                const freshPick = annotated.find(t => !t.is_in_resting_vault) || annotated[0];
+                if (freshPick) {
+                  lastDiscoveredOrSearchedTrack = { title: freshPick.title, artist: freshPick.artist, uri: freshPick.spotify_uri };
+                }
+                return {
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: JSON.stringify({ ...artistRes, tracks: annotated })
                 };
               }
 
@@ -3677,7 +3787,7 @@ Respond ONLY with a single valid JSON object:
         previewUrl?: string | null;
         audiusStreamUrl?: string | null;
         deezerUrl?: string | null;
-      } = discovered[0]
+      } | null = discovered[0]
         ? {
             title: discovered[0].title,
             artist: discovered[0].artist,
@@ -3695,12 +3805,26 @@ Respond ONLY with a single valid JSON object:
             uri: '',
             trackId: freshTracks[0].trackId
           }
-        : {
-            title: 'Midnight City',
-            artist: 'M83',
-            uri: '',
-            trackId: undefined
-          };
+        : null;
+      if (!chosen) {
+        return {
+          calculated_satiety_percentage: context.current_satiety_percentage || 24,
+          reasoning_mode: 'JOURNEY_ADVISOR',
+          flow_state_analysis: 'Autonomous DJ • Waiting for fresh catalog match',
+          voice_agent_tts: 'I could not fetch a fresh next track right now. Tell me what artist, song, or vibe you would like next!',
+          agent_tool_call: {
+            action: 'ADVISE_ONLY',
+            expect_follow_up: true
+          },
+          os_execution_command: {
+            intent: 'NONE',
+            target_player: targetPlayer,
+            search_query: '',
+            suggested_bpm_target: 105
+          },
+          database_tags: ['auto-curate-miss', 'advise-only']
+        };
+      }
       if (chosen.title && !chosen.ytmVideoId && !chosen.previewUrl) {
         const resolved = await this.lookupOpenCatalogTrack(chosen.title, chosen.artist);
         if (resolved) {
@@ -4350,12 +4474,26 @@ Respond ONLY with a single valid JSON object:
 
     if (!chosen) {
       const pool = freshTracks.length > 0 ? freshTracks : allUserTracks;
-      chosen = pool[0] || {
-        title: 'Calm Down',
-        artist: 'Rema',
-        trackId: undefined,
-        spotifyUri: undefined,
-        source: targetPlayer
+      chosen = pool[0] || null;
+    }
+
+    if (!chosen) {
+      return {
+        calculated_satiety_percentage: context.current_satiety_percentage || 24,
+        reasoning_mode: 'JOURNEY_ADVISOR',
+        flow_state_analysis: 'TuneMind Studio • Awaiting Specific Request',
+        voice_agent_tts: 'Tell me any artist, song, album, or mood you want to hear and I will find and play it for you.',
+        agent_tool_call: {
+          action: 'ADVISE_ONLY',
+          expect_follow_up: true
+        },
+        os_execution_command: {
+          intent: 'NONE',
+          target_player: targetPlayer,
+          search_query: userCommandRaw,
+          suggested_bpm_target: 105
+        },
+        database_tags: ['empty-pool-advise', 'advise-only']
       };
     }
 
@@ -4822,53 +4960,8 @@ Respond ONLY with a JSON array:
     return {
       status: 'ok',
       isAiGenerated: false,
-      modelUsed: 'claude-haiku-baseline',
-      recommendations: [
-        {
-          trackId: resolveCanonicalTrackIdentity({ title: 'Huwezi Jua', artist: 'Mbosso', prefix: 'disc' }).trackId,
-          playCount: 0,
-          title: 'Huwezi Jua',
-          artist: 'Mbosso',
-          album: 'Khan',
-          category: 'DOPAMINE_FLOW',
-          subTier: 'CORE_DOPAMINE',
-          reason: 'Acoustic guitar cadence and signature Swahili melody deliver dopamine flow.',
-          confidence: 0.98
-        },
-        {
-          trackId: resolveCanonicalTrackIdentity({ title: 'Mi Amor', artist: 'Marioo & Jovial', prefix: 'disc' }).trackId,
-          playCount: 0,
-          title: 'Mi Amor',
-          artist: 'Marioo & Jovial',
-          album: 'The Kid You Know',
-          category: 'DOPAMINE_FLOW',
-          subTier: 'CORE_DOPAMINE',
-          reason: 'Tender vocal harmonies and sweet acoustic rhythm clear cognitive fatigue.',
-          confidence: 0.96
-        },
-        {
-          trackId: resolveCanonicalTrackIdentity({ title: 'Calm Down', artist: 'Rema', prefix: 'disc' }).trackId,
-          playCount: 0,
-          title: 'Calm Down',
-          artist: 'Rema',
-          album: 'Rave & Climax',
-          category: 'DOPAMINE_FLOW',
-          subTier: 'CORE_DOPAMINE',
-          reason: 'Smooth melodic warmth and mid-tempo rhythmic pacing calibrated for circadian focus.',
-          confidence: 0.95
-        },
-        {
-          trackId: resolveCanonicalTrackIdentity({ title: 'Single Again', artist: 'Harmonize', prefix: 'disc' }).trackId,
-          playCount: 0,
-          title: 'Single Again',
-          artist: 'Harmonize',
-          album: 'Made For Us',
-          category: 'PALATE_CLEANSER',
-          subTier: 'PALATE_CLEANSER',
-          reason: 'Melodic guitar progression and relaxed cadence soothe auditory receptor saturation.',
-          confidence: 0.94
-        }
-      ]
+      modelUsed: 'gemini-catalog-fallback',
+      recommendations: []
     };
   }
 

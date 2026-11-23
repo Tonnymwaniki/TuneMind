@@ -54,6 +54,12 @@ function convertAnthropicMessagesToGemini(messages: any[]): any[] {
     }
 
     if (Array.isArray(rawContent)) {
+      // Register tool_use IDs -> tool names before replaying raw Gemini parts so subsequent tool_result turns resolve exact functionResponse.name
+      for (const block of rawContent) {
+        if (block && typeof block === 'object' && block.type === 'tool_use' && block.id) {
+          toolUseNameById.set(String(block.id), String(block.name || 'tool'));
+        }
+      }
       // Preserve exact raw Gemini model parts (including thoughtSignature) when replaying tool_use turns
       const rawGeminiHolder = rawContent.find((b: any) => b && Array.isArray(b._rawGeminiParts));
       if (role === 'model' && rawGeminiHolder) {
@@ -113,20 +119,23 @@ function convertGeminiResponseToAnthropicShape(geminiJson: any, modelId: string)
   const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
   const contentBlocks: any[] = [];
   let hasToolUse = false;
+  let attachedRawParts = false;
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
-    if (part?.text && typeof part.text === 'string') {
+    if (part?.text && typeof part.text === 'string' && !part?.thought) {
       contentBlocks.push({ type: 'text', text: part.text });
     }
     if (part?.functionCall && typeof part.functionCall === 'object') {
       hasToolUse = true;
+      const attachRaw = !attachedRawParts;
+      attachedRawParts = true;
       contentBlocks.push({
         type: 'tool_use',
         id: `gemini_call_${Date.now()}_${i}`,
         name: String(part.functionCall.name || ''),
         input: part.functionCall.args && typeof part.functionCall.args === 'object' ? part.functionCall.args : {},
-        ...(i === 0 ? { _rawGeminiParts: parts } : {})
+        ...(attachRaw ? { _rawGeminiParts: parts } : {})
       });
     }
   }
@@ -198,6 +207,11 @@ export async function callGeminiMessagesWithTools(
       }
       if (functionDeclarations && functionDeclarations.length > 0) {
         bodyPayload.tools = [{ functionDeclarations }];
+        bodyPayload.toolConfig = {
+          functionCallingConfig: {
+            mode: 'AUTO'
+          }
+        };
       }
 
       const json = await retryWithBackoff(

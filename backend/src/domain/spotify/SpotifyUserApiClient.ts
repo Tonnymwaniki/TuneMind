@@ -531,6 +531,105 @@ export class SpotifyUserApiClient {
     };
   }
 
+  public async getArtistTopTracks(
+    artistIdOrUri: string,
+    market: string = 'US'
+  ): Promise<{
+    connected: boolean;
+    artist_id: string;
+    context_uri: string;
+    tracks: SpotifyTrackSummary[];
+    error?: string;
+  }> {
+    const cleanId = String(artistIdOrUri || '')
+      .replace(/^spotify:artist:/i, '')
+      .replace(/^https?:\/\/open\.spotify\.com\/artist\//i, '')
+      .split('?')[0]
+      .trim();
+    if (!cleanId) {
+      return { connected: false, artist_id: '', context_uri: '', tracks: [], error: 'Missing Spotify artist ID' };
+    }
+    const resp = await this.spotifyGet<any>(`/artists/${encodeURIComponent(cleanId)}/top-tracks?market=${encodeURIComponent(market)}`);
+    if (!resp.ok || !resp.data) {
+      return {
+        connected: resp.status !== 401,
+        artist_id: cleanId,
+        context_uri: `spotify:artist:${cleanId}`,
+        tracks: [],
+        error: resp.error
+      };
+    }
+    const tracks = (Array.isArray(resp.data?.tracks) ? resp.data.tracks : [])
+      .map(mapSpotifyTrack)
+      .filter((t: SpotifyTrackSummary | null): t is SpotifyTrackSummary => Boolean(t));
+    return {
+      connected: true,
+      artist_id: cleanId,
+      context_uri: `spotify:artist:${cleanId}`,
+      tracks
+    };
+  }
+
+  public async getAlbumTracks(
+    albumIdOrUri: string,
+    limit: number = 20
+  ): Promise<{
+    connected: boolean;
+    album_id: string;
+    context_uri: string;
+    album_name: string;
+    tracks: Array<{ title: string; artist: string; spotify_id: string; spotify_uri: string; duration_ms: number; explicit: boolean }>;
+    error?: string;
+  }> {
+    const cleanId = String(albumIdOrUri || '')
+      .replace(/^spotify:album:/i, '')
+      .replace(/^https?:\/\/open\.spotify\.com\/album\//i, '')
+      .split('?')[0]
+      .trim();
+    if (!cleanId) {
+      return { connected: false, album_id: '', context_uri: '', album_name: '', tracks: [], error: 'Missing Spotify album ID' };
+    }
+    const safeLimit = Math.min(30, Math.max(1, limit));
+    const resp = await this.spotifyGet<any>(`/albums/${encodeURIComponent(cleanId)}?market=US`);
+    if (!resp.ok || !resp.data) {
+      return {
+        connected: resp.status !== 401,
+        album_id: cleanId,
+        context_uri: `spotify:album:${cleanId}`,
+        album_name: '',
+        tracks: [],
+        error: resp.error
+      };
+    }
+    const albumName = String(resp.data?.name || '').trim();
+    const rawItems = Array.isArray(resp.data?.tracks?.items) ? resp.data.tracks.items.slice(0, safeLimit) : [];
+    const tracks = rawItems
+      .map((item: any) => {
+        const id = String(item?.id || '').trim();
+        const title = String(item?.name || '').trim();
+        if (!id || !title) return null;
+        const artist = Array.isArray(item?.artists)
+          ? item.artists.map((a: any) => String(a?.name || '').trim()).filter(Boolean).join(', ')
+          : '';
+        return {
+          title,
+          artist: artist || 'Unknown Artist',
+          spotify_id: id,
+          spotify_uri: `spotify:track:${id}`,
+          duration_ms: Number(item?.duration_ms || 0),
+          explicit: Boolean(item?.explicit)
+        };
+      })
+      .filter((t: any) => Boolean(t));
+    return {
+      connected: true,
+      album_id: cleanId,
+      context_uri: `spotify:album:${cleanId}`,
+      album_name: albumName,
+      tracks
+    };
+  }
+
   public async getPlaybackStateAndDevices(): Promise<SpotifyPlaybackSnapshot> {
     const [playerResp, devicesResp, queueResp] = await Promise.all([
       this.spotifyGet<any>('/me/player'),
