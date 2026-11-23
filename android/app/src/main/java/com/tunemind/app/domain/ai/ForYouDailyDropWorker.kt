@@ -273,14 +273,15 @@ class ForYouDailyDropWorker(
         private const val KEY_FOR_YOU_AI_ENABLED = "for_you_ai_enabled"
 
         fun isForYouAiEnabled(context: Context): Boolean {
-            return context.applicationContext
-                .getSharedPreferences(FOR_YOU_PREFS_NAME, Context.MODE_PRIVATE)
+            return com.tunemind.app.data.auth.TuneMindAccountStorage
+                .getUserPrefs(context.applicationContext, FOR_YOU_PREFS_NAME)
                 .getBoolean(KEY_FOR_YOU_AI_ENABLED, false)
         }
 
         fun setForYouAiEnabled(context: Context, enabled: Boolean) {
             val appCtx = context.applicationContext
-            appCtx.getSharedPreferences(FOR_YOU_PREFS_NAME, Context.MODE_PRIVATE)
+            com.tunemind.app.data.auth.TuneMindAccountStorage
+                .getUserPrefs(appCtx, FOR_YOU_PREFS_NAME)
                 .edit()
                 .putBoolean(KEY_FOR_YOU_AI_ENABLED, enabled)
                 .apply()

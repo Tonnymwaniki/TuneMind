@@ -119,9 +119,18 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun userPrefs() =
+        com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(appContext, PREFS_NAME)
+
     private val _state = MutableStateFlow(loadCachedState())
     val state: StateFlow<BillingUiState> = _state.asStateFlow()
+
+    fun reloadForActiveAccount() {
+        _state.value = loadCachedState()
+        scope.launch {
+            refreshEntitlementFromBackend()
+        }
+    }
 
     @Volatile
     private var productDetailsMap: Map<String, ProductDetails> = emptyMap()
@@ -542,13 +551,13 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
                 put("freeForYouDailyPicks", s.freeForYouDailyPicks)
                 put("autoRenewing", s.autoRenewing)
             }
-            prefs.edit().putString(KEY_CACHED_ENTITLEMENT, obj.toString()).apply()
+            userPrefs().edit().putString(KEY_CACHED_ENTITLEMENT, obj.toString()).apply()
         }
     }
 
     private fun loadCachedState(): BillingUiState {
         return runCatching {
-            val raw = prefs.getString(KEY_CACHED_ENTITLEMENT, null) ?: return BillingUiState()
+            val raw = userPrefs().getString(KEY_CACHED_ENTITLEMENT, null) ?: return BillingUiState()
             val obj = JSONObject(raw)
             val tierStr = obj.optString("tier", "FREE")
             val tier = runCatching { TuneMindTier.valueOf(tierStr) }.getOrDefault(TuneMindTier.FREE)

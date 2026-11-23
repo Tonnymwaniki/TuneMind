@@ -1040,6 +1040,12 @@ open class MainActivity : ComponentActivity() {
 
         var hasNotificationListenerAccess by remember { mutableStateOf(true) }
 
+        LaunchedEffect(activePartitionKey) {
+            com.tunemind.app.provider.SpotifyPremiumConnectManager.reloadForActiveAccount(context)
+            com.tunemind.app.data.ingestion.SpotifyLibrarySyncEngine.ensureLoaded(context)
+            com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).reloadForActiveAccount()
+        }
+
         LaunchedEffect(Unit) {
             orchestrator.start()
             agentVoiceManager.setForegroundActive(true)

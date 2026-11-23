@@ -208,6 +208,9 @@ object SpotifyPremiumConnectManager {
     private var cachedPrefs: SharedPreferences? = null
 
     @Volatile
+    private var cachedPartitionKey: String? = null
+
+    @Volatile
     private var hasLoadedOnce = false
 
     @Volatile
@@ -220,27 +223,88 @@ object SpotifyPremiumConnectManager {
     private val _statusFlow = MutableStateFlow(SpotifyPremiumStatus())
     val statusFlow: StateFlow<SpotifyPremiumStatus> = _statusFlow.asStateFlow()
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        cachedPrefs?.let { return it }
+    fun reloadForActiveAccount(context: Context) {
         synchronized(this) {
-            cachedPrefs?.let { return it }
-            val appCtx = context.applicationContext
-            val created = try {
-                val masterKey = MasterKey.Builder(appCtx)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences.create(
-                    appCtx,
-                    PREFS_NAME,
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "EncryptedSharedPreferences unavailable, using private fallback: ${e.message}")
-                appCtx.getSharedPreferences("${PREFS_NAME}_fallback", Context.MODE_PRIVATE)
+            cachedPrefs = null
+            cachedPartitionKey = null
+            hasLoadedOnce = false
+            asyncLoadStarted = false
+            _statusFlow.value = SpotifyPremiumStatus()
+        }
+        val appCtx = context.applicationContext
+        ioScope.launch {
+            runCatching {
+                val status = ensureLoaded(appCtx)
+                if (!status.isConnected) {
+                    restoreConnectionFromCloudIfNeeded(appCtx)
+                }
             }
+        }
+    }
+
+    private fun openEncryptedOrFallbackPrefs(appCtx: Context, prefsName: String): SharedPreferences {
+        return try {
+            val masterKey = MasterKey.Builder(appCtx)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appCtx,
+                prefsName,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "EncryptedSharedPreferences unavailable, using private fallback: ${e.message}")
+            appCtx.getSharedPreferences("${prefsName}_fallback", Context.MODE_PRIVATE)
+        }
+    }
+
+    private fun migrateLegacySpotifyPrefsIfOwner(appCtx: Context, activePartition: String, dest: SharedPreferences) {
+        if (!dest.getString(KEY_REFRESH_TOKEN, "").isNullOrBlank()) return
+        val meta = appCtx.getSharedPreferences("tunemind_account_partition_meta", Context.MODE_PRIVATE)
+        val claimedBy = meta.getString("legacy_db_claimed_by", null)
+        if (claimedBy.isNullOrBlank() || claimedBy != activePartition) return
+        if (meta.getBoolean("legacy_spotify_migrated", false)) return
+
+        runCatching {
+            val legacy = openEncryptedOrFallbackPrefs(appCtx, PREFS_NAME)
+            val legacyRefresh = legacy.getString(KEY_REFRESH_TOKEN, "")?.trim().orEmpty()
+            if (legacyRefresh.isNotBlank()) {
+                val editor = dest.edit()
+                for ((k, v) in legacy.all) {
+                    when (v) {
+                        is String -> editor.putString(k, v)
+                        is Boolean -> editor.putBoolean(k, v)
+                        is Int -> editor.putInt(k, v)
+                        is Long -> editor.putLong(k, v)
+                        is Float -> editor.putFloat(k, v)
+                    }
+                }
+                editor.apply()
+                legacy.edit().clear().apply()
+                Log.i(TAG, "Migrated legacy Spotify connection into partition $activePartition")
+            }
+            meta.edit().putBoolean("legacy_spotify_migrated", true).apply()
+        }
+    }
+
+    private fun getPrefs(context: Context): SharedPreferences {
+        val appCtx = context.applicationContext
+        val partition = com.tunemind.app.data.auth.TuneMindAccountStorage.resolveActivePartitionKey(appCtx)
+        cachedPrefs?.let { existing ->
+            if (cachedPartitionKey == partition) return existing
+        }
+        synchronized(this) {
+            val activePartition = com.tunemind.app.data.auth.TuneMindAccountStorage.resolveActivePartitionKey(appCtx)
+            cachedPrefs?.let { existing ->
+                if (cachedPartitionKey == activePartition) return existing
+            }
+            val partitionedName = "${PREFS_NAME}__${activePartition}"
+            val created = openEncryptedOrFallbackPrefs(appCtx, partitionedName)
+            migrateLegacySpotifyPrefsIfOwner(appCtx, activePartition, created)
             cachedPrefs = created
+            cachedPartitionKey = activePartition
             return created
         }
     }

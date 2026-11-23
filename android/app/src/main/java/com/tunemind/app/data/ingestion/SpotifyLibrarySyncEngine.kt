@@ -96,7 +96,7 @@ object SpotifyLibrarySyncEngine {
     val syncState: StateFlow<SpotifyLibrarySyncUiState> = _syncState.asStateFlow()
 
     fun ensureLoaded(context: Context): SpotifyLibrarySyncUiState {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_NAME)
         val current = _syncState.value
         if (current.isSyncing) return current
         val loaded = SpotifyLibrarySyncUiState(
@@ -262,7 +262,7 @@ object SpotifyLibrarySyncEngine {
             val needsInsightsScope = recentScopeMissing || topTrackScopeMissing || topArtistScopeMissing
             val nowMs = System.currentTimeMillis()
 
-            val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(appCtx, PREFS_NAME)
             prefs.edit()
                 .putLong(KEY_LAST_SYNC_MS, nowMs)
                 .putInt(KEY_LIKED_COUNT, likedTracks.size)
