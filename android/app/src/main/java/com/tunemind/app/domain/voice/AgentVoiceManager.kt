@@ -1450,13 +1450,13 @@ class AgentVoiceManager(
 
     private fun buildCircadianWakeGreeting(): String {
         if (wasMediaPlayingBeforeWake) {
-            return "Yes? I paused the music. What would you like?"
+            return "Yes, I'm TuneMind — I paused the music. What would you like?"
         }
         val hr = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         return when (hr) {
-            in 4..11 -> "Good morning. I'm listening, what would you like to hear?"
-            in 12..16 -> "Hey, I'm here. What would you like to play?"
-            else -> "I'm right here. Tell me what you feel like hearing."
+            in 4..11 -> "Good morning! I'm TuneMind, I'm listening. What would you like to hear?"
+            in 12..16 -> "Hey! I'm TuneMind, right here with you. What would you like to play?"
+            else -> "Hey, I'm TuneMind! Tell me what you feel like hearing."
         }
     }
 
@@ -2669,18 +2669,22 @@ class AgentVoiceManager(
             !explicitNamedSongAfterPlay.contains(pendingNorm) &&
             !pendingNorm.contains(explicitNamedSongAfterPlay)
 
+        val isPurePendingConfirmation = Regex(
+            "\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play it|play that|play this|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|approve|confirm|spin it|yea|yah)\\b"
+        ).containsMatchIn(userTranscriptLower) ||
+            Regex("^\\s*(?:please\\s+)?(?:play|spin|start)(?:\\s+(?:on|with|via|in)\\s+\\w+(?:\\s+music)?)?\\s*[.!?]*\\s*$")
+                .matches(userTranscriptLower)
+
         val isApprovingPending = pendingBeforeTurn != null &&
             !isSyntheticPrompt &&
             !isRejectingPending &&
-            !backendPickedDifferentTrack &&
             !userAskedForDifferentNamedSong && (
-                rawAction == "PLAY_TRACK_NOW" ||
-                (spokenPlayerPkg != null && explicitNamedSongAfterPlay.isNullOrBlank()) ||
-                Regex("\\b(yes|yeah|yep|yup|ya|sure|ok|okay|alright|fine|play it|play that|play this|go ahead|do it|put it on|let'?s go|sounds good|good|perfect|ndio|sawa|haya|approve|confirm|spin it|yea|yah)\\b")
-                    .containsMatchIn(userTranscriptLower) ||
-                Regex("^\\s*(?:please\\s+)?(?:play|spin|start)(?:\\s+(?:on|with|via|in)\\s+\\w+(?:\\s+music)?)?\\s*[.!?]*\\s*$")
-                    .matches(userTranscriptLower) ||
-                (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
+                (isPurePendingConfirmation && explicitNamedSongAfterPlay.isNullOrBlank()) ||
+                (!backendPickedDifferentTrack && (
+                    rawAction == "PLAY_TRACK_NOW" ||
+                    (spokenPlayerPkg != null && explicitNamedSongAfterPlay.isNullOrBlank()) ||
+                    (pendingBeforeTurn.title.length >= 4 && userTranscriptLower.contains(pendingBeforeTurn.title.lowercase().take(5).trim()))
+                ))
             )
 
         if (isApprovingPending && pendingBeforeTurn != null) {

@@ -1310,7 +1310,7 @@ export class SelfLearningDiscoveryEngine {
       }
     }
 
-    // 2. Strict Universal Catalog (Deezer + iTunes + Songlink for Spotify URI if still missing)
+    // 2. Strict Universal Catalog (iTunes + Audius + Songlink for Spotify URI if still missing)
     try {
       const profile = await resolveUniversalTrackProfile(candidate.title, candidate.artist);
       if (profile && isStrictTitleArtistMatch(candidate.title, candidate.artist, profile.cleanTitle, profile.cleanArtist)) {
@@ -1328,65 +1328,6 @@ export class SelfLearningDiscoveryEngine {
         if (!options?.spotifyClient || !matchedSpotifyUri) {
           matchedTitle = profile.cleanTitle || matchedTitle;
           matchedArtist = profile.cleanArtist || matchedArtist;
-        }
-      }
-    } catch {
-      // Non-fatal
-    }
-
-    // 3. Direct strict Deezer check + BPM enrichment
-    try {
-      const q = encodeURIComponent(`${candidate.title} ${candidate.artist}`);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2400);
-      const resp = await fetch(`https://api.deezer.com/search?q=${q}&limit=6`, {
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      if (resp.ok) {
-        anyNetworkSucceeded = true;
-        const json: any = await resp.json();
-        const rows: any[] = Array.isArray(json?.data) ? json.data : [];
-        const match = rows.find((item: any) =>
-          isStrictTitleArtistMatch(
-            candidate.title,
-            candidate.artist,
-            String(item?.title || ''),
-            String(item?.artist?.name || '')
-          )
-        ) || null;
-
-        if (match && match.title) {
-          catalogConfirmed = true;
-          if (match.id) {
-            try {
-              const bpmCtrl = new AbortController();
-              const bpmTimer = setTimeout(() => bpmCtrl.abort(), 1400);
-              const detailRes = await fetch(`https://api.deezer.com/track/${match.id}`, { signal: bpmCtrl.signal });
-              clearTimeout(bpmTimer);
-              if (detailRes.ok) {
-                const detail: any = await detailRes.json();
-                if (typeof detail?.bpm === 'number' && detail.bpm > 40) {
-                  matchedBpm = Math.round(detail.bpm);
-                }
-              }
-            } catch {
-              // Non-fatal optional BPM enrichment
-            }
-          }
-          if (matchedTrackId.startsWith('disc:') || matchedTrackId.startsWith('trk:')) {
-            matchedTrackId = match.id ? `deezer:${match.id}` : matchedTrackId;
-          }
-          if (!matchedAlbum && match.album?.title) matchedAlbum = String(match.album.title).trim();
-          if (!matchedPreviewUrl && typeof match.preview === 'string' && match.preview.startsWith('http')) {
-            matchedPreviewUrl = match.preview;
-          }
-          if (!matchedAlbumArtUrl && typeof match.album?.cover_medium === 'string') {
-            matchedAlbumArtUrl = match.album.cover_medium;
-          }
-          if (!matchedDurationMs && typeof match.duration === 'number') {
-            matchedDurationMs = match.duration * 1000;
-          }
         }
       }
     } catch {

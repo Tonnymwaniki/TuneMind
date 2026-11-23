@@ -60,10 +60,10 @@ wss.on('connection', async (ws: WebSocket) => {
   }
 
   const SAMPLE_RATE = 16_000;
-  const SPEECH_RMS_THRESHOLD = 260;
-  const SILENCE_FINALIZE_MS = 950;
-  const MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 0.35; // ~350ms
-  const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 20;   // 20s max
+  const SPEECH_RMS_THRESHOLD = 120;
+  const SILENCE_FINALIZE_MS = 1350;
+  const MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 0.30; // ~300ms
+  const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 25;   // 25s max
 
   let chunkCount = 0;
   let pcmChunks: Buffer[] = [];

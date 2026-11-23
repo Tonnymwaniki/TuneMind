@@ -458,7 +458,7 @@ object MusicPlayerAutoLauncher {
                 title = cleanTitle.ifBlank { track.title },
                 artist = cleanArtist.ifBlank { track.artist },
                 album = resolvedLinks?.albumName,
-                previewFallback = resolvedLinks?.previewUrl,
+                previewFallback = null,
                 fallbackExternalPkg = targetPkg ?: YouTubeMusicProvider.YTM_PACKAGE,
                 fallbackExternalName = displayName
             )
@@ -506,7 +506,7 @@ object MusicPlayerAutoLauncher {
                     title = cleanTitle.ifBlank { track.title },
                     artist = cleanArtist.ifBlank { track.artist },
                     album = resolvedLinks?.albumName,
-                    previewFallback = if (isSpotifyFreeSmartMode && !strictNoSwitch && !stayInTuneMind) null else resolvedLinks?.previewUrl,
+                    previewFallback = null,
                     fallbackExternalPkg = if (isSpotifyFreeSmartMode || isSpotifyTarget) SpotifyMusicProvider.SPOTIFY_PACKAGE else targetPkg,
                     fallbackExternalName = if (isSpotifyFreeSmartMode || isSpotifyTarget) "Spotify" else displayName
                 )
@@ -548,32 +548,14 @@ object MusicPlayerAutoLauncher {
             }
 
             val ytmInstalled = !isYtmTarget && YouTubeMusicProvider().isInstalled(context)
-            val previewUrl = resolvedLinks?.previewUrl?.takeIf { it.startsWith("http") }
-            if (previewUrl != null && TuneMindInAppPlayer.playStreamUrl(
-                    context = context,
-                    streamUrl = previewUrl,
-                    title = cleanTitle.ifBlank { track.title },
-                    artist = cleanArtist.ifBlank { track.artist },
-                    album = resolvedLinks?.albumName,
-                    expectedDurationMs = 30_000L,
-                    isPreview = true,
-                    fallbackExternalPkg = targetPkg,
-                    fallbackExternalName = displayName
-                )
-            ) {
-                val extraHint = when {
-                    spotifyHadNoActiveDevice ->
-                        "Kept inside TuneMind (Spotify was closed from Recent Apps). Tap 'Open full track in Spotify' if you want to wake Spotify directly."
-                    ytmInstalled ->
-                        "Playing preview inside TuneMind · tap 'Open full track in $displayName' for the full song."
-                    else ->
-                        "Tap 'Open full track in $displayName' for the full song."
-                }
+            // 30s preview fallback intentionally removed: never play 30s snippets when full playback via Spotify/YouTube/Audius is expected.
+            if (spotifyHadNoActiveDevice && (spotifyPremiumReady || isSpotifyTarget)) {
+                Log.w(TAG, "Spotify did not wake a Connect device in the background yet — returning without playing a 30s preview.")
                 return LaunchOutcome(
-                    launched = true,
-                    usedInAppPlayer = true,
-                    destinationUri = spotifyResolvedUriFromConnect ?: previewUrl,
-                    detailMessage = "Playing '$cleanTitle' (30s preview) inside TuneMind · $extraHint"
+                    launched = false,
+                    usedInAppPlayer = false,
+                    destinationUri = spotifyResolvedUriFromConnect,
+                    detailMessage = "Spotify did not finish waking in the background yet. Tap Spotify Connect once or open Spotify briefly to warm its session, then TuneMind will play full songs silently without leaving."
                 )
             }
 

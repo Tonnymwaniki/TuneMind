@@ -118,7 +118,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             tts?.setSpeechRate(1.12f)
             tts?.setAudioAttributes(
                 android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                     .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -248,10 +248,14 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             }
         }
 
-        // Play ElevenLabs Audio or fallback to native TTS
+        // Play OpenAI/cloud Base64 MP3 audio or fallback to native TTS
         if (!response.voice_agent_audio_base64.isNullOrEmpty()) {
-            Log.d(TAG, "Playing ElevenLabs hyper-realistic voice audio...")
-            playBase64Audio(response.voice_agent_audio_base64, onCompletion = onSpeechFinished)
+            Log.d(TAG, "Playing cloud voice audio (${response.voice_agent_audio_base64.length} b64 chars)...")
+            playBase64Audio(
+                base64Str = response.voice_agent_audio_base64,
+                fallbackText = textToSpeak,
+                onCompletion = onSpeechFinished
+            )
         } else if (textToSpeak.isNotEmpty()) {
             Log.d(TAG, "Speaking voice response via TTS: $textToSpeak")
             speakWithListener(textToSpeak, onCompletion = onSpeechFinished)
@@ -325,10 +329,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         }
     }
 
-    private fun playBase64Audio(base64Str: String, onCompletion: () -> Unit) {
+    private fun playBase64Audio(base64Str: String, fallbackText: String, onCompletion: () -> Unit) {
         try {
             val audioBytes = Base64.decode(base64Str, Base64.DEFAULT)
-            val tempFile = File.createTempFile("elevenlabs_response_", ".mp3", context.cacheDir)
+            if (audioBytes == null || audioBytes.isEmpty()) {
+                if (fallbackText.isNotBlank()) {
+                    speakWithListener(fallbackText, onCompletion)
+                } else {
+                    onCompletion()
+                }
+                return
+            }
+            val tempFile = File.createTempFile("tunemind_voice_", ".mp3", context.cacheDir)
             FileOutputStream(tempFile).use { fos ->
                 fos.write(audioBytes)
                 fos.flush()
@@ -336,6 +348,13 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setVolume(1.0f, 1.0f)
                 setDataSource(tempFile.absolutePath)
                 prepare()
                 start()
@@ -347,17 +366,25 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                     onCompletion()
                 }
                 setOnErrorListener { mp, what, extra ->
-                    Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
+                    Log.e(TAG, "MediaPlayer error: what=$what extra=$extra — falling back to native TTS")
                     mp.release()
                     tempFile.delete()
                     mediaPlayer = null
-                    onCompletion()
+                    if (fallbackText.isNotBlank()) {
+                        speakWithListener(fallbackText, onCompletion)
+                    } else {
+                        onCompletion()
+                    }
                     true
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to play Base64 audio", e)
-            onCompletion()
+            Log.e(TAG, "Failed to play Base64 audio — falling back to native TTS", e)
+            if (fallbackText.isNotBlank()) {
+                speakWithListener(fallbackText, onCompletion)
+            } else {
+                onCompletion()
+            }
         }
     }
 

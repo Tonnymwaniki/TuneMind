@@ -1408,7 +1408,25 @@ object SpotifyPremiumConnectManager {
 
         return runSearch(searchExpr) ?: run {
             val fallbackExpr = listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" ").ifBlank { query.trim() }
-            if (fallbackExpr.isNotBlank() && fallbackExpr != searchExpr) runSearch(fallbackExpr) else null
+            val firstFallback = if (fallbackExpr.isNotBlank() && fallbackExpr != searchExpr) runSearch(fallbackExpr) else null
+            if (firstFallback != null) return firstFallback
+
+            val normQuery = listOf(expTitleNorm, expArtistNorm).filter { it.isNotBlank() }.joinToString(" ")
+            val secondFallback = if (normQuery.isNotBlank() && normQuery != fallbackExpr) runSearch(normQuery) else null
+            if (secondFallback != null) return secondFallback
+
+            // If title is hyphenated (e.g. "Ihuha-Wendo wi Cama"), try each segment with primary artist
+            if (cleanTitle.contains("-")) {
+                for (part in cleanTitle.split("-")) {
+                    val cleanPart = part.trim()
+                    if (cleanPart.length >= 3) {
+                        val partExpr = listOf(cleanPart, expPrimaryArtist).filter { it.isNotBlank() }.joinToString(" ")
+                        val hit = runSearch(partExpr)
+                        if (hit != null) return hit
+                    }
+                }
+            }
+            null
         }
     }
 
@@ -1640,9 +1658,9 @@ object SpotifyPremiumConnectManager {
                         connectLatch.countDown()
                     }
                 }
-                runCatching { connectLatch.await(1200L, TimeUnit.MILLISECONDS) }
+                runCatching { connectLatch.await(1600L, TimeUnit.MILLISECONDS) }
 
-                val mbPolls = if (browserConnected) listOf(350L, 600L) else listOf(350L)
+                val mbPolls = if (browserConnected) listOf(450L, 700L) else listOf(450L)
                 for (waitMs in mbPolls) {
                     runCatching { Thread.sleep(waitMs) }
                     findBestConnectDevice(accessToken)?.let { dev ->
@@ -1669,7 +1687,7 @@ object SpotifyPremiumConnectManager {
             val sentButton = dispatchTargetedSpotifyMediaPlayBroadcast(appCtx)
             if (sentButton || browserConnected) {
                 var pushedUriToWokenSession = false
-                for (waitMs in listOf(450L, 650L, 800L, 900L)) {
+                for (waitMs in listOf(500L, 750L, 950L, 1100L)) {
                     runCatching { Thread.sleep(waitMs) }
                     val listener = com.tunemind.app.service.TuneMindListenerService.instance
                     if (!pushedUriToWokenSession && listener?.hasActiveSession("com.spotify.music") == true && uriObj != null) {

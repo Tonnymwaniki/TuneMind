@@ -23,7 +23,7 @@ export interface UniversalTrackProfile {
   deezerUrl: string | null;
   spotifyUri: string | null;
   spotifyUrl: string | null;
-  source: 'deezer' | 'itunes' | 'audius' | 'lastfm' | 'mixed';
+  source: 'itunes' | 'audius' | 'lastfm' | 'mixed';
   resolvedAtMs: number;
 }
 
@@ -257,48 +257,7 @@ async function resolveAudiusHost(): Promise<string | null> {
   return host;
 }
 
-async function searchDeezerTracks(
-  query: string,
-  limit = 10,
-  offset = 0,
-  excludeExplicit = false
-): Promise<OpenCatalogTrackHit[]> {
-  if (!query.trim()) return [];
-  const boundedLimit = Math.min(20, Math.max(1, limit));
-  const data = await fetchJsonWithTimeout(
-    `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=${boundedLimit}&index=${Math.max(0, offset)}`,
-    4000
-  );
-  const rows: any[] = Array.isArray(data?.data) ? data.data : [];
-  return rows
-    .filter(item => item && item.title && (!excludeExplicit || !Boolean(item.explicit_lyrics)))
-    .map(item => {
-      const title = String(item.title || '').trim();
-      const artist = String(item.artist?.name || 'Unknown Artist').trim();
-      const canonical = resolveCanonicalTrackIdentity({
-        trackId: item.id ? `deezer:${item.id}` : undefined,
-        title,
-        artist
-      });
-      return {
-        trackId: canonical.trackId,
-        title,
-        artist,
-        album: String(item.album?.title || '').trim(),
-        genre: '',
-        popularity: Math.min(98, Math.max(25, Math.round(Number(item.rank || 300000) / 10000))),
-        explicit: Boolean(item.explicit_lyrics),
-        durationMs: Number(item.duration || 0) * 1000,
-        previewUrl: typeof item.preview === 'string' && item.preview.startsWith('http') ? item.preview : null,
-        audiusStreamUrl: null,
-        ytmVideoId: null,
-        deezerUrl: typeof item.link === 'string' ? item.link : item.id ? `https://www.deezer.com/track/${item.id}` : null,
-        albumArtUrl: item.album?.cover_big || item.album?.cover_medium || item.album?.cover || null,
-        artistImageUrl: item.artist?.picture_big || item.artist?.picture_medium || item.artist?.picture || null,
-        source: 'deezer'
-      };
-    });
-}
+// Deezer removed by product decision — open-catalog search uses iTunes, Audius, Last.fm, and YouTube Music/Songlink.
 
 async function searchItunesTracks(
   query: string,
@@ -537,28 +496,26 @@ export async function resolveUniversalTrackProfile(
   }
 
   const searchQuery = cleanArtist ? `${cleanTitle} ${cleanArtist}` : cleanTitle;
-  const [dzHits, itHits, audiusHits, lastFmTags, ytmVideoId] = await Promise.all([
-    searchDeezerTracks(searchQuery, 4),
-    searchItunesTracks(searchQuery, 3),
+  const [itHits, audiusHits, lastFmTags, ytmVideoId] = await Promise.all([
+    searchItunesTracks(searchQuery, 4),
     searchAudiusTracks(searchQuery, 3),
     cleanArtist ? fetchLastFmArtistTags(cleanArtist) : Promise.resolve([]),
     resolveYouTubeMusicVideoId(cleanTitle, cleanArtist)
   ]);
 
-  const dz = dzHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
   const it = itHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
   const au = audiusHits.find(h => isStrictTitleArtistMatch(cleanTitle, cleanArtist, h.title, h.artist)) || null;
 
-  if (!dz && !it && !au) {
+  if (!it && !au) {
     trackProfileCache.set(key, { value: null, expiresAtMs: now + NEGATIVE_CACHE_TTL_MS });
     trimMapIfNeeded(trackProfileCache, 2500);
     return null;
   }
 
-  const resolvedTitle = dz?.title || it?.title || au?.title || cleanTitle;
-  const resolvedArtist = dz?.artist || it?.artist || au?.artist || cleanArtist;
+  const resolvedTitle = it?.title || au?.title || cleanTitle;
+  const resolvedArtist = it?.artist || au?.artist || cleanArtist;
   const canonical = resolveCanonicalTrackIdentity({
-    trackId: dz?.trackId || it?.trackId || au?.trackId,
+    trackId: it?.trackId || au?.trackId,
     title: resolvedTitle,
     artist: resolvedArtist
   });
@@ -571,9 +528,8 @@ export async function resolveUniversalTrackProfile(
     )
   ).slice(0, 4);
 
-  const sourcesUsed = [dz ? 'deezer' : '', it ? 'itunes' : '', au ? 'audius' : ''].filter(Boolean);
+  const sourcesUsed = [it ? 'itunes' : '', au ? 'audius' : ''].filter(Boolean);
   const { spotifyUri, spotifyUrl, ytmVideoId: songlinkYtmVideoId } = await resolveSpotifyUriViaSonglink([
-    dz?.deezerUrl || null,
     it?.itunesUrl || null
   ]);
   const finalYtmVideoId = ytmVideoId || songlinkYtmVideoId || null;
@@ -583,20 +539,20 @@ export async function resolveUniversalTrackProfile(
     trackKey: key,
     cleanTitle: resolvedTitle,
     cleanArtist: resolvedArtist,
-    albumName: dz?.album || it?.album || null,
+    albumName: it?.album || null,
     releaseDate: null,
-    albumArtUrl: it?.albumArtUrl || dz?.albumArtUrl || au?.albumArtUrl || null,
-    artistImageUrl: dz?.artistImageUrl || au?.artistImageUrl || null,
+    albumArtUrl: it?.albumArtUrl || au?.albumArtUrl || null,
+    artistImageUrl: au?.artistImageUrl || null,
     genres: genreList,
-    popularity: dz?.popularity || it?.popularity || au?.popularity || 55,
-    previewUrl: dz?.previewUrl || it?.previewUrl || null,
+    popularity: it?.popularity || au?.popularity || 55,
+    previewUrl: it?.previewUrl || null,
     audiusTrackId: au?.audiusTrackId || null,
     audiusStreamUrl: au?.audiusStreamUrl || null,
     ytmVideoId: finalYtmVideoId,
-    deezerUrl: dz?.deezerUrl || null,
+    deezerUrl: null,
     spotifyUri,
     spotifyUrl,
-    source: sourcesUsed.length > 1 ? 'mixed' : ((sourcesUsed[0] as UniversalTrackProfile['source']) || 'deezer'),
+    source: sourcesUsed.length > 1 ? 'mixed' : ((sourcesUsed[0] as UniversalTrackProfile['source']) || 'itunes'),
     resolvedAtMs: now
   };
 
@@ -627,61 +583,22 @@ export async function searchOpenMusicCatalog(
   if (cached && cached.expiresAtMs > now) return cached.value;
 
   if (searchType === 'artist') {
-    const artistData = await fetchJsonWithTimeout(
-      `https://api.deezer.com/search/artist?q=${encodeURIComponent(fullQ)}&limit=3`,
-      3500
-    );
-    const artistRows: any[] = Array.isArray(artistData?.data) ? artistData.data : [];
-    const artists = artistRows.map(a => ({
-      id: String(a.id),
-      name: String(a.name || ''),
-      genres: [] as string[],
-      popularity: Math.min(99, Math.max(40, Math.round(Math.log10(Math.max(10, Number(a.nb_fan || 100))) * 15))),
-      imageUrl: a.picture_big || a.picture_medium || null
-    }));
-
-    let tracks: OpenCatalogTrackHit[] = [];
-    if (artists[0]?.id) {
-      const topData = await fetchJsonWithTimeout(
-        `https://api.deezer.com/artist/${encodeURIComponent(artists[0].id)}/top?limit=${boundedLimit}`,
-        3500
-      );
-      const topRows: any[] = Array.isArray(topData?.data) ? topData.data : [];
-      tracks = topRows
-        .filter(item => item && item.title && (!excludeExplicit || !Boolean(item.explicit_lyrics)))
-        .map(item => {
-          const title = String(item.title || '').trim();
-          const itemArtist = String(item.artist?.name || artists[0].name).trim();
-          return {
-            trackId: resolveCanonicalTrackIdentity({ trackId: `deezer:${item.id}`, title, artist: itemArtist }).trackId,
-            title,
-            artist: itemArtist,
-            album: String(item.album?.title || '').trim(),
-            genre: '',
-            popularity: 72,
-            explicit: Boolean(item.explicit_lyrics),
-            durationMs: Number(item.duration || 0) * 1000,
-            previewUrl: typeof item.preview === 'string' && item.preview.startsWith('http') ? item.preview : null,
-            audiusStreamUrl: null,
-            ytmVideoId: null,
-            deezerUrl: item.link || (item.id ? `https://www.deezer.com/track/${item.id}` : null),
-            albumArtUrl: item.album?.cover_big || item.album?.cover_medium || null,
-            artistImageUrl: artists[0].imageUrl,
-            source: 'deezer'
-          };
-        });
-    }
-    if (tracks.length === 0) {
-      tracks = await searchDeezerTracks(fullQ, boundedLimit, offset, excludeExplicit);
-    }
+    const [itHits, auHits] = await Promise.all([
+      searchItunesTracks(fullQ, boundedLimit, excludeExplicit),
+      searchAudiusTracks(fullQ, Math.min(6, boundedLimit))
+    ]);
+    const tracks = [...itHits, ...auHits].slice(0, boundedLimit);
+    const artistImage = tracks.find(t => t.artistImageUrl || t.albumArtUrl)?.artistImageUrl || tracks[0]?.albumArtUrl || null;
+    const artists = tracks[0]
+      ? [{ id: tracks[0].trackId, name: tracks[0].artist, genres: [] as string[], popularity: 75, imageUrl: artistImage }]
+      : [];
     const result: OpenCatalogSearchResult = { search_type: 'artist', artists, tracks };
     catalogSearchCache.set(cacheKey, { value: result, expiresAtMs: now + CATALOG_CACHE_TTL_MS });
     return result;
   }
 
-  const [dzHits, itHits, auHits] = await Promise.all([
-    searchDeezerTracks(fullQ, boundedLimit, offset, excludeExplicit),
-    searchItunesTracks(fullQ, Math.min(8, boundedLimit), excludeExplicit),
+  const [itHits, auHits] = await Promise.all([
+    searchItunesTracks(fullQ, boundedLimit, excludeExplicit),
     searchAudiusTracks(fullQ, 4)
   ]);
 
@@ -697,14 +614,13 @@ export async function searchOpenMusicCatalog(
         genre: prev.genre || hit.genre,
         previewUrl: prev.previewUrl || hit.previewUrl,
         audiusStreamUrl: prev.audiusStreamUrl || hit.audiusStreamUrl,
-        deezerUrl: prev.deezerUrl || hit.deezerUrl,
+        deezerUrl: null,
         albumArtUrl: prev.albumArtUrl || hit.albumArtUrl,
         artistImageUrl: prev.artistImageUrl || hit.artistImageUrl
       });
     }
   };
 
-  for (const h of dzHits) addOrMerge(h);
   for (const h of itHits) addOrMerge(h);
   for (const h of auHits) addOrMerge(h);
 
@@ -713,8 +629,8 @@ export async function searchOpenMusicCatalog(
     if (getYoutubeApiKey()) {
       tracks[0].ytmVideoId = await resolveYouTubeMusicVideoId(tracks[0].title, tracks[0].artist);
     }
-    if (!tracks[0].ytmVideoId && (tracks[0].deezerUrl || tracks[0].itunesUrl)) {
-      const songlink = await resolveSpotifyUriViaSonglink([tracks[0].deezerUrl, tracks[0].itunesUrl]);
+    if (!tracks[0].ytmVideoId && tracks[0].itunesUrl) {
+      const songlink = await resolveSpotifyUriViaSonglink([tracks[0].itunesUrl]);
       tracks[0].ytmVideoId = songlink.ytmVideoId;
     }
   }
@@ -787,33 +703,15 @@ export async function discoverOpenMusicRecommendations(params: {
     }
   }
 
-  // 2. Deezer Related Artists + Last.fm artist.getSimilar graph (zero Spotify key!)
+  // 2. Last.fm artist.getSimilar graph -> Open Catalog (iTunes/Audius)
   const seeds = seedArtists.map(s => s.trim()).filter(Boolean).slice(0, 3);
   const lastFmKey = getLastFmApiKey();
 
   for (const seedName of seeds) {
     if (discovered.length >= 10) break;
 
-    const dzArtistData = await fetchJsonWithTimeout(
-      `https://api.deezer.com/search/artist?q=${encodeURIComponent(seedName)}&limit=1`,
-      3000
-    );
-    const seedId = dzArtistData?.data?.[0]?.id;
-    const relatedCandidates: Array<{ id?: string; name: string }> = [];
-
-    if (seedId) {
-      const relData = await fetchJsonWithTimeout(
-        `https://api.deezer.com/artist/${encodeURIComponent(String(seedId))}/related?limit=4`,
-        3000
-      );
-      for (const rel of relData?.data || []) {
-        if (rel?.id && rel?.name) {
-          relatedCandidates.push({ id: String(rel.id), name: String(rel.name) });
-        }
-      }
-    }
-
-    if (lastFmKey && relatedCandidates.length < 3) {
+    const relatedCandidates: Array<{ name: string }> = [];
+    if (lastFmKey) {
       const lfmRel = await fetchJsonWithTimeout(
         `https://ws.audioscrobbler.com/2.0/?method=artist.getsimilar&artist=${encodeURIComponent(seedName)}&limit=4&api_key=${encodeURIComponent(lastFmKey)}&format=json`,
         3000
@@ -827,43 +725,10 @@ export async function discoverOpenMusicRecommendations(params: {
 
     for (const rel of relatedCandidates.slice(0, 3)) {
       if (discovered.length >= 10) break;
-      if (rel.id) {
-        const topData = await fetchJsonWithTimeout(
-          `https://api.deezer.com/artist/${encodeURIComponent(rel.id)}/top?limit=8`,
-          3000
-        );
-        for (const item of topData?.data || []) {
-          const title = String(item?.title || '').trim();
-          const artist = String(item?.artist?.name || rel.name).trim();
-          const explicit = Boolean(item?.explicit_lyrics);
-          if (title && isNovel(title, artist, explicit)) {
-            discovered.push({
-              trackId: resolveCanonicalTrackIdentity({ trackId: `deezer:${item.id}`, title, artist }).trackId,
-              title,
-              artist,
-              album: String(item?.album?.title || '').trim(),
-              genre: '',
-              popularity: 68,
-              explicit,
-              durationMs: Number(item?.duration || 0) * 1000,
-              previewUrl: typeof item?.preview === 'string' && item.preview.startsWith('http') ? item.preview : null,
-              audiusStreamUrl: null,
-              ytmVideoId: null,
-              deezerUrl: item?.link || `https://www.deezer.com/track/${item.id}`,
-              albumArtUrl: item?.album?.cover_big || item?.album?.cover_medium || null,
-              artistImageUrl: null,
-              source: 'deezer',
-              source_reason: `Fresh kindred artist to ${seedName} (${rel.name})`
-            });
-          }
-          if (discovered.length >= 10) break;
-        }
-      } else {
-        const res = await searchOpenMusicCatalog(rel.name, 'artist', undefined, 5, excludeExplicit, 0);
-        for (const hit of res.tracks) {
-          if (isNovel(hit.title, hit.artist, hit.explicit)) {
-            discovered.push({ ...hit, source_reason: `Similar artist to ${seedName} (${rel.name})` });
-          }
+      const res = await searchOpenMusicCatalog(rel.name, 'artist', undefined, 5, excludeExplicit, 0);
+      for (const hit of res.tracks) {
+        if (isNovel(hit.title, hit.artist, hit.explicit)) {
+          discovered.push({ ...hit, source_reason: `Similar artist to ${seedName} (${rel.name})` });
         }
       }
     }

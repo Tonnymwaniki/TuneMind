@@ -157,35 +157,34 @@ object UniversalTrackResolver {
             return hit
         }
 
-        // 2. Direct zero-key on-device fallback (Deezer + iTunes + Audius) when offline from backend / fast path
+        // 2. Direct zero-key on-device fallback (iTunes + Audius) when offline from backend / fast path
         val q = if (a.isNotBlank() && !t.contains(a, ignoreCase = true)) "$t $a" else t.ifBlank { fullQuery }
-        val deezer = fetchDeezerSingle(q, t, a)
         val itunes = fetchItunesSingle(q, t, a)
         val audiusStream = fetchAudiusStreamUrl(t, a, q)
 
-        if (deezer != null || itunes != null || !audiusStream.isNullOrBlank()) {
-            val songlink = resolveLinksViaSonglink(listOfNotNull(deezer?.deezerUrl, itunes?.itunesUrl))
+        if (itunes != null || !audiusStream.isNullOrBlank()) {
+            val songlink = resolveLinksViaSonglink(listOfNotNull(itunes?.itunesUrl))
             val resolved = ResolvedPlayableLinks(
                 canonicalTrackKey = matchKey,
                 trackId = TrackIdentityResolver.buildDeterministicTrackId(
-                    deezer?.title ?: itunes?.title ?: t,
-                    deezer?.artist ?: itunes?.artist ?: a
+                    itunes?.title ?: t,
+                    itunes?.artist ?: a
                 ),
-                cleanTitle = deezer?.title ?: itunes?.title ?: t,
-                cleanArtist = deezer?.artist ?: itunes?.artist ?: a,
-                albumName = deezer?.album ?: itunes?.album,
-                albumArtUrl = deezer?.albumArtUrl ?: itunes?.albumArtUrl,
-                artistImageUrl = deezer?.albumArtUrl,
+                cleanTitle = itunes?.title ?: t,
+                cleanArtist = itunes?.artist ?: a,
+                albumName = itunes?.album,
+                albumArtUrl = itunes?.albumArtUrl,
+                artistImageUrl = itunes?.albumArtUrl,
                 genres = listOfNotNull(itunes?.genre?.takeIf { it.isNotBlank() && it != "Music" }).ifEmpty { listOf("Music") },
-                popularity = deezer?.popularity ?: 74,
-                previewUrl = deezer?.previewUrl ?: itunes?.previewUrl,
+                popularity = 74,
+                previewUrl = itunes?.previewUrl,
                 audiusStreamUrl = audiusStream,
                 ytmVideoId = songlink?.ytmVideoId,
-                deezerUrl = deezer?.deezerUrl,
+                deezerUrl = null,
                 spotifyUri = songlink?.spotifyUri,
                 spotifyUrl = songlink?.spotifyUrl,
                 audiomackUrl = songlink?.audiomackUrl,
-                source = if (!audiusStream.isNullOrBlank()) "audius+open" else "deezer+itunes"
+                source = if (!audiusStream.isNullOrBlank()) "audius+open" else "itunes+songlink"
             )
             resolvedCache[matchKey] = resolved
             return resolved
@@ -271,15 +270,10 @@ object UniversalTrackResolver {
             Log.d(TAG, "Backend catalog search fallback triggered: ${e.message}")
         }
 
-        // 2. Direct device Deezer + iTunes fallback
+        // 2. Direct device iTunes fallback
         val results = mutableListOf<OpenCatalogSearchTrack>()
         val seenKeys = mutableSetOf<String>()
 
-        fetchDeezerList(cleanQ, limit).forEach { track ->
-            if (excludeExplicit && track.isExplicit) return@forEach
-            val key = TrackIdentityResolver.buildNormalizedMatchKey(track.title, track.artist)
-            if (seenKeys.add(key)) results.add(track)
-        }
         fetchItunesList(cleanQ, limit).forEach { track ->
             if (excludeExplicit && track.isExplicit) return@forEach
             val key = TrackIdentityResolver.buildNormalizedMatchKey(track.title, track.artist)
@@ -357,50 +351,7 @@ object UniversalTrackResolver {
         }
     }
 
-    private fun fetchDeezerList(query: String, limit: Int): List<OpenCatalogSearchTrack> {
-        return try {
-            val url = "https://api.deezer.com/search?q=${Uri.encode(query)}&limit=$limit"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return emptyList()
-                val arr = JSONObject(resp.body?.string().orEmpty()).optJSONArray("data") ?: return emptyList()
-                buildList {
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        val title = obj.optString("title").trim()
-                        val artistObj = obj.optJSONObject("artist")
-                        val artist = artistObj?.optString("name")?.trim().orEmpty()
-                        if (title.isBlank() || artist.isBlank()) continue
-                        val albumObj = obj.optJSONObject("album")
-                        val cover = albumObj?.optString("cover_xl")?.takeIf { it.startsWith("http") }
-                            ?: albumObj?.optString("cover_big")?.takeIf { it.startsWith("http") }
-                            ?: albumObj?.optString("cover_medium")?.takeIf { it.startsWith("http") }
-                        add(
-                            OpenCatalogSearchTrack(
-                                trackId = TrackIdentityResolver.buildDeterministicTrackId(title, artist),
-                                title = title,
-                                artist = artist,
-                                album = albumObj?.optString("title")?.takeIf { it.isNotBlank() },
-                                albumArtUrl = cover,
-                                genre = "Music",
-                                previewUrl = obj.optString("preview").takeIf { it.startsWith("http") },
-                                deezerUrl = obj.optString("link").takeIf { it.startsWith("http") },
-                                popularity = ((obj.optInt("rank", 500_000) / 10_000).coerceIn(55, 98)),
-                                isExplicit = obj.optBoolean("explicit_lyrics", false)
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun fetchDeezerSingle(query: String, title: String, artist: String): OpenCatalogSearchTrack? {
-        val list = fetchDeezerList(query, 8)
-        return list.firstOrNull { isStrictTitleArtistMatch(title, artist, it.title, it.artist) }
-    }
+    // Deezer removed by product decision — on-device open-catalog fallback uses iTunes, Audius, and Songlink.
 
     private fun fetchItunesList(query: String, limit: Int): List<OpenCatalogSearchTrack> {
         return try {
