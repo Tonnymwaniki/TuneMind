@@ -201,26 +201,33 @@ export async function callOpenAIMessagesWithTools(
 
       const json: any = await retryWithBackoff(
         async () => {
-          const resp = await fetch(OPENAI_CHAT_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`
-            },
-            body: JSON.stringify(bodyPayload)
-          });
-          if (!resp.ok) {
-            const errText = await resp.text().catch(() => '');
-            if (resp.status === 404 || resp.status === 400 || resp.status === 401 || resp.status === 403) {
-              return { __nonRetryableError: true, status: resp.status, errText };
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 16_000);
+          try {
+            const resp = await fetch(OPENAI_CHAT_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`
+              },
+              body: JSON.stringify(bodyPayload),
+              signal: controller.signal
+            });
+            if (!resp.ok) {
+              const errText = await resp.text().catch(() => '');
+              if (resp.status === 404 || resp.status === 400 || resp.status === 401 || resp.status === 403) {
+                return { __nonRetryableError: true, status: resp.status, errText };
+              }
+              const err: any = new Error(`OpenAI HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+              err.status = resp.status;
+              throw err;
             }
-            const err: any = new Error(`OpenAI HTTP ${resp.status}: ${errText.slice(0, 300)}`);
-            err.status = resp.status;
-            throw err;
+            return resp.json();
+          } finally {
+            clearTimeout(timer);
           }
-          return resp.json();
         },
-        { maxAttempts: 3, baseDelayMs: 350, maxDelayMs: 4_000 }
+        { maxAttempts: 2, baseDelayMs: 300, maxDelayMs: 2_500 }
       );
 
       if (json?.__nonRetryableError) {
@@ -261,7 +268,7 @@ export async function generateOpenAISpeechBase64(text: string): Promise<string |
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7_000);
+    const timer = setTimeout(() => controller.abort(), 10_000);
     const resp = await fetch(OPENAI_TTS_URL, {
       method: 'POST',
       headers: {
@@ -280,12 +287,15 @@ export async function generateOpenAISpeechBase64(text: string): Promise<string |
     clearTimeout(timer);
 
     if (!resp.ok) {
+      const errTxt = await resp.text().catch(() => '');
+      console.warn(`[OpenAI TTS] HTTP ${resp.status}: ${errTxt.slice(0, 200)}`);
       return null;
     }
     const arrBuf = await resp.arrayBuffer();
     if (!arrBuf || arrBuf.byteLength === 0) return null;
     return Buffer.from(arrBuf).toString('base64');
-  } catch {
+  } catch (err: any) {
+    console.warn('[OpenAI TTS] error:', err?.message || err);
     return null;
   }
 }

@@ -10,10 +10,10 @@ import {
 const MAX_CONCURRENT_VOICE_SOCKETS = 250;
 const VOICE_IDLE_TIMEOUT_MS = 90_000;
 const SAMPLE_RATE = 16_000;
-const SPEECH_RMS_THRESHOLD = 260;
-const SILENCE_FINALIZE_MS = 950;
-const MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 0.35; // ~350ms minimum utterance
-const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 20;   // 20s max single utterance
+const SPEECH_RMS_THRESHOLD = 120;
+const SILENCE_FINALIZE_MS = 1350;
+const MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 0.30; // ~300ms minimum utterance
+const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 25;   // 25s max single utterance
 
 export function setupVoiceStreamSocket(server: Server) {
   const wss = new WebSocketServer({ server, path: '/ws/stt' });

@@ -10,7 +10,17 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 data class PlaylistTrackInput(
     val title: String,
@@ -101,6 +111,10 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     private var isShutDown = false
     private var pendingSpeech: Pair<String, () -> Unit>? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val engineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val openAiTtsCache = ConcurrentHashMap<String, String>()
+    @Volatile
+    private var activeSpeechGeneration: Long = 0L
 
     private fun ensureTtsStarted(): TextToSpeech? {
         if (isShutDown) return null
@@ -128,7 +142,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             if (pending != null) {
                 pendingSpeech = null
                 Log.d(TAG, "Speaking queued first-attempt utterance now that TTS is ready.")
-                speakWithListener(pending.first, pending.second)
+                speakWithListener(pending.first, onCompletion = pending.second)
             }
         } else {
             Log.e(TAG, "TTS Initialization failed (status=$status)!")
@@ -141,6 +155,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
     }
 
     fun stopSpeaking() {
+        activeSpeechGeneration++
         pendingSpeech = null
         try {
             tts?.stop()
@@ -150,6 +165,104 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             mediaPlayer?.release()
         } catch (_: Exception) {}
         mediaPlayer = null
+    }
+
+    private fun stopPlaybackEnginesOnly() {
+        pendingSpeech = null
+        try {
+            tts?.stop()
+        } catch (_: Exception) {}
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (_: Exception) {}
+        mediaPlayer = null
+    }
+
+    private fun fetchOpenAiSpeechBase64Blocking(text: String): String? {
+        val clean = text.trim()
+        if (clean.isBlank()) return null
+        openAiTtsCache[clean]?.let { return it }
+        return try {
+            val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
+            val authClient = com.tunemind.app.domain.network.TuneMindAuthOkHttp.getAuthenticatedClient(context)
+                .newBuilder()
+                .callTimeout(5500, TimeUnit.MILLISECONDS)
+                .readTimeout(5000, TimeUnit.MILLISECONDS)
+                .build()
+            val body = JSONObject().put("text", clean).toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url("$baseUrl/api/v1/reasoning/tts")
+                .post(body)
+                .build()
+            authClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                val b64 = JSONObject(resp.body?.string().orEmpty())
+                    .optString("voice_agent_audio_base64", "")
+                    .trim()
+                if (b64.isNotBlank() && b64 != "null") {
+                    if (openAiTtsCache.size > 40) openAiTtsCache.clear()
+                    openAiTtsCache[clean] = b64
+                    b64
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "OpenAI /tts fetch skipped (${e.message})")
+            null
+        }
+    }
+
+    private fun speakTextWithOpenAIOrOfflineFallback(
+        text: String,
+        preloadedBase64: String?,
+        onCompletion: () -> Unit
+    ) {
+        stopSpeaking()
+        val gen = activeSpeechGeneration
+        if (!preloadedBase64.isNullOrBlank()) {
+            Log.d(TAG, "Playing cloud OpenAI voice audio (${preloadedBase64.length} b64 chars)...")
+            playBase64Audio(
+                base64Str = preloadedBase64,
+                fallbackText = text,
+                expectedGen = gen,
+                onCompletion = onCompletion
+            )
+            return
+        }
+        val clean = text.trim()
+        if (clean.isBlank()) {
+            onCompletion()
+            return
+        }
+        openAiTtsCache[clean]?.let { cached ->
+            playBase64Audio(
+                base64Str = cached,
+                fallbackText = clean,
+                expectedGen = gen,
+                onCompletion = onCompletion
+            )
+            return
+        }
+        engineScope.launch {
+            val fetchedB64 = fetchOpenAiSpeechBase64Blocking(clean)
+            mainHandler.post {
+                if (isShutDown || gen != activeSpeechGeneration) {
+                    return@post
+                }
+                if (!fetchedB64.isNullOrBlank()) {
+                    playBase64Audio(
+                        base64Str = fetchedB64,
+                        fallbackText = clean,
+                        expectedGen = gen,
+                        onCompletion = onCompletion
+                    )
+                } else {
+                    Log.w(TAG, "OpenAI voice unavailable offline — speaking fallback via local TTS: $clean")
+                    speakWithListener(clean, expectedGen = gen, onCompletion = onCompletion)
+                }
+            }
+        }
     }
 
     fun executeBackendCommand(
@@ -248,17 +361,13 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             }
         }
 
-        // Play OpenAI/cloud Base64 MP3 audio or fallback to native TTS
-        if (!response.voice_agent_audio_base64.isNullOrEmpty()) {
-            Log.d(TAG, "Playing cloud voice audio (${response.voice_agent_audio_base64.length} b64 chars)...")
-            playBase64Audio(
-                base64Str = response.voice_agent_audio_base64,
-                fallbackText = textToSpeak,
+        // Play OpenAI/cloud Base64 MP3 audio (fetching /api/v1/reasoning/tts if missing) — local TTS only when completely offline
+        if (textToSpeak.isNotEmpty() || !response.voice_agent_audio_base64.isNullOrEmpty()) {
+            speakTextWithOpenAIOrOfflineFallback(
+                text = textToSpeak,
+                preloadedBase64 = response.voice_agent_audio_base64,
                 onCompletion = onSpeechFinished
             )
-        } else if (textToSpeak.isNotEmpty()) {
-            Log.d(TAG, "Speaking voice response via TTS: $textToSpeak")
-            speakWithListener(textToSpeak, onCompletion = onSpeechFinished)
         } else {
             onSpeechFinished()
         }
@@ -266,7 +375,7 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
     /**
      * Speaks a short prompt (for example a circadian wake greeting when the user calls
-     * "Hi TuneMind" and waits) and invokes [onFinished] immediately on completion.
+     * "Hi TuneMind" and waits) using OpenAI voice when online, and invokes [onFinished] on completion.
      */
     fun speakPromptOnly(text: String, onFinished: () -> Unit) {
         if (text.isBlank()) {
@@ -274,10 +383,15 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             return
         }
         pauseCurrentMedia()
-        speakWithListener(text, onCompletion = onFinished)
+        speakTextWithOpenAIOrOfflineFallback(
+            text = text,
+            preloadedBase64 = null,
+            onCompletion = onFinished
+        )
     }
 
-    private fun speakWithListener(text: String, onCompletion: () -> Unit) {
+    private fun speakWithListener(text: String, expectedGen: Long = activeSpeechGeneration, onCompletion: () -> Unit) {
+        stopPlaybackEnginesOnly()
         val ttsInstance = ensureTtsStarted()
         if (ttsInstance == null) {
             onCompletion()
@@ -307,14 +421,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
             override fun onDone(id: String?) {
                 Log.d(TAG, "TTS Speech finished: $id")
                 mainHandler.post {
-                    onCompletion()
+                    if (expectedGen == activeSpeechGeneration) {
+                        onCompletion()
+                    }
                 }
             }
 
             override fun onError(id: String?) {
                 Log.e(TAG, "TTS Speech error on: $id")
                 mainHandler.post {
-                    onCompletion()
+                    if (expectedGen == activeSpeechGeneration) {
+                        onCompletion()
+                    }
                 }
             }
         })
@@ -329,12 +447,18 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
         }
     }
 
-    private fun playBase64Audio(base64Str: String, fallbackText: String, onCompletion: () -> Unit) {
+    private fun playBase64Audio(
+        base64Str: String,
+        fallbackText: String,
+        expectedGen: Long = activeSpeechGeneration,
+        onCompletion: () -> Unit
+    ) {
+        stopPlaybackEnginesOnly()
         try {
             val audioBytes = Base64.decode(base64Str, Base64.DEFAULT)
             if (audioBytes == null || audioBytes.isEmpty()) {
                 if (fallbackText.isNotBlank()) {
-                    speakWithListener(fallbackText, onCompletion)
+                    speakWithListener(fallbackText, expectedGen = expectedGen, onCompletion = onCompletion)
                 } else {
                     onCompletion()
                 }
@@ -346,7 +470,6 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 fos.flush()
             }
 
-            mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     android.media.AudioAttributes.Builder()
@@ -361,29 +484,35 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
                 setOnCompletionListener {
                     it.release()
                     tempFile.delete()
-                    mediaPlayer = null
+                    if (mediaPlayer === it) mediaPlayer = null
                     Log.d(TAG, "Voice response playback finished.")
-                    onCompletion()
+                    if (expectedGen == activeSpeechGeneration) {
+                        onCompletion()
+                    }
                 }
                 setOnErrorListener { mp, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra — falling back to native TTS")
                     mp.release()
                     tempFile.delete()
-                    mediaPlayer = null
-                    if (fallbackText.isNotBlank()) {
-                        speakWithListener(fallbackText, onCompletion)
-                    } else {
-                        onCompletion()
+                    if (mediaPlayer === mp) mediaPlayer = null
+                    if (expectedGen == activeSpeechGeneration) {
+                        if (fallbackText.isNotBlank()) {
+                            speakWithListener(fallbackText, expectedGen = expectedGen, onCompletion = onCompletion)
+                        } else {
+                            onCompletion()
+                        }
                     }
                     true
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play Base64 audio — falling back to native TTS", e)
-            if (fallbackText.isNotBlank()) {
-                speakWithListener(fallbackText, onCompletion)
-            } else {
-                onCompletion()
+            if (expectedGen == activeSpeechGeneration) {
+                if (fallbackText.isNotBlank()) {
+                    speakWithListener(fallbackText, expectedGen = expectedGen, onCompletion = onCompletion)
+                } else {
+                    onCompletion()
+                }
             }
         }
     }
@@ -743,6 +872,8 @@ class TuneMindExecutionEngine(private val context: Context) : TextToSpeech.OnIni
 
     fun shutdown() {
         isShutDown = true
+        activeSpeechGeneration++
+        runCatching { engineScope.cancel() }
         mainHandler.removeCallbacksAndMessages(null)
         try {
             mediaPlayer?.stop()

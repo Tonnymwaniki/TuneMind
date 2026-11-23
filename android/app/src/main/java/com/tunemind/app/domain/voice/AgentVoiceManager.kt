@@ -2257,6 +2257,7 @@ class AgentVoiceManager(
         }
 
         isWsOpenForAudio = false
+        hasCompletedCloudTurn = false
         preConnectAudioBuffer.clear()
         lastWsPartialProgressAtMs = 0L
         startLocalAudioCapture()
@@ -2414,6 +2415,10 @@ class AgentVoiceManager(
 
                     // Handle backend reasoning completion
                     if (json.optString("type") == "command" && json.optString("action") == "THINKING_COMPLETE") {
+                        if (hasCompletedReasoning || hasCompletedCloudTurn || _agentState.value == AgentState.SPEAKING) {
+                            Log.w(TAG, "Ignoring late/duplicate THINKING_COMPLETE after turn already completed.")
+                            return
+                        }
                         hasCompletedReasoning = true
                         hasCompletedCloudTurn = true
                         cloudResponseTimeoutJob?.cancel()
@@ -2585,6 +2590,9 @@ class AgentVoiceManager(
             return candidate
         }
         if (!fallbackPkg.isNullOrBlank()) return fallbackPkg
+        if (com.tunemind.app.provider.SpotifyPremiumConnectManager.isConnectedAndPremium(context)) {
+            return com.tunemind.app.provider.SpotifyMusicProvider.SPOTIFY_PACKAGE
+        }
         val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(context)
         if (registry.hasExplicitDefault()) {
             val pref = registry.getProvider(registry.getPreferredProviderId())
@@ -3136,11 +3144,15 @@ class AgentVoiceManager(
                 deezer_url = rawDeezerUrl,
                 never_open_external_app = resolvedNeverOpenExternalApp
             ),
-            voice_agent_audio_base64 = if (effectiveAction == "PROPOSE_TRACK" && rawAction == "PLAY_TRACK_NOW") {
-                // Force Android TTS to speak our rewritten approval question if cloud audio said "Spinning..."
-                null
-            } else {
-                dataObj?.optString("voice_agent_audio_base64", "")?.takeIf { it.isNotBlank() && it != "null" }
+            voice_agent_audio_base64 = run {
+                val cloudTts = dataObj?.optString("voice_agent_tts", "")?.trim().orEmpty()
+                val cloudAudio = dataObj?.optString("voice_agent_audio_base64", "")?.takeIf { it.isNotBlank() && it != "null" }
+                if (spokenTts.isNotBlank() && cloudTts.isNotBlank() && spokenTts != cloudTts) {
+                    // Text changed locally — let TuneMindExecutionEngine synthesize spokenTts via OpenAI /tts so voice stays 100% consistent!
+                    null
+                } else {
+                    cloudAudio
+                }
             }
         )
 
@@ -3339,17 +3351,10 @@ class AgentVoiceManager(
             return
         }
         lastUserTranscript = cleaned
+        hasCompletedCloudTurn = false
 
         setThinkingState()
         scope.launch {
-            // Free users get instant local playback & utility controls at $0 Claude API cost
-            val billingSnapshot = com.tunemind.app.billing.TuneMindBillingManager.getInstance(context).state.value
-            if (!billingSnapshot.hasProAccess && isFreeTierLocalCommand(cleaned)) {
-                val localFreeJson = buildLocalOnDeviceFallbackJson(cleaned)
-                dispatchReasoningResult(localFreeJson, localFreeJson.optString("voice_agent_tts", ""))
-                return@launch
-            }
-
             try {
                 val np = getNowPlaying?.invoke()
                 val recents = getRecentTracks?.invoke() ?: emptyList()
@@ -4356,6 +4361,10 @@ class AgentVoiceManager(
                         override fun onError(error: Int) {
                             Log.w(TAG, "Native SpeechRecognizer finished with code: $error")
                             stopNativeSpeechRecognizer()
+                            if (hasCompletedCloudTurn || _agentState.value == AgentState.SPEAKING || _agentState.value == AgentState.THINKING) {
+                                Log.d(TAG, "Ignoring late native SpeechRecognizer error($error); turn already active/complete.")
+                                return
+                            }
                             val capturedNativePartial = latestNativePartialText.trim()
                             if (capturedNativePartial.length >= 2) {
                                 Log.i(TAG, "Recovering SpeechRecognizer error($error) with partial transcript: $capturedNativePartial")
@@ -4393,6 +4402,10 @@ class AgentVoiceManager(
                         }
 
                         override fun onResults(results: Bundle?) {
+                            if (hasCompletedCloudTurn || _agentState.value == AgentState.SPEAKING) {
+                                Log.d(TAG, "Ignoring duplicate native SpeechRecognizer result after turn completed.")
+                                return
+                            }
                             val matches = results?.getStringArrayList(AndroidSpeechRecognizer.RESULTS_RECOGNITION)
                             val transcript = matches?.firstOrNull()?.trim()
                             if (!transcript.isNullOrBlank()) {
@@ -4710,9 +4723,9 @@ class AgentVoiceManager(
         val clean = fallbackTranscript.trim()
         if (clean.isBlank()) return
         cloudResponseTimeoutJob = scope.launch {
-            delay(18_000L)
+            delay(32_000L)
             if (!hasCompletedCloudTurn && (_agentState.value == AgentState.LISTENING || _agentState.value == AgentState.THINKING)) {
-                Log.w(TAG, "⚡ Cloud response >18s — replying with offline fallback for: \"$clean\"")
+                Log.w(TAG, "⚡ Cloud response >32s — replying cleanly for: \"$clean\"")
                 hasCompletedCloudTurn = true
                 lastUserTranscript = clean
                 stopMicrophoneStream()
@@ -4809,6 +4822,7 @@ class AgentVoiceManager(
     private fun stopMicrophoneStream() {
         stopAudioRecordingOnly()
         isWsOpenForAudio = false
+        hasCompletedCloudTurn = false
         preConnectAudioBuffer.clear()
         try {
             webSocket?.close(1000, "Finished speaking")

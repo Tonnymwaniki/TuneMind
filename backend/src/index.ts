@@ -102,16 +102,13 @@ wss.on('connection', async (ws: WebSocket) => {
 
   const buildDynamicKeyterms = (ctx: typeof clientContext): string[] => {
     const terms = new Set<string>([
-      'TuneMind', 'Spotify', 'Boomplay', 'Audiomack', 'YouTube Music',
-      'Kikuyu', 'Mugithi', 'Benga', 'Bongo Flava', 'Afrobeats', 'Amapiano',
-      'Cocomelon', 'Super Simple Songs', 'Samidoh', 'Sauti Sol', 'Nyashinski',
-      'Wakadinali', 'Bien', 'Burna Boy', 'Wizkid', 'Diamond Platnumz', 'Harmonize',
+      'TuneMind', 'Spotify', 'YouTube Music', 'Boomplay', 'Audiomack',
       'TuneMind playlist', 'Resting Vault', 'Dopamine Capsule', 'For You',
       'Kids Mode', 'sleep timer', 'ndio', 'sawa'
     ]);
     const pushTerm = (val: unknown) => {
       const s = String(val || '').replace(/[\r\n]+/g, ' ').trim();
-      if (s.length >= 2 && s.length <= 48 && terms.size < 95) {
+      if (s.length >= 2 && s.length <= 48 && terms.size < 80) {
         terms.add(s);
       }
     };
@@ -121,9 +118,6 @@ wss.on('connection', async (ws: WebSocket) => {
     }
     for (const pl of (ctx?.tunemind_playlists || []).slice(0, 15)) {
       pushTerm(pl?.name);
-    }
-    for (const pl of ((ctx?.tunemind_playlists || []) as any[]).slice(0, 12)) {
-      pushTerm((pl as any)?.name);
     }
     for (const tr of ((ctx?.cross_app_library || []) as any[]).slice(0, 15)) {
       pushTerm((tr as any)?.artist);
@@ -136,7 +130,7 @@ wss.on('connection', async (ws: WebSocket) => {
     for (const f of (ctx?.for_you_picks || []).slice(0, 10)) {
       pushTerm((f as any)?.artist);
     }
-    return Array.from(terms).slice(0, 95);
+    return Array.from(terms).slice(0, 80);
   };
 
   let clientContext: (Partial<TuneMindTelemetryContext> & {
@@ -322,11 +316,19 @@ wss.on('connection', async (ws: WebSocket) => {
       }
     } catch (e) {
       console.error('[VoiceStream] Error triggering reasoning:', e);
+      const errText = "I caught that, but hit a quick snag connecting. Say it again for me?";
+      const errAudio = await generateOpenAISpeechBase64(errText).catch(() => null);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'command',
           action: 'THINKING_COMPLETE',
-          payload: "I heard you. Let me know which vibe you'd like next."
+          payload: errText,
+          data: {
+            voice_agent_tts: errText,
+            voice_agent_audio_base64: errAudio,
+            agent_tool_call: { action: 'ADVISE_ONLY', expect_follow_up: true },
+            os_execution_command: { intent: 'NONE', target_player: 'com.spotify.music', search_query: '' }
+          }
         }));
       }
     }

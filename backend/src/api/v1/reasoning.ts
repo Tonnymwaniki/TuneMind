@@ -214,6 +214,31 @@ router.post('/evaluate-satiety', requireAuthInProduction, async (req: Request, r
 });
 
 /**
+ * POST /api/v1/reasoning/tts
+ * Lightweight OpenAI gpt-4o-mini-tts endpoint so wake greetings & local confirmations use the exact same voice.
+ */
+router.post('/tts', requireAuthInProduction, async (req: Request, res: Response) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) {
+      return res.status(400).json({ error: 'Missing text to synthesize' });
+    }
+    const { generateOpenAISpeechBase64, isOpenAIActive } = await import('../../domain/reasoning/OpenAIAdapter');
+    if (!isOpenAIActive()) {
+      return res.status(503).json({ error: 'OpenAI TTS not configured' });
+    }
+    const base64Audio = await generateOpenAISpeechBase64(text);
+    return res.json({
+      status: 'ok',
+      voice_agent_audio_base64: base64Audio
+    });
+  } catch (error) {
+    console.error('[reasoning.ts] Error in /tts:', error);
+    return res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
  * POST /api/v1/reasoning/analyze
  * Direct live endpoint for Android app and web client to request real-time Claude 3.5 Haiku reasoning.
  */

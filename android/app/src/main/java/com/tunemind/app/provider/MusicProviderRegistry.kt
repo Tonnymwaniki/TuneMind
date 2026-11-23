@@ -316,7 +316,7 @@ class TuneMindInAppProvider : MusicProvider {
                 title = match.title,
                 artist = match.artist,
                 album = resolved?.albumName,
-                previewFallback = if (preferSpotifyOverPreview && !strictNoSwitch && !stayInTuneMind) null else resolved?.previewUrl,
+                previewFallback = null,
                 fallbackExternalPkg = if (preferSpotifyOverPreview) SpotifyMusicProvider.SPOTIFY_PACKAGE else YouTubeMusicProvider.YTM_PACKAGE,
                 fallbackExternalName = if (preferSpotifyOverPreview) "Spotify" else "YouTube Music"
             )
@@ -345,7 +345,7 @@ class TuneMindInAppProvider : MusicProvider {
                 id = exactSpotifyUri ?: resolved?.trackId ?: match.providerTrackId ?: match.title,
                 title = match.title,
                 artist = match.artist,
-                reason = "Opening full track in Spotify instead of 30-second preview",
+                reason = "Opening full track in Spotify",
                 confidence = match.confidence,
                 spotifyUri = exactSpotifyUri
             )
@@ -362,27 +362,7 @@ class TuneMindInAppProvider : MusicProvider {
             if (spotifyLaunch.isSuccess) return spotifyLaunch
         }
 
-        val previewUrl = resolved?.previewUrl?.takeIf { it.startsWith("http") }
-        if (previewUrl != null && TuneMindInAppPlayer.playStreamUrl(
-                context = context,
-                streamUrl = previewUrl,
-                title = match.title,
-                artist = match.artist,
-                album = resolved.albumName,
-                expectedDurationMs = 30_000L,
-                isPreview = true,
-                fallbackExternalPkg = if (spotifyInstalled) SpotifyMusicProvider.SPOTIFY_PACKAGE else YouTubeMusicProvider.YTM_PACKAGE,
-                fallbackExternalName = if (spotifyInstalled) "Spotify" else "YouTube Music"
-            )
-        ) {
-            return PlaybackLaunchResult.DirectPlaybackLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                trackTitle = match.title,
-                destinationUri = previewUrl,
-                message = "Playing '${match.title}' (30s preview) inside TuneMind."
-            )
-        }
+        // 30s preview playback removed intentionally: continue silently to warm MediaSession fallback below.
 
         // 3. Fallback silently via warm active MediaSession (`neverOpenExternalApp = true`)
         val preferredExternal = MusicProviderRegistry.getInstance(context)
