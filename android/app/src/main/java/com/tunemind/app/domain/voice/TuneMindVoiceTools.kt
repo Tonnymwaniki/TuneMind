@@ -35,8 +35,10 @@ import com.tunemind.app.ui.theme.ThemeBehavior
 import com.tunemind.app.ui.theme.ThemePreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -64,7 +66,8 @@ data class TuneMindVoiceToolHost(
     val onRefreshVaultAndStats: () -> Unit = {},
     val onNavigateScreen: (screen: String, playlistName: String?) -> Unit = { _, _ -> },
     val onSetSleepTimerMinutes: (Int) -> Unit = {},
-    val onSetTheme: (paletteId: String?, customAccentHex: String?, behavior: ThemeBehavior?) -> Unit = { _, _, _ -> }
+    val onSetTheme: (paletteId: String?, customAccentHex: String?, behavior: ThemeBehavior?) -> Unit = { _, _, _ -> },
+    val onEnqueueUpNextTracks: (List<Triple<String, String, String?>>) -> Unit = {}
 )
 
 /**
@@ -106,6 +109,56 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             })
         }
         return arr
+    }
+
+    fun toGeminiFunctionDeclarationsJsonArray(): JSONArray {
+        val arr = JSONArray()
+        registryMap.values.forEach { tool ->
+            arr.put(JSONObject().apply {
+                put("name", tool.name)
+                put("description", tool.description)
+                val props = tool.parametersSchema.optJSONObject("properties")
+                if (props != null && props.length() > 0) {
+                    put("parameters", convertSchemaToGemini(tool.parametersSchema))
+                }
+            })
+        }
+        return arr
+    }
+
+    private fun convertSchemaToGemini(src: JSONObject): JSONObject {
+        val out = JSONObject()
+        val rawType = src.optString("type", "").trim().lowercase()
+        if (rawType.isNotBlank()) {
+            out.put("type", when (rawType) {
+                "object" -> "OBJECT"
+                "array" -> "ARRAY"
+                "string" -> "STRING"
+                "integer" -> "INTEGER"
+                "number" -> "NUMBER"
+                "boolean" -> "BOOLEAN"
+                else -> rawType.uppercase()
+            })
+        }
+        if (src.has("description")) out.put("description", src.optString("description"))
+        if (src.has("enum")) out.put("enum", src.optJSONArray("enum"))
+        if (src.has("required")) out.put("required", src.optJSONArray("required"))
+        val srcProps = src.optJSONObject("properties")
+        if (srcProps != null && srcProps.length() > 0) {
+            val mappedProps = JSONObject()
+            val keys = srcProps.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val child = srcProps.optJSONObject(k)
+                if (child != null) mappedProps.put(k, convertSchemaToGemini(child))
+            }
+            out.put("properties", mappedProps)
+        }
+        val items = src.optJSONObject("items")
+        if (items != null) {
+            out.put("items", convertSchemaToGemini(items))
+        }
+        return out
     }
 
     suspend fun execute(toolName: String, args: JSONObject): JSONObject = withContext(Dispatchers.IO) {
@@ -215,6 +268,33 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 required = listOf("title")
             ),
             executor = ::execPlayTrack
+        ),
+        RealtimeToolDescriptor(
+            name = "play_track_sequence",
+            description = "Play an ordered sequence of multiple songs back-to-back right now (for example: 'play my 4 most recent songs', 'play my top 3 songs', or a custom list of tracks). Plays #1 and queues #2..N seamlessly on Spotify or TuneMind Up Next.",
+            statusLabel = "Queuing & playing track sequence",
+            parametersSchema = JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("preset_source", prop("string", "Optional auto-selected list from user's real history when 'tracks' is omitted.", listOf("recent", "most_played", "liked", "freshest")))
+                    put("count", prop("integer", "Number of songs to play when using preset_source (1..15, default 4)."))
+                    put("artist_filter", prop("string", "Optional artist name filter when using preset_source."))
+                    put("tracks", JSONObject().apply {
+                        put("type", "array")
+                        put("description", "Explicit ordered list of verified tracks to play back-to-back.")
+                        put("items", schemaObj(
+                            props = mapOf(
+                                "title" to prop("string", "Song title"),
+                                "artist" to prop("string", "Artist name"),
+                                "spotify_uri" to prop("string", "Optional spotify:track:<id> URI")
+                            ),
+                            required = listOf("title")
+                        ))
+                    })
+                    put("target_player", prop("string", "Optional explicit player override."))
+                })
+            },
+            executor = ::execPlayTrackSequence
         ),
         RealtimeToolDescriptor(
             name = "play_spotify_context",
@@ -408,35 +488,121 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
 
     // ─── Executors (100% Real Repo Data & Capabilities) ───────────────────────
 
+    private suspend fun fetchLiveSpotifyPlayerState(): JSONObject? {
+        if (!SpotifyPremiumConnectManager.isConnected(appContext)) return null
+        val token = SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(appContext) ?: return null
+        return executeSpotifyGet("$SPOTIFY_API_BASE/me/player", token)
+    }
+
+    private suspend fun getChronologicalRecentTracks(limit: Int = 8): List<JSONObject> {
+        val dao = scopedDb().crossAppLibraryDao()
+        val libraryTracks = dao.getAllLibraryTracksOnce()
+        val playLogs = dao.getPlayLogsOnce(400)
+
+        val uriByNormKey = HashMap<String, String>()
+        val sourceByNormKey = HashMap<String, String>()
+        libraryTracks.forEach { t ->
+            val key = ListeningPlayDeduplicator.canonicalTrackKey(t.title, t.artist)
+            MusicPlayerAutoLauncher.extractSpotifyTrackUri(t.trackId)?.let { uriByNormKey[key] = it }
+            sourceByNormKey[key] = t.primarySourcePackage
+        }
+
+        val seenKeys = HashSet<String>()
+        val ordered = mutableListOf<JSONObject>()
+
+        // 1. Live Spotify recently-played API gives exact chronological recent plays across devices
+        if (SpotifyPremiumConnectManager.isConnected(appContext)) {
+            val (spRecent, _) = SpotifyPremiumConnectManager.fetchRecentlyPlayedTracks(appContext, limit.coerceIn(1, 20))
+            spRecent.forEach { st ->
+                val key = ListeningPlayDeduplicator.canonicalTrackKey(st.title, st.artist)
+                if (seenKeys.add(key)) {
+                    ordered.add(JSONObject().apply {
+                        put("title", st.title)
+                        put("artist", st.artist)
+                        put("spotify_uri", st.spotifyUri)
+                        put("played_at_ms", st.addedAtMs)
+                        put("source", "spotify_recently_played")
+                    })
+                }
+            }
+        }
+
+        // 2. Merge local chronological Room play logs (sorted by playedAtMs DESC)
+        playLogs
+            .filter { !it.wasSkipped && it.title.isNotBlank() }
+            .sortedByDescending { it.playedAtMs }
+            .forEach { log ->
+                val key = ListeningPlayDeduplicator.canonicalTrackKey(log.title, log.artist)
+                if (seenKeys.add(key)) {
+                    ordered.add(JSONObject().apply {
+                        put("title", log.title)
+                        put("artist", log.artist)
+                        put("spotify_uri", uriByNormKey[key] ?: "")
+                        put("played_at_ms", log.playedAtMs)
+                        put("source", log.sourcePackage.ifBlank { sourceByNormKey[key] ?: "tunemind_history" })
+                    })
+                }
+            }
+
+        return ordered
+            .sortedByDescending { it.optLong("played_at_ms", 0L) }
+            .take(limit)
+    }
+
     private suspend fun execGetLivePlaybackState(): JSONObject {
         val listener = TuneMindListenerService.instance
         val snap = listener?.getActivePlaybackSnapshot()
         val vmNp = host.getNowPlaying()
         val inAppPlaying = TuneMindInAppPlayer.isPlaying()
         val ytPlaying = TuneMindYouTubeEmbedController.isPlaying()
+        val spotifyPlayer = fetchLiveSpotifyPlayerState()
+        val spotifyItem = spotifyPlayer?.optJSONObject("item")
+        val spotifyTitle = spotifyItem?.optString("name").orEmpty().trim()
+        val spotifyArtist = parseArtistNames(spotifyItem?.optJSONArray("artists")).trim()
+        val spotifyAlbum = spotifyItem?.optJSONObject("album")?.optString("name").orEmpty().trim()
+        val spotifyUri = spotifyItem?.optString("uri").orEmpty().trim()
+        val spotifyIsPlaying = spotifyPlayer?.optBoolean("is_playing", false) == true
+        val spotifyProgressMs = spotifyPlayer?.optLong("progress_ms", 0L) ?: 0L
+        val spotifyDurationMs = spotifyItem?.optLong("duration_ms", 0L) ?: 0L
+        val spotifyDeviceObj = spotifyPlayer?.optJSONObject("device")
+
+        val recentChronological = getChronologicalRecentTracks(limit = 6)
+        val latestRecent = recentChronological.firstOrNull()
 
         val activeTitle = when {
             inAppPlaying -> TuneMindInAppPlayer.currentTitleFlow.value
             ytPlaying -> TuneMindYouTubeEmbedController.currentTitleFlow.value
             !snap?.title.isNullOrBlank() -> snap!!.title
-            else -> vmNp?.title
+            spotifyTitle.isNotBlank() -> spotifyTitle
+            !vmNp?.title.isNullOrBlank() && vmNp?.title != "Standing By" -> vmNp!!.title
+            else -> latestRecent?.optString("title").orEmpty()
         }.orEmpty()
         val activeArtist = when {
             inAppPlaying -> TuneMindInAppPlayer.currentArtistFlow.value
             ytPlaying -> TuneMindYouTubeEmbedController.currentArtistFlow.value
             !snap?.artist.isNullOrBlank() -> snap!!.artist
-            else -> vmNp?.artist
+            spotifyTitle.isNotBlank() -> spotifyArtist
+            !vmNp?.title.isNullOrBlank() && vmNp?.title != "Standing By" -> vmNp!!.artist
+            else -> latestRecent?.optString("artist").orEmpty()
         }.orEmpty()
         val isPlaying = when {
             inAppPlaying || ytPlaying -> true
             snap != null -> snap.isPlaying
+            spotifyTitle.isNotBlank() -> spotifyIsPlaying
             else -> vmNp?.isPlaying == true
         }
         val activeSource = when {
             inAppPlaying -> "tunemind_inapp"
             ytPlaying -> "youtube_embed_inapp"
             !snap?.packageName.isNullOrBlank() -> snap!!.packageName
-            else -> vmNp?.sourcePackage ?: "unknown_player"
+            spotifyTitle.isNotBlank() -> "com.spotify.music"
+            !vmNp?.sourcePackage.isNullOrBlank() -> vmNp!!.sourcePackage
+            else -> latestRecent?.optString("source").orEmpty().ifBlank { "unknown_player" }
+        }
+        val activeUri = when {
+            spotifyUri.isNotBlank() -> spotifyUri
+            !vmNp?.spotifyUri.isNullOrBlank() -> vmNp!!.spotifyUri
+            else -> latestRecent?.optString("spotify_uri").orEmpty()
         }
 
         val registry = MusicProviderRegistry.getInstance(appContext)
@@ -463,19 +629,21 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             put("now_playing", JSONObject().apply {
                 put("title", activeTitle.ifBlank { "Nothing active" })
                 put("artist", activeArtist)
-                put("album", snap?.album ?: "")
+                put("album", snap?.album?.ifBlank { spotifyAlbum } ?: spotifyAlbum)
                 put("is_playing", isPlaying)
+                put("is_paused", activeTitle.isNotBlank() && !isPlaying)
                 put("source_package", activeSource)
-                put("position_ms", snap?.positionMs ?: vmNp?.positionMs ?: 0L)
-                put("duration_ms", snap?.durationMs ?: vmNp?.durationMs ?: 0L)
-                put("spotify_uri", vmNp?.spotifyUri ?: "")
+                put("position_ms", snap?.positionMs?.takeIf { it > 0L } ?: spotifyProgressMs.takeIf { it > 0L } ?: (vmNp?.positionMs ?: 0L))
+                put("duration_ms", snap?.durationMs?.takeIf { it > 0L } ?: spotifyDurationMs.takeIf { it > 0L } ?: (vmNp?.durationMs ?: 0L))
+                put("spotify_uri", activeUri)
             })
+            put("recent_chronological_tracks", JSONArray(recentChronological))
             put("spotify", JSONObject().apply {
                 put("is_connected", spotifyStatus.isConnected)
                 put("is_premium", spotifyStatus.isPremium)
-                put("has_active_connect_device", deviceCheck?.hasActiveDevice == true)
-                put("active_device_name", deviceCheck?.deviceName ?: spotifyStatus.lastDeviceName)
-                put("active_device_type", deviceCheck?.deviceType ?: "")
+                put("has_active_connect_device", (deviceCheck?.hasActiveDevice == true) || (spotifyDeviceObj != null))
+                put("active_device_name", spotifyDeviceObj?.optString("name")?.takeIf { it.isNotBlank() } ?: deviceCheck?.deviceName ?: spotifyStatus.lastDeviceName)
+                put("active_device_type", spotifyDeviceObj?.optString("type")?.takeIf { it.isNotBlank() } ?: deviceCheck?.deviceType ?: "")
             })
             put("player_preferences", JSONObject().apply {
                 put("has_explicit_default", registry.hasExplicitDefault())
@@ -518,6 +686,25 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 if (!handled && TuneMindYouTubeEmbedController.hasActiveVideo() && TuneMindYouTubeEmbedController.resume()) handled = true
                 if (!handled && listener?.play(snapPkg) == true) handled = true
                 if (!handled && isSpotifyPremium) handled = SpotifyPremiumConnectManager.resumePlayback(appContext)
+                // Cold-resume fallback: if Spotify Connect slept after pausing, re-launch the paused track seamlessly
+                if (!handled) {
+                    val liveSnap = execGetLivePlaybackState().optJSONObject("now_playing")
+                    val pausedTitle = liveSnap?.optString("title").orEmpty().takeIf { it.isNotBlank() && it != "Nothing active" }
+                    val pausedArtist = liveSnap?.optString("artist").orEmpty()
+                    val pausedUri = liveSnap?.optString("spotify_uri").orEmpty()
+                    val pausedPosMs = liveSnap?.optLong("position_ms", 0L) ?: 0L
+                    if (!pausedTitle.isNullOrBlank()) {
+                        val playRes = execPlayTrack(JSONObject().apply {
+                            put("title", pausedTitle)
+                            put("artist", pausedArtist)
+                            if (pausedUri.isNotBlank()) put("spotify_uri", pausedUri)
+                        })
+                        handled = playRes.optBoolean("ok", false)
+                        if (handled && pausedPosMs > 2_000L && isSpotifyPremium) {
+                            SpotifyPremiumConnectManager.seekPlayback(appContext, positionMs = pausedPosMs)
+                        }
+                    }
+                }
                 if (handled) host.onResumeUiSync()
                 handled
             }
@@ -699,6 +886,216 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
         }
     }
 
+    private suspend fun execPlayTrackSequence(args: JSONObject): JSONObject {
+        val count = args.optInt("count", 4).coerceIn(1, 15)
+        val preset = args.optString("preset_source").trim().lowercase()
+        val artistFilter = args.optString("artist_filter").trim().lowercase()
+        val explicitPlayer = args.optString("target_player").trim()
+
+        data class SeqTrack(
+            val title: String,
+            val artist: String,
+            var spotifyUri: String?
+        )
+
+        val resolvedTracks = mutableListOf<SeqTrack>()
+        val rawArr = args.optJSONArray("tracks")
+        if (rawArr != null && rawArr.length() > 0) {
+            for (i in 0 until minOf(15, rawArr.length())) {
+                val obj = rawArr.optJSONObject(i) ?: continue
+                val t = obj.optString("title").trim()
+                if (t.isNotBlank()) {
+                    resolvedTracks.add(
+                        SeqTrack(
+                            title = t,
+                            artist = obj.optString("artist").trim(),
+                            spotifyUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(obj.optString("spotify_uri"))
+                        )
+                    )
+                }
+            }
+        }
+
+        if (resolvedTracks.isEmpty()) {
+            when (preset.ifBlank { "recent" }) {
+                "recent" -> {
+                    val recent = getChronologicalRecentTracks(limit = count * 2)
+                    recent.forEach { r ->
+                        val t = r.optString("title").trim()
+                        val a = r.optString("artist").trim()
+                        if (t.isNotBlank() && (artistFilter.isBlank() || a.lowercase().contains(artistFilter))) {
+                            resolvedTracks.add(
+                                SeqTrack(
+                                    title = t,
+                                    artist = a,
+                                    spotifyUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(r.optString("spotify_uri"))
+                                )
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    val hist = execQueryListeningHistory(JSONObject().apply {
+                        put("sort_by", when (preset) {
+                            "most_played" -> "most_played"
+                            "freshest" -> "freshest"
+                            else -> "most_played"
+                        })
+                        if (preset == "liked") put("liked_only", true)
+                        if (artistFilter.isNotBlank()) put("artist_filter", artistFilter)
+                        put("limit", count)
+                    })
+                    val arr = hist.optJSONArray("tracks")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            val t = o.optString("title").trim()
+                            val a = o.optString("artist").trim()
+                            if (t.isNotBlank()) {
+                                resolvedTracks.add(SeqTrack(t, a, MusicPlayerAutoLauncher.extractSpotifyTrackUri(o.optString("spotify_uri"))))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        val finalTracks = resolvedTracks.take(count)
+        if (finalTracks.isEmpty()) {
+            return errorResult("No matching songs were found to play in sequence.")
+        }
+
+        val registry = MusicProviderRegistry.getInstance(appContext)
+        val spotifyConnected = SpotifyPremiumConnectManager.isConnected(appContext)
+        val useSpotify = explicitPlayer.contains("spotify", true) ||
+            (explicitPlayer.isBlank() && (registry.getPreferredProviderId() == SpotifyMusicProvider.PROVIDER_ID || spotifyConnected))
+
+        // Enqueue into TuneMind's Up Next queue for UI visibility
+        host.onEnqueueUpNextTracks(finalTracks.map { Triple(it.title, it.artist, it.spotifyUri) })
+
+        if (useSpotify && SpotifyPremiumConnectManager.isConnectedAndPremium(appContext)) {
+            finalTracks.forEach { st ->
+                if (st.spotifyUri.isNullOrBlank()) {
+                    st.spotifyUri = SpotifyPremiumConnectManager.searchExactTrackUri(
+                        context = appContext,
+                        title = st.title,
+                        artist = st.artist,
+                        query = "${st.title} ${st.artist}".trim()
+                    )
+                }
+            }
+            val uris = finalTracks.mapNotNull { it.spotifyUri }.distinct()
+            if (uris.isNotEmpty()) {
+                val token = SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(appContext)
+                var multiPlaySuccess = false
+                if (!token.isNullOrBlank()) {
+                    val putBody = JSONObject().put("uris", JSONArray(uris))
+                        .toString()
+                        .toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val req = Request.Builder()
+                        .url("$SPOTIFY_API_BASE/me/player/play")
+                        .header("Authorization", "Bearer $token")
+                        .put(putBody)
+                        .build()
+                    runCatching {
+                        httpClient.newCall(req).execute().use { resp ->
+                            multiPlaySuccess = resp.isSuccessful || resp.code == 204 || resp.code == 202
+                        }
+                    }
+                }
+
+                if (!multiPlaySuccess) {
+                    // Cold-wake Spotify onto track #1, then queue tracks #2..N (or send uris array once awake)
+                    val first = finalTracks.first()
+                    val firstPlay = execPlayTrack(JSONObject().apply {
+                        put("title", first.title)
+                        put("artist", first.artist)
+                        if (!first.spotifyUri.isNullOrBlank()) put("spotify_uri", first.spotifyUri)
+                        if (explicitPlayer.isNotBlank()) put("target_player", explicitPlayer)
+                    })
+                    if (firstPlay.optBoolean("ok", false)) {
+                        val refreshedToken = SpotifyPremiumConnectManager.refreshAccessTokenIfNeeded(appContext)
+                        var replayedMulti = false
+                        if (!refreshedToken.isNullOrBlank() && uris.size > 1) {
+                            val putBody = JSONObject().put("uris", JSONArray(uris))
+                                .toString()
+                                .toRequestBody("application/json; charset=utf-8".toMediaType())
+                            val req = Request.Builder()
+                                .url("$SPOTIFY_API_BASE/me/player/play")
+                                .header("Authorization", "Bearer $refreshedToken")
+                                .put(putBody)
+                                .build()
+                            runCatching {
+                                httpClient.newCall(req).execute().use { resp ->
+                                    replayedMulti = resp.isSuccessful || resp.code == 204 || resp.code == 202
+                                }
+                            }
+                        }
+                        if (!replayedMulti) {
+                            finalTracks.drop(1).forEach { nextTrack ->
+                                if (!nextTrack.spotifyUri.isNullOrBlank()) {
+                                    SpotifyPremiumConnectManager.queueTrack(
+                                        context = appContext,
+                                        title = nextTrack.title,
+                                        artist = nextTrack.artist,
+                                        spotifyUri = nextTrack.spotifyUri
+                                    )
+                                }
+                            }
+                        }
+                        multiPlaySuccess = true
+                    }
+                } else {
+                    val first = finalTracks.first()
+                    host.onTrackDispatched(first.title, first.artist, "com.spotify.music")
+                }
+
+                if (multiPlaySuccess) {
+                    val arr = JSONArray()
+                    finalTracks.forEachIndexed { idx, st ->
+                        arr.put(JSONObject().apply {
+                            put("position", idx + 1)
+                            put("title", st.title)
+                            put("artist", st.artist)
+                            put("spotify_uri", st.spotifyUri ?: "")
+                        })
+                    }
+                    return JSONObject().apply {
+                        put("ok", true)
+                        put("played_count", finalTracks.size)
+                        put("target_player", "Spotify")
+                        put("tracks", arr)
+                        put("detail", "Playing ${finalTracks.size} tracks in sequence on Spotify starting with '${finalTracks.first().title}'.")
+                    }
+                }
+            }
+        }
+
+        // Fallback for non-Spotify / in-app players: launch #1 cleanly; #2..N are already in TuneMind Up Next queue
+        val first = finalTracks.first()
+        val firstRes = execPlayTrack(JSONObject().apply {
+            put("title", first.title)
+            put("artist", first.artist)
+            if (!first.spotifyUri.isNullOrBlank()) put("spotify_uri", first.spotifyUri)
+            if (explicitPlayer.isNotBlank()) put("target_player", explicitPlayer)
+        })
+        val arr = JSONArray()
+        finalTracks.forEachIndexed { idx, st ->
+            arr.put(JSONObject().apply {
+                put("position", idx + 1)
+                put("title", st.title)
+                put("artist", st.artist)
+            })
+        }
+        return JSONObject().apply {
+            put("ok", firstRes.optBoolean("ok", false))
+            put("played_count", finalTracks.size)
+            put("target_player", firstRes.optString("target_player", "TuneMind"))
+            put("tracks", arr)
+            put("detail", if (firstRes.optBoolean("ok")) "Playing '${first.title}' with ${finalTracks.size - 1} more queued in TuneMind Up Next." else firstRes.optString("detail"))
+        }
+    }
+
     private suspend fun execQueueSpotifyTrack(args: JSONObject): JSONObject {
         val title = args.optString("title").trim()
         if (title.isBlank()) return errorResult("Track title is required")
@@ -713,7 +1110,12 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             )
         }
         if (uri.isNullOrBlank()) return errorResult("Could not locate '$title' on Spotify to queue.")
-        val queued = SpotifyPremiumConnectManager.queueTrack(appContext, uri)
+        val queued = SpotifyPremiumConnectManager.queueTrack(
+            context = appContext,
+            title = title,
+            artist = artist,
+            spotifyUri = uri
+        )
         return JSONObject().apply {
             put("ok", queued)
             put("title", title)
@@ -861,24 +1263,41 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 }
             }
             if (artistId.isNotBlank()) {
-                val topJson = executeSpotifyGet("$SPOTIFY_API_BASE/artists/$artistId/top-tracks", token)
-                val items = topJson?.optJSONArray("tracks")
+                val topJson = executeSpotifyGet("$SPOTIFY_API_BASE/artists/$artistId/top-tracks?market=from_token", token)
+                var items = topJson?.optJSONArray("tracks")
+                var sourceLabel = "spotify_artist_top_tracks"
+                if (items == null || items.length() == 0) {
+                    val fallbackQuery = if (resolvedArtistName.isNotBlank()) "artist:\"$resolvedArtistName\"" else resolvedArtistName
+                    val fallbackJson = executeSpotifyGet(
+                        "$SPOTIFY_API_BASE/search?q=${URLEncoder.encode(fallbackQuery, "UTF-8")}&type=track&limit=$limit",
+                        token
+                    )
+                    items = fallbackJson?.optJSONObject("tracks")?.optJSONArray("items")
+                    sourceLabel = "spotify_artist_catalog_search"
+                }
                 if (items != null) {
-                    for (i in 0 until minOf(limit, items.length())) {
-                        val tr = items.optJSONObject(i) ?: continue
-                        val trTitle = tr.optString("name")
-                        val trArtist = parseArtistNames(tr.optJSONArray("artists")).ifBlank { resolvedArtistName }
-                        val key = ListeningPlayDeduplicator.canonicalTrackKey(trTitle, trArtist)
-                        spotifyTopArr.put(JSONObject().apply {
-                            put("rank", i + 1)
-                            put("title", trTitle)
-                            put("artist", trArtist)
-                            put("spotify_popularity", tr.optInt("popularity", 0))
-                            put("spotify_uri", tr.optString("uri"))
-                            put("album", tr.optJSONObject("album")?.optString("name").orEmpty())
-                            put("user_verified_play_count", userPlaysByNormTitle[key] ?: 0)
-                        })
+                    val candidates = mutableListOf<JSONObject>()
+                    for (i in 0 until items.length()) {
+                        items.optJSONObject(i)?.let { candidates.add(it) }
                     }
+                    candidates
+                        .sortedByDescending { it.optInt("popularity", 0) }
+                        .take(limit)
+                        .forEachIndexed { idx, tr ->
+                            val trTitle = tr.optString("name")
+                            val trArtist = parseArtistNames(tr.optJSONArray("artists")).ifBlank { resolvedArtistName }
+                            val key = ListeningPlayDeduplicator.canonicalTrackKey(trTitle, trArtist)
+                            spotifyTopArr.put(JSONObject().apply {
+                                put("rank", idx + 1)
+                                put("source", sourceLabel)
+                                put("title", trTitle)
+                                put("artist", trArtist)
+                                put("spotify_popularity", tr.optInt("popularity", 0))
+                                put("spotify_uri", tr.optString("uri"))
+                                put("album", tr.optJSONObject("album")?.optString("name").orEmpty())
+                                put("user_verified_play_count", userPlaysByNormTitle[key] ?: 0)
+                            })
+                        }
                 }
             }
         }
@@ -1000,8 +1419,21 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
         dao.setTrackLiked(canonicalKey, liked)
 
         val spotifyUpdated = if (!uri.isNullOrBlank() && SpotifyPremiumConnectManager.isConnected(appContext)) {
-            if (liked) SpotifyPremiumConnectManager.likeTrackOnSpotify(appContext, uri)
-            else SpotifyPremiumConnectManager.unlikeTrackOnSpotify(appContext, uri)
+            if (liked) {
+                SpotifyPremiumConnectManager.likeTrackOnSpotify(
+                    context = appContext,
+                    title = title,
+                    artist = artist,
+                    spotifyUri = uri
+                )
+            } else {
+                SpotifyPremiumConnectManager.unlikeTrackOnSpotify(
+                    context = appContext,
+                    title = title,
+                    artist = artist,
+                    spotifyUri = uri
+                )
+            }
         } else false
 
         return JSONObject().apply {
@@ -1034,6 +1466,10 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
         }
 
         val logsByTrackKey = playLogs.filter { it.playedAtMs >= windowStartMs }.groupBy { it.canonicalTrackKey }
+        val latestLogMsByKey = playLogs
+            .filter { !it.wasSkipped }
+            .groupBy { it.canonicalTrackKey }
+            .mapValues { (_, list) -> list.maxOfOrNull { it.playedAtMs } ?: 0L }
         val sensitivity = AgentSettingsStore.getRepetitionSensitivity(appContext)
 
         data class TrackRow(
@@ -1042,7 +1478,8 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             val skipsInWindow: Int,
             val avgCompletion: Float,
             val satietyPercent: Int,
-            val freshnessPercent: Int
+            val freshnessPercent: Int,
+            val effectiveLastPlayedMs: Long
         )
 
         val rows = libraryTracks.filter { t ->
@@ -1061,18 +1498,20 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 sensitivity = sensitivity,
                 nowMs = nowMs
             )
+            val effRecent = latestLogMsByKey[t.canonicalTrackKey]?.takeIf { it > 0L } ?: t.lastPlayedAtMs
             TrackRow(
                 entity = t,
                 playsInWindow = plays,
                 skipsInWindow = skips,
                 avgCompletion = avgComp,
                 satietyPercent = fatigue.effectiveSatiety,
-                freshnessPercent = fatigue.freshnessPercent
+                freshnessPercent = fatigue.freshnessPercent,
+                effectiveLastPlayedMs = effRecent
             )
         }
 
         val sorted = when (sortBy) {
-            "recent" -> rows.sortedByDescending { it.entity.lastPlayedAtMs }
+            "recent" -> rows.sortedByDescending { it.effectiveLastPlayedMs }
             "most_skipped" -> rows.sortedByDescending { it.skipsInWindow }
             "highest_fatigue" -> rows.sortedByDescending { it.satietyPercent }
             "freshest" -> rows.sortedByDescending { it.freshnessPercent }
@@ -1084,6 +1523,7 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             tracksArr.put(JSONObject().apply {
                 put("title", r.entity.title)
                 put("artist", r.entity.artist)
+                put("spotify_uri", MusicPlayerAutoLauncher.extractSpotifyTrackUri(r.entity.trackId) ?: "")
                 put("verified_play_count", r.playsInWindow)
                 put("skip_count", r.skipsInWindow)
                 put("avg_completion_ratio", String.format("%.2f", r.avgCompletion).toDouble())
@@ -1092,13 +1532,18 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 put("is_liked", r.entity.isLiked)
                 put("is_in_vault", r.entity.isInVault)
                 put("primary_source", r.entity.primarySourcePackage)
-                put("last_played_at_ms", r.entity.lastPlayedAtMs)
+                put("last_played_at_ms", r.effectiveLastPlayedMs)
             })
         }
 
         val filteredLogs = playLogs.filter { it.playedAtMs >= windowStartMs }
         val totalMinutes = (filteredLogs.sumOf { it.listenedMs } / 60_000L).toInt()
         val totalSkips = filteredLogs.count { it.wasSkipped }
+        val chronologicalRecent = if (sortBy == "recent" && artistFilter.isBlank() && titleQuery.isBlank()) {
+            getChronologicalRecentTracks(limit)
+        } else {
+            emptyList()
+        }
 
         return JSONObject().apply {
             put("ok", true)
@@ -1107,6 +1552,9 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             put("window_total_listened_minutes", totalMinutes)
             put("window_total_skips", totalSkips)
             put("window_total_log_events", filteredLogs.size)
+            if (chronologicalRecent.isNotEmpty()) {
+                put("chronological_recent_plays", JSONArray(chronologicalRecent))
+            }
             put("tracks", tracksArr)
         }
     }

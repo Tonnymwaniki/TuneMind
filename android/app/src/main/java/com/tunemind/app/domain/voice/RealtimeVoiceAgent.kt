@@ -44,6 +44,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -138,15 +140,23 @@ class RealtimeVoiceAgent(
 
     private var recordJob: Job? = null
     private var playbackJob: Job? = null
-    private var playbackChannel = Channel<ByteArray>(capacity = 256)
+    private var playbackChannel = Channel<ByteArray>(capacity = Channel.UNLIMITED)
     private val playbackGen = AtomicLong(0L)
+    private val totalFramesWritten = AtomicLong(0L)
     private val isConnectingOrActive = AtomicBoolean(false)
     @Volatile
     private var isCapturingAudio = false
     @Volatile
+    private var suppressMicStreaming = false
+    @Volatile
+    private var activeProvider: String = "openai"
+    @Volatile
+    private var pendingInitialPrompt: String? = null
+    @Volatile
     private var activeResponseId: String? = null
     @Volatile
     private var pendingAutoSettleAfterPlayback = false
+    private var settleOrDrainJob: Job? = null
 
     private data class PendingCall(
         val callId: String,
@@ -184,6 +194,9 @@ class RealtimeVoiceAgent(
         // Pause active music cleanly so the voice microphone hears clearly without music bleed
         pauseCurrentMediaQuietly()
         pendingAutoSettleAfterPlayback = false
+        suppressMicStreaming = false
+        settleOrDrainJob?.cancel()
+        settleOrDrainJob = null
         pendingCallsById.clear()
         activeAssistantText.clear()
         activeUserText.clear()
@@ -217,19 +230,32 @@ class RealtimeVoiceAgent(
         val clean = prompt.trim()
         if (clean.isBlank()) return
         if (_uiState.value.isSessionActive && webSocket != null) {
-            val itemEv = JSONObject().apply {
-                put("type", "conversation.item.create")
-                put("item", JSONObject().apply {
-                    put("type", "message")
-                    put("role", "user")
-                    put("content", org.json.JSONArray().put(JSONObject().apply {
-                        put("type", "input_text")
-                        put("text", clean)
-                    }))
-                })
+            if (activeProvider == "gemini") {
+                val turnObj = JSONObject().apply {
+                    put("clientContent", JSONObject().apply {
+                        put("turns", JSONArray().put(JSONObject().apply {
+                            put("role", "user")
+                            put("parts", JSONArray().put(JSONObject().put("text", clean)))
+                        }))
+                        put("turnComplete", true)
+                    })
+                }
+                webSocket?.send(turnObj.toString())
+            } else {
+                val itemEv = JSONObject().apply {
+                    put("type", "conversation.item.create")
+                    put("item", JSONObject().apply {
+                        put("type", "message")
+                        put("role", "user")
+                        put("content", JSONArray().put(JSONObject().apply {
+                            put("type", "input_text")
+                            put("text", clean)
+                        }))
+                    })
+                }
+                webSocket?.send(itemEv.toString())
+                webSocket?.send(JSONObject().put("type", "response.create").toString())
             }
-            webSocket?.send(itemEv.toString())
-            webSocket?.send(JSONObject().put("type", "response.create").toString())
         } else {
             startSession(initialPrompt = clean)
         }
@@ -251,7 +277,9 @@ class RealtimeVoiceAgent(
     // ─── Step 1: Secure Ephemeral Token Minting ───────────────────────────────
 
     private data class MintedSession(
+        val provider: String,
         val clientSecret: String,
+        val wsUrl: String,
         val model: String,
         val voice: String,
         val userContext: JSONObject?
@@ -263,6 +291,25 @@ class RealtimeVoiceAgent(
         val identity = SupabaseIntelligenceSyncManager.resolveUserIdentity(appContext)
         val supabaseUrl = identity.supabaseUrl.trim().trimEnd('/')
         val anonKey = identity.supabaseAnonKey.trim()
+
+        val jwtDiag = runCatching {
+            val parts = freshJwt.split(".")
+            if (parts.size < 2) {
+                "missingOrMalformed"
+            } else {
+                val payloadJson = JSONObject(
+                    String(
+                        Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP),
+                        Charsets.UTF_8
+                    )
+                )
+                val exp = payloadJson.optLong("exp", 0L)
+                val nowSec = System.currentTimeMillis() / 1000L
+                val iss = payloadJson.optString("iss", "")
+                "expDeltaSec=${exp - nowSec},iss=$iss"
+            }
+        }.getOrDefault("decodeErr")
+        Log.i(TAG, "Minting Realtime session for user=${identity.userId} supabaseUrl=$supabaseUrl jwt=$jwtDiag")
 
         val payload = JSONObject().apply {
             put("model", "gpt-realtime")
@@ -287,13 +334,16 @@ class RealtimeVoiceAgent(
                     if (resp.isSuccessful && bodyStr.isNotBlank()) {
                         return parseMintedResponse(JSONObject(bodyStr))
                     }
-                    lastError = "Edge Function HTTP ${resp.code}: ${bodyStr.take(180)}"
+                    lastError = "Edge Function HTTP ${resp.code}: ${bodyStr.take(220)}"
                     Log.w(TAG, "Supabase Edge Function mint note: $lastError")
                 }
             } catch (e: Exception) {
                 lastError = e.message
                 Log.w(TAG, "Supabase Edge Function unavailable (${e.message}), trying TuneMind backend mirror.")
             }
+        } else {
+            lastError = "Missing Supabase session token on device (jwtPresent=${freshJwt.isNotBlank()})"
+            Log.w(TAG, lastError!!)
         }
 
         // Mirror fallback: TuneMind Express `/api/v1/realtime/session` (JWT validated)
@@ -309,7 +359,16 @@ class RealtimeVoiceAgent(
             if (resp.isSuccessful && bodyStr.isNotBlank()) {
                 return parseMintedResponse(JSONObject(bodyStr))
             }
-            val msg = runCatching { JSONObject(bodyStr).optString("error") }.getOrNull().orEmpty()
+            Log.w(TAG, "Backend /api/v1/realtime/session failed HTTP ${resp.code}: ${bodyStr.take(220)}")
+            val errObj = runCatching { JSONObject(bodyStr) }.getOrNull()
+            val msg = listOfNotNull(
+                errObj?.optString("message")?.takeIf { it.isNotBlank() },
+                errObj?.optString("error")?.takeIf { it.isNotBlank() }
+            ).firstOrNull().orEmpty()
+
+            if (resp.code == 401 || lastError?.contains("401") == true) {
+                throw IllegalStateException("Session expired or unauthorized — open Profile → Log Out and sign back in.")
+            }
             throw IllegalStateException(
                 msg.ifBlank { lastError ?: "Realtime session mint failed (HTTP ${resp.code})" }
             )
@@ -317,14 +376,18 @@ class RealtimeVoiceAgent(
     }
 
     private fun parseMintedResponse(json: JSONObject): MintedSession {
+        val provider = json.optString("provider", "openai").trim().lowercase().ifBlank { "openai" }
         val secret = json.optString("client_secret").trim()
-        if (secret.isBlank()) {
-            throw IllegalStateException("Server did not return an ephemeral OpenAI client_secret.")
+        val wsUrl = json.optString("ws_url").trim()
+        if (secret.isBlank() && wsUrl.isBlank()) {
+            throw IllegalStateException("Server did not return an ephemeral session credential.")
         }
         return MintedSession(
+            provider = provider,
             clientSecret = secret,
-            model = json.optString("model", "gpt-realtime").ifBlank { "gpt-realtime" },
-            voice = json.optString("voice", "coral").ifBlank { "coral" },
+            wsUrl = wsUrl,
+            model = json.optString("model", if (provider == "gemini") "models/gemini-2.5-flash-native-audio-preview-12-2025" else "gpt-realtime"),
+            voice = json.optString("voice", if (provider == "gemini") "Aoede" else "coral"),
             userContext = json.optJSONObject("user_context")
         )
     }
@@ -332,54 +395,89 @@ class RealtimeVoiceAgent(
     // ─── Step 2: Realtime WebSocket + Dynamic Grounded Session Setup ──────────
 
     private fun openRealtimeWebSocket(minted: MintedSession, initialPrompt: String?) {
-        val url = "wss://api.openai.com/v1/realtime?model=${minted.model}"
-        val reqBuilder = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${minted.clientSecret}")
-        if (minted.model.contains("preview", ignoreCase = true)) {
-            reqBuilder.header("OpenAI-Beta", "realtime=v1")
+        activeProvider = minted.provider
+        pendingInitialPrompt = initialPrompt?.takeIf { it.isNotBlank() }
+
+        val url = if (minted.provider == "gemini") {
+            minted.wsUrl.ifBlank {
+                "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${java.net.URLEncoder.encode(minted.clientSecret, "UTF-8")}"
+            }
+        } else {
+            "wss://api.openai.com/v1/realtime?model=${minted.model}"
+        }
+
+        val reqBuilder = Request.Builder().url(url)
+        if (minted.provider != "gemini") {
+            reqBuilder.header("Authorization", "Bearer ${minted.clientSecret}")
+            if (minted.model.contains("preview", ignoreCase = true)) {
+                reqBuilder.header("OpenAI-Beta", "realtime=v1")
+            }
         }
 
         webSocket = wsClient.newWebSocket(reqBuilder.build(), object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
-                if (ws !== webSocket) return
-                Log.i(TAG, "🟢 Connected to OpenAI Realtime WebSocket (model=${minted.model})")
-                sendSessionUpdate(ws, minted)
-                if (initialPrompt.isNullOrBlank()) {
-                    startAudioInputCapture()
+            override fun onOpen(sock: WebSocket, response: Response) {
+                if (sock !== webSocket) return
+                Log.i(TAG, "🟢 Connected to ${minted.provider} Realtime WebSocket (model=${minted.model})")
+                if (minted.provider == "gemini") {
+                    sendGeminiSetup(sock, minted)
                     _uiState.value = _uiState.value.copy(
-                        phase = RealtimePhase.LISTENING,
+                        phase = RealtimePhase.CONNECTING,
                         isSessionActive = true,
-                        liveTranscript = "Listening...",
-                        activeToolStatus = ""
+                        liveTranscript = "Starting TuneMind Live...",
+                        activeToolStatus = "Initializing Gemini Live voice"
                     )
                 } else {
-                    startAudioInputCapture()
-                    sendTextTurn(initialPrompt)
+                    sendSessionUpdate(sock, minted)
+                    if (initialPrompt.isNullOrBlank()) {
+                        startAudioInputCapture(SAMPLE_RATE_HZ)
+                        _uiState.value = _uiState.value.copy(
+                            phase = RealtimePhase.LISTENING,
+                            isSessionActive = true,
+                            liveTranscript = "Listening...",
+                            activeToolStatus = ""
+                        )
+                    } else {
+                        startAudioInputCapture(SAMPLE_RATE_HZ)
+                        sendTextTurn(initialPrompt)
+                    }
                 }
             }
 
-            override fun onMessage(ws: WebSocket, text: String) {
-                if (ws !== webSocket) return
-                handleServerEvent(ws, text)
+            override fun onMessage(sock: WebSocket, text: String) {
+                if (sock !== webSocket) return
+                if (activeProvider == "gemini") {
+                    handleGeminiServerEvent(sock, text)
+                } else {
+                    handleServerEvent(sock, text)
+                }
             }
 
-            override fun onClosing(ws: WebSocket, code: Int, reason: String) {
-                Log.w(TAG, "OpenAI Realtime closing ($code): $reason")
+            override fun onMessage(sock: WebSocket, bytes: ByteString) {
+                if (sock !== webSocket) return
+                val text = bytes.utf8()
+                if (activeProvider == "gemini") {
+                    handleGeminiServerEvent(sock, text)
+                } else {
+                    handleServerEvent(sock, text)
+                }
             }
 
-            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                if (ws !== webSocket) return
-                Log.i(TAG, "OpenAI Realtime closed ($code): $reason")
+            override fun onClosing(sock: WebSocket, code: Int, reason: String) {
+                Log.w(TAG, "${minted.provider} Realtime closing ($code): $reason")
+            }
+
+            override fun onClosed(sock: WebSocket, code: Int, reason: String) {
+                if (sock !== webSocket) return
+                Log.i(TAG, "${minted.provider} Realtime closed ($code): $reason")
                 if (isConnectingOrActive.get()) {
                     stopSessionInternal(RealtimePhase.IDLE, "Tap the orb to talk with TuneMind", null)
                 }
             }
 
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                if (ws !== webSocket) return
+            override fun onFailure(sock: WebSocket, t: Throwable, response: Response?) {
+                if (sock !== webSocket) return
                 val errBody = runCatching { response?.body?.string() }.getOrNull()
-                Log.e(TAG, "OpenAI Realtime WS failure: ${t.message} | $errBody")
+                Log.e(TAG, "${minted.provider} Realtime WS failure: ${t.message} | $errBody")
                 if (isConnectingOrActive.get()) {
                     stopSessionInternal(
                         RealtimePhase.ERROR,
@@ -389,6 +487,35 @@ class RealtimeVoiceAgent(
                 }
             }
         })
+    }
+
+    private fun sendGeminiSetup(ws: WebSocket, minted: MintedSession) {
+        val instructions = buildDynamicGroundedInstructions(minted.userContext)
+        val modelPath = if (minted.model.startsWith("models/")) minted.model else "models/${minted.model}"
+        val decls = tools.toGeminiFunctionDeclarationsJsonArray()
+
+        val setupFrame = JSONObject().apply {
+            put("setup", JSONObject().apply {
+                put("model", modelPath)
+                put("generationConfig", JSONObject().apply {
+                    put("responseModalities", JSONArray().put("AUDIO"))
+                    put("speechConfig", JSONObject().apply {
+                        put("voiceConfig", JSONObject().apply {
+                            put("prebuiltVoiceConfig", JSONObject().apply {
+                                put("voiceName", minted.voice.ifBlank { "Aoede" })
+                            })
+                        })
+                    })
+                })
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().put(JSONObject().put("text", instructions)))
+                })
+                put("inputAudioTranscription", JSONObject())
+                put("outputAudioTranscription", JSONObject())
+                put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls)))
+            })
+        }
+        ws.send(setupFrame.toString())
     }
 
     private fun sendSessionUpdate(ws: WebSocket, minted: MintedSession) {
@@ -403,12 +530,12 @@ class RealtimeVoiceAgent(
                 put("voice", minted.voice)
                 put("input_audio_format", "pcm16")
                 put("output_audio_format", "pcm16")
-                put("input_audio_transcription", JSONObject().put("model", "gpt-4o-transcribe"))
+                put("input_audio_transcription", JSONObject().put("model", "gpt-4o-transcribe").put("language", "en"))
                 put("turn_detection", JSONObject().apply {
                     put("type", "server_vad")
-                    put("threshold", 0.55)
+                    put("threshold", 0.68)
                     put("prefix_padding_ms", 300)
-                    put("silence_duration_ms", 650)
+                    put("silence_duration_ms", 700)
                 })
                 put("tools", toolsJson)
                 put("tool_choice", "auto")
@@ -421,12 +548,12 @@ class RealtimeVoiceAgent(
                 put("audio", JSONObject().apply {
                     put("input", JSONObject().apply {
                         put("format", JSONObject().put("type", "audio/pcm").put("rate", SAMPLE_RATE_HZ))
-                        put("transcription", JSONObject().put("model", "gpt-4o-transcribe"))
+                        put("transcription", JSONObject().put("model", "gpt-4o-transcribe").put("language", "en"))
                         put("turn_detection", JSONObject().apply {
                             put("type", "server_vad")
-                            put("threshold", 0.55)
+                            put("threshold", 0.68)
                             put("prefix_padding_ms", 300)
-                            put("silence_duration_ms", 650)
+                            put("silence_duration_ms", 700)
                             put("create_response", true)
                             put("interrupt_response", true)
                         })
@@ -472,12 +599,15 @@ LIVE SESSION TELEMETRY:
 
 CORE REASONING & ZERO-HALLUCINATION RULES:
 1. NEVER guess or invent song titles, artist names, play counts, playlists, devices, or playback state. ALWAYS call the appropriate tools FIRST and inspect their JSON output before speaking facts.
-2. CONTEXTUAL REFERENCE RESOLUTION: When the user refers to "that song", "that same artist", "this track", or asks about what was just playing, ALWAYS call `get_live_playback_state` first to inspect the active/just-paused track and artist, then chain `get_spotify_artist_top_tracks`, `query_listening_history_and_analytics`, `search_spotify_catalog`, or `get_spotify_account_library` as needed before acting or answering.
+2. CONTEXTUAL REFERENCE RESOLUTION: When the user refers to "that song", "the paused song", "that same artist", "this track", or asks about what was just playing / their most recent songs, ALWAYS call `get_live_playback_state` first (it reads live MediaSession, live Spotify /me/player including paused tracks, and `recent_chronological_tracks`), then chain `get_spotify_artist_top_tracks`, `query_listening_history_and_analytics` (`sort_by="recent"`), `search_spotify_catalog`, or `get_spotify_account_library` as needed before acting or answering.
 3. MULTI-STEP VERIFICATION BEFORE CLAIMING ACTION:
    - Never claim a song is playing, queued, paused, skipped, liked, vaulted, or saved to a playlist unless the corresponding tool returned `"ok": true`.
-   - When asked to play or recommend: if the user names a song, artist, or asks for a specific track (or "most listened song of that same artist"), verify the track + URI via tools (`get_spotify_artist_top_tracks` / `search_spotify_catalog` / `query_listening_history_and_analytics`), call `play_track` if they explicitly asked you to play it (or propose concisely and wait for confirmation if it's an open mood/suggestion request).
+   - When asked to play or resume a paused song: call `control_playback` with `"resume"` (or `play_track` with the resolved track/URI).
+   - When asked to play multiple songs (e.g. "play my 4 recent songs", "play my top 3 songs", or several named tracks), call `play_track_sequence` with either `preset_source` (`"recent"`, `"most_played"`, `"liked"`, `"freshest"`) + `count` OR explicit `tracks` array so all songs play back-to-back seamlessly.
+   - When asked to play a single track: verify the track + URI via tools first and call `play_track` (or propose concisely and wait for confirmation if it's an open mood/suggestion request).
 4. AUTHENTIC USER ISOLATION: All database, Spotify, Vault, and preference tools are strictly scoped to this authenticated user's session.
 5. CONVERSATIONAL VOICE STYLE: Speak warmly and naturally in 1–3 concise sentences unless more detail is asked for. No markdown symbols, bullet formatting, or robotic phrasing. If Kids Mode is true or clean/kids music is requested, avoid explicit tracks (`explicit: true`).
+6. STRICT ENGLISH-ONLY LANGUAGE RULE: Always respond strictly in clear, natural English only. Never speak, translate into, or reply in Swahili, Sheng, or any other language even if song titles, artist names, or user speech contain non-English words.
         """.trimIndent()
     }
 
@@ -532,6 +662,8 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             }
 
             "response.created" -> {
+                settleOrDrainJob?.cancel()
+                settleOrDrainJob = null
                 activeResponseId = json.optJSONObject("response")?.optString("id")?.ifBlank { null }
                 activeAssistantText.clear()
             }
@@ -634,19 +766,25 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                     executeToolBatchAndContinue(ws, callsToRun)
                 } else if (pendingAutoSettleAfterPlayback) {
                     pendingAutoSettleAfterPlayback = false
-                    // Let streamed audio drain cleanly before closing session so music plays undisturbed
-                    scope.launch {
-                        delay(2_200L)
+                    settleOrDrainJob?.cancel()
+                    settleOrDrainJob = scope.launch {
+                        waitUntilAudioDrained()
                         if (isConnectingOrActive.get() && activeResponseId == null) {
                             stopSession()
                         }
                     }
                 } else if (isConnectingOrActive.get() && _uiState.value.phase != RealtimePhase.ERROR) {
-                    _uiState.value = _uiState.value.copy(
-                        phase = RealtimePhase.LISTENING,
-                        activeToolName = "",
-                        activeToolStatus = ""
-                    )
+                    settleOrDrainJob?.cancel()
+                    settleOrDrainJob = scope.launch {
+                        waitUntilAudioDrained()
+                        if (isConnectingOrActive.get() && activeResponseId == null && _uiState.value.phase == RealtimePhase.SPEAKING) {
+                            _uiState.value = _uiState.value.copy(
+                                phase = RealtimePhase.LISTENING,
+                                activeToolName = "",
+                                activeToolStatus = ""
+                            )
+                        }
+                    }
                 }
             }
 
@@ -688,9 +826,12 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 val result = tools.execute(call.name, argsJson)
                 Log.i(TAG, "✅ Tool result (${call.name}): $result")
 
-                if ((call.name == "play_track" || call.name == "play_spotify_context") && result.optBoolean("ok", false)) {
+                val isPlaybackLaunchTool = call.name == "play_track" ||
+                    call.name == "play_spotify_context" ||
+                    call.name == "play_track_sequence" ||
+                    (call.name == "control_playback" && argsJson.optString("command").equals("resume", ignoreCase = true))
+                if (isPlaybackLaunchTool && result.optBoolean("ok", false)) {
                     launchedPlayback = true
-                    abandonVoiceAudioFocus()
                 }
                 summaryLabels.add("${call.name}: ${if (result.optBoolean("ok")) "ok" else "err"}")
 
@@ -706,6 +847,8 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             }
 
             if (launchedPlayback) {
+                // Mute mic upload while TuneMind finishes reading its final confirmation so incoming music doesn't cut it off
+                suppressMicStreaming = true
                 pendingAutoSettleAfterPlayback = true
             }
 
@@ -717,26 +860,235 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         }
     }
 
+    // ─── Gemini Live Event Router + Tool Loop ────────────────────────────────
+
+    private fun handleGeminiServerEvent(ws: WebSocket, rawText: String) {
+        val json = runCatching { JSONObject(rawText) }.getOrNull() ?: return
+
+        if (json.has("setupComplete")) {
+            Log.d(TAG, "Gemini Live setupComplete confirmed.")
+            startAudioInputCapture(16_000)
+            val initPrompt = pendingInitialPrompt
+            pendingInitialPrompt = null
+            if (!initPrompt.isNullOrBlank()) {
+                sendTextTurn(initPrompt)
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    phase = RealtimePhase.LISTENING,
+                    isSessionActive = true,
+                    liveTranscript = "Listening...",
+                    activeToolStatus = ""
+                )
+            }
+            return
+        }
+
+        if (json.has("error")) {
+            val errObj = json.optJSONObject("error")
+            val msg = errObj?.optString("message")?.ifBlank { null } ?: "Gemini Live error"
+            Log.e(TAG, "Gemini Live error: $msg")
+            _uiState.value = _uiState.value.copy(
+                phase = RealtimePhase.ERROR,
+                errorMessage = msg,
+                liveTranscript = msg
+            )
+            return
+        }
+
+        val toolCallObj = json.optJSONObject("toolCall")
+        val fnCallsArr = toolCallObj?.optJSONArray("functionCalls")
+        if (fnCallsArr != null && fnCallsArr.length() > 0) {
+            val calls = mutableListOf<PendingCall>()
+            for (i in 0 until fnCallsArr.length()) {
+                val fc = fnCallsArr.optJSONObject(i) ?: continue
+                val id = fc.optString("id").trim()
+                val name = fc.optString("name").trim()
+                val argsObj = fc.optJSONObject("args")?.toString() ?: "{}"
+                if (name.isNotBlank()) {
+                    calls.add(PendingCall(callId = id.ifBlank { "call_$i" }, name = name, argsBuffer = StringBuilder(argsObj)))
+                }
+            }
+            if (calls.isNotEmpty()) {
+                executeGeminiToolBatchAndContinue(ws, calls)
+            }
+            return
+        }
+
+        val sc = json.optJSONObject("serverContent") ?: return
+
+        if (sc.optBoolean("interrupted", false)) {
+            Log.d(TAG, "🎙️ Gemini Live barge-in interrupted — flushing AI audio output.")
+            activeResponseId = null
+            flushAudioOutputBuffer()
+            pendingAutoSettleAfterPlayback = false
+            _uiState.value = _uiState.value.copy(
+                phase = RealtimePhase.LISTENING,
+                liveTranscript = "Listening...",
+                activeToolName = "",
+                activeToolStatus = ""
+            )
+            return
+        }
+
+        sc.optJSONObject("inputTranscription")?.optString("text")?.takeIf { it.isNotBlank() }?.let { chunk ->
+            activeUserText.append(chunk)
+            _uiState.value = _uiState.value.copy(
+                liveTranscript = activeUserText.toString().trim()
+            )
+        }
+
+        sc.optJSONObject("outputTranscription")?.optString("text")?.takeIf { it.isNotBlank() }?.let { chunk ->
+            if (activeResponseId == null) {
+                activeResponseId = "gemini-turn"
+                activeAssistantText.clear()
+                activeUserText.clear()
+            }
+            activeAssistantText.append(chunk)
+            _uiState.value = _uiState.value.copy(
+                liveTranscript = activeAssistantText.toString().trim()
+            )
+        }
+
+        val parts = sc.optJSONObject("modelTurn")?.optJSONArray("parts")
+        if (parts != null) {
+            settleOrDrainJob?.cancel()
+            settleOrDrainJob = null
+            if (activeResponseId == null) {
+                activeResponseId = "gemini-turn"
+                activeUserText.clear()
+            }
+            for (i in 0 until parts.length()) {
+                val part = parts.optJSONObject(i) ?: continue
+                val inlineData = part.optJSONObject("inlineData")
+                val b64Audio = inlineData?.optString("data").orEmpty()
+                if (b64Audio.isNotBlank()) {
+                    val pcm = runCatching { Base64.decode(b64Audio, Base64.DEFAULT) }.getOrNull()
+                    if (pcm != null && pcm.isNotEmpty()) {
+                        playbackChannel.trySend(pcm)
+                        if (_uiState.value.phase != RealtimePhase.SPEAKING) {
+                            _uiState.value = _uiState.value.copy(
+                                phase = RealtimePhase.SPEAKING,
+                                activeToolName = "",
+                                activeToolStatus = ""
+                            )
+                        }
+                    }
+                }
+                val partText = part.optString("text")
+                if (partText.isNotBlank() && !part.optBoolean("thought", false) && sc.optJSONObject("outputTranscription") == null) {
+                    activeAssistantText.append(partText)
+                    _uiState.value = _uiState.value.copy(
+                        liveTranscript = activeAssistantText.toString().trim()
+                    )
+                }
+            }
+        }
+
+        if (sc.optBoolean("turnComplete", false)) {
+            activeResponseId = null
+            activeUserText.clear()
+            if (pendingAutoSettleAfterPlayback) {
+                pendingAutoSettleAfterPlayback = false
+                settleOrDrainJob?.cancel()
+                settleOrDrainJob = scope.launch {
+                    waitUntilAudioDrained()
+                    if (isConnectingOrActive.get() && activeResponseId == null) {
+                        stopSession()
+                    }
+                }
+            } else if (isConnectingOrActive.get() && _uiState.value.phase != RealtimePhase.ERROR) {
+                settleOrDrainJob?.cancel()
+                settleOrDrainJob = scope.launch {
+                    waitUntilAudioDrained()
+                    if (isConnectingOrActive.get() && activeResponseId == null && _uiState.value.phase == RealtimePhase.SPEAKING) {
+                        _uiState.value = _uiState.value.copy(
+                            phase = RealtimePhase.LISTENING,
+                            activeToolName = "",
+                            activeToolStatus = ""
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun executeGeminiToolBatchAndContinue(ws: WebSocket, calls: List<PendingCall>) {
+        scope.launch {
+            var launchedPlayback = false
+            val summaryLabels = mutableListOf<String>()
+            val responsesArr = JSONArray()
+
+            for (call in calls) {
+                if (!isActive || ws !== webSocket) return@launch
+                val label = tools.getStatusLabel(call.name)
+                _uiState.value = _uiState.value.copy(
+                    phase = RealtimePhase.THINKING_CALLING_TOOLS,
+                    activeToolName = call.name,
+                    activeToolStatus = label
+                )
+                val argsJson = runCatching {
+                    val raw = call.argsBuffer.toString().trim()
+                    if (raw.isBlank()) JSONObject() else JSONObject(raw)
+                }.getOrElse { JSONObject() }
+
+                Log.i(TAG, "🛠️ Executing Gemini Live tool: ${call.name} args=$argsJson")
+                val result = tools.execute(call.name, argsJson)
+                Log.i(TAG, "✅ Tool result (${call.name}): $result")
+
+                val isPlaybackLaunchTool = call.name == "play_track" ||
+                    call.name == "play_spotify_context" ||
+                    call.name == "play_track_sequence" ||
+                    (call.name == "control_playback" && argsJson.optString("command").equals("resume", ignoreCase = true))
+                if (isPlaybackLaunchTool && result.optBoolean("ok", false)) {
+                    launchedPlayback = true
+                }
+                summaryLabels.add("${call.name}: ${if (result.optBoolean("ok")) "ok" else "err"}")
+
+                responsesArr.put(JSONObject().apply {
+                    put("id", call.callId)
+                    put("name", call.name)
+                    put("response", result)
+                })
+            }
+
+            if (launchedPlayback) {
+                suppressMicStreaming = true
+                pendingAutoSettleAfterPlayback = true
+            }
+
+            _uiState.value = _uiState.value.copy(
+                lastToolSummary = summaryLabels.joinToString(" · "),
+                activeToolStatus = "Generating voice response..."
+            )
+            ws.send(
+                JSONObject().apply {
+                    put("toolResponse", JSONObject().put("functionResponses", responsesArr))
+                }.toString()
+            )
+        }
+    }
+
     // ─── Step 4: Bidirectional Hardware-AEC AudioRecord & AudioTrack ─────────
 
     @SuppressLint("MissingPermission")
-    private fun startAudioInputCapture() {
+    private fun startAudioInputCapture(sampleRateHz: Int = SAMPLE_RATE_HZ) {
         stopAudioInputCapture()
+        val frameBytes = ((sampleRateHz * 2) / 25).coerceAtLeast(640) // 40ms @ 16kHz (1280B) or 24kHz (1920B)
         val minBuf = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE_HZ,
+            sampleRateHz,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(FRAME_BYTES * 4)
+        ).coerceAtLeast(frameBytes * 4)
 
         val rec = AudioRecord(
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            SAMPLE_RATE_HZ,
+            sampleRateHz,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             minBuf
         )
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord failed to initialize at ${SAMPLE_RATE_HZ}Hz")
+            Log.e(TAG, "AudioRecord failed to initialize at ${sampleRateHz}Hz")
             runCatching { rec.release() }
             return
         }
@@ -757,18 +1109,31 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         rec.startRecording()
 
         recordJob = scope.launch {
-            val frame = ByteArray(FRAME_BYTES)
+            val frame = ByteArray(frameBytes)
             while (isActive && isCapturingAudio && webSocket != null) {
                 val readBytes = rec.read(frame, 0, frame.size)
                 if (readBytes > 0) {
                     val rms = computeNormalizedEnergy(frame, readBytes)
                     _uiState.value = _uiState.value.copy(micEnergy = rms)
-                    val b64 = Base64.encodeToString(frame, 0, readBytes, Base64.NO_WRAP)
-                    val ev = JSONObject().apply {
-                        put("type", "input_audio_buffer.append")
-                        put("audio", b64)
+                    if (!suppressMicStreaming) {
+                        val b64 = Base64.encodeToString(frame, 0, readBytes, Base64.NO_WRAP)
+                        val ev = if (activeProvider == "gemini") {
+                            JSONObject().apply {
+                                put("realtimeInput", JSONObject().apply {
+                                    put("mediaChunks", JSONArray().put(JSONObject().apply {
+                                        put("mimeType", "audio/pcm;rate=$sampleRateHz")
+                                        put("data", b64)
+                                    }))
+                                })
+                            }
+                        } else {
+                            JSONObject().apply {
+                                put("type", "input_audio_buffer.append")
+                                put("audio", b64)
+                            }
+                        }
+                        webSocket?.send(ev.toString())
                     }
-                    webSocket?.send(ev.toString())
                 }
             }
         }
@@ -814,15 +1179,36 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
 
         track.play()
         audioTrack = track
-        playbackChannel = Channel(capacity = 512)
+        totalFramesWritten.set(0L)
+        playbackChannel = Channel(capacity = Channel.UNLIMITED)
         val gen = playbackGen.incrementAndGet()
 
         playbackJob = scope.launch {
             for (chunk in playbackChannel) {
                 if (!isActive || gen != playbackGen.get()) break
-                runCatching { track.write(chunk, 0, chunk.size) }
+                val written = runCatching { track.write(chunk, 0, chunk.size) }.getOrDefault(0)
+                if (written > 0) {
+                    totalFramesWritten.addAndGet((written / 2).toLong())
+                }
             }
         }
+    }
+
+    private suspend fun waitUntilAudioDrained(maxWaitMs: Long = 18_000L) {
+        val startMs = System.currentTimeMillis()
+        // Wait for queued PCM chunks + AudioTrack hardware playback head to finish speaking every word
+        delay(120L)
+        while (isConnectingOrActive.get() && activeResponseId == null && (System.currentTimeMillis() - startMs) < maxWaitMs) {
+            val tr = audioTrack ?: break
+            val headFrames = runCatching { tr.playbackHeadPosition.toLong() and 0xFFFFFFFFL }.getOrDefault(0L)
+            val writtenFrames = totalFramesWritten.get()
+            val remainingFrames = writtenFrames - headFrames
+            if (playbackChannel.isEmpty && remainingFrames <= 480L) {
+                break
+            }
+            delay(60L)
+        }
+        delay(180L)
     }
 
     private fun flushAudioOutputBuffer() {
@@ -834,12 +1220,15 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 tr.pause()
                 tr.flush()
                 tr.play()
+                val head = tr.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+                totalFramesWritten.set(head)
             }
         }
     }
 
     private fun stopAudioOutputTrack() {
         playbackGen.incrementAndGet()
+        totalFramesWritten.set(0L)
         runCatching { playbackChannel.close() }
         playbackJob?.cancel()
         playbackJob = null
@@ -857,6 +1246,9 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
     ) {
         isConnectingOrActive.set(false)
         pendingAutoSettleAfterPlayback = false
+        suppressMicStreaming = false
+        settleOrDrainJob?.cancel()
+        settleOrDrainJob = null
         stopAudioInputCapture()
         stopAudioOutputTrack()
         val ws = webSocket

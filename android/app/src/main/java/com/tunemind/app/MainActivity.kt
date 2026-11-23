@@ -1140,6 +1140,18 @@ open class MainActivity : ComponentActivity() {
                     } else {
                         vm.setCustomThemeAccentHex(customAccentHex, behavior)
                     }
+                },
+                onEnqueueUpNextTracks = { triples ->
+                    triples.reversed().forEach { (tTitle, tArtist, tUri) ->
+                        vm.enqueueUpNextTrack(
+                            title = tTitle,
+                            artist = tArtist,
+                            spotifyUri = tUri,
+                            reason = "Queued by TuneMind",
+                            freshnessPercent = 96,
+                            playNext = true
+                        )
+                    }
                 }
             )
         }

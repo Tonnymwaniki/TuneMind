@@ -12,6 +12,15 @@ const corsHeaders = {
 
 const OPENAI_CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
 const OPENAI_SESSIONS_URL = 'https://api.openai.com/v1/realtime/sessions';
+const GEMINI_AUTH_TOKENS_URL = 'https://generativelanguage.googleapis.com/v1alpha/auth_tokens';
+
+function sanitizeApiKey(raw: string): string {
+  return raw.split(/[\r\n]/)[0].replace(/^Bearer\s+/i, '').trim();
+}
+
+function redactErrorDetails(raw: string): string {
+  return raw.replace(/sk-[A-Za-z0-9_-]{12,}/g, '[redacted-key]').replace(/AIza[A-Za-z0-9_-]{12,}/g, '[redacted-key]').slice(0, 300);
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -28,7 +37,13 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    const openAiApiKey = (Deno.env.get('OPENAI_API_KEY') ?? '').trim();
+    const openAiApiKey = sanitizeApiKey(Deno.env.get('OPENAI_API_KEY') ?? '');
+    const geminiApiKey = sanitizeApiKey(
+      Deno.env.get('GEMINI_API_KEY') ??
+      Deno.env.get('GOOGLE_AI_API_KEY') ??
+      Deno.env.get('GOOGLE_API_KEY') ??
+      ''
+    );
 
     if (!supabaseUrl || !supabaseAnonKey) {
       return new Response(JSON.stringify({ error: 'Supabase environment is not configured' }), {
@@ -36,8 +51,8 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    if (!openAiApiKey) {
-      return new Response(JSON.stringify({ error: 'OPENAI_API_KEY secret is not configured in Supabase Edge Function' }), {
+    if (!openAiApiKey && !geminiApiKey) {
+      return new Response(JSON.stringify({ error: 'Neither GEMINI_API_KEY nor OPENAI_API_KEY is configured in Supabase Edge Function secrets' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -111,62 +126,117 @@ Deno.serve(async (req: Request) => {
     };
 
     const reqBody = await req.json().catch(() => ({}));
-    const model = String(reqBody?.model || Deno.env.get('OPENAI_REALTIME_MODEL') || 'gpt-realtime').trim();
-    const voice = String(reqBody?.voice || Deno.env.get('OPENAI_TTS_VOICE') || 'coral').trim();
+    const configuredProvider = String(
+      Deno.env.get('REALTIME_PROVIDER') || reqBody?.provider || 'auto'
+    ).trim().toLowerCase();
 
-    // Mint ephemeral Realtime client secret (GA /v1/realtime/client_secrets -> fallback /v1/realtime/sessions)
-    let minted: any = null;
-    const gaResp = await fetch(OPENAI_CLIENT_SECRETS_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${openAiApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        expires_after: { anchor: 'created_at', seconds: 600 },
-        session: {
-          type: 'realtime',
-          model,
-          audio: {
-            output: { voice }
-          }
-        }
-      })
-    });
+    const useGemini =
+      (configuredProvider === 'gemini' && Boolean(geminiApiKey)) ||
+      (configuredProvider !== 'openai' && Boolean(geminiApiKey));
 
-    if (gaResp.ok) {
-      minted = await gaResp.json();
+    let activeProvider = useGemini ? 'gemini' : 'openai';
+    let clientSecret = '';
+    let wsUrl = '';
+    let expiresAt: string | number | null = null;
+    let resolvedModel = '';
+    let resolvedVoice = '';
+
+    if (activeProvider === 'gemini') {
+      const geminiModelRaw = String(
+        Deno.env.get('GEMINI_LIVE_MODEL') || 'models/gemini-2.5-flash-native-audio-preview-12-2025'
+      ).trim();
+      const geminiModel = geminiModelRaw.startsWith('models/') ? geminiModelRaw : `models/${geminiModelRaw}`;
+      resolvedVoice = String(Deno.env.get('GEMINI_LIVE_VOICE') || 'Aoede').trim();
+      const expireIso = new Date(Date.now() + 30 * 60_000).toISOString();
+      const newSessionExpireIso = new Date(Date.now() + 2 * 60_000).toISOString();
+
+      const authTokResp = await fetch(GEMINI_AUTH_TOKENS_URL, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': geminiApiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          uses: 1,
+          expireTime: expireIso,
+          newSessionExpireTime: newSessionExpireIso
+        })
+      });
+
+      if (!authTokResp.ok) {
+        const errText = await authTokResp.text().catch(() => '');
+        return new Response(
+          JSON.stringify({
+            error: `Failed to mint Gemini Live ephemeral token (${authTokResp.status})`,
+            details: redactErrorDetails(errText)
+          }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const tokJson: any = await authTokResp.json();
+      clientSecret = String(tokJson?.name || '').trim();
+      expiresAt = tokJson?.expireTime ?? expireIso;
+      resolvedModel = geminiModel;
+      wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(clientSecret)}`;
     } else {
-      const legacyResp = await fetch(OPENAI_SESSIONS_URL, {
+      const model = String(reqBody?.model || Deno.env.get('OPENAI_REALTIME_MODEL') || 'gpt-realtime').trim();
+      const voice = String(reqBody?.voice || Deno.env.get('OPENAI_TTS_VOICE') || 'coral').trim();
+      resolvedVoice = voice;
+
+      let minted: any = null;
+      const gaResp = await fetch(OPENAI_CLIENT_SECRETS_URL, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${openAiApiKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: model === 'gpt-realtime' ? 'gpt-4o-realtime-preview' : model,
-          voice
+          expires_after: { anchor: 'created_at', seconds: 600 },
+          session: {
+            type: 'realtime',
+            model,
+            audio: {
+              output: { voice }
+            }
+          }
         })
       });
-      if (!legacyResp.ok) {
-        const errText = await legacyResp.text().catch(() => '');
-        return new Response(
-          JSON.stringify({
-            error: `Failed to mint OpenAI Realtime secret (${gaResp.status}/${legacyResp.status})`,
-            details: errText.slice(0, 300)
-          }),
-          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+
+      if (gaResp.ok) {
+        minted = await gaResp.json();
+      } else {
+        const legacyResp = await fetch(OPENAI_SESSIONS_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openAiApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: model === 'gpt-realtime' ? 'gpt-4o-realtime-preview' : model,
+            voice
+          })
+        });
+        if (!legacyResp.ok) {
+          const errText = await legacyResp.text().catch(() => '');
+          return new Response(
+            JSON.stringify({
+              error: `Failed to mint OpenAI Realtime secret (${gaResp.status}/${legacyResp.status})`,
+              details: redactErrorDetails(errText)
+            }),
+            { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        minted = await legacyResp.json();
       }
-      minted = await legacyResp.json();
+
+      clientSecret = minted?.value ?? minted?.client_secret?.value ?? '';
+      expiresAt = minted?.expires_at ?? minted?.client_secret?.expires_at ?? null;
+      resolvedModel = minted?.session?.model ?? minted?.model ?? model;
     }
 
-    const clientSecret = minted?.value ?? minted?.client_secret?.value ?? '';
-    const expiresAt = minted?.expires_at ?? minted?.client_secret?.expires_at ?? null;
-    const resolvedModel = minted?.session?.model ?? minted?.model ?? model;
-
     if (!clientSecret) {
-      return new Response(JSON.stringify({ error: 'OpenAI returned an empty ephemeral client secret' }), {
+      return new Response(JSON.stringify({ error: `${activeProvider} returned an empty ephemeral token` }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -178,10 +248,12 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         status: 'ok',
+        provider: activeProvider,
         client_secret: clientSecret,
+        ws_url: wsUrl,
         expires_at: expiresAt,
         model: resolvedModel,
-        voice,
+        voice: resolvedVoice,
         user_context: {
           user_id: userId,
           email: userEmail,
