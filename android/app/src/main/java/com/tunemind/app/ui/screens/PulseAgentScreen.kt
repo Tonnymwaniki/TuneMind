@@ -113,7 +113,9 @@ fun PulseAgentScreen(
     kidsModeEnabled: Boolean = false,
     hasExternalMiniVideoDock: Boolean = false,
     isOrbActive: Boolean = true,
-    onOpenPlaylists: () -> Unit = {}
+    onOpenPlaylists: () -> Unit = {},
+    realtimePhase: com.tunemind.app.domain.voice.RealtimePhase? = null,
+    activeToolStatus: String = ""
 ) {
     val colors = LocalAdaptiveTheme.current
     val haptics = LocalHapticFeedback.current
@@ -318,6 +320,12 @@ fun PulseAgentScreen(
                 val stateLabel = when {
                     hasPendingApproval && agentState == AgentState.LISTENING -> "Say \"Yes\" or \"Skip\""
                     hasPendingApproval -> "Waiting for approval"
+                    realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.CONNECTING -> "Connecting…"
+                    realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.LISTENING -> "Listening…"
+                    realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.THINKING_CALLING_TOOLS ->
+                        if (activeToolStatus.isNotBlank()) "Thinking · $activeToolStatus" else "Thinking / Calling Tools…"
+                    realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.SPEAKING -> "Speaking"
+                    realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.ERROR -> "Tap to retry"
                     agentState == AgentState.IDLE -> "Ready"
                     agentState == AgentState.LISTENING -> "Listening…"
                     agentState == AgentState.THINKING -> "Thinking…"

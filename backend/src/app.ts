@@ -6,6 +6,7 @@ import { optionalAuth, requireAuthInProduction, resolveEffectiveUserIdentity } f
 import eventsRouter from './api/v1/events';
 import analyticsRouter from './api/v1/analytics';
 import reasoningRouter from './api/v1/reasoning';
+import realtimeRouter from './api/v1/realtime';
 import discoveryRouter from './api/v1/discovery';
 import musicProfilesRouter from './api/v1/musicProfiles';
 import supportRouter from './api/v1/support';
@@ -74,6 +75,7 @@ export function createApp(): express.Express {
   app.use('/api/v1/events', eventsRouter);
   app.use('/api/v1/analytics', analyticsRouter);
   app.use('/api/v1/reasoning', aiComputeLimiter, reasoningRouter);
+  app.use('/api/v1/realtime', aiComputeLimiter, realtimeRouter);
   app.use('/api/v1/discovery', aiComputeLimiter, discoveryRouter);
   app.use('/api/v1/music', musicProfilesRouter);
   app.use('/api/v1/support', sensitiveOpsLimiter, supportRouter);

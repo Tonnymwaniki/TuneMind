@@ -1006,6 +1006,153 @@ open class MainActivity : ComponentActivity() {
                 }
             )
         }
+        val voiceToolHost = remember(context) {
+            com.tunemind.app.domain.voice.TuneMindVoiceToolHost(
+                context = context,
+                getNowPlaying = { vm.homeState.value.nowPlaying },
+                getCurrentScreenName = {
+                    when {
+                        showLegalScreen -> "LEGAL"
+                        showSupportScreen -> "SUPPORT"
+                        showNotificationsScreen -> "NOTIFICATIONS"
+                        showSettingsScreen -> "SETTINGS"
+                        showProfileScreen -> "PROFILE"
+                        showPlaylistsScreen -> "TUNEMIND_PLAYLISTS"
+                        showSearchScreen -> "SEARCH"
+                        showNowPlayingScreen -> "NOW_PLAYING"
+                        showWeeklyReportScreen -> "WEEKLY_REPORT"
+                        showHearingScreen -> "HEARING_HEALTH"
+                        showMusicProfileScreen -> "MUSIC_PROFILE"
+                        showStatsScreen -> "STATS"
+                        currentPagerPage == 0 -> "DOPAMINE_VAULT"
+                        currentPagerPage == 2 -> "RHYTHM_DNA"
+                        else -> "PULSE_AGENT"
+                    }
+                },
+                getSleepTimerRemainingMinutes = {
+                    vm.sleepTimerEndsAtMs.value?.let { endMs ->
+                        ((endMs - System.currentTimeMillis()) / 60_000L).toInt().coerceAtLeast(1)
+                    }
+                },
+                onTrackDispatched = { title, artist, sourcePlayer ->
+                    vm.setAgentActiveTrack(title, artist, sourcePlayer)
+                },
+                onPlaybackLaunchResult = { result ->
+                    vm.reportPlaybackLaunchResult(result)
+                },
+                onVaultRestoreByTitle = { title ->
+                    vm.restoreTrackFromVaultByTitle(title)
+                },
+                onRefreshVaultAndStats = {
+                    vm.refreshVaultLifecycleNow(syncWithBackend = false)
+                },
+                onNavigateScreen = { targetScreen, playlistName ->
+                    val screen = targetScreen.uppercase()
+                    coroutineScope.launch {
+                        when {
+                            screen.contains("SETTING") -> {
+                                showProfileScreen = true
+                                showSettingsScreen = true
+                            }
+                            screen.contains("SEARCH") -> {
+                                showSettingsScreen = false
+                                showSearchScreen = true
+                            }
+                            screen.contains("NOW_PLAYING") || screen.contains("QUEUE") -> {
+                                showNowPlayingScreen = true
+                            }
+                            screen.contains("NOTIF") -> {
+                                showSettingsScreen = false
+                                showProfileScreen = true
+                                showNotificationsScreen = true
+                            }
+                            screen.contains("TUNEMIND_PLAYLIST") || screen == "PLAYLISTS" -> {
+                                showSettingsScreen = false
+                                showProfileScreen = false
+                                showStatsScreen = false
+                                selectedPlaylistNavName = playlistName?.takeIf { it.isNotBlank() }
+                                showPlaylistsScreen = true
+                            }
+                            screen.contains("STAT") -> {
+                                showSettingsScreen = false
+                                showProfileScreen = false
+                                showStatsScreen = true
+                            }
+                            screen.contains("WEEKLY") -> {
+                                showSettingsScreen = false
+                                showWeeklyReportScreen = true
+                            }
+                            screen.contains("HEARING") -> {
+                                showSettingsScreen = false
+                                showHearingScreen = true
+                            }
+                            screen.contains("PROFILE") -> {
+                                showSettingsScreen = false
+                                showProfileScreen = true
+                            }
+                            else -> {
+                                showSettingsScreen = false
+                                showProfileScreen = false
+                                showStatsScreen = false
+                                showWeeklyReportScreen = false
+                                showHearingScreen = false
+                                showMusicProfileScreen = false
+                                showSearchScreen = false
+                                showNowPlayingScreen = false
+                                showPlaylistsScreen = false
+                                showNotificationsScreen = false
+                                showSupportScreen = false
+                                showLegalScreen = false
+                                when {
+                                    screen.contains("FOR_YOU") || screen.contains("DISCOVER") -> {
+                                        requestedScreenPage = 0
+                                        requestedDopamineSubTab = 2
+                                    }
+                                    screen.contains("VAULT") || screen.contains("RESTING") -> {
+                                        requestedScreenPage = 0
+                                        requestedDopamineSubTab = 1
+                                    }
+                                    screen.contains("DOPAMINE") || screen.contains("FRESH") -> {
+                                        requestedScreenPage = 0
+                                        requestedDopamineSubTab = 0
+                                    }
+                                    screen.contains("RHYTHM") || screen.contains("DNA") || screen.contains("HISTORY") -> {
+                                        requestedScreenPage = 2
+                                    }
+                                    else -> {
+                                        requestedScreenPage = 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                onSetSleepTimerMinutes = { minutes ->
+                    if (minutes > 0) {
+                        vm.startSleepTimerMinutes(minutes)
+                    } else {
+                        vm.cancelSleepTimer()
+                    }
+                },
+                onSetTheme = { paletteId, customAccentHex, behavior ->
+                    if (!paletteId.isNullOrBlank()) {
+                        vm.setAtmospherePaletteById(paletteId)
+                    } else {
+                        vm.setCustomThemeAccentHex(customAccentHex, behavior)
+                    }
+                }
+            )
+        }
+        val tuneMindVoiceTools = remember(voiceToolHost) {
+            com.tunemind.app.domain.voice.TuneMindVoiceTools(voiceToolHost)
+        }
+        val realtimeVoiceAgent = remember(context, tuneMindVoiceTools) {
+            com.tunemind.app.domain.voice.RealtimeVoiceAgent(
+                context = context,
+                tools = tuneMindVoiceTools
+            )
+        }
+        val realtimeState by realtimeVoiceAgent.uiState.collectAsState()
         val orchestrator = remember(agentVoiceManager) {
             com.tunemind.app.domain.voice.AgentOrchestrator(
                 context = context,
@@ -1019,6 +1166,14 @@ open class MainActivity : ComponentActivity() {
         val pendingProposedTrack by agentVoiceManager.pendingProposedTrackFlow.collectAsState()
         val liveTranscript by agentVoiceManager.transcriptionFlow.collectAsState(initial = "Say \"Hi TuneMind\" or tap the orb")
 
+        val micPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+            contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            if (granted) {
+                agentVoiceManager.setForegroundActive(false)
+                realtimeVoiceAgent.startSession()
+            }
+        }
         val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
         ) {
@@ -1127,7 +1282,14 @@ open class MainActivity : ComponentActivity() {
             onDispose {
                 lifecycleOwner.lifecycle.removeObserver(observer)
                 orchestrator.stop()
+                realtimeVoiceAgent.shutdown()
                 agentVoiceManager.destroy()
+            }
+        }
+
+        LaunchedEffect(realtimeState.isSessionActive) {
+            if (realtimeState.isSessionActive) {
+                agentVoiceManager.setForegroundActive(false)
             }
         }
 
@@ -1395,15 +1557,21 @@ open class MainActivity : ComponentActivity() {
                             )
                         }
                         1 -> {
+                            val useRealtimeUi = realtimeState.isSessionActive ||
+                                realtimeState.phase == com.tunemind.app.domain.voice.RealtimePhase.ERROR
                             PulseAgentScreen(
-                                agentState = agentState,
+                                agentState = if (useRealtimeUi) realtimeState.toLegacyAgentState() else agentState,
                                 satietyPercentage = agentSatiety,
                                 currentTrackName = trackTitle,
                                 artistName = artistName,
                                 isMusicPlaying = isMusicPlaying,
-                                energy = energy,
-                                liveTranscript = liveTranscript,
-                                flowAnalysis = flowAnalysis,
+                                energy = if (realtimeState.isSessionActive) {
+                                    (0.5f + realtimeState.micEnergy * 0.5f).coerceIn(0.4f, 1f)
+                                } else {
+                                    energy
+                                },
+                                liveTranscript = if (useRealtimeUi) realtimeState.liveTranscript else liveTranscript,
+                                flowAnalysis = realtimeState.lastToolSummary.ifBlank { flowAnalysis },
                                 recentTracks = combinedRecentTracks,
                                 dopamineCapsule = dopamineCapsule,
                                 pendingProposedTrack = pendingProposedTrack,
@@ -1414,7 +1582,16 @@ open class MainActivity : ComponentActivity() {
                                     agentVoiceManager.rejectPendingProposedTrack()
                                 },
                                 onOrbTapped = {
-                                    agentVoiceManager.simulateWakeWordDetected()
+                                    val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.RECORD_AUDIO
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                    if (hasMic) {
+                                        agentVoiceManager.setForegroundActive(false)
+                                        realtimeVoiceAgent.toggleSession()
+                                    } else {
+                                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
                                 },
                                 onLaunchDopamineCapsule = {
                                     agentVoiceManager.launchDopamineCapsuleBriefing(
@@ -1462,7 +1639,9 @@ open class MainActivity : ComponentActivity() {
                                 onOpenPlaylists = {
                                     selectedPlaylistNavName = null
                                     showPlaylistsScreen = true
-                                }
+                                },
+                                realtimePhase = if (useRealtimeUi) realtimeState.phase else null,
+                                activeToolStatus = if (realtimeState.isSessionActive) realtimeState.activeToolStatus else ""
                             )
                         }
                         2 -> {
