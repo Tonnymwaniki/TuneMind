@@ -3,7 +3,7 @@
  *
  * Phase 1: Express skeleton with a single route stub.
  * Phase 2: Firebase Admin SDK initialised, full event ingestion implemented.
- * Phase 3: Raw HTTP server with WebSocket upgrade handler for AssemblyAI voice stream.
+ * Phase 3: Raw HTTP server with WebSocket upgrade handler for OpenAI voice stream.
  */
 
 import './bootstrap';
@@ -14,6 +14,12 @@ import { WebSocketServer, WebSocket, RawData } from 'ws';
 import app from './app';
 import { EventStore } from './domain/events/EventStore';
 import { ClaudeMusicReasoningProvider, type TuneMindTelemetryContext } from './domain/reasoning/ClaudeMusicReasoningProvider';
+import {
+  computePcm16Rms,
+  generateOpenAISpeechBase64,
+  getOpenAIApiKey,
+  transcribePcm16WithOpenAI
+} from './domain/reasoning/OpenAIAdapter';
 import { SupabaseIntelligenceStore } from './domain/storage/SupabaseIntelligenceStore';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -40,49 +46,32 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-// ─── 4. Handle the active WebSocket connection with AssemblyAI Universal v3 ─
+// ─── 4. Handle the active WebSocket connection with OpenAI gpt-4o-transcribe ─
 wss.on('connection', async (ws: WebSocket) => {
-  console.log('[VoiceStream] 🟢 Android client connected via WebSocket.');
+  console.log('[VoiceStream] 🟢 Android client connected via WebSocket (OpenAI STT + gpt-4o).');
 
-  let isAssemblyReady = false;
-  let chunkCount = 0;
-  let audioAccumulator: Buffer = Buffer.alloc(0);
-  const MIN_AAI_FRAME_BYTES = 3200; // 100ms at 16kHz 16-bit mono (AssemblyAI v3 requires 20ms..1000ms)
-  const MAX_AAI_FRAME_BYTES = 16000; // 500ms max per flushed chunk
-
-  const flushAccumulatorToAssembly = () => {
-    if (!isAssemblyReady || aaiSocket.readyState !== WebSocket.OPEN) return;
-    while (audioAccumulator.length >= MIN_AAI_FRAME_BYTES) {
-      const sliceLen = Math.min(audioAccumulator.length, MAX_AAI_FRAME_BYTES);
-      // Ensure even byte count (16-bit PCM alignment)
-      const alignedLen = sliceLen - (sliceLen % 2);
-      if (alignedLen < MIN_AAI_FRAME_BYTES) break;
-      const frame = audioAccumulator.subarray(0, alignedLen);
-      audioAccumulator = audioAccumulator.subarray(alignedLen);
-      try {
-        aaiSocket.send(frame);
-      } catch (e) {
-        console.error('[VoiceStream] Failed to push audio frame to AAI:', e);
-        break;
-      }
-    }
-  };
-
-  const apiKey = (process.env.ASSEMBLYAI_API_KEY || '').trim();
-  if (!apiKey) {
-    console.warn('[VoiceStream] ASSEMBLYAI_API_KEY is missing or empty. Please check your .env/.env.local.');
+  const openAiKey = getOpenAIApiKey();
+  if (!openAiKey) {
+    console.warn('[VoiceStream] OPENAI_API_KEY is missing or empty.');
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ error: 'ASSEMBLYAI_KEY_NOT_CONFIGURED', message: 'ASSEMBLYAI_API_KEY not set' }));
+      ws.send(JSON.stringify({ error: 'OPENAI_KEY_NOT_CONFIGURED', message: 'OPENAI_API_KEY not set' }));
     }
     return;
   }
 
+  const SAMPLE_RATE = 16_000;
+  const SPEECH_RMS_THRESHOLD = 260;
+  const SILENCE_FINALIZE_MS = 950;
+  const MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 0.35; // ~350ms
+  const MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 20;   // 20s max
+
+  let chunkCount = 0;
+  let pcmChunks: Buffer[] = [];
+  let totalBytes = 0;
+  let hasSpoken = false;
+  let isTranscribing = false;
   let hasTriggeredReasoning = false;
   let silenceTimer: NodeJS.Timeout | null = null;
-  let formatWaitTimer: NodeJS.Timeout | null = null;
-  let forceEndpointFallbackTimer: NodeJS.Timeout | null = null;
-  let hasSentDynamicKeyterms = false;
-  let latestPartialText = '';
 
   const normalizeMusicTranscript = (raw: string): string => {
     let cleaned = raw.trim().replace(/\s+/g, ' ');
@@ -213,16 +202,8 @@ wss.on('connection', async (ws: WebSocket) => {
       clearTimeout(silenceTimer);
       silenceTimer = null;
     }
-    if (formatWaitTimer) {
-      clearTimeout(formatWaitTimer);
-      formatWaitTimer = null;
-    }
-    if (forceEndpointFallbackTimer) {
-      clearTimeout(forceEndpointFallbackTimer);
-      forceEndpointFallbackTimer = null;
-    }
 
-    console.log(`\n[STT] ⚡ Finalized Transcript: "${finalText}" (raw: "${rawFinalText}")`);
+    console.log(`\n[STT] ⚡ Finalized OpenAI Transcript: "${finalText}" (raw: "${rawFinalText}")`);
 
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -326,7 +307,11 @@ wss.on('connection', async (ws: WebSocket) => {
         spotify_device_name: clientContext?.spotify_device_name
       });
 
-      console.log('[VoiceStream] Claude reasoning completed:', response.voice_agent_tts);
+      if (response.voice_agent_tts) {
+        (response as any).voice_agent_audio_base64 = await generateOpenAISpeechBase64(response.voice_agent_tts);
+      }
+
+      console.log('[VoiceStream] OpenAI reasoning completed:', response.voice_agent_tts);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'command',
@@ -347,103 +332,36 @@ wss.on('connection', async (ws: WebSocket) => {
     }
   };
 
-  // Connect to AssemblyAI Universal v3 streaming WebSocket endpoint with max_accuracy turn handling
-  const aaiUrl = 'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true&mode=max_accuracy';
-  const aaiSocket = new WebSocket(aaiUrl, {
-    headers: { Authorization: apiKey }
-  });
+  const flushAudioAndTranscribe = async (fallbackTranscriptHint: string = '') => {
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+    if (hasTriggeredReasoning || isTranscribing) return;
 
-  const pushAssemblyConfiguration = (reason: string) => {
-    if (!isAssemblyReady || aaiSocket.readyState !== WebSocket.OPEN) return;
-    try {
-      const keyterms = buildDynamicKeyterms(clientContext);
-      aaiSocket.send(JSON.stringify({
-        type: 'UpdateConfiguration',
-        keyterms_prompt: keyterms,
-        min_turn_silence: 800,
-        max_turn_silence: 2600
-      }));
-      if (clientContext) {
-        hasSentDynamicKeyterms = true;
+    if (totalBytes < MIN_AUDIO_BYTES || !hasSpoken) {
+      if (fallbackTranscriptHint.trim().length >= 2) {
+        await triggerReasoningForTranscript(fallbackTranscriptHint);
       }
-      console.log(`[STT] 🎯 Synced ${keyterms.length} keyterms (${reason}) with max_accuracy turn detection.`);
-    } catch (e) {
-      console.warn('[STT] UpdateConfiguration notice:', e);
+      return;
+    }
+
+    isTranscribing = true;
+    const audioBuffer = Buffer.concat(pcmChunks);
+    pcmChunks = [];
+    totalBytes = 0;
+
+    try {
+      const hints = buildDynamicKeyterms(clientContext).slice(0, 20);
+      const transcript = await transcribePcm16WithOpenAI(audioBuffer, hints);
+      const bestText = transcript.trim() || fallbackTranscriptHint.trim();
+      if (bestText.length >= 2) {
+        await triggerReasoningForTranscript(bestText);
+      }
+    } finally {
+      isTranscribing = false;
     }
   };
-
-  aaiSocket.on('open', () => {
-    console.log('[STT] 🟢 AssemblyAI v3 Real-Time (max_accuracy) connection opened.');
-  });
-
-  aaiSocket.on('error', (error: Error) => {
-    console.error('[STT] AssemblyAI Error:', error);
-    if (!hasTriggeredReasoning && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: error.message }));
-    }
-  });
-
-  aaiSocket.on('message', async (data: RawData) => {
-    try {
-      const msg = JSON.parse(data.toString());
-
-      if (msg.type === 'Begin' || msg.message_type === 'SessionBegins') {
-        const sessionId = msg.id || msg.session_id || 'v3-session';
-        console.log(`[STT] Session started: ${sessionId}`);
-        isAssemblyReady = true;
-        pushAssemblyConfiguration('onBegin');
-
-        if (audioAccumulator.length >= MIN_AAI_FRAME_BYTES && aaiSocket.readyState === WebSocket.OPEN) {
-          console.log(`[STT] ⚡ Flushing ${audioAccumulator.length} buffered pre-session audio bytes to AssemblyAI...`);
-          flushAccumulatorToAssembly();
-        }
-      } else if (msg.type === 'Turn' || msg.message_type === 'FinalTranscript' || msg.message_type === 'PartialTranscript') {
-        const text = (msg.transcript || msg.text || '').trim();
-        if (!text || hasTriggeredReasoning) return;
-
-        latestPartialText = text;
-        const isEndOfTurn = Boolean(msg.end_of_turn || msg.message_type === 'FinalTranscript');
-        const isFormatted = Boolean(msg.turn_is_formatted || msg.message_type === 'FinalTranscript');
-
-        if (isEndOfTurn && isFormatted) {
-          await triggerReasoningForTranscript(text);
-        } else if (isEndOfTurn) {
-          // Give AssemblyAI v3's formatter 350ms to emit the clean context-spelled turn
-          if (formatWaitTimer) clearTimeout(formatWaitTimer);
-          formatWaitTimer = setTimeout(() => {
-            if (!hasTriggeredReasoning) {
-              triggerReasoningForTranscript(latestPartialText);
-            }
-          }, 350);
-        } else {
-          process.stdout.write(`\r[STT] Partial: "${text}"`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'transcript',
-              text: normalizeMusicTranscript(text),
-              transcript: normalizeMusicTranscript(text),
-              isFinal: false
-            }));
-          }
-
-          // Patient fallback timer (2600ms) so multi-clause breaths & hesitations are never cut mid-sentence
-          if (silenceTimer) clearTimeout(silenceTimer);
-          silenceTimer = setTimeout(() => {
-            if (!hasTriggeredReasoning && latestPartialText.trim().length >= 2) {
-              triggerReasoningForTranscript(latestPartialText);
-            }
-          }, 2600);
-        }
-      } else if (msg.type === 'Error') {
-        console.error('[STT] AssemblyAI Server Error:', msg);
-        if (!hasTriggeredReasoning && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ error: 'ASSEMBLYAI_ERROR', message: msg.error || 'Server Error' }));
-        }
-      }
-    } catch (e) {
-      console.warn('[STT] Failed to parse message from AssemblyAI:', e);
-    }
-  });
 
   // Handle incoming messages from the Android client
   ws.on('message', (message: RawData, isBinary: boolean) => {
@@ -453,32 +371,12 @@ wss.on('connection', async (ws: WebSocket) => {
         const textData = message.toString();
         const json = JSON.parse(textData);
         if (json.type === 'finalize_utterance') {
-          if (isAssemblyReady && aaiSocket.readyState === WebSocket.OPEN && !hasTriggeredReasoning) {
-            try {
-              aaiSocket.send(JSON.stringify({ type: 'ForceEndpoint' }));
-            } catch (_err) {}
-            if (forceEndpointFallbackTimer) clearTimeout(forceEndpointFallbackTimer);
-            const fallbackHint = typeof json.transcript === 'string' ? json.transcript.trim() : '';
-            forceEndpointFallbackTimer = setTimeout(() => {
-              const best = latestPartialText.trim() || fallbackHint;
-              if (!hasTriggeredReasoning && best.length >= 2) {
-                void triggerReasoningForTranscript(best);
-              }
-            }, 450);
-          } else {
-            const fallbackText = latestPartialText.trim() ||
-              (typeof json.transcript === 'string' ? json.transcript.trim() : '');
-            if (!hasTriggeredReasoning && fallbackText.length >= 2) {
-              void triggerReasoningForTranscript(fallbackText);
-            }
-          }
+          const fallbackHint = typeof json.transcript === 'string' ? json.transcript.trim() : '';
+          void flushAudioAndTranscribe(fallbackHint);
           return;
         }
         if (json.type === 'client_context') {
           clientContext = json;
-          if (!hasSentDynamicKeyterms) {
-            pushAssemblyConfiguration('onClientContext');
-          }
           const recentsList = Array.isArray(json.recent_tracks) ? json.recent_tracks : [];
           console.log(`[VoiceStream] 📱 Received live client playback context: Now Playing: "${json.current_track?.title}" by "${json.current_track?.artist}", Recent tracks: ${recentsList.length}`);
           if (recentsList.length > 0) {
@@ -510,36 +408,38 @@ wss.on('connection', async (ws: WebSocket) => {
         ? Buffer.concat(message)
         : Buffer.from(message as ArrayBuffer);
 
-    if (rawBuf.length > 0) {
+    if (rawBuf.length > 0 && !hasTriggeredReasoning) {
       chunkCount++;
       if (chunkCount % 20 === 0) {
-        console.log(`[VoiceStream] 🔵 Streaming audio chunk... (x${chunkCount})`);
+        console.log(`[VoiceStream] 🔵 Buffering audio chunk... (x${chunkCount})`);
       }
 
-      // Cap pre-session buffer at ~5 seconds (160,000 bytes)
-      if (audioAccumulator.length < 160000) {
-        audioAccumulator = Buffer.concat([audioAccumulator, rawBuf]);
+      pcmChunks.push(rawBuf);
+      totalBytes += rawBuf.length;
+
+      const rms = computePcm16Rms(rawBuf);
+      if (rms >= SPEECH_RMS_THRESHOLD) {
+        hasSpoken = true;
+        if (silenceTimer) {
+          clearTimeout(silenceTimer);
+          silenceTimer = null;
+        }
+      } else if (hasSpoken && !silenceTimer) {
+        silenceTimer = setTimeout(() => {
+          void flushAudioAndTranscribe();
+        }, SILENCE_FINALIZE_MS);
       }
 
-      if (isAssemblyReady && aaiSocket.readyState === WebSocket.OPEN) {
-        flushAccumulatorToAssembly();
+      if (totalBytes >= MAX_AUDIO_BYTES) {
+        void flushAudioAndTranscribe();
       }
     }
   });
 
   ws.on('close', () => {
     console.log('[VoiceStream] 🔴 Android client disconnected.');
-    isAssemblyReady = false;
     hasTriggeredReasoning = true;
     if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-    if (formatWaitTimer) { clearTimeout(formatWaitTimer); formatWaitTimer = null; }
-    if (forceEndpointFallbackTimer) { clearTimeout(forceEndpointFallbackTimer); forceEndpointFallbackTimer = null; }
-    if (aaiSocket.readyState === WebSocket.OPEN) {
-      try {
-        aaiSocket.send(JSON.stringify({ type: 'Terminate' }));
-        aaiSocket.close();
-      } catch (_: unknown) {}
-    }
   });
 });
 

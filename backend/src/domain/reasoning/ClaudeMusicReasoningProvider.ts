@@ -13,7 +13,6 @@ import { StoredTrackCardRecord, TrackCardStore } from '../storage/TrackCardStore
 import { SpotifyUserApiClient } from '../spotify/SpotifyUserApiClient';
 import { RestingVaultEngine } from '../vault/RestingVaultEngine';
 import { buildCrisisSupportMessage, detectCrisisRisk } from './CrisisSafetyGuardrail';
-import { callGeminiMessagesWithTools, callGeminiSingleShot, getCandidateGeminiModels, getGeminiApiKey, isGeminiActive } from './GeminiAdapter';
 import {
   callOpenAIMessagesWithTools,
   callOpenAISingleShot,
@@ -549,28 +548,14 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   getLastDiagnostics() {
     const openAiActive = isOpenAIActive();
     const openAiKey = getOpenAIApiKey();
-    const geminiActive = isGeminiActive();
-    const geminiKey = getGeminiApiKey();
     const rawAnthropicKey = process.env.ANTHROPIC_API_KEY;
     return {
-      provider: openAiActive ? 'openai' : geminiActive ? 'gemini' : 'anthropic',
-      hasAiClient: openAiActive
-        ? Boolean(openAiKey)
-        : geminiActive
-        ? Boolean(geminiKey)
-        : Boolean(this.anthropic || this.cleanKey(rawAnthropicKey)),
-      keyPresent: openAiActive
-        ? Boolean(openAiKey)
-        : geminiActive
-        ? Boolean(geminiKey)
-        : Boolean(rawAnthropicKey && rawAnthropicKey !== 'your_key_here'),
-      keyLength: openAiActive ? openAiKey.length : geminiActive ? geminiKey.length : (rawAnthropicKey?.length || 0),
+      provider: openAiActive ? 'openai' : 'anthropic',
+      hasAiClient: openAiActive ? Boolean(openAiKey) : Boolean(this.anthropic || this.cleanKey(rawAnthropicKey)),
+      keyPresent: openAiActive ? Boolean(openAiKey) : Boolean(rawAnthropicKey && rawAnthropicKey !== 'your_key_here'),
+      keyLength: openAiActive ? openAiKey.length : (rawAnthropicKey?.length || 0),
       hasInvalidKey: this.hasInvalidKey,
-      discoveredModels: openAiActive
-        ? getCandidateOpenAIModels()
-        : geminiActive
-        ? getCandidateGeminiModels()
-        : ClaudeMusicReasoningProvider.discoveredAnthropicModels,
+      discoveredModels: openAiActive ? getCandidateOpenAIModels() : ClaudeMusicReasoningProvider.discoveredAnthropicModels,
       lastErrorDetails: this.lastErrorDetails || ClaudeMusicReasoningProvider.lastStaticErrorDetails,
       activeModelUsed: ClaudeMusicReasoningProvider.lastActiveModelUsed || this.activeModelUsed
     };
@@ -735,20 +720,6 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
         throw err;
       }
     }
-    if (isGeminiActive()) {
-      try {
-        const res = await callGeminiSingleShot(guardedSystem, userContent, maxTokens);
-        this.activeModelUsed = res.model || 'gemini-2.5-flash-lite';
-        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
-        this.lastErrorDetails = null;
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
-        return res;
-      } catch (err: any) {
-        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'gemini' };
-        throw err;
-      }
-    }
     const candidateModels = await this.getCandidateClaudeModels();
     let lastErr: any = null;
     for (const modelId of candidateModels) {
@@ -804,20 +775,6 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
       } catch (err: any) {
         this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
         ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'openai' };
-        throw err;
-      }
-    }
-    if (isGeminiActive()) {
-      try {
-        const res = await callGeminiMessagesWithTools(guardedSystem, messages, tools, maxTokens);
-        this.activeModelUsed = res.model || 'gemini-2.5-flash-lite';
-        ClaudeMusicReasoningProvider.lastActiveModelUsed = this.activeModelUsed;
-        this.lastErrorDetails = null;
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = null;
-        return res;
-      } catch (err: any) {
-        this.lastErrorDetails = { status: err?.status, message: String(err?.message || err) };
-        ClaudeMusicReasoningProvider.lastStaticErrorDetails = { ...this.lastErrorDetails, provider: 'gemini' };
         throw err;
       }
     }
@@ -887,7 +844,7 @@ export class ClaudeMusicReasoningProvider implements MusicReasoningProvider {
   }
 
   public async isAvailable(): Promise<boolean> {
-    if (isOpenAIActive() || isGeminiActive()) return true;
+    if (isOpenAIActive()) return true;
     const rawKey = process.env.ANTHROPIC_API_KEY;
     return Boolean(this.cleanKey(rawKey) && !this.hasInvalidKey);
   }

@@ -2,6 +2,8 @@ import { retryWithBackoff } from '../../utils/retryWithBackoff';
 
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_TTS_URL = 'https://api.openai.com/v1/audio/speech';
+const OPENAI_STT_URL = 'https://api.openai.com/v1/audio/transcriptions';
+const STT_SAMPLE_RATE = 16_000;
 
 let cachedWorkingOpenAIModel: string | null = null;
 
@@ -286,4 +288,86 @@ export async function generateOpenAISpeechBase64(text: string): Promise<string |
   } catch {
     return null;
   }
+}
+
+export function computePcm16Rms(pcm: Buffer): number {
+  const sampleCount = Math.floor(pcm.length / 2);
+  if (sampleCount === 0) return 0;
+  let sumSq = 0;
+  for (let i = 0; i < sampleCount * 2; i += 2) {
+    const sample = pcm.readInt16LE(i);
+    sumSq += sample * sample;
+  }
+  return Math.sqrt(sumSq / sampleCount);
+}
+
+function pcm16ToWavBuffer(pcm: Buffer, sampleRate: number = STT_SAMPLE_RATE): Buffer {
+  const header = Buffer.alloc(44);
+  const byteRate = sampleRate * 2;
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+/**
+ * Transcribes 16kHz 16-bit mono PCM audio via OpenAI gpt-4o-transcribe
+ * (with dynamic artist/music context hints and gpt-4o-mini-transcribe fallback).
+ */
+export async function transcribePcm16WithOpenAI(
+  pcm: Buffer,
+  artistHints: string[] = []
+): Promise<string> {
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey || pcm.length < 3200) return '';
+
+  const wav = pcm16ToWavBuffer(pcm, STT_SAMPLE_RATE);
+  const models = [(process.env.OPENAI_STT_MODEL || 'gpt-4o-transcribe').trim(), 'gpt-4o-mini-transcribe']
+    .filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
+
+  const hintsText = artistHints
+    .map((a) => String(a || '').trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .join(', ');
+  const prompt = hintsText
+    ? `TuneMind voice music companion. Transcribe global & East African artist names, song titles, albums, and genres accurately. Listener artists: ${hintsText}.`
+    : 'TuneMind voice music companion. Transcribe global & East African artist names, song titles, albums, and genres accurately.';
+
+  for (const model of models) {
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(wav)], { type: 'audio/wav' }), 'utterance.wav');
+      form.append('model', model);
+      form.append('prompt', prompt);
+
+      const resp = await fetch(OPENAI_STT_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form
+      });
+
+      if (!resp.ok) {
+        const errTxt = await resp.text().catch(() => '');
+        console.warn(`[VoiceStream] OpenAI STT (${model}) HTTP ${resp.status}: ${errTxt.slice(0, 200)}`);
+        continue;
+      }
+      const json: any = await resp.json();
+      const text = String(json?.text || '').trim();
+      if (text) return text;
+    } catch (err: any) {
+      console.warn(`[VoiceStream] OpenAI STT (${model}) error:`, err?.message || err);
+    }
+  }
+  return '';
 }

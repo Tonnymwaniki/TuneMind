@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { normalizeSpotifyUri, resolveCanonicalTrackIdentity } from '../identity/trackIdentity';
-import { callGeminiMessagesWithTools, isGeminiActive } from './GeminiAdapter';
+import { callOpenAIMessagesWithTools, isOpenAIActive } from './OpenAIAdapter';
 
 // ============================================================================
 // 1. INPUT & OUTPUT SCHEMAS FOR THE SATIETY REASONING ENGINE
@@ -346,11 +346,11 @@ You MUST invoke all three tools in your response:
     });
 
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-    if (isGeminiActive() || (apiKey && apiKey !== 'your_key_here')) {
+    if (isOpenAIActive() || (apiKey && apiKey !== 'your_key_here')) {
       try {
         let response: Anthropic.Message | null = null;
-        if (isGeminiActive()) {
-          response = (await callGeminiMessagesWithTools(
+        if (isOpenAIActive()) {
+          response = (await callOpenAIMessagesWithTools(
             this.buildSystemPrompt(),
             [{ role: 'user', content: userPrompt }],
             AGENTIC_TOOL_DEFINITIONS,
