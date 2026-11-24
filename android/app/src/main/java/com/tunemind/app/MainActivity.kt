@@ -51,8 +51,14 @@ open class MainActivity : ComponentActivity() {
         kotlinx.coroutines.flow.MutableStateFlow<Bundle?>(null)
     private val pendingOpenNotificationsFlow =
         kotlinx.coroutines.flow.MutableStateFlow(false)
+    private val pendingOpenVoiceOrbFlow =
+        kotlinx.coroutines.flow.MutableStateFlow(false)
 
     private fun captureRecoveryIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(com.tunemind.app.provider.MusicPlayerAutoLauncher.EXTRA_OPEN_VOICE_ORB, false) == true) {
+            pendingOpenVoiceOrbFlow.value = true
+            intent.removeExtra(com.tunemind.app.provider.MusicPlayerAutoLauncher.EXTRA_OPEN_VOICE_ORB)
+        }
         if (intent?.getBooleanExtra(com.tunemind.app.sync.WeeklyShareDropWorker.EXTRA_OPEN_NOTIFICATIONS, false) == true) {
             pendingOpenNotificationsFlow.value = true
             intent.removeExtra(com.tunemind.app.sync.WeeklyShareDropWorker.EXTRA_OPEN_NOTIFICATIONS)
@@ -217,6 +223,7 @@ open class MainActivity : ComponentActivity() {
                                     authSession = authSession,
                                     pendingRecoveryBundleFlow = pendingRecoveryBundleFlow,
                                     pendingOpenNotificationsFlow = pendingOpenNotificationsFlow,
+                                    pendingOpenVoiceOrbFlow = pendingOpenVoiceOrbFlow,
                                     onAccountSwitched = {
                                         this@MainActivity.viewModelStore.clear()
                                     },
@@ -261,6 +268,7 @@ open class MainActivity : ComponentActivity() {
         authSession: com.tunemind.app.data.auth.TuneMindUserSession,
         pendingRecoveryBundleFlow: kotlinx.coroutines.flow.MutableStateFlow<Bundle?>,
         pendingOpenNotificationsFlow: kotlinx.coroutines.flow.MutableStateFlow<Boolean>,
+        pendingOpenVoiceOrbFlow: kotlinx.coroutines.flow.MutableStateFlow<Boolean>,
         onAccountSwitched: () -> Unit,
         onSignedOutToAuth: () -> Unit
     ) {
@@ -1222,11 +1230,28 @@ open class MainActivity : ComponentActivity() {
         }
         val pendingRecoveryBundle by pendingRecoveryBundleFlow.collectAsState()
         val pendingOpenNotifications by pendingOpenNotificationsFlow.collectAsState()
+        val pendingOpenVoiceOrb by pendingOpenVoiceOrbFlow.collectAsState()
 
         LaunchedEffect(pendingOpenNotifications) {
             if (pendingOpenNotifications) {
                 pendingOpenNotificationsFlow.value = false
                 showNotificationsScreen = true
+            }
+        }
+
+        LaunchedEffect(pendingOpenVoiceOrb) {
+            if (pendingOpenVoiceOrb) {
+                pendingOpenVoiceOrbFlow.value = false
+                val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (hasMic && !realtimeVoiceAgent.uiState.value.isSessionActive) {
+                    agentVoiceManager.setForegroundActive(false)
+                    realtimeVoiceAgent.startSession()
+                } else if (!hasMic) {
+                    micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                }
             }
         }
 

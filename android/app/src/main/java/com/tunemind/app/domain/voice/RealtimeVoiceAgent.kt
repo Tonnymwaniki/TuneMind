@@ -15,12 +15,18 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.tunemind.app.data.auth.TuneMindAuthSessionManager
 import com.tunemind.app.data.supabase.SupabaseIntelligenceSyncManager
 import com.tunemind.app.domain.network.BackendEndpointManager
+import com.tunemind.app.provider.MusicPlayerAutoLauncher
 import com.tunemind.app.provider.SpotifyPremiumConnectManager
 import com.tunemind.app.provider.TuneMindInAppPlayer
 import com.tunemind.app.provider.TuneMindYouTubeEmbedController
@@ -29,8 +35,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -157,6 +166,48 @@ class RealtimeVoiceAgent(
     @Volatile
     private var pendingAutoSettleAfterPlayback = false
     private var settleOrDrainJob: Job? = null
+    @Volatile
+    private var pendingExternalAppLaunch: (() -> Unit)? = null
+    private var deferredLaunchWatchdogJob: Job? = null
+
+    private fun firePendingExternalLaunchIfAny() {
+        deferredLaunchWatchdogJob?.cancel()
+        deferredLaunchWatchdogJob = null
+        val action = pendingExternalAppLaunch ?: return
+        pendingExternalAppLaunch = null
+        Handler(Looper.getMainLooper()).post {
+            runCatching { action.invoke() }
+                .onFailure { Log.w(TAG, "Deferred external launch failed: ${it.message}") }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun pulseThinkingHaptic() {
+        runCatching {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (appContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            } ?: return
+            if (!vibrator.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(18L, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                vibrator.vibrate(18L)
+            }
+        }
+    }
+
+    private fun isPlaybackOrMutatingTool(name: String): Boolean {
+        return name == "play_track" ||
+            name == "play_spotify_context" ||
+            name == "play_track_sequence" ||
+            name == "control_playback" ||
+            name == "queue_spotify_track" ||
+            name == "set_spotify_track_like" ||
+            name == "manage_resting_vault" ||
+            name == "manage_tunemind_playlists"
+    }
 
     private data class PendingCall(
         val callId: String,
@@ -507,6 +558,7 @@ class RealtimeVoiceAgent(
                 put("model", modelPath)
                 put("generationConfig", JSONObject().apply {
                     put("responseModalities", JSONArray().put("AUDIO"))
+                    put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                     put("speechConfig", JSONObject().apply {
                         put("voiceConfig", JSONObject().apply {
                             put("prebuiltVoiceConfig", JSONObject().apply {
@@ -524,9 +576,9 @@ class RealtimeVoiceAgent(
                     put("automaticActivityDetection", JSONObject().apply {
                         put("disabled", false)
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
-                        put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
-                        put("prefixPaddingMs", 300)
-                        put("silenceDurationMs", 600)
+                        put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
+                        put("prefixPaddingMs", 200)
+                        put("silenceDurationMs", 450)
                     })
                 })
                 put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls)))
@@ -637,7 +689,7 @@ LIVE SESSION TELEMETRY:
 PLAYER ROUTING & 7-DAY TRIAL EXPLANATION (KNOW & EXPLAIN ACCURATELY):
 - TuneMind 7-Day Free Trial: All new TuneMind listeners get a 7-day free trial of TuneMind Pro (full access to the voice companion, Song Cards, Resting Vault, and discovery). Note that the TuneMind 7-day trial is separate from a user's Spotify subscription.
 - Spotify Premium: Plays silently in the background WITHOUT leaving TuneMind.
-- Spotify Free: Spotify's platform blocks background Connect playback on Free accounts, so TuneMind opens the Spotify app directly to play the song — and reassures the listener cleanly ("Since you're on Spotify Free, I'll open Spotify directly to play it for you — silent background playback without leaving TuneMind requires Spotify Premium, and TuneMind still tracks your Song Cards and stats!").
+- Spotify Free: Spotify's platform blocks background Connect playback on Free accounts, so TuneMind opens the Spotify app directly to play the song. Keep your confirmation crisp (1 short warm sentence, e.g. "Opening Spotify for [Song] now — tap Play there and I'll keep tracking your stats!").
 - YouTube Music (ONLY when the listener selected YouTube Music as default or asks for it): Plays inside TuneMind's built-in YouTube player without leaving the app.
 - Boomplay, Audiomack, and any other detected music app: Opens that music app directly and plays the requested song there. Never switch to Audius.
 
@@ -645,9 +697,10 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
 1. NEVER guess or invent song titles, artist names, play counts, playlists, devices, or playback state. ALWAYS call the appropriate tools FIRST and inspect their JSON output before speaking facts.
 2. CONTEXTUAL REFERENCE RESOLUTION: When the user refers to "that song", "the paused song", "that same artist", "this track", or asks about what was just playing / their most recent songs, ALWAYS call `get_live_playback_state` first (it reads live MediaSession, live Spotify /me/player including paused tracks, and `recent_chronological_tracks`), then chain `get_spotify_artist_top_tracks`, `query_listening_history_and_analytics` (`sort_by="recent"`), `search_spotify_catalog`, or `get_spotify_account_library` as needed before acting or answering.
 3. PLAYBACK APPROVAL GATE & MULTI-STEP VERIFICATION:
-   - ALWAYS ASK BEFORE PLAYING: Before calling `play_track`, `play_track_sequence`, or `play_spotify_context` to play ANY song, sequence, or playlist, you MUST first tell the listener the exact song title(s) and artist(s) and ask for their approval — e.g. "Should I play [Song] by [Artist]?" or "Should I play these songs: [Song 1], [Song 2]?" — and WAIT for them to approve ("yes", "sure", "go ahead", "play it", "do it") in their next turn. NEVER jump straight into executing playback before the listener approves!
+   - ALWAYS ASK BEFORE PLAYING: Before calling `play_track`, `play_track_sequence`, or `play_spotify_context` to play ANY song, sequence, or playlist, you MUST first tell the listener the exact song title(s) and artist(s) and ask for their approval — e.g. "Should I play [Song] by [Artist]?" or "Should I play these songs: [Song 1], [Song 2]?" — and WAIT for them to approve in their next turn. NEVER jump straight into executing playback before the listener approves!
+   - NATURAL APPROVAL UNDERSTANDING (NO RIGID PHRASES): Treat ANY natural human affirmation as approval — e.g. "yeah", "yes", "yep", "uh-huh", "sure", "cool", "bet", "sounds good", "go ahead", "go for it", "play it", "play that", "do it", "let's go", "okay" — and immediately execute the playback tool without asking a second time.
    - If the listener says "no", "skip", or "something else", suggest a different verified song and ask again.
-   - Only call `play_track` / `play_track_sequence` / `play_spotify_context` AFTER the listener explicitly confirms your proposed song(s).
+   - Only call `play_track` / `play_track_sequence` / `play_spotify_context` AFTER the listener confirms your proposed song(s).
    - Never claim a song is playing, queued, paused, skipped, liked, vaulted, or saved to a playlist unless the corresponding tool returned `"ok": true`.
    - For simple playback controls on the ALREADY active song (pause, resume, next, previous, volume, like), execute `control_playback` immediately without asking.
 4. FRESHNESS, ALL-SCREEN AWARENESS & ZERO-REPEAT VARIETY:
@@ -820,11 +873,20 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                     executeToolBatchAndContinue(ws, callsToRun)
                 } else if (pendingAutoSettleAfterPlayback) {
                     pendingAutoSettleAfterPlayback = false
+                    deferredLaunchWatchdogJob?.cancel()
+                    deferredLaunchWatchdogJob = null
                     settleOrDrainJob?.cancel()
                     settleOrDrainJob = scope.launch {
                         waitUntilAudioDrained()
                         if (isConnectingOrActive.get() && activeResponseId == null) {
+                            val deferred = pendingExternalAppLaunch
+                            pendingExternalAppLaunch = null
                             stopSession()
+                            if (deferred != null) {
+                                Handler(Looper.getMainLooper()).post {
+                                    runCatching { deferred.invoke() }
+                                }
+                            }
                         }
                     }
                 } else if (isConnectingOrActive.get() && _uiState.value.phase != RealtimePhase.ERROR) {
@@ -860,6 +922,7 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
     private fun executeToolBatchAndContinue(ws: WebSocket, calls: List<PendingCall>) {
         // Pause microphone capture briefly only if launching external/Spotify playback? Keep listening for barge-in during reads!
         scope.launch {
+            pulseThinkingHaptic()
             var launchedPlayback = false
             val summaryLabels = mutableListOf<String>()
 
@@ -876,14 +939,26 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                     if (raw.isBlank()) JSONObject() else JSONObject(raw)
                 }.getOrElse { JSONObject() }
 
-                Log.i(TAG, "🛠️ Executing Realtime tool: ${call.name} args=$argsJson")
-                val result = tools.execute(call.name, argsJson)
-                Log.i(TAG, "✅ Tool result (${call.name}): $result")
-
                 val isPlaybackLaunchTool = call.name == "play_track" ||
                     call.name == "play_spotify_context" ||
                     call.name == "play_track_sequence" ||
                     (call.name == "control_playback" && argsJson.optString("command").equals("resume", ignoreCase = true))
+
+                Log.i(TAG, "🛠️ Executing Realtime tool: ${call.name} args=$argsJson")
+                val result = if (isPlaybackLaunchTool) {
+                    MusicPlayerAutoLauncher.setDeferredExternalLaunchSink { launchAction ->
+                        pendingExternalAppLaunch = launchAction
+                    }
+                    try {
+                        tools.execute(call.name, argsJson)
+                    } finally {
+                        MusicPlayerAutoLauncher.setDeferredExternalLaunchSink(null)
+                    }
+                } else {
+                    tools.execute(call.name, argsJson)
+                }
+                Log.i(TAG, "✅ Tool result (${call.name}): $result")
+
                 if (isPlaybackLaunchTool && result.optBoolean("ok", false)) {
                     launchedPlayback = true
                 }
@@ -904,6 +979,31 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 // Mute mic upload while TuneMind finishes reading its final confirmation so incoming music doesn't cut it off
                 suppressMicStreaming = true
                 pendingAutoSettleAfterPlayback = true
+                if (pendingExternalAppLaunch != null) {
+                    deferredLaunchWatchdogJob?.cancel()
+                    deferredLaunchWatchdogJob = scope.launch {
+                        // Never cut off the agent mid-sentence: wait until speaking finishes or 16s max
+                        val deadline = System.currentTimeMillis() + 16_000L
+                        var silentPolls = 0
+                        delay(4_500L)
+                        while (pendingExternalAppLaunch != null && System.currentTimeMillis() < deadline) {
+                            val speakingNow = _uiState.value.phase == RealtimePhase.SPEAKING ||
+                                activeResponseId != null ||
+                                !playbackChannel.isEmpty
+                            if (speakingNow) {
+                                silentPolls = 0
+                            } else {
+                                silentPolls++
+                                if (silentPolls >= 5) break
+                            }
+                            delay(500L)
+                        }
+                        if (pendingExternalAppLaunch != null) {
+                            waitUntilAudioDrained(maxWaitMs = 4_000L)
+                            firePendingExternalLaunchIfAny()
+                        }
+                    }
+                }
             }
 
             _uiState.value = _uiState.value.copy(
@@ -1047,11 +1147,20 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             activeUserText.clear()
             if (pendingAutoSettleAfterPlayback) {
                 pendingAutoSettleAfterPlayback = false
+                deferredLaunchWatchdogJob?.cancel()
+                deferredLaunchWatchdogJob = null
                 settleOrDrainJob?.cancel()
                 settleOrDrainJob = scope.launch {
                     waitUntilAudioDrained()
                     if (isConnectingOrActive.get() && activeResponseId == null) {
+                        val deferred = pendingExternalAppLaunch
+                        pendingExternalAppLaunch = null
                         stopSession()
+                        if (deferred != null) {
+                            Handler(Looper.getMainLooper()).post {
+                                runCatching { deferred.invoke() }
+                            }
+                        }
                     }
                 }
             } else if (isConnectingOrActive.get() && _uiState.value.phase != RealtimePhase.ERROR) {
@@ -1072,46 +1181,117 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
 
     private fun executeGeminiToolBatchAndContinue(ws: WebSocket, calls: List<PendingCall>) {
         scope.launch {
+            pulseThinkingHaptic()
             var launchedPlayback = false
             val summaryLabels = mutableListOf<String>()
             val responsesArr = JSONArray()
 
-            for (call in calls) {
-                if (!isActive || ws !== webSocket) return@launch
-                val label = tools.getStatusLabel(call.name)
+            val canRunParallel = calls.size > 1 && calls.none { isPlaybackOrMutatingTool(it.name) }
+            if (canRunParallel) {
+                val firstCall = calls.first()
                 _uiState.value = _uiState.value.copy(
                     phase = RealtimePhase.THINKING_CALLING_TOOLS,
-                    activeToolName = call.name,
-                    activeToolStatus = label
+                    activeToolName = firstCall.name,
+                    activeToolStatus = tools.getStatusLabel(firstCall.name)
                 )
-                val argsJson = runCatching {
-                    val raw = call.argsBuffer.toString().trim()
-                    if (raw.isBlank()) JSONObject() else JSONObject(raw)
-                }.getOrElse { JSONObject() }
-
-                Log.i(TAG, "🛠️ Executing Gemini Live tool: ${call.name} args=$argsJson")
-                val result = tools.execute(call.name, argsJson)
-                Log.i(TAG, "✅ Tool result (${call.name}): $result")
-
-                val isPlaybackLaunchTool = call.name == "play_track" ||
-                    call.name == "play_spotify_context" ||
-                    call.name == "play_track_sequence" ||
-                    (call.name == "control_playback" && argsJson.optString("command").equals("resume", ignoreCase = true))
-                if (isPlaybackLaunchTool && result.optBoolean("ok", false)) {
-                    launchedPlayback = true
+                val results = coroutineScope {
+                    calls.map { call ->
+                        async(Dispatchers.IO) {
+                            val argsJson = runCatching {
+                                val raw = call.argsBuffer.toString().trim()
+                                if (raw.isBlank()) JSONObject() else JSONObject(raw)
+                            }.getOrElse { JSONObject() }
+                            Log.i(TAG, "🛠️ Executing Gemini Live tool (parallel): ${call.name} args=$argsJson")
+                            val res = tools.execute(call.name, argsJson)
+                            Log.i(TAG, "✅ Tool result (${call.name}): $res")
+                            call to res
+                        }
+                    }.awaitAll()
                 }
-                summaryLabels.add("${call.name}: ${if (result.optBoolean("ok")) "ok" else "err"}")
+                if (!isActive || ws !== webSocket) return@launch
+                for ((call, result) in results) {
+                    summaryLabels.add("${call.name}: ${if (result.optBoolean("ok")) "ok" else "err"}")
+                    responsesArr.put(JSONObject().apply {
+                        put("id", call.callId)
+                        put("name", call.name)
+                        put("response", JSONObject().put("output", result))
+                    })
+                }
+            } else {
+                for (call in calls) {
+                    if (!isActive || ws !== webSocket) return@launch
+                    val label = tools.getStatusLabel(call.name)
+                    _uiState.value = _uiState.value.copy(
+                        phase = RealtimePhase.THINKING_CALLING_TOOLS,
+                        activeToolName = call.name,
+                        activeToolStatus = label
+                    )
+                    val argsJson = runCatching {
+                        val raw = call.argsBuffer.toString().trim()
+                        if (raw.isBlank()) JSONObject() else JSONObject(raw)
+                    }.getOrElse { JSONObject() }
 
-                responsesArr.put(JSONObject().apply {
-                    put("id", call.callId)
-                    put("name", call.name)
-                    put("response", JSONObject().put("output", result))
-                })
+                    val isPlaybackLaunchTool = call.name == "play_track" ||
+                        call.name == "play_spotify_context" ||
+                        call.name == "play_track_sequence" ||
+                        (call.name == "control_playback" && argsJson.optString("command").equals("resume", ignoreCase = true))
+
+                    Log.i(TAG, "🛠️ Executing Gemini Live tool: ${call.name} args=$argsJson")
+                    val result = if (isPlaybackLaunchTool) {
+                        MusicPlayerAutoLauncher.setDeferredExternalLaunchSink { launchAction ->
+                            pendingExternalAppLaunch = launchAction
+                        }
+                        try {
+                            tools.execute(call.name, argsJson)
+                        } finally {
+                            MusicPlayerAutoLauncher.setDeferredExternalLaunchSink(null)
+                        }
+                    } else {
+                        tools.execute(call.name, argsJson)
+                    }
+                    Log.i(TAG, "✅ Tool result (${call.name}): $result")
+
+                    if (isPlaybackLaunchTool && result.optBoolean("ok", false)) {
+                        launchedPlayback = true
+                    }
+                    summaryLabels.add("${call.name}: ${if (result.optBoolean("ok")) "ok" else "err"}")
+
+                    responsesArr.put(JSONObject().apply {
+                        put("id", call.callId)
+                        put("name", call.name)
+                        put("response", JSONObject().put("output", result))
+                    })
+                }
             }
 
             if (launchedPlayback) {
                 suppressMicStreaming = true
                 pendingAutoSettleAfterPlayback = true
+                if (pendingExternalAppLaunch != null) {
+                    deferredLaunchWatchdogJob?.cancel()
+                    deferredLaunchWatchdogJob = scope.launch {
+                        // Never cut off the agent mid-sentence: wait until speaking finishes or 16s max
+                        val deadline = System.currentTimeMillis() + 16_000L
+                        var silentPolls = 0
+                        delay(4_500L)
+                        while (pendingExternalAppLaunch != null && System.currentTimeMillis() < deadline) {
+                            val speakingNow = _uiState.value.phase == RealtimePhase.SPEAKING ||
+                                activeResponseId != null ||
+                                !playbackChannel.isEmpty
+                            if (speakingNow) {
+                                silentPolls = 0
+                            } else {
+                                silentPolls++
+                                if (silentPolls >= 5) break
+                            }
+                            delay(500L)
+                        }
+                        if (pendingExternalAppLaunch != null) {
+                            waitUntilAudioDrained(maxWaitMs = 4_000L)
+                            firePendingExternalLaunchIfAny()
+                        }
+                    }
+                }
             }
 
             _uiState.value = _uiState.value.copy(
@@ -1298,12 +1478,27 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         isCapturingAudio = false
         recordJob?.cancel()
         recordJob = null
-        runCatching { echoCanceler?.release() }; echoCanceler = null
-        runCatching { noiseSuppressor?.release() }; noiseSuppressor = null
-        runCatching { automaticGainControl?.release() }; automaticGainControl = null
-        runCatching { audioRecord?.stop() }
-        runCatching { audioRecord?.release() }
+        val oldAec = echoCanceler
+        val oldNs = noiseSuppressor
+        val oldAgc = automaticGainControl
+        val oldRec = audioRecord
+        echoCanceler = null
+        noiseSuppressor = null
+        automaticGainControl = null
         audioRecord = null
+        val releaseBlock = {
+            runCatching { oldAec?.release() }
+            runCatching { oldNs?.release() }
+            runCatching { oldAgc?.release() }
+            runCatching { oldRec?.stop() }
+            runCatching { oldRec?.release() }
+            Unit
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            scope.launch(Dispatchers.IO) { releaseBlock() }
+        } else {
+            releaseBlock()
+        }
     }
 
     private fun startAudioOutputTrack() {
@@ -1363,7 +1558,7 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             }
             delay(60L)
         }
-        delay(180L)
+        delay(350L)
     }
 
     private fun flushAudioOutputBuffer() {
@@ -1387,11 +1582,22 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         runCatching { playbackChannel.close() }
         playbackJob?.cancel()
         playbackJob = null
-        runCatching { audioTrack?.pause() }
-        runCatching { audioTrack?.flush() }
-        runCatching { audioTrack?.stop() }
-        runCatching { audioTrack?.release() }
+        val oldTrack = audioTrack
         audioTrack = null
+        if (oldTrack != null) {
+            val releaseBlock = {
+                runCatching { oldTrack.pause() }
+                runCatching { oldTrack.flush() }
+                runCatching { oldTrack.stop() }
+                runCatching { oldTrack.release() }
+                Unit
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                scope.launch(Dispatchers.IO) { releaseBlock() }
+            } else {
+                releaseBlock()
+            }
+        }
     }
 
     private fun stopSessionInternal(
@@ -1402,6 +1608,10 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         isConnectingOrActive.set(false)
         pendingAutoSettleAfterPlayback = false
         suppressMicStreaming = false
+        deferredLaunchWatchdogJob?.cancel()
+        deferredLaunchWatchdogJob = null
+        pendingExternalAppLaunch = null
+        MusicPlayerAutoLauncher.setDeferredExternalLaunchSink(null)
         settleOrDrainJob?.cancel()
         settleOrDrainJob = null
         stopAudioInputCapture()

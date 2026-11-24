@@ -321,7 +321,7 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
         ),
         RealtimeToolDescriptor(
             name = "play_track",
-            description = "Play a verified song right now on the user's chosen/default player (waking Spotify silently via Connect when connected). IMPORTANT: ALWAYS ask the user for approval first ('Should I play <Song> by <Artist>?') and ONLY call this tool after the user confirms ('yes', 'sure', 'go ahead', 'play it'). Never pass unverified or guessed URIs.",
+            description = "Play a verified song right now on the user's chosen/default player (waking Spotify silently via Connect when connected). IMPORTANT: ALWAYS ask the user for approval first ('Should I play <Song> by <Artist>?') and ONLY call this tool after the user naturally approves in any casual way (e.g. 'yeah', 'yes', 'yep', 'sure', 'go ahead', 'play it', 'sounds good', 'cool'). Never pass unverified or guessed URIs.",
             statusLabel = "Launching track playback",
             parametersSchema = schemaObj(
                 props = mapOf(
@@ -336,7 +336,7 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
         ),
         RealtimeToolDescriptor(
             name = "play_track_sequence",
-            description = "Play an ordered sequence of multiple songs back-to-back right now (plays #1 and queues #2..N seamlessly on Spotify or TuneMind Up Next). IMPORTANT: ALWAYS name the songs and ask the user for confirmation first before calling this tool, and execute ONLY after the user says yes/approves.",
+            description = "Play an ordered sequence of multiple songs back-to-back right now (plays #1 and queues #2..N seamlessly on Spotify or TuneMind Up Next). IMPORTANT: ALWAYS name the songs and ask the user for confirmation first before calling this tool, and execute ONLY after the user naturally approves in any casual way.",
             statusLabel = "Queuing & playing track sequence",
             parametersSchema = JSONObject().apply {
                 put("type", "object")
@@ -1397,10 +1397,28 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             httpClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use errorResult("Catalog search HTTP ${resp.code}")
                 val body = JSONObject(resp.body?.string().orEmpty())
+                val rawTracks = body.optJSONArray("tracks") ?: JSONArray()
+                val compactTracks = JSONArray()
+                for (i in 0 until rawTracks.length()) {
+                    val t = rawTracks.optJSONObject(i) ?: continue
+                    compactTracks.put(JSONObject().apply {
+                        put("title", t.optString("title"))
+                        put("artist", t.optString("artist"))
+                        val album = t.optString("album")
+                        if (album.isNotBlank()) put("album", album)
+                        val genre = t.optString("genre")
+                        if (genre.isNotBlank()) put("genre", genre)
+                        put("explicit", t.optBoolean("explicit", false))
+                        val tid = t.optString("trackId")
+                        if (tid.isNotBlank()) put("track_id", tid)
+                        val spUri = t.optString("spotifyUri").ifBlank { t.optString("spotify_uri") }
+                        if (spUri.isNotBlank()) put("spotify_uri", spUri)
+                    })
+                }
                 JSONObject().apply {
                     put("ok", true)
                     put("source", "tunemind_open_catalog")
-                    put("tracks", body.optJSONArray("tracks") ?: JSONArray())
+                    put("tracks", compactTracks)
                 }
             }
         }.getOrElse { err -> errorResult("Catalog search failed: ${err.message}") }

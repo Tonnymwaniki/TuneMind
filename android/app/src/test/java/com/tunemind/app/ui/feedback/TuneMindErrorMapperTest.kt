@@ -47,4 +47,15 @@ class TuneMindErrorMapperTest {
         assertEquals(BannerSeverity.INFO, mapped.severity)
         assertEquals("Spotify Free account detected", mapped.title)
     }
+
+    @Test
+    fun mapsExpiredTuneMindAuthSessionToSignInExpiredInsteadOfVoiceDropped() {
+        val mapped = TuneMindErrorMapper.map(
+            "Session expired or unauthorized — open Profile → Log Out and sign back in.",
+            contextHint = "voice"
+        )
+        assertEquals(BannerSeverity.WARNING, mapped.severity)
+        assertEquals("Sign-in expired", mapped.title)
+        assertTrue(mapped.message.contains("Log Out"))
+    }
 }

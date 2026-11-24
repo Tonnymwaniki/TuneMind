@@ -51,6 +51,7 @@ object MusicPlayerAutoLauncher {
     private const val RETURN_CHANNEL_ID = "tunemind_quick_return_banner_v2"
     private const val RETURN_NOTIFICATION_ID = 4409
     const val ACTION_RECOVER_PLAYBACK_IN_TUNEMIND = "com.tunemind.app.ACTION_RECOVER_PLAYBACK_IN_TUNEMIND"
+    const val EXTRA_OPEN_VOICE_ORB = "com.tunemind.app.EXTRA_OPEN_VOICE_ORB"
     const val EXTRA_RECOVER_TITLE = "recover_title"
     const val EXTRA_RECOVER_ARTIST = "recover_artist"
     const val EXTRA_RECOVER_YTM_ID = "recover_ytm_id"
@@ -136,6 +137,27 @@ object MusicPlayerAutoLauncher {
             .replace(Regex("[.\"'`]+$"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    @Volatile
+    private var deferredExternalLaunchSink: ((() -> Unit) -> Unit)? = null
+
+    /**
+     * Allows the Realtime Voice Agent to defer external player `startActivity(...)` handoffs
+     * (e.g. Spotify Free, Boomplay, Audiomack) until the agent finishes speaking its closing
+     * confirmation, avoiding mid-sentence cutoffs and audio glitches.
+     */
+    fun setDeferredExternalLaunchSink(sink: ((() -> Unit) -> Unit)?) {
+        deferredExternalLaunchSink = sink
+    }
+
+    private fun runOrDeferExternalLaunch(action: () -> Unit) {
+        val sink = deferredExternalLaunchSink
+        if (sink != null) {
+            sink(action)
+        } else {
+            action()
+        }
     }
 
     fun sanitizeArtistForPlay(rawArtist: String): String {
@@ -417,13 +439,25 @@ object MusicPlayerAutoLauncher {
             )
         }
 
-        // Resolve Open Catalog Links (YouTube Music videoId when YTM target, or external deep links)
-        val resolvedLinks = UniversalTrackResolver.resolveTrackBlocking(
-            context = context,
-            cleanTitle = cleanTitle,
-            cleanArtist = cleanArtist,
-            fullQuery = fullSearchQuery
-        )
+        // Resolve Open Catalog Links ONLY when the target player actually needs a YTM videoId
+        // or Audiomack deep link; for Spotify/Boomplay/other players use the instant cache so
+        // play_track executes in <30ms instead of blocking 1s+ on cross-platform HTTP lookups.
+        val isYtmTargetForResolve = targetPkg?.contains("youtube.music", ignoreCase = true) == true ||
+            providerId.equals("youtube_music", ignoreCase = true)
+        val isAudiomackTargetForResolve = targetPkg?.contains("audiomack", ignoreCase = true) == true ||
+            providerId.equals("audiomack", ignoreCase = true)
+        val hasInlineYtmId = track.providerTrackId?.trim()?.let { Regex("^[A-Za-z0-9_-]{11}$").matches(it) } == true
+        val needsBlockingResolve = (isYtmTargetForResolve && !hasInlineYtmId) || isAudiomackTargetForResolve || targetPkg == null
+        val resolvedLinks = if (needsBlockingResolve) {
+            UniversalTrackResolver.resolveTrackBlocking(
+                context = context,
+                cleanTitle = cleanTitle,
+                cleanArtist = cleanArtist,
+                fullQuery = fullSearchQuery
+            )
+        } else {
+            UniversalTrackResolver.getCached(cleanTitle, cleanArtist)
+        }
 
         // TIER 1C: Official Built-In YouTube Player inside TuneMind — ONLY when user chose YouTube Music
         val ytmVideoId = resolvedLinks?.ytmVideoId?.takeIf { it.isNotBlank() }
@@ -751,19 +785,21 @@ object MusicPlayerAutoLauncher {
                     putExtra("play", true)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
-                context.startActivity(ytmIntent)
-                scheduleAutoPlayKicker(
-                    context = context,
-                    targetPackage = targetPkg,
-                    displayName = displayName,
-                    track = track,
-                    overrideQuery = fullSearchQuery,
-                    previousTitle = previousTitle,
-                    spotifyUri = null,
-                    ytmVideoId = resolvedLinks?.ytmVideoId,
-                    autoReturnOnPlay = false
-                )
-                postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                runOrDeferExternalLaunch {
+                    runCatching { context.startActivity(ytmIntent) }
+                    scheduleAutoPlayKicker(
+                        context = context,
+                        targetPackage = targetPkg,
+                        displayName = displayName,
+                        track = track,
+                        overrideQuery = fullSearchQuery,
+                        previousTitle = previousTitle,
+                        spotifyUri = null,
+                        ytmVideoId = resolvedLinks?.ytmVideoId,
+                        autoReturnOnPlay = false
+                    )
+                    postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = false,
@@ -785,21 +821,23 @@ object MusicPlayerAutoLauncher {
                     putExtra("android.intent.extra.START_PLAYBACK", true)
                     putExtra("autostart", true)
                     putExtra("play", true)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 }
-                context.startActivity(spotifyTrackIntent)
-                scheduleAutoPlayKicker(
-                    context = context,
-                    targetPackage = targetPkg,
-                    displayName = displayName,
-                    track = track,
-                    overrideQuery = fullSearchQuery,
-                    previousTitle = previousTitle,
-                    spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId,
-                    autoReturnOnPlay = effectiveAutoReturn
-                )
-                postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                runOrDeferExternalLaunch {
+                    runCatching { context.startActivity(spotifyTrackIntent) }
+                    scheduleAutoPlayKicker(
+                        context = context,
+                        targetPackage = targetPkg,
+                        displayName = displayName,
+                        track = track,
+                        overrideQuery = fullSearchQuery,
+                        previousTitle = previousTitle,
+                        spotifyUri = exactSpotifyUri,
+                        ytmVideoId = resolvedLinks?.ytmVideoId,
+                        autoReturnOnPlay = effectiveAutoReturn
+                    )
+                    postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                }
                 val msg = if (effectiveAutoReturn) {
                     "Waking Spotify to play '$cleanTitle' and returning automatically to TuneMind."
                 } else {
@@ -831,21 +869,29 @@ object MusicPlayerAutoLauncher {
                     putExtra("autostart", true)
                     putExtra("play", true)
                     setPackage(targetPkg)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(
+                        if (isSpotifyTarget) {
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        } else {
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                    )
                 }
-                context.startActivity(mediaPlayIntent)
-                scheduleAutoPlayKicker(
-                    context = context,
-                    targetPackage = targetPkg,
-                    displayName = displayName,
-                    track = track,
-                    overrideQuery = fullSearchQuery,
-                    previousTitle = previousTitle,
-                    spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId,
-                    autoReturnOnPlay = effectiveAutoReturn
-                )
-                postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                runOrDeferExternalLaunch {
+                    runCatching { context.startActivity(mediaPlayIntent) }
+                    scheduleAutoPlayKicker(
+                        context = context,
+                        targetPackage = targetPkg,
+                        displayName = displayName,
+                        track = track,
+                        overrideQuery = fullSearchQuery,
+                        previousTitle = previousTitle,
+                        spotifyUri = exactSpotifyUri,
+                        ytmVideoId = resolvedLinks?.ytmVideoId,
+                        autoReturnOnPlay = effectiveAutoReturn
+                    )
+                    postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                }
                 val honestMsg = if (isSpotifyTarget && exactSpotifyUri == null) {
                     "Opened Spotify search for '$cleanTitle' — tap Play if Spotify pauses on search."
                 } else {
@@ -878,21 +924,29 @@ object MusicPlayerAutoLauncher {
                     putExtra("android.intent.extra.START_PLAYBACK", true)
                     putExtra("autostart", true)
                     putExtra("play", true)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(
+                        if (isSpotifyTarget) {
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        } else {
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        }
+                    )
                 }
-                context.startActivity(uriIntent)
-                scheduleAutoPlayKicker(
-                    context = context,
-                    targetPackage = targetPkg,
-                    displayName = displayName,
-                    track = track,
-                    overrideQuery = fullSearchQuery,
-                    previousTitle = previousTitle,
-                    spotifyUri = exactSpotifyUri,
-                    ytmVideoId = resolvedLinks?.ytmVideoId,
-                    autoReturnOnPlay = effectiveAutoReturn
-                )
-                postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                runOrDeferExternalLaunch {
+                    runCatching { context.startActivity(uriIntent) }
+                    scheduleAutoPlayKicker(
+                        context = context,
+                        targetPackage = targetPkg,
+                        displayName = displayName,
+                        track = track,
+                        overrideQuery = fullSearchQuery,
+                        previousTitle = previousTitle,
+                        spotifyUri = exactSpotifyUri,
+                        ytmVideoId = resolvedLinks?.ytmVideoId,
+                        autoReturnOnPlay = effectiveAutoReturn
+                    )
+                    postReturnToTuneMindNotification(context, cleanTitle.ifBlank { track.title }, displayName)
+                }
                 return LaunchOutcome(
                     launched = true,
                     usedInAppPlayer = false,
@@ -967,16 +1021,26 @@ object MusicPlayerAutoLauncher {
                 returnIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            val talkIntent = Intent(context, com.tunemind.app.MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(EXTRA_OPEN_VOICE_ORB, true)
+            }
+            val talkPi = PendingIntent.getActivity(
+                context,
+                RETURN_NOTIFICATION_ID + 1,
+                talkIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
 
             val titleText = if (confirmedPlaying) {
                 "Now playing '$trackTitle' in $playerDisplayName"
             } else {
-                "Starting '$trackTitle' in $playerDisplayName"
+                "Playing '$trackTitle' in $playerDisplayName"
             }
             val bodyText = if (confirmedPlaying) {
-                "Tap Back to TuneMind — $playerDisplayName stays playing"
+                "Tap Back to TuneMind anytime — $playerDisplayName keeps playing"
             } else {
-                "Tap to return to TuneMind anytime"
+                "Tap Play in $playerDisplayName, then tap Back to TuneMind"
             }
 
             val builder = NotificationCompat.Builder(context, RETURN_CHANNEL_ID)
@@ -988,12 +1052,17 @@ object MusicPlayerAutoLauncher {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(silentUpdate)
                 .setAutoCancel(true)
-                .setTimeoutAfter(28_000L)
+                .setTimeoutAfter(180_000L)
                 .setContentIntent(pi)
                 .addAction(
                     R.drawable.ic_launcher_foreground,
                     "Back to TuneMind",
                     pi
+                )
+                .addAction(
+                    R.drawable.ic_launcher_foreground,
+                    "Talk to TuneMind",
+                    talkPi
                 )
 
             if (!silentUpdate) {
@@ -1232,7 +1301,9 @@ object MusicPlayerAutoLauncher {
                     if (titleMatchesNewSong && playingOrBufferingTarget) {
                         onConfirmedPlaying()
                         TuneMindListenerService.removePlaybackSnapshotListener(reactiveListener)
-                    } else if (titleMatchesNewSong || (delay >= 2250L && listener?.hasActiveSession(targetPackage) == true && !playingOrBufferingTarget)) {
+                    } else if (titleMatchesNewSong && !playingOrBufferingTarget) {
+                        // Only send PLAY when the player actually loaded the NEW track —
+                        // never blindly resume an old paused song on Spotify Free!
                         listener?.play(targetPackage)
                         audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
                         audioManager?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))

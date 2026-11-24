@@ -256,6 +256,19 @@ object TuneMindErrorMapper {
                 )
             }
 
+            lower.contains("session expired") ||
+                lower.contains("unauthorized") ||
+                lower.contains("sign back in") ||
+                lower.contains("log out") -> {
+                TuneMindBannerMessage(
+                    title = "Sign-in expired",
+                    message = "Open Profile → Log Out and sign back in to refresh your TuneMind session.",
+                    severity = BannerSeverity.WARNING,
+                    action = TuneMindBannerAction.NONE,
+                    autoDismissMs = 9500L
+                )
+            }
+
             lower.contains("websocket") || lower.contains("session") || lower.contains("realtime") || hintLower.contains("voice") -> {
                 TuneMindBannerMessage(
                     title = "Voice connection dropped",

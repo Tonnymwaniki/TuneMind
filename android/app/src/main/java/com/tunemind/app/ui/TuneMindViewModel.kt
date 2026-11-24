@@ -675,7 +675,15 @@ class TuneMindViewModel : ViewModel() {
                     liveSnapObs.title, liveSnapObs.artist, null,
                     pendingTitle, null, null
                 )
-            if (!liveAlreadySwitched) {
+            val livePlayingOtherTrackAfterGrace = liveSnapObs != null &&
+                liveSnapObs.isPlaying &&
+                (nowMs - overrideObs.updatedAtMs) >= 1_800L
+            if (liveAlreadySwitched || livePlayingOtherTrackAfterGrace) {
+                // Real live playback on Spotify/Boomplay/Audiomack always beats optimistic pending
+                manualActiveTrackOverride = null
+                manualLaunchPendingUntilMs = 0L
+                manualLaunchPendingTitle = null
+            } else {
                 return overrideObs
             }
         }
