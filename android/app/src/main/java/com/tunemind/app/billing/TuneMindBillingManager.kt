@@ -147,6 +147,7 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
                     .enablePrepaidPlans()
                     .build()
             )
+            .enableAutoServiceReconnection()
             .build()
     }
 
@@ -208,7 +209,8 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
             .setProductList(productList)
             .build()
 
-        billingClient.queryProductDetailsAsync(params) { billingResult, detailsList ->
+        billingClient.queryProductDetailsAsync(params) { billingResult, queryProductDetailsResult ->
+            val detailsList = queryProductDetailsResult.productDetailsList
             if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && detailsList.isNotEmpty()) {
                 val map = detailsList.associateBy { it.productId }
                 productDetailsMap = map

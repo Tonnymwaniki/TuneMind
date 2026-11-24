@@ -24,7 +24,7 @@ lottie = "6.6.2"
 firebaseBom = "34.19.0"
 googleServices = "4.6.0"
 firebaseCrashlytics = "3.0.8"
-billingKtx = "7.1.1"
+billingKtx = "8.0.0"
 
 [libraries]
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
