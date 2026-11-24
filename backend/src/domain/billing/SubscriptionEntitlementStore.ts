@@ -320,7 +320,7 @@ export class SubscriptionEntitlementStore {
       dailyAgentRemaining: Math.max(0, limits.agentLimit - usage.agentUsed),
       dailyForYouRefreshLimit: limits.forYouLimit,
       dailyForYouRefreshesUsed: usage.forYouUsed,
-      freeForYouDailyPicks: 2,
+      freeForYouDailyPicks: 3,
       updatedAtMs: rec.updatedAtMs
     };
   }

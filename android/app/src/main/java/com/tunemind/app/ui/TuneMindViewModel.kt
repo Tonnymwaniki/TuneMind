@@ -1080,7 +1080,7 @@ class TuneMindViewModel : ViewModel() {
     private val _isForYouAiEnabled = MutableStateFlow(
         AppHolder.context?.let {
             com.tunemind.app.domain.ai.ForYouDailyDropWorker.isForYouAiEnabled(it)
-        } ?: false
+        } ?: true
     )
     val isForYouAiEnabled: StateFlow<Boolean> = _isForYouAiEnabled.asStateFlow()
 
@@ -2611,7 +2611,7 @@ class TuneMindViewModel : ViewModel() {
                     lastObservedNoonCycle = currentNoonCycle
                     lastObservedSlot = currentSlot
                     recomputeAdaptiveTheme()
-                    triggerChronoDiscovery(forceRefresh = true)
+                    triggerChronoDiscovery(forceRefresh = false)
                 } else if (currentSlot != lastObservedSlot) {
                     lastObservedSlot = currentSlot
                     recomputeAdaptiveTheme()
@@ -4932,16 +4932,20 @@ class TuneMindViewModel : ViewModel() {
 
                 val billingHasPro = _billingState.value.hasProAccess ||
                     com.tunemind.app.billing.TuneMindBillingManager.getInstance(ctx).state.value.hasProAccess
-                if (forceRefresh && !billingHasPro) {
-                    openPaywall("Start your 7-day free trial to refresh For You drops and unlock all 15 daily AI recommendations.")
+                val existingInRoomSnapshot = withContext(Dispatchers.IO) {
+                    aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()
+                }
+                if (forceRefresh && !billingHasPro && existingInRoomSnapshot.isNotEmpty()) {
+                    openPaywall("Start your 7-day free trial to refresh For You drops and unlock all 15 daily recommendations.")
                     return@launch
                 }
 
                 val existingInFlow = _aiDiscoveryCrate.value.filter {
                     it.dropDateKey == todayNoonKey && !it.isDismissed
                 }
-                val requiredCachedCount = if (billingHasPro) 10 else 2
-                if (!forceRefresh) {
+                val requiredCachedCount = if (billingHasPro) 10 else 3
+                val effectiveForceRefresh = if (billingHasPro) forceRefresh else false
+                if (!effectiveForceRefresh) {
                     fun repairUnverifiedAsync(pool: List<com.tunemind.app.domain.recommendation.AiRecommendationEntity>) {
                         val unverified = pool.filter {
                             it.previewUrl.isNullOrBlank() ||
@@ -5001,13 +5005,10 @@ class TuneMindViewModel : ViewModel() {
                         repairUnverifiedAsync(existingInFlow)
                         return@launch
                     }
-                    // Check Room synchronously before hitting backend (Flow may not have emitted on startup yet)
-                    val existingInRoom = withContext(Dispatchers.IO) {
-                        aiRecDao?.getByDropDateSnapshot(todayNoonKey) ?: emptyList()
-                    }
-                    if (existingInRoom.size >= requiredCachedCount) {
+                    // Reuse Room snapshot already fetched above before hitting backend
+                    if (existingInRoomSnapshot.size >= requiredCachedCount) {
                         autoTriggeredNoonCycleKey = todayNoonKey
-                        repairUnverifiedAsync(existingInRoom)
+                        repairUnverifiedAsync(existingInRoomSnapshot)
                         return@launch
                     }
                 }

@@ -63,7 +63,7 @@ data class BillingUiState(
     val dailyAgentRemaining: Int = 0,
     val dailyForYouRefreshLimit: Int = 0,
     val dailyForYouRefreshesUsed: Int = 0,
-    val freeForYouDailyPicks: Int = 2,
+    val freeForYouDailyPicks: Int = 3,
     val autoRenewing: Boolean = false,
     val isLoading: Boolean = false,
     val isPlayBillingReady: Boolean = false,
@@ -517,7 +517,7 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
             dailyAgentRemaining = entJson.optInt("dailyAgentRemaining", 0),
             dailyForYouRefreshLimit = entJson.optInt("dailyForYouRefreshLimit", 0),
             dailyForYouRefreshesUsed = entJson.optInt("dailyForYouRefreshesUsed", 0),
-            freeForYouDailyPicks = entJson.optInt("freeForYouDailyPicks", 2),
+            freeForYouDailyPicks = entJson.optInt("freeForYouDailyPicks", 3),
             autoRenewing = entJson.optBoolean("autoRenewing", false)
         )
         _state.value = next
@@ -572,7 +572,7 @@ class TuneMindBillingManager private constructor(context: Context) : PurchasesUp
                 dailyAgentRemaining = obj.optInt("dailyAgentRemaining", 0),
                 dailyForYouRefreshLimit = obj.optInt("dailyForYouRefreshLimit", 0),
                 dailyForYouRefreshesUsed = obj.optInt("dailyForYouRefreshesUsed", 0),
-                freeForYouDailyPicks = obj.optInt("freeForYouDailyPicks", 2),
+                freeForYouDailyPicks = obj.optInt("freeForYouDailyPicks", 3),
                 autoRenewing = obj.optBoolean("autoRenewing", false)
             )
         }.getOrDefault(BillingUiState())

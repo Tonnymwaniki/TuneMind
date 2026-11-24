@@ -19,7 +19,7 @@ describe('TuneMind Monetization, 7-Day Trial & Cost Protection', () => {
     expect(monthly.eastAfricaPriceKes).toContain('250');
   });
 
-  test('Free users get 2 For You catalog picks at $0 Claude cost and 402 on Agent / Refresh until starting 7-day trial', async () => {
+  test('Free users get 3 For You catalog picks at $0 AI cost and 402 on Agent / Refresh until starting 7-day trial', async () => {
     const app = createApp();
     const userId = `billing-free-${Date.now()}`;
 
@@ -33,7 +33,7 @@ describe('TuneMind Monetization, 7-Day Trial & Cost Protection', () => {
     expect(dropRes.status).toBe(200);
     expect(dropRes.body.isFreeLimitedDrop).toBe(true);
     expect(Array.isArray(dropRes.body.recommendations)).toBe(true);
-    expect(dropRes.body.recommendations.length).toBeLessThanOrEqual(2);
+    expect(dropRes.body.recommendations.length).toBeLessThanOrEqual(3);
     expect(dropRes.body.recommendations.length).toBeGreaterThanOrEqual(1);
 
     const refreshRes = await request(app)

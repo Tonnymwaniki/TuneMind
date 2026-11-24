@@ -275,7 +275,7 @@ class ForYouDailyDropWorker(
         fun isForYouAiEnabled(context: Context): Boolean {
             return com.tunemind.app.data.auth.TuneMindAccountStorage
                 .getUserPrefs(context.applicationContext, FOR_YOU_PREFS_NAME)
-                .getBoolean(KEY_FOR_YOU_AI_ENABLED, false)
+                .getBoolean(KEY_FOR_YOU_AI_ENABLED, true)
         }
 
         fun setForYouAiEnabled(context: Context, enabled: Boolean) {

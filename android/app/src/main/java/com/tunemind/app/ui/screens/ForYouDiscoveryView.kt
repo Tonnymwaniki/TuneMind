@@ -38,10 +38,7 @@ import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TrendingUp
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -212,13 +209,17 @@ fun LazyListScope.forYouDiscoveryItems(
     hasProAccess: Boolean = true,
     onOpenProUpgrade: ((String?) -> Unit)? = null
 ) {
-    val wildcards = activeRecs
-        .filter { it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true) }
-        .take(3)
+    val wildcards = if (hasProAccess) {
+        activeRecs
+            .filter { it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true) }
+            .take(3)
+    } else {
+        emptyList()
+    }
 
     val genrePicks = activeRecs
         .filter { !(it.isWildcard || it.subTier.equals("GLOBAL_WILDCARD", ignoreCase = true)) }
-        .take(12)
+        .take(if (hasProAccess) 12 else 3)
 
     val orderedGenreGroups: List<Pair<String, List<AiRecommendationEntity>>> = run {
         val map = LinkedHashMap<String, MutableList<AiRecommendationEntity>>()
@@ -260,21 +261,7 @@ fun LazyListScope.forYouDiscoveryItems(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (!isForYouAiEnabled) {
-                        Text(
-                            text = "For You AI is turned off",
-                            color = Color(0xFFF5F3FF),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Zero Claude API tokens are being used. Turn on the switch above whenever you want Claude to recommend songs.",
-                            color = Color(0xFFB8B2CC),
-                            fontSize = 12.5.sp,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 18.sp
-                        )
-                    } else if (isDiscovering) {
+                    if (isDiscovering) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -306,7 +293,7 @@ fun LazyListScope.forYouDiscoveryItems(
                             text = if (hasProAccess) {
                                 "12 fresh unheard tracks across your genres plus 3 songs from new global genres, calibrated from your listening behavior."
                             } else {
-                                "Your 2 daily Free picks are ready to sync. Start a 7-day free trial anytime for all 15 daily picks and refreshes."
+                                "3 tailored daily Free picks calibrated from your listening taste. Start a 7-day free trial anytime for all 15 daily picks & Wildcard drops."
                             },
                             color = Color.White.copy(alpha = 0.64f),
                             fontSize = 12.5.sp,
@@ -329,7 +316,7 @@ fun LazyListScope.forYouDiscoveryItems(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = if (hasProAccess) "Sync Today's 15 Picks" else "Sync Today's 2 Free Picks",
+                                text = if (hasProAccess) "Sync Today's 15 Picks" else "Sync Today's 3 Free Picks",
                                 color = Color(0xFFF8FAFC),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -342,7 +329,7 @@ fun LazyListScope.forYouDiscoveryItems(
         }
     }
 
-    // 2. Unified 1-Wildcard Showcase Card holding all 3 Completely New-Genre Songs Together
+    // 2. Wildcard Showcase Card (Pro/Trial) OR Wildcard Upcoming Card (Free tier)
     if (wildcards.isNotEmpty()) {
         item(key = "foryou_wildcard_trio") {
             WildcardTrioShowcaseCard(
@@ -356,6 +343,17 @@ fun LazyListScope.forYouDiscoveryItems(
                 onSaveTrack = onSaveTrack,
                 onDismissTrack = onDismissTrack,
                 onInspectTrack = onInspectTrack
+            )
+            Spacer(modifier = Modifier.height(18.dp))
+        }
+    } else if (!hasProAccess) {
+        item(key = "foryou_wildcard_upcoming") {
+            WildcardUpcomingCard(
+                onExplorePro = onOpenProUpgrade?.let { openUpgrade ->
+                    {
+                        openUpgrade("Wildcard new-genre drops are upcoming on Free tier — start your 7-day free trial to preview early Wildcard discoveries.")
+                    }
+                }
             )
             Spacer(modifier = Modifier.height(18.dp))
         }
@@ -485,14 +483,14 @@ fun LazyListScope.forYouDiscoveryItems(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "2 Free Daily Picks Active",
+                            text = "3 Free Daily Picks Active",
                             color = Color(0xFFF8FAFC),
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Try TuneMind Pro free for 7 days to unlock all 15 AI picks, refreshes & Pulse Voice Agent.",
+                            text = "Try TuneMind Pro free for 7 days to unlock 15 daily AI picks, Wildcard genre drops & refreshes.",
                             color = Color.White.copy(alpha = 0.66f),
                             fontSize = 11.5.sp,
                             lineHeight = 16.sp
@@ -602,10 +600,13 @@ private fun ForYouAiHeroCard(
                     }
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = if (genrePickCount + wildcardCount > 0) {
-                            "$genrePickCount genre picks ($genreCount genres) + $wildcardCount wildcards"
-                        } else {
-                            "Daily 12:00 PM drop ($tzShort) · Next in $countdownText"
+                        text = when {
+                            genrePickCount > 0 && wildcardCount > 0 ->
+                                "$genrePickCount genre picks ($genreCount genres) + $wildcardCount wildcards"
+                            genrePickCount > 0 ->
+                                "$genrePickCount tailored picks · Wildcards upcoming"
+                            else ->
+                                "Daily 12:00 PM drop ($tzShort) · Next in $countdownText"
                         },
                         color = Color(0xFFB8B2CC),
                         fontSize = 11.5.sp,
@@ -643,17 +644,14 @@ private fun ForYouAiHeroCard(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .clickable(enabled = isForYouAiEnabled && !isDiscovering) { onRefresh() },
+                        .clickable(enabled = !isDiscovering) { onRefresh() },
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(
-                                if (isForYouAiEnabled) aiCyan.copy(alpha = 0.16f)
-                                else Color.White.copy(alpha = 0.06f)
-                            ),
+                            .background(aiCyan.copy(alpha = 0.16f)),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isDiscovering) {
@@ -666,53 +664,12 @@ private fun ForYouAiHeroCard(
                             Icon(
                                 imageVector = Icons.Rounded.Refresh,
                                 contentDescription = "Refresh Daily Drop",
-                                tint = if (isForYouAiEnabled) aiCyan else Color(0xFFB8B2CC),
+                                tint = aiCyan,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Dedicated Claude API Kill-Switch for For You Screen
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF1A1033))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isForYouAiEnabled) "Claude AI Recommendations: ON" else "Claude AI Recommendations: OFF",
-                        color = Color(0xFFF5F3FF),
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (isForYouAiEnabled) {
-                            "Active · Turn off when done to save Claude tokens"
-                        } else {
-                            "Paused · Zero Claude API calls or auto-reloads"
-                        },
-                        color = Color(0xFFB8B2CC),
-                        fontSize = 11.sp
-                    )
-                }
-                Switch(
-                    checked = isForYouAiEnabled,
-                    onCheckedChange = onToggleForYouAi,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color(0xFF07020F),
-                        checkedTrackColor = aiCyan,
-                        uncheckedThumbColor = Color(0xFFB8B2CC),
-                        uncheckedTrackColor = Color(0xFF07020F)
-                    )
-                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -763,6 +720,106 @@ private fun ForYouAiHeroCard(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Clean "Wildcard · Upcoming" card shown on Free tier so v1 testers see the feature roadmap
+ * without burning paid LLM discovery slots.
+ */
+@Composable
+private fun WildcardUpcomingCard(
+    onExplorePro: (() -> Unit)? = null
+) {
+    val amberGold = Color(0xFFF59E0B)
+    SoftGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        accentTint = amberGold,
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(amberGold.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Explore,
+                            contentDescription = null,
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "WILDCARD · UPCOMING",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Text(
+                            text = "Surprise new genres outside your usual lanes",
+                            color = Color.White.copy(alpha = 0.68f),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(amberGold.copy(alpha = 0.16f))
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Coming Soon",
+                        color = Color(0xFFFDE68A),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Text(
+                text = "Cross-genre global Wildcard picks are upcoming for Free listeners. You can already enjoy 3 daily picks tailored to your taste, or try TuneMind Pro free for 7 days to unlock Wildcards early.",
+                color = Color.White.copy(alpha = 0.70f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+
+            if (onExplorePro != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(amberGold.copy(alpha = 0.16f))
+                        .border(1.dp, amberGold.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                        .clickable { onExplorePro() }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = "Unlock Wildcards with 7-Day Free Trial",
+                        color = Color(0xFFFDE68A),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }

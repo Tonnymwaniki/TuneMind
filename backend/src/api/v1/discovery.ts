@@ -11,8 +11,8 @@ const router = Router();
 /**
  * POST /api/v1/discovery/daily-drop
  * Runs online learning on yesterday's recommendation outcomes + cross-app listening context.
- * - Free users receive 2 verified non-repeating daily picks at $0 Claude cost.
- * - Trial/Pro users receive the full 15-song Haiku-synthesized slate within fair-use quotas.
+ * - Free users receive 3 verified non-repeating daily picks at $0 AI cost.
+ * - Trial/Pro users receive the full 15-song synthesized slate (12 genre + 3 wildcards) within fair-use quotas.
  */
 router.post('/daily-drop', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
@@ -73,7 +73,7 @@ router.post('/daily-drop', requireAuthInProduction, async (req: Request, res: Re
       dropDate: body.dropDate || body.drop_date,
       forceRefresh: isFreeOffer ? false : forceRefresh,
       skipClaude: isFreeOffer,
-      maxTotalRecommendations: isFreeOffer ? 2 : undefined,
+      maxTotalRecommendations: isFreeOffer ? 3 : undefined,
       timezone: body.timezone,
       localHour: typeof body.localHour === 'number' ? body.localHour : undefined,
       timeSlot: body.timeSlot || body.time_slot,
