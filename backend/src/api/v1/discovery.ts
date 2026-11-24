@@ -127,11 +127,16 @@ router.post('/daily-drop', requireAuthInProduction, async (req: Request, res: Re
  * Records real-time recommendation feedback (PLAYED, COMPLETED, SAVED, SKIPPED, DISMISSED, IGNORED)
  * along with listen duration and volume ratio so the model trains immediately.
  */
-router.post('/feedback', async (req: Request, res: Response) => {
+router.post('/feedback', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
     const body = req.body || {};
+    const identity = resolveEffectiveUserIdentity(
+      req,
+      body.userId || body.user_id,
+      body.userEmail || body.user_email
+    );
     const event: DiscoveryFeedbackEvent = {
-      userId: req.authUser?.id || body.userId || body.user_id,
+      userId: (req.authUser ? identity.userId : (body.userId || body.user_id)) || identity.userId,
       trackId: body.trackId || body.track_id,
       spotifyUri: body.spotifyUri || body.spotify_uri,
       title: String(body.title || ''),
@@ -174,9 +179,14 @@ router.post('/feedback', async (req: Request, res: Response) => {
  * GET /api/v1/discovery/insights
  * Returns the user's learned genre weights, time-of-day volume profile, and daily match score.
  */
-router.get('/insights', async (req: Request, res: Response) => {
+router.get('/insights', requireAuthInProduction, async (req: Request, res: Response) => {
   try {
-    const userId = req.authUser?.id || String(req.query.userId || req.query.user_id || '');
+    const identity = resolveEffectiveUserIdentity(
+      req,
+      typeof req.query.userId === 'string' ? req.query.userId : (typeof req.query.user_id === 'string' ? req.query.user_id : undefined),
+      typeof req.query.userEmail === 'string' ? req.query.userEmail : undefined
+    );
+    const userId = (req.authUser ? identity.userId : String(req.query.userId || req.query.user_id || '')) || identity.userId;
     const engine = new SelfLearningDiscoveryEngine();
     const insights = await engine.getInsights(userId);
     res.json({

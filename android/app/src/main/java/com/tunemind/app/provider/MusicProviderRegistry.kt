@@ -15,8 +15,11 @@ import com.tunemind.app.domain.recommendation.RecommendedTrack
  */
 class MusicProviderRegistry(
     private val context: Context,
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences? = null
 ) {
+    private fun activePrefs(): SharedPreferences {
+        return prefs ?: com.tunemind.app.data.auth.TuneMindAccountStorage.getUserPrefs(context, PREFS_NAME)
+    }
     private val staticProviders: List<MusicProvider> = listOf(
         TuneMindInAppProvider(),
         BoomplayMusicProvider(),
@@ -95,24 +98,24 @@ class MusicProviderRegistry(
     }
 
     /** True if the user has explicitly selected a default player. */
-    fun hasExplicitDefault(): Boolean = prefs.contains(KEY_PREFERRED_PROVIDER)
+    fun hasExplicitDefault(): Boolean = activePrefs().contains(KEY_PREFERRED_PROVIDER)
 
     /**
      * True if TuneMind should prompt the user to choose their music player before playing.
      * Defaults to true if the user hasn't explicitly set a default player.
      */
     fun isAlwaysAskEnabled(): Boolean {
-        return prefs.getBoolean(KEY_ALWAYS_ASK, !hasExplicitDefault())
+        return activePrefs().getBoolean(KEY_ALWAYS_ASK, !hasExplicitDefault())
     }
 
     /** Toggles the 'Always ask before playing' preference. */
     fun setAlwaysAskEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ALWAYS_ASK, enabled).apply()
+        activePrefs().edit().putBoolean(KEY_ALWAYS_ASK, enabled).apply()
     }
 
     /** Returns the user's preferred music provider ID. */
     fun getPreferredProviderId(): String {
-        val saved = prefs.getString(KEY_PREFERRED_PROVIDER, null)
+        val saved = activePrefs().getString(KEY_PREFERRED_PROVIDER, null)
         if (saved != null) {
             val p = getProvider(saved)
             if (p.isInstalled(context)) return saved
@@ -124,7 +127,7 @@ class MusicProviderRegistry(
 
     /** Updates the user's preferred music provider ID. */
     fun setPreferredProviderId(providerId: String) {
-        prefs.edit()
+        activePrefs().edit()
             .putString(KEY_PREFERRED_PROVIDER, providerId)
             .putBoolean(KEY_ALWAYS_ASK, false)
             .apply()
@@ -139,7 +142,7 @@ class MusicProviderRegistry(
 
     /** Resets the default player choice so the dialog prompts again. */
     fun resetDefaultPlayer() {
-        prefs.edit()
+        activePrefs().edit()
             .remove(KEY_PREFERRED_PROVIDER)
             .putBoolean(KEY_ALWAYS_ASK, true)
             .apply()
