@@ -1,0 +1,69 @@
+{
+  "subscriptions": [
+    {
+      "userId": "billing-trial-1795356439236",
+      "tier": "FREE",
+      "planId": null,
+      "billingSource": "google_play",
+      "trialStartedAtMs": null,
+      "trialEndsAtMs": null,
+      "currentPeriodEndMs": null,
+      "autoRenewing": false,
+      "purchaseTokenHash": "66e28011d7402a200c48c2eb8673296403211c9b6b295165bb9c2332bc1bf07c",
+      "verificationMode": "rtdn_revoked_13",
+      "updatedAtMs": 1795356439256
+    },
+    {
+      "userId": "billing-trial-1795356490843",
+      "tier": "FREE",
+      "planId": null,
+      "billingSource": "google_play",
+      "trialStartedAtMs": null,
+      "trialEndsAtMs": null,
+      "currentPeriodEndMs": null,
+      "autoRenewing": false,
+      "purchaseTokenHash": "7770664fa984711e7aca00988b9e1553dd2f1a69d700d0bd7163afd030c2ee4b",
+      "verificationMode": "rtdn_revoked_13",
+      "updatedAtMs": 1795356490853
+    },
+    {
+      "userId": "billing-trial-1795358492000",
+      "tier": "FREE",
+      "planId": null,
+      "billingSource": "google_play",
+      "trialStartedAtMs": null,
+      "trialEndsAtMs": null,
+      "currentPeriodEndMs": null,
+      "autoRenewing": false,
+      "purchaseTokenHash": "58ebae32cb3dedb272f5ee220ae084acb4f3a5fd274e7d1e16ef68d74611a71a",
+      "verificationMode": "rtdn_revoked_13",
+      "updatedAtMs": 1795358492012
+    },
+    {
+      "userId": "billing-trial-1795359735602",
+      "tier": "FREE",
+      "planId": null,
+      "billingSource": "google_play",
+      "trialStartedAtMs": null,
+      "trialEndsAtMs": null,
+      "currentPeriodEndMs": null,
+      "autoRenewing": false,
+      "purchaseTokenHash": "7d44a435b5072a4e8d57e4eb8eaeed669a420ad442568f1d8f46021304e79ec6",
+      "verificationMode": "rtdn_revoked_13",
+      "updatedAtMs": 1795359735640
+    },
+    {
+      "userId": "billing-trial-1795525785467",
+      "tier": "FREE",
+      "planId": null,
+      "billingSource": "google_play",
+      "trialStartedAtMs": null,
+      "trialEndsAtMs": null,
+      "currentPeriodEndMs": null,
+      "autoRenewing": false,
+      "purchaseTokenHash": "05d393e24127f504cf038ec66438d6419e1a3a5db559cc1bc2ccc25d454b3397",
+      "verificationMode": "rtdn_revoked_13",
+      "updatedAtMs": 1795525785528
+    }
+  ]
+}
