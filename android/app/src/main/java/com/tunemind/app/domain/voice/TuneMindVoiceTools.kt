@@ -806,10 +806,58 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
             spotifyUri = verifiedUri
         )
 
-        val neverExternal = AgentSettingsStore.isStrictNoAppSwitchEnabled(appContext)
+        // Strictly stay inside TuneMind: never open Spotify in foreground when user wants background wake
+        val neverExternal = isSpotifyTarget ||
+            AgentSettingsStore.isStayInTuneMindEnabled(appContext) ||
+            AgentSettingsStore.isStrictNoAppSwitchEnabled(appContext)
         host.onTrackDispatched(rawTitle, rawArtist, targetPkg)
 
-        val launchResult = if (resolvedProviderId == TuneMindInAppProvider.PROVIDER_ID && !isSpotifyTarget) {
+        val launchResult: PlaybackLaunchResult = if (isSpotifyTarget && SpotifyPremiumConnectManager.isConnectedAndPremium(appContext)) {
+            var spRes = SpotifyPremiumConnectManager.playTrackSilently(
+                context = appContext,
+                title = rawTitle,
+                artist = rawArtist,
+                query = searchQuery,
+                spotifyUri = verifiedUri
+            )
+            // If Spotify was deeply asleep in the background on Android, give the newly woken
+            // background service 1.2s to register with Spotify Connect and retry silently once.
+            if (spRes is SpotifyPlayResult.NoActiveDevice) {
+                kotlinx.coroutines.delay(1_200L)
+                spRes = SpotifyPremiumConnectManager.playTrackSilently(
+                    context = appContext,
+                    title = rawTitle,
+                    artist = rawArtist,
+                    query = searchQuery,
+                    spotifyUri = verifiedUri
+                )
+            }
+            when (spRes) {
+                is SpotifyPlayResult.Success -> PlaybackLaunchResult.DirectPlaybackLaunched(
+                    providerId = SpotifyMusicProvider.PROVIDER_ID,
+                    providerDisplayName = "Spotify",
+                    trackTitle = rawTitle,
+                    destinationUri = spRes.trackUri,
+                    message = "Playing '$rawTitle' silently on Spotify (${spRes.deviceName}) without leaving TuneMind."
+                )
+                is SpotifyPlayResult.NoActiveDevice -> PlaybackLaunchResult.LaunchFailed(
+                    providerId = SpotifyMusicProvider.PROVIDER_ID,
+                    reason = "Spotify is deeply asleep in the background and did not wake without opening it. Open Spotify once or allow Spotify background autostart in Android settings, then try again — I kept you inside TuneMind."
+                )
+                is SpotifyPlayResult.PremiumRequired -> PlaybackLaunchResult.LaunchFailed(
+                    providerId = SpotifyMusicProvider.PROVIDER_ID,
+                    reason = spRes.message
+                )
+                is SpotifyPlayResult.Failed -> PlaybackLaunchResult.LaunchFailed(
+                    providerId = SpotifyMusicProvider.PROVIDER_ID,
+                    reason = spRes.reason
+                )
+                SpotifyPlayResult.NotConnected -> PlaybackLaunchResult.LaunchFailed(
+                    providerId = SpotifyMusicProvider.PROVIDER_ID,
+                    reason = "Spotify is not connected in Settings."
+                )
+            }
+        } else if (resolvedProviderId == TuneMindInAppProvider.PROVIDER_ID && !isSpotifyTarget) {
             registry.launchRecommendation(rec, TuneMindInAppProvider.PROVIDER_ID)
         } else {
             MusicPlayerAutoLauncher.launchWithAutoPlay(
@@ -858,16 +906,30 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
     }
 
     private suspend fun execPlaySpotifyContext(args: JSONObject): JSONObject {
-        val ctxUri = args.optString("context_uri").trim()
-        if (ctxUri.isBlank()) return errorResult("context_uri is required (e.g. spotify:playlist:...)")
+        val rawCtx = args.optString("context_uri").trim()
+        if (rawCtx.isBlank()) return errorResult("context_uri is required (e.g. spotify:playlist:...)")
+        val ctxUri = when {
+            rawCtx.startsWith("spotify:", ignoreCase = true) -> rawCtx
+            rawCtx.startsWith("spotify_pl_", ignoreCase = true) ->
+                "spotify:playlist:${SpotifyLibrarySyncEngine.extractSpotifyPlaylistId(rawCtx) ?: rawCtx.removePrefix("spotify_pl_")}"
+            else -> rawCtx
+        }
         val label = args.optString("label", "Spotify Mix").ifBlank { "Spotify Mix" }
         val shuffle = if (args.has("shuffle_enabled") && !args.isNull("shuffle_enabled")) args.optBoolean("shuffle_enabled") else null
 
-        val res = SpotifyPremiumConnectManager.playSpotifyContextSilently(
+        var res = SpotifyPremiumConnectManager.playSpotifyContextSilently(
             context = appContext,
             contextUri = ctxUri,
             shuffleEnabled = shuffle
         )
+        if (res is SpotifyPlayResult.NoActiveDevice) {
+            kotlinx.coroutines.delay(1_200L)
+            res = SpotifyPremiumConnectManager.playSpotifyContextSilently(
+                context = appContext,
+                contextUri = ctxUri,
+                shuffleEnabled = shuffle
+            )
+        }
         return when (res) {
             is SpotifyPlayResult.Success -> JSONObject().apply {
                 put("ok", true)
@@ -1640,12 +1702,16 @@ class TuneMindVoiceTools(private val host: TuneMindVoiceToolHost) {
                 val arr = JSONArray()
                 for (pl in playlists) {
                     val count = pDao.getTracksForPlaylistOnce(pl.playlistId).size
+                    val spId = SpotifyLibrarySyncEngine.extractSpotifyPlaylistId(pl.playlistId)
                     arr.put(JSONObject().apply {
                         put("playlist_id", pl.playlistId)
                         put("name", pl.name)
                         put("description", pl.description)
                         put("track_count", count)
-                        put("is_spotify_synced", SpotifyLibrarySyncEngine.isSpotifySyncedPlaylistId(pl.playlistId))
+                        put("is_spotify_synced", !spId.isNullOrBlank())
+                        if (!spId.isNullOrBlank()) {
+                            put("spotify_context_uri", "spotify:playlist:$spId")
+                        }
                     })
                 }
                 JSONObject().put("ok", true).put("playlists", arr)

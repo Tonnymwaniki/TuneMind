@@ -512,6 +512,15 @@ class RealtimeVoiceAgent(
                 })
                 put("inputAudioTranscription", JSONObject())
                 put("outputAudioTranscription", JSONObject())
+                put("realtimeInputConfig", JSONObject().apply {
+                    put("automaticActivityDetection", JSONObject().apply {
+                        put("disabled", false)
+                        put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                        put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
+                        put("prefixPaddingMs", 300)
+                        put("silenceDurationMs", 600)
+                    })
+                })
                 put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls)))
             })
         }
@@ -607,7 +616,7 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
    - When asked to play a single track: verify the track + URI via tools first and call `play_track` (or propose concisely and wait for confirmation if it's an open mood/suggestion request).
 4. AUTHENTIC USER ISOLATION: All database, Spotify, Vault, and preference tools are strictly scoped to this authenticated user's session.
 5. CONVERSATIONAL VOICE STYLE: Speak warmly and naturally in 1–3 concise sentences unless more detail is asked for. No markdown symbols, bullet formatting, or robotic phrasing. If Kids Mode is true or clean/kids music is requested, avoid explicit tracks (`explicit: true`).
-6. STRICT ENGLISH-ONLY LANGUAGE RULE: Always respond strictly in clear, natural English only. Never speak, translate into, or reply in Swahili, Sheng, or any other language even if song titles, artist names, or user speech contain non-English words.
+6. STRICT ENGLISH-ONLY LANGUAGE RULE: Always understand and respond strictly in clear, natural English only. The listener speaks English (including East African / Kenyan English pronunciation) with occasional Swahili, Kikuyu, or Dancehall song titles and artist names. Never speak, translate into, or reply in Swahili, Sheng, Chinese, or any other non-English language.
         """.trimIndent()
     }
 
@@ -930,11 +939,15 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             return
         }
 
-        sc.optJSONObject("inputTranscription")?.optString("text")?.takeIf { it.isNotBlank() }?.let { chunk ->
-            activeUserText.append(chunk)
-            _uiState.value = _uiState.value.copy(
-                liveTranscript = activeUserText.toString().trim()
-            )
+        sc.optJSONObject("inputTranscription")?.optString("text")?.let { rawChunk ->
+            val cleaned = sanitizeEnglishTranscript(rawChunk)
+            if (cleaned.isNotEmpty()) {
+                activeUserText.append(cleaned)
+                val display = activeUserText.toString().replace(Regex("\\s+"), " ").trim()
+                if (display.isNotBlank()) {
+                    _uiState.value = _uiState.value.copy(liveTranscript = display)
+                }
+            }
         }
 
         sc.optJSONObject("outputTranscription")?.optString("text")?.takeIf { it.isNotBlank() }?.let { chunk ->
@@ -1047,7 +1060,7 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 responsesArr.put(JSONObject().apply {
                     put("id", call.callId)
                     put("name", call.name)
-                    put("response", result)
+                    put("response", JSONObject().put("output", result))
                 })
             }
 
@@ -1071,7 +1084,11 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
     // ─── Step 4: Bidirectional Hardware-AEC AudioRecord & AudioTrack ─────────
 
     @SuppressLint("MissingPermission")
-    private fun startAudioInputCapture(sampleRateHz: Int = SAMPLE_RATE_HZ) {
+    private fun startAudioInputCapture(
+        sampleRateHz: Int = SAMPLE_RATE_HZ,
+        preferredSource: Int = MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        allowFallback: Boolean = true
+    ) {
         stopAudioInputCapture()
         val frameBytes = ((sampleRateHz * 2) / 25).coerceAtLeast(640) // 40ms @ 16kHz (1280B) or 24kHz (1920B)
         val minBuf = AudioRecord.getMinBufferSize(
@@ -1080,16 +1097,42 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
             AudioFormat.ENCODING_PCM_16BIT
         ).coerceAtLeast(frameBytes * 4)
 
-        val rec = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRateHz,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            minBuf
-        )
-        if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord failed to initialize at ${sampleRateHz}Hz")
-            runCatching { rec.release() }
+        val candidateSources = if (preferredSource == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+            listOf(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION to "VOICE_RECOGNITION",
+                MediaRecorder.AudioSource.MIC to "MIC",
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION to "VOICE_COMMUNICATION"
+            )
+        } else {
+            listOf(
+                preferredSource to "FALLBACK_$preferredSource",
+                MediaRecorder.AudioSource.MIC to "MIC"
+            )
+        }
+
+        var rec: AudioRecord? = null
+        var chosenLabel = "UNKNOWN"
+        for ((src, label) in candidateSources) {
+            val attempt = runCatching {
+                AudioRecord(
+                    src,
+                    sampleRateHz,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    minBuf
+                )
+            }.getOrNull()
+            if (attempt != null && attempt.state == AudioRecord.STATE_INITIALIZED) {
+                rec = attempt
+                chosenLabel = label
+                break
+            } else {
+                runCatching { attempt?.release() }
+            }
+        }
+
+        if (rec == null) {
+            Log.e(TAG, "AudioRecord failed to initialize on all audio sources at ${sampleRateHz}Hz")
             return
         }
 
@@ -1100,30 +1143,60 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         if (NoiseSuppressor.isAvailable()) {
             noiseSuppressor = runCatching { NoiseSuppressor.create(sessionId)?.apply { enabled = true } }.getOrNull()
         }
-        if (AutomaticGainControl.isAvailable()) {
-            automaticGainControl = runCatching { AutomaticGainControl.create(sessionId)?.apply { enabled = true } }.getOrNull()
-        }
+        // Avoid stacking hardware AGC on top of VOICE_RECOGNITION, which already applies wideband speech gain
+        // and caused peakRms=1.000 clipping + consonant distortion on Redmi devices.
+        automaticGainControl = null
 
         audioRecord = rec
         isCapturingAudio = true
         rec.startRecording()
+        Log.i(TAG, "🎤 Mic capture started (source=$chosenLabel, rate=${sampleRateHz}Hz, aec=${echoCanceler != null}, ns=${noiseSuppressor != null}, agc=false)")
 
         recordJob = scope.launch {
             val frame = ByteArray(frameBytes)
+            var zeroFrameStreak = 0
+            var framesLogged = 0
+            var peakRmsWindow = 0f
             while (isActive && isCapturingAudio && webSocket != null) {
                 val readBytes = rec.read(frame, 0, frame.size)
                 if (readBytes > 0) {
                     val rms = computeNormalizedEnergy(frame, readBytes)
+                    if (rms > peakRmsWindow) peakRmsWindow = rms
                     _uiState.value = _uiState.value.copy(micEnergy = rms)
+
+                    if (rms <= 0.0005f) {
+                        zeroFrameStreak++
+                        if (allowFallback && zeroFrameStreak == 25) {
+                            Log.w(TAG, "⚠️ Mic returned 25 consecutive silent frames on $chosenLabel — reopening on AudioSource.MIC")
+                            delay(150L)
+                            if (isActive && isCapturingAudio && webSocket != null) {
+                                startAudioInputCapture(
+                                    sampleRateHz = sampleRateHz,
+                                    preferredSource = MediaRecorder.AudioSource.MIC,
+                                    allowFallback = false
+                                )
+                            }
+                            return@launch
+                        }
+                    } else {
+                        zeroFrameStreak = 0
+                    }
+
+                    framesLogged++
+                    if (framesLogged % 50 == 0) {
+                        Log.d(TAG, "🎤 Mic telemetry ($chosenLabel @ ${sampleRateHz}Hz): peakRms=${"%.3f".format(peakRmsWindow)} muted=$suppressMicStreaming")
+                        peakRmsWindow = 0f
+                    }
+
                     if (!suppressMicStreaming) {
                         val b64 = Base64.encodeToString(frame, 0, readBytes, Base64.NO_WRAP)
                         val ev = if (activeProvider == "gemini") {
                             JSONObject().apply {
                                 put("realtimeInput", JSONObject().apply {
-                                    put("mediaChunks", JSONArray().put(JSONObject().apply {
+                                    put("audio", JSONObject().apply {
                                         put("mimeType", "audio/pcm;rate=$sampleRateHz")
                                         put("data", b64)
-                                    }))
+                                    })
                                 })
                             }
                         } else {
@@ -1137,6 +1210,18 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 }
             }
         }
+    }
+
+    private fun sanitizeEnglishTranscript(raw: String): String {
+        // Strip stray CJK / non-Latin hallucinated characters caused by ambient noise bursts
+        val sb = StringBuilder(raw.length)
+        for (ch in raw) {
+            val code = ch.code
+            if (code in 0x20..0x7E || code in 0x00C0..0x024F || ch == '\n') {
+                sb.append(ch)
+            }
+        }
+        return sb.toString()
     }
 
     private fun stopAudioInputCapture() {
