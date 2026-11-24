@@ -369,12 +369,24 @@ fun PulseAgentScreen(
                         )
                     }
 
+                    val cleanPromptLine = when {
+                        hasPendingApproval && agentState == AgentState.LISTENING -> "Say \"Yes\" to play or \"Skip\""
+                        hasPendingApproval -> "Waiting for your approval"
+                        realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.CONNECTING -> "Connecting to TuneMind…"
+                        realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.LISTENING -> "I'm listening…"
+                        realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.THINKING_CALLING_TOOLS ->
+                            if (activeToolStatus.isNotBlank()) activeToolStatus else "Checking your music…"
+                        realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.SPEAKING -> "TuneMind is speaking"
+                        realtimePhase == com.tunemind.app.domain.voice.RealtimePhase.ERROR -> "Tap the orb to try again"
+                        agentState == AgentState.LISTENING -> "I'm listening…"
+                        agentState == AgentState.THINKING -> "Checking your music…"
+                        agentState == AgentState.SPEAKING -> "TuneMind is speaking"
+                        agentState == AgentState.ERROR -> "Tap the orb to try again"
+                        else -> "Tap orb or say \"Hi TuneMind\""
+                    }
+
                     Text(
-                        text = if (liveTranscript.isNotBlank()) {
-                            liveTranscript
-                        } else {
-                            "Tap orb or say \"Hi TuneMind\""
-                        },
+                        text = cleanPromptLine,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFFFAFAFA),
@@ -385,11 +397,7 @@ fun PulseAgentScreen(
                     )
 
                     Text(
-                        text = if (flowAnalysis.isNotBlank() && !flowAnalysis.contains("Studio Neural Engine", ignoreCase = true)) {
-                            flowAnalysis
-                        } else {
-                            "Ask for a song, shift the mood, or start your mix"
-                        },
+                        text = "Ask for a song, shift the mood, or start your mix",
                         fontSize = 13.sp,
                         color = Color(0xFFB8B2CC),
                         textAlign = TextAlign.Center,
@@ -416,7 +424,7 @@ fun PulseAgentScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Voice commands",
+                                text = "App & Voice guide",
                                 color = Color(0xFFD6D1E6),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium

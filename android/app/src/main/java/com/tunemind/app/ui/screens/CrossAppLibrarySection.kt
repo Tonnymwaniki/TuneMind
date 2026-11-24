@@ -618,6 +618,13 @@ fun CrossAppLibrarySection(
                 }
             }
 
+            visibleTracks.isEmpty() && spotifySyncState.isSyncing -> {
+                com.tunemind.app.ui.components.TuneMindShimmerTrackSkeletonList(
+                    count = 5,
+                    accentColor = theme.primaryAccent
+                )
+            }
+
             visibleTracks.isEmpty() -> {
                 LibraryEmptyCard(
                     title = when {
@@ -644,7 +651,11 @@ fun CrossAppLibrarySection(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 110.dp)
                 ) {
-                    items(visibleTracks, key = { it.canonicalTrackKey }) { track ->
+                    items(
+                        items = visibleTracks,
+                        key = { it.canonicalTrackKey },
+                        contentType = { "track_row" }
+                    ) { track ->
                         val isPlaying = isTrackCurrentlyPlaying(track.title, track.artist)
                         val (inVault, freshness) = resolveTrackVaultStatus(track.title, track.artist)
                         val playerPkg = if (selectedTabKey != "ALL" && selectedTabKey != "LIKED") {

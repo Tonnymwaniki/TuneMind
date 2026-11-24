@@ -56,6 +56,8 @@ fun SettingsScreen(
     onOpenAccountAuth: () -> Unit = {},
     onOpenSupport: () -> Unit = {},
     onOpenLegal: (Int) -> Unit = {},
+    onOpenAppGuide: () -> Unit = {},
+    onReplayWelcomeTour: () -> Unit = {},
     openSpotifySetupInitially: Boolean = false,
     onSpotifySetupSheetConsumed: () -> Unit = {}
 ) {
@@ -1105,6 +1107,38 @@ fun SettingsScreen(
                 StudioSectionHeader(title = "Help & Legal")
                 Spacer(modifier = Modifier.height(6.dp))
                 StudioHairlineDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenAppGuide() }
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("TuneMind App Guide", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text("How Freshness, Resting Vault, Voice AI & Music Apps work", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = colors.primaryAccent)
+                    }
+                    StudioHairlineDivider()
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onReplayWelcomeTour() }
+                            .padding(vertical = 13.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Replay 4-Step Welcome Tour", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFFF8FAFC))
+                            Text("Quick visual overview of TuneMind essentials", fontSize = 12.sp, color = Color.White.copy(alpha = 0.56f))
+                        }
+                        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color.White.copy(alpha = 0.45f))
+                    }
+                    StudioHairlineDivider()
 
                     Row(
                         modifier = Modifier

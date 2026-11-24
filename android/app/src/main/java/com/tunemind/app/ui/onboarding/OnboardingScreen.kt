@@ -717,10 +717,11 @@ private fun AuthLoginStep(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (awaitingGoogleOAuthCallback) {
-                            CircularProgressIndicator(
+                            com.tunemind.app.ui.components.TuneMindStudioLoader(
                                 color = Color(0xFF0D0D0D),
+                                secondaryColor = Color(0xFF38BDF8),
                                 strokeWidth = 2.dp,
-                                modifier = Modifier.size(18.dp)
+                                size = 18.dp
                             )
                         } else {
                             Image(
@@ -1097,10 +1098,11 @@ private fun AuthLoginStep(
                         .height(54.dp)
                 ) {
                     if (isSubmitting) {
-                        CircularProgressIndicator(
+                        com.tunemind.app.ui.components.TuneMindStudioLoader(
                             color = Color(0xFF09090B),
+                            secondaryColor = Color(0xFF38BDF8),
                             strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
+                            size = 18.dp
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                     }

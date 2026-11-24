@@ -17,11 +17,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -129,7 +131,8 @@ fun DopamineVaultScreen(
     onAddToFresh: (title: String, artist: String, sourcePackage: String?, spotifyUri: String?, trackId: String?, albumArtUrl: String?) -> Unit = { _, _, _, _, _, _ -> },
     onRemoveFromFresh: (title: String, artist: String, spotifyUri: String?, trackId: String?) -> Unit = { _, _, _, _ -> },
     hasProAccess: Boolean = true,
-    onOpenProUpgrade: ((String?) -> Unit)? = null
+    onOpenProUpgrade: ((String?) -> Unit)? = null,
+    onOpenGuide: () -> Unit = {}
 ) {
     val theme = LocalAdaptiveTheme.current
     val repetitionSensitivity by com.tunemind.app.domain.voice.AgentSettingsStore.repetitionSensitivity.collectAsState()
@@ -577,16 +580,32 @@ fun DopamineVaultScreen(
                         letterSpacing = (-0.4).sp
                     )
                 }
-                Text(
-                    text = if (selectedTab == 2) {
-                        "Taste Match ${learningState.intelligenceScorePercent}%"
-                    } else {
-                        "${peakFreshSongs.size} ready · ${coolingDownSongs.size} resting"
-                    },
-                    color = if (selectedTab == 2) theme.primaryAccent else Color.White.copy(alpha = 0.56f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (selectedTab == 2) {
+                            "Taste Match ${learningState.intelligenceScorePercent}%"
+                        } else {
+                            "${peakFreshSongs.size} ready · ${coolingDownSongs.size} resting"
+                        },
+                        color = if (selectedTab == 2) theme.primaryAccent else Color.White.copy(alpha = 0.56f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    IconButton(
+                        onClick = onOpenGuide,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
+                            contentDescription = "Fresh & Vault Guide",
+                            tint = Color.White.copy(alpha = 0.70f),
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -853,7 +872,8 @@ fun DopamineVaultScreen(
                     } else {
                         itemsIndexed(
                             items = displayedSongs,
-                            key = { index, song -> "fresh_${currentTab}_${song.id}_$index" }
+                            key = { _, song -> "fresh_${currentTab}_${song.id}" },
+                            contentType = { _, _ -> "track_row" }
                         ) { _, song ->
                             val isCurrentlyPlaying = isTrackCurrentlyPlaying(song.title, song.artist, song.spotifyUri)
                             val accurateCount = resolvePlayCount(song.title, song.artist, song.spotifyUri)

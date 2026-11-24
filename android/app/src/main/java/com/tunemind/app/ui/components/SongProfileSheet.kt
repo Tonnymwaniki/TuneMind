@@ -574,7 +574,7 @@ fun SongProfile(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.padding(vertical = 4.dp)
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = theme.primaryAccent, strokeWidth = 2.dp)
+                        TuneMindStudioLoader(size = 16.dp, color = theme.primaryAccent, strokeWidth = 2.dp)
                         Text("Getting track notes…", fontSize = 13.sp, color = Color.White.copy(alpha = 0.62f))
                     }
                 } else if (claudeInsightText != null) {

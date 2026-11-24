@@ -464,6 +464,14 @@ class RealtimeVoiceAgent(
 
             override fun onClosing(sock: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "${minted.provider} Realtime closing ($code): $reason")
+                runCatching { sock.close(1000, null) }
+                if (sock === webSocket && code != 1000 && isConnectingOrActive.get()) {
+                    stopSessionInternal(
+                        RealtimePhase.ERROR,
+                        "Voice connection interrupted ($code) — tap the orb to retry.",
+                        reason.ifBlank { "Closed ($code)" }
+                    )
+                }
             }
 
             override fun onClosed(sock: WebSocket, code: Int, reason: String) {
@@ -590,10 +598,28 @@ class RealtimeVoiceAgent(
         val displayName = serverContext?.optString("display_name")?.takeIf { it.isNotBlank() }
             ?: session.displayName.ifBlank { "TuneMind Listener" }
         val spotifyStatus = SpotifyPremiumConnectManager.ensureLoaded(appContext)
+        val billingState = com.tunemind.app.billing.TuneMindBillingManager.getInstance(appContext).state.value
+        val registry = com.tunemind.app.provider.MusicProviderRegistry.getInstance(appContext)
+        val installedPlayers = registry.getInstalledProviders()
+            .filter { it.providerId != "tunemind_inapp" && it.providerId != "local_files" }
+            .joinToString(", ") { it.displayName }
+            .ifBlank { "None detected" }
+        val defaultPlayerName = registry.getProvider(registry.getPreferredProviderId()).displayName
+        val spotifyTierLabel = when {
+            spotifyStatus.isConnected && spotifyStatus.isPremium -> "Premium (silent background playback inside TuneMind)"
+            spotifyStatus.isConnected -> "Free (opens Spotify directly to play)"
+            else -> "Not connected"
+        }
+        val hasFreeTrialOffer = billingState.plans.any { it.hasFreeTrialOffer }
+        val trialLabel = when {
+            billingState.isTrial -> "7-day TuneMind Pro Free Trial active (${billingState.trialDaysRemaining} days remaining)"
+            billingState.hasProAccess -> "TuneMind Pro Active (${billingState.tier.name})"
+            hasFreeTrialOffer -> "TuneMind Free Tier (7-day Free Trial available)"
+            else -> "TuneMind Free Tier"
+        }
         val localTime = SimpleDateFormat("HH:mm (EEEE)", Locale.getDefault()).format(Date())
         val tz = TimeZone.getDefault().id
         val kidsMode = AgentSettingsStore.isKidsModeEnabled(appContext)
-        val stayInApp = AgentSettingsStore.isStayInTuneMindEnabled(appContext)
         val serverSummary = serverContext?.toString() ?: "{}"
 
         return """
@@ -602,21 +628,40 @@ You are TuneMind — the warm, natural, human-sounding AI music companion built 
 LIVE SESSION TELEMETRY:
 - Listener: $displayName (user_id: ${session.userId.ifBlank { "local" }})
 - Local time: $localTime ($tz)
-- Spotify status: connected=${spotifyStatus.isConnected}, premium=${spotifyStatus.isPremium}
-- Kids mode: $kidsMode | Stay in TuneMind: $stayInApp
+- TuneMind Plan / Trial: $trialLabel
+- Spotify account: $spotifyTierLabel
+- Default music player: $defaultPlayerName | Detected music apps on phone: $installedPlayers
+- Kids mode: $kidsMode
 - Initial server-scoped snapshot: $serverSummary
+
+PLAYER ROUTING & 7-DAY TRIAL EXPLANATION (KNOW & EXPLAIN ACCURATELY):
+- TuneMind 7-Day Free Trial: All new TuneMind listeners get a 7-day free trial of TuneMind Pro (full access to the voice companion, Song Cards, Resting Vault, and discovery). Note that the TuneMind 7-day trial is separate from a user's Spotify subscription.
+- Spotify Premium: Plays silently in the background WITHOUT leaving TuneMind.
+- Spotify Free: Spotify's platform blocks background Connect playback on Free accounts, so TuneMind opens the Spotify app directly to play the song — and reassures the listener cleanly ("Since you're on Spotify Free, I'll open Spotify directly to play it for you — silent background playback without leaving TuneMind requires Spotify Premium, and TuneMind still tracks your Song Cards and stats!").
+- YouTube Music (ONLY when the listener selected YouTube Music as default or asks for it): Plays inside TuneMind's built-in YouTube player without leaving the app.
+- Boomplay, Audiomack, and any other detected music app: Opens that music app directly and plays the requested song there. Never switch to Audius.
 
 CORE REASONING & ZERO-HALLUCINATION RULES:
 1. NEVER guess or invent song titles, artist names, play counts, playlists, devices, or playback state. ALWAYS call the appropriate tools FIRST and inspect their JSON output before speaking facts.
 2. CONTEXTUAL REFERENCE RESOLUTION: When the user refers to "that song", "the paused song", "that same artist", "this track", or asks about what was just playing / their most recent songs, ALWAYS call `get_live_playback_state` first (it reads live MediaSession, live Spotify /me/player including paused tracks, and `recent_chronological_tracks`), then chain `get_spotify_artist_top_tracks`, `query_listening_history_and_analytics` (`sort_by="recent"`), `search_spotify_catalog`, or `get_spotify_account_library` as needed before acting or answering.
-3. MULTI-STEP VERIFICATION BEFORE CLAIMING ACTION:
+3. PLAYBACK APPROVAL GATE & MULTI-STEP VERIFICATION:
+   - ALWAYS ASK BEFORE PLAYING: Before calling `play_track`, `play_track_sequence`, or `play_spotify_context` to play ANY song, sequence, or playlist, you MUST first tell the listener the exact song title(s) and artist(s) and ask for their approval — e.g. "Should I play [Song] by [Artist]?" or "Should I play these songs: [Song 1], [Song 2]?" — and WAIT for them to approve ("yes", "sure", "go ahead", "play it", "do it") in their next turn. NEVER jump straight into executing playback before the listener approves!
+   - If the listener says "no", "skip", or "something else", suggest a different verified song and ask again.
+   - Only call `play_track` / `play_track_sequence` / `play_spotify_context` AFTER the listener explicitly confirms your proposed song(s).
    - Never claim a song is playing, queued, paused, skipped, liked, vaulted, or saved to a playlist unless the corresponding tool returned `"ok": true`.
-   - When asked to play or resume a paused song: call `control_playback` with `"resume"` (or `play_track` with the resolved track/URI).
-   - When asked to play multiple songs (e.g. "play my 4 recent songs", "play my top 3 songs", or several named tracks), call `play_track_sequence` with either `preset_source` (`"recent"`, `"most_played"`, `"liked"`, `"freshest"`) + `count` OR explicit `tracks` array so all songs play back-to-back seamlessly.
-   - When asked to play a single track: verify the track + URI via tools first and call `play_track` (or propose concisely and wait for confirmation if it's an open mood/suggestion request).
-4. AUTHENTIC USER ISOLATION: All database, Spotify, Vault, and preference tools are strictly scoped to this authenticated user's session.
-5. CONVERSATIONAL VOICE STYLE: Speak warmly and naturally in 1–3 concise sentences unless more detail is asked for. No markdown symbols, bullet formatting, or robotic phrasing. If Kids Mode is true or clean/kids music is requested, avoid explicit tracks (`explicit: true`).
-6. STRICT ENGLISH-ONLY LANGUAGE RULE: Always understand and respond strictly in clear, natural English only. The listener speaks English (including East African / Kenyan English pronunciation) with occasional Swahili, Kikuyu, or Dancehall song titles and artist names. Never speak, translate into, or reply in Swahili, Sheng, Chinese, or any other non-English language.
+   - For simple playback controls on the ALREADY active song (pause, resume, next, previous, volume, like), execute `control_playback` immediately without asking.
+4. FRESHNESS, ALL-SCREEN AWARENESS & ZERO-REPEAT VARIETY:
+   - Whenever the user asks for fresh songs, recommendations, "surprise me", "what's in my Fresh screen / For You / playlists", or something they haven't heard in a while, ALWAYS call `get_fresh_and_discovery_picks` first. It reads across the user's Fresh screen (all 90+ fresh tracks), For You AI Discovery Crate, Dopamine Capsule, and TuneMind/Spotify playlists, and automatically excludes songs already played or served recently (persisted across app restarts).
+   - NEVER repeat a song that was recently played, suggested, or listed in `recently_played_or_served_avoid` unless the user explicitly asks to replay that specific song. Actively vary artists and sources (Fresh screen, For You crate, playlists, and Spotify catalog) across every request.
+5. SONG CARD & RELATIONSHIP INTELLIGENCE:
+   - Whenever the user asks how many times they've played a song, their skip count, freshness/fatigue score, vault status, which playlists contain a song, or their relationship/history with the current song or any named song, ALWAYS call `get_song_card_details` first. NEVER say you don't know the play count without calling `get_song_card_details`.
+6. AUTHENTIC USER ISOLATION: All database, Spotify, Vault, and preference tools are strictly scoped to this authenticated user's session.
+7. CONVERSATIONAL VOICE STYLE: Speak warmly and naturally in 1–3 concise sentences unless more detail is asked for. No markdown symbols, bullet formatting, or robotic phrasing. If Kids Mode is true or clean/kids music is requested, avoid explicit tracks (`explicit: true`).
+8. STRICT ENGLISH-ONLY & WAKE NAME RECOGNITION: Always understand and respond strictly in clear, natural English only. The listener speaks English (including East African / Kenyan English pronunciation) with occasional Swahili, Kikuyu, or Dancehall song titles and artist names. Never speak, translate into, or reply in Swahili, Sheng, Chinese, or any other non-English language. Your name is TuneMind (pronounced "Tune-Mind") — because speech recognition sometimes mishears "TuneMind" as "twin", "tune mine", "to mind", or "two mind", always recognize greetings like "Hi twin" or "Hey tune mine" as the listener greeting you as "Hi TuneMind" and respond naturally as TuneMind.
+9. NEW LISTENERS, EMPTY LIBRARIES & DIVERSE QUESTIONS:
+   - Brand-new user with empty history/playlists: If tools return zero tracks, zero plays, or no playlists, NEVER invent history. Warmly let them know their TuneMind library is just getting started, ask what artist, genre, or mood they love, or call `search_spotify_catalog` to propose a real song (and ask before playing).
+   - No Spotify or Spotify Free: If `spotify.is_connected` is false or `spotify.is_premium` is false, never claim Spotify Connect is active. You can still recommend music, answer questions, use installed players reported by `get_live_playback_state`, or gently mention they can link Spotify in Profile anytime.
+   - General, App-Help, or Off-Topic Questions: If the listener asks how TuneMind works (Freshness %, Resting Vault cooldowns, Dopamine Capsule, Song Cards, Hearing Health, Sleep Timer, Themes) or asks casual/off-topic questions (mood, greetings, jokes, general chat), answer warmly and concisely in 1–2 sentences without forcing unnecessary tool calls. If a tool returns an error or network timeout, explain it gently and naturally — never read raw JSON or technical error codes aloud.
         """.trimIndent()
     }
 
@@ -1133,6 +1178,11 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
 
         if (rec == null) {
             Log.e(TAG, "AudioRecord failed to initialize on all audio sources at ${sampleRateHz}Hz")
+            stopSessionInternal(
+                finalPhase = RealtimePhase.ERROR,
+                transcript = "Microphone is busy or unavailable — tap the orb to retry.",
+                error = "Microphone unavailable"
+            )
             return
         }
 
@@ -1147,27 +1197,45 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
         // and caused peakRms=1.000 clipping + consonant distortion on Redmi devices.
         automaticGainControl = null
 
+        val startedOk = runCatching { rec.startRecording() }.isSuccess
+        if (!startedOk) {
+            Log.e(TAG, "AudioRecord.startRecording() failed on $chosenLabel")
+            runCatching { rec.release() }
+            stopSessionInternal(
+                finalPhase = RealtimePhase.ERROR,
+                transcript = "Microphone couldn't start — tap the orb to retry.",
+                error = "AudioRecord start failed"
+            )
+            return
+        }
         audioRecord = rec
         isCapturingAudio = true
-        rec.startRecording()
         Log.i(TAG, "🎤 Mic capture started (source=$chosenLabel, rate=${sampleRateHz}Hz, aec=${echoCanceler != null}, ns=${noiseSuppressor != null}, agc=false)")
 
         recordJob = scope.launch {
             val frame = ByteArray(frameBytes)
             var zeroFrameStreak = 0
+            var everHeardNonZero = false
             var framesLogged = 0
             var peakRmsWindow = 0f
             while (isActive && isCapturingAudio && webSocket != null) {
-                val readBytes = rec.read(frame, 0, frame.size)
+                val readBytes = runCatching { rec.read(frame, 0, frame.size) }.getOrElse { -1 }
+                if (readBytes < 0) {
+                    Log.w(TAG, "AudioRecord.read returned $readBytes — stopping mic loop cleanly")
+                    break
+                }
                 if (readBytes > 0) {
                     val rms = computeNormalizedEnergy(frame, readBytes)
                     if (rms > peakRmsWindow) peakRmsWindow = rms
                     _uiState.value = _uiState.value.copy(micEnergy = rms)
 
-                    if (rms <= 0.0005f) {
+                    if (rms > 0f) {
+                        everHeardNonZero = true
+                        zeroFrameStreak = 0
+                    } else if (!everHeardNonZero) {
                         zeroFrameStreak++
-                        if (allowFallback && zeroFrameStreak == 25) {
-                            Log.w(TAG, "⚠️ Mic returned 25 consecutive silent frames on $chosenLabel — reopening on AudioSource.MIC")
+                        if (allowFallback && zeroFrameStreak == 30) {
+                            Log.w(TAG, "⚠️ Mic returned 30 all-zero hardware frames at startup on $chosenLabel — reopening on AudioSource.MIC")
                             delay(150L)
                             if (isActive && isCapturingAudio && webSocket != null) {
                                 startAudioInputCapture(
@@ -1178,8 +1246,6 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                             }
                             return@launch
                         }
-                    } else {
-                        zeroFrameStreak = 0
                     }
 
                     framesLogged++
@@ -1221,7 +1287,11 @@ CORE REASONING & ZERO-HALLUCINATION RULES:
                 sb.append(ch)
             }
         }
-        return sb.toString()
+        // Normalize common ASR wake-name mishearings ("Hi twin", "Hey tune mine") -> "TuneMind"
+        return sb.toString().replace(
+            Regex("\\b(hi|hey|hello)\\s+(twin|tune\\s*mine|to\\s*mind|two\\s*mind|tunemine)\\b", RegexOption.IGNORE_CASE),
+            "$1 TuneMind"
+        )
     }
 
     private fun stopAudioInputCapture() {

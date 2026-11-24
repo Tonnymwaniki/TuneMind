@@ -94,12 +94,21 @@ fun rememberResolvedTrackMedia(
         UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist)
     }
 
-    val visualsMap by repo.trackVisualsMapFlow.collectAsState()
-    val artistsMap by repo.artistProfilesMapFlow.collectAsState()
-
-    val resolved = remember(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl) {
-        resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
+    val perTrackFlow = remember(repo, tKey, aKey, fallbackAlbumArtUrl) {
+        combine(repo.trackVisualsMapFlow, repo.artistProfilesMapFlow) { visualsMap, artistsMap ->
+            resolveVisualSlice(visualsMap, artistsMap, tKey, aKey, fallbackAlbumArtUrl)
+        }.distinctUntilChanged()
     }
+    val initialResolved = remember(tKey, aKey, fallbackAlbumArtUrl) {
+        resolveVisualSlice(
+            repo.trackVisualsMapFlow.value,
+            repo.artistProfilesMapFlow.value,
+            tKey,
+            aKey,
+            fallbackAlbumArtUrl
+        )
+    }
+    val resolved by perTrackFlow.collectAsState(initial = initialResolved)
 
     LaunchedEffect(tKey) {
         if (cleanTitle.isNotBlank() && resolved.albumArtUrl.isNullOrBlank()) {
@@ -120,13 +129,15 @@ fun rememberResolvedArtistPhoto(
     val cleanArtist = remember(artistName) { artistName?.trim().orEmpty() }
     val aKey = remember(cleanArtist) { UniversalMusicVisualRepository.normalizeArtistKey(cleanArtist) }
 
-    val artistsMap by repo.artistProfilesMapFlow.collectAsState()
-    val photo = remember(artistsMap, aKey, artistId) {
-        (if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null)
-            ?: artistId?.takeIf { it.isNotBlank() }?.let { id ->
-                artistsMap.values.firstOrNull { it.artistId == id }?.imageUrl
-            }
+    val photoFlow = remember(repo, aKey, artistId) {
+        repo.artistProfilesMapFlow.map { artistsMap ->
+            (if (aKey.isNotBlank()) artistsMap[aKey]?.imageUrl else null)
+                ?: artistId?.takeIf { it.isNotBlank() }?.let { id ->
+                    artistsMap.values.firstOrNull { it.artistId == id }?.imageUrl
+                }
+        }.distinctUntilChanged()
     }
+    val photo by photoFlow.collectAsState(initial = null)
 
     LaunchedEffect(aKey) {
         if (cleanArtist.isNotBlank() && photo.isNullOrBlank()) {
@@ -148,6 +159,10 @@ fun TuneMindAvatarCircle(
     borderColor: Color = accentColor.copy(alpha = 0.55f)
 ) {
     val context = LocalContext.current
+    val isLowTier = rememberIsLowTierDevice()
+    val targetPx = remember(size) {
+        (size.value * context.resources.displayMetrics.density * 1.5f).toInt().coerceIn(48, 512)
+    }
     val cleanUrl = imageUrl?.trim()?.takeIf {
         it.startsWith("http") || it.startsWith("file://") || it.startsWith("/")
     }
@@ -179,10 +194,13 @@ fun TuneMindAvatarCircle(
         )
         if (cleanUrl != null && !imageFailed) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(cleanUrl)
-                    .crossfade(true)
-                    .build(),
+                model = remember(cleanUrl, targetPx, isLowTier) {
+                    ImageRequest.Builder(context)
+                        .data(cleanUrl)
+                        .size(targetPx)
+                        .crossfade(if (isLowTier) 0 else 120)
+                        .build()
+                },
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 onError = { imageFailed = true },
@@ -219,6 +237,10 @@ fun LayeredSongArtistBadge(
     size: Dp = 46.dp
 ) {
     val context = LocalContext.current
+    val isLowTier = rememberIsLowTierDevice()
+    val density = context.resources.displayMetrics.density
+    val albumTargetPx = remember(size, density) { (size.value * density * 1.5f).toInt().coerceIn(64, 512) }
+    val artistTargetPx = remember(size, density) { (size.value * 0.44f * density * 1.5f).toInt().coerceIn(36, 160) }
     val cleanAlbumUrl = albumArtUrl?.trim()?.takeIf { it.startsWith("http") }
     val cleanArtistUrl = artistImageUrl?.trim()?.takeIf { it.startsWith("http") }
     var albumFailed by remember(cleanAlbumUrl) { mutableStateOf(false) }
@@ -259,7 +281,13 @@ fun LayeredSongArtistBadge(
 
             if (cleanAlbumUrl != null && !albumFailed) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context).data(cleanAlbumUrl).crossfade(true).build(),
+                    model = remember(cleanAlbumUrl, albumTargetPx, isLowTier) {
+                        ImageRequest.Builder(context)
+                            .data(cleanAlbumUrl)
+                            .size(albumTargetPx)
+                            .crossfade(if (isLowTier) 0 else 120)
+                            .build()
+                    },
                     contentDescription = "$title cover",
                     contentScale = ContentScale.Crop,
                     onError = { albumFailed = true },
@@ -286,7 +314,13 @@ fun LayeredSongArtistBadge(
             )
             if (cleanArtistUrl != null && !artistFailed) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context).data(cleanArtistUrl).crossfade(true).build(),
+                    model = remember(cleanArtistUrl, artistTargetPx, isLowTier) {
+                        ImageRequest.Builder(context)
+                            .data(cleanArtistUrl)
+                            .size(artistTargetPx)
+                            .crossfade(if (isLowTier) 0 else 100)
+                            .build()
+                    },
                     contentDescription = "$artist profile",
                     contentScale = ContentScale.Crop,
                     onError = { artistFailed = true },

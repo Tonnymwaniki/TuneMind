@@ -275,16 +275,25 @@ fun LazyListScope.forYouDiscoveryItems(
                             lineHeight = 18.sp
                         )
                     } else if (isDiscovering) {
-                        CircularProgressIndicator(
-                            color = Color(0xFF38BDF8),
-                            strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        Text(
-                            text = "Curating 12 genre picks + 3 new-genre wildcards...",
-                            color = Color(0xFFF8FAFC),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            com.tunemind.app.ui.components.TuneMindStudioLoader(
+                                size = 22.dp,
+                                color = Color(0xFF38BDF8)
+                            )
+                            Text(
+                                text = "Curating your personalized picks…",
+                                color = Color(0xFFF8FAFC),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        com.tunemind.app.ui.components.TuneMindShimmerTrackSkeletonList(
+                            count = 4,
+                            accentColor = Color(0xFF38BDF8)
                         )
                     } else {
                         Text(
@@ -648,10 +657,10 @@ private fun ForYouAiHeroCard(
                         contentAlignment = Alignment.Center
                     ) {
                         if (isDiscovering) {
-                            CircularProgressIndicator(
+                            com.tunemind.app.ui.components.TuneMindStudioLoader(
                                 color = aiCyan,
                                 strokeWidth = 2.dp,
-                                modifier = Modifier.size(16.dp)
+                                size = 16.dp
                             )
                         } else {
                             Icon(

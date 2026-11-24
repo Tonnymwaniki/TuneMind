@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Refresh
@@ -55,7 +56,8 @@ import kotlin.math.roundToInt
 @Composable
 fun HearingInsightsScreen(
     vm: TuneMindViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenGuide: () -> Unit = {}
 ) {
     val hearingState by vm.hearingInsightsState.collectAsState()
     val homeState by vm.homeState.collectAsState()
@@ -223,12 +225,21 @@ fun HearingInsightsScreen(
                     )
                 }
 
-                IconButton(onClick = { vm.refreshHearingInsights() }) {
-                    Icon(
-                        imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "Refresh Audio Output",
-                        tint = Color.White.copy(alpha = 0.80f)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onOpenGuide) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.HelpOutline,
+                            contentDescription = "Safe Listening Guide",
+                            tint = Color.White.copy(alpha = 0.80f)
+                        )
+                    }
+                    IconButton(onClick = { vm.refreshHearingInsights() }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh Audio Output",
+                            tint = Color.White.copy(alpha = 0.80f)
+                        )
+                    }
                 }
             }
 

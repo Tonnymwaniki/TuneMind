@@ -43,11 +43,12 @@ fun StudioAmbientBackground(
     val bottomGlowAlpha = if (isActivePulse) (0.11f * intensity).coerceIn(0.05f, 0.14f)
     else (0.07f * intensity).coerceIn(0.03f, 0.10f)
 
+    val isLowTier = rememberIsLowTierDevice()
     val bgBrush = remember(topBg, midBg, deepBg) {
         Brush.verticalGradient(colors = listOf(topBg, midBg, deepBg))
     }
 
-    val glowModifier = remember(topAccent, bottomAccent, topGlowAlpha, bottomGlowAlpha) {
+    val glowModifier = remember(topAccent, bottomAccent, topGlowAlpha, bottomGlowAlpha, isLowTier) {
         Modifier
             .fillMaxSize()
             .drawWithCache {
@@ -66,7 +67,7 @@ fun StudioAmbientBackground(
                 )
                 val lowerCenter = Offset(w * 0.82f, h * 0.84f)
                 val lowerRadius = (w * 0.90f).coerceAtLeast(1f)
-                val lowerBrush = Brush.radialGradient(
+                val lowerBrush = if (isLowTier) null else Brush.radialGradient(
                     colors = listOf(
                         bottomAccent.copy(alpha = bottomGlowAlpha),
                         Color.Transparent
@@ -76,7 +77,9 @@ fun StudioAmbientBackground(
                 )
                 onDrawBehind {
                     drawCircle(brush = topBrush, center = topCenter, radius = topRadius)
-                    drawCircle(brush = lowerBrush, center = lowerCenter, radius = lowerRadius)
+                    if (lowerBrush != null) {
+                        drawCircle(brush = lowerBrush, center = lowerCenter, radius = lowerRadius)
+                    }
                 }
             }
     }

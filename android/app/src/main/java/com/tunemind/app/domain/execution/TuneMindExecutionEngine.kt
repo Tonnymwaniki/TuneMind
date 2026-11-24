@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
 import android.util.Log
 import java.io.File
@@ -105,6 +107,9 @@ class TuneMindExecutionEngine(private val context: Context) {
     private val TAG = "TuneMindExecution"
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
     private var mediaPlayer: MediaPlayer? = null
+    private var androidTts: TextToSpeech? = null
+    @Volatile private var androidTtsReady: Boolean = false
+    private var pendingTtsSpeech: Triple<String, Long, () -> Unit>? = null
     private var isShutDown = false
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val engineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -112,8 +117,109 @@ class TuneMindExecutionEngine(private val context: Context) {
     @Volatile
     private var activeSpeechGeneration: Long = 0L
 
+    init {
+        mainHandler.post { ensureAndroidTtsInitialized() }
+    }
+
+    private fun ensureAndroidTtsInitialized() {
+        if (androidTts != null || isShutDown) return
+        try {
+            androidTts = TextToSpeech(context.applicationContext) { status ->
+                mainHandler.post {
+                    if (isShutDown) return@post
+                    if (status == TextToSpeech.SUCCESS) {
+                        runCatching {
+                            androidTts?.language = Locale.US
+                            androidTts?.setSpeechRate(1.02f)
+                            androidTts?.setPitch(1.0f)
+                        }
+                        androidTtsReady = true
+                        val pending = pendingTtsSpeech
+                        pendingTtsSpeech = null
+                        if (pending != null && pending.second == activeSpeechGeneration) {
+                            speakWithAndroidTts(pending.first, pending.second, pending.third)
+                        }
+                    } else {
+                        androidTtsReady = false
+                        val pending = pendingTtsSpeech
+                        pendingTtsSpeech = null
+                        if (pending != null && pending.second == activeSpeechGeneration) {
+                            pending.third.invoke()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Android TTS init failed: ${e.message}")
+            androidTtsReady = false
+        }
+    }
+
+    private fun speakWithAndroidTts(text: String, expectedGen: Long, onCompletion: () -> Unit) {
+        if (isShutDown || expectedGen != activeSpeechGeneration) return
+        if (androidTts == null) {
+            pendingTtsSpeech = Triple(text, expectedGen, onCompletion)
+            ensureAndroidTtsInitialized()
+            // Safety guard if TTS init takes > 1.8s
+            mainHandler.postDelayed({
+                val pending = pendingTtsSpeech
+                if (pending != null && pending.second == expectedGen && !androidTtsReady) {
+                    pendingTtsSpeech = null
+                    onCompletion()
+                }
+            }, 1800L)
+            return
+        }
+        if (!androidTtsReady) {
+            pendingTtsSpeech = Triple(text, expectedGen, onCompletion)
+            return
+        }
+        val utteranceId = "tm_tts_${expectedGen}_${System.currentTimeMillis()}"
+        var finished = false
+        val completeOnce = {
+            mainHandler.post {
+                if (!finished && !isShutDown && expectedGen == activeSpeechGeneration) {
+                    finished = true
+                    onCompletion()
+                }
+            }
+        }
+        try {
+            androidTts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                override fun onDone(id: String?) {
+                    if (id == utteranceId) completeOnce()
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(id: String?) {
+                    if (id == utteranceId) completeOnce()
+                }
+                override fun onError(id: String?, errorCode: Int) {
+                    if (id == utteranceId) completeOnce()
+                }
+            })
+            val params = android.os.Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, android.media.AudioManager.STREAM_MUSIC)
+            }
+            val result = androidTts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            if (result != TextToSpeech.SUCCESS) {
+                completeOnce()
+            } else {
+                // Safety guard so playback never stalls
+                mainHandler.postDelayed({ completeOnce() }, 5000L)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Android TTS speak error: ${e.message}")
+            completeOnce()
+        }
+    }
+
     fun stopSpeaking() {
         activeSpeechGeneration++
+        pendingTtsSpeech = null
+        try {
+            androidTts?.stop()
+        } catch (_: Exception) {}
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -136,35 +242,34 @@ class TuneMindExecutionEngine(private val context: Context) {
         val baseUrl = com.tunemind.app.domain.network.BackendEndpointManager.getActiveHttpBaseUrl(context).trimEnd('/')
         val authClient = com.tunemind.app.domain.network.TuneMindAuthOkHttp.getAuthenticatedClient(context)
             .newBuilder()
-            .callTimeout(9000, TimeUnit.MILLISECONDS)
-            .readTimeout(8500, TimeUnit.MILLISECONDS)
+            .connectTimeout(2000, TimeUnit.MILLISECONDS)
+            .callTimeout(2800, TimeUnit.MILLISECONDS)
+            .readTimeout(2500, TimeUnit.MILLISECONDS)
             .build()
         val body = JSONObject().put("text", clean).toString()
             .toRequestBody("application/json; charset=utf-8".toMediaType())
 
-        for (attempt in 1..2) {
-            try {
-                val req = Request.Builder()
-                    .url("$baseUrl/api/v1/reasoning/tts")
-                    .post(body)
-                    .build()
-                authClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        Log.w(TAG, "OpenAI /tts HTTP ${resp.code} (attempt $attempt)")
-                        return@use
-                    }
-                    val b64 = JSONObject(resp.body?.string().orEmpty())
-                        .optString("voice_agent_audio_base64", "")
-                        .trim()
-                    if (b64.isNotBlank() && b64 != "null") {
-                        if (openAiTtsCache.size > 40) openAiTtsCache.clear()
-                        openAiTtsCache[clean] = b64
-                        return b64
-                    }
+        try {
+            val req = Request.Builder()
+                .url("$baseUrl/api/v1/reasoning/tts")
+                .post(body)
+                .build()
+            authClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "OpenAI /tts HTTP ${resp.code} — falling back to on-device TTS")
+                    return null
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "OpenAI /tts attempt $attempt error (${e.message})")
+                val b64 = JSONObject(resp.body?.string().orEmpty())
+                    .optString("voice_agent_audio_base64", "")
+                    .trim()
+                if (b64.isNotBlank() && b64 != "null") {
+                    if (openAiTtsCache.size > 40) openAiTtsCache.clear()
+                    openAiTtsCache[clean] = b64
+                    return b64
+                }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "OpenAI /tts error (${e.message}) — falling back to on-device TTS")
         }
         return null
     }
@@ -211,8 +316,8 @@ class TuneMindExecutionEngine(private val context: Context) {
                         onCompletion = onCompletion
                     )
                 } else {
-                    Log.w(TAG, "OpenAI /tts unavailable for '$clean' — proceeding silently (legacy Android TTS removed).")
-                    onCompletion()
+                    Log.d(TAG, "Cloud /tts unavailable for '$clean' — speaking via on-device Android TTS fallback.")
+                    speakWithAndroidTts(clean, gen, onCompletion)
                 }
             }
         }
@@ -758,6 +863,13 @@ class TuneMindExecutionEngine(private val context: Context) {
         activeSpeechGeneration++
         runCatching { engineScope.cancel() }
         mainHandler.removeCallbacksAndMessages(null)
+        try {
+            androidTts?.stop()
+            androidTts?.shutdown()
+        } catch (_: Exception) {}
+        androidTts = null
+        androidTtsReady = false
+        pendingTtsSpeech = null
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()

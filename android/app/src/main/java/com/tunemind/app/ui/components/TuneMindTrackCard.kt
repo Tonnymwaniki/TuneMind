@@ -217,7 +217,7 @@ fun TuneMindTrackCard(
 
     val haptics = LocalHapticFeedback.current
     val cardInteraction = remember { MutableInteractionSource() }
-    Column(modifier = modifier.fillMaxWidth().animateContentSize(TuneMindSprings.snappy())) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

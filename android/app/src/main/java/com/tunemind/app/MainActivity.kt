@@ -320,7 +320,16 @@ open class MainActivity : ComponentActivity() {
         var showSupportScreen by remember { mutableStateOf(false) }
         var showNotificationsScreen by remember { mutableStateOf(false) }
         var showAgentGuideSheet by remember { mutableStateOf(false) }
+        var activeGuideSection by remember { mutableStateOf<com.tunemind.app.ui.components.TuneMindGuideSection?>(null) }
+        var showWelcomeTour by remember(activePartitionKey) {
+            mutableStateOf(!playerPrefs.getBoolean("completed_welcome_tour", false))
+        }
         var currentPagerPage by remember { mutableStateOf(1) }
+
+        val openGuideSection: (com.tunemind.app.ui.components.TuneMindGuideSection) -> Unit = { section ->
+            activeGuideSection = section
+            showAgentGuideSheet = true
+        }
 
         val autonomousDjEnabled by AgentSettingsStore.autonomousDjEnabled.collectAsState()
         val kidsModeEnabled by AgentSettingsStore.kidsModeEnabled.collectAsState()
@@ -1152,7 +1161,18 @@ open class MainActivity : ComponentActivity() {
                             playNext = true
                         )
                     }
-                }
+                },
+                getForYouPicks = {
+                    vm.aiDiscoveryCrate.value.map { Triple(it.title, it.artist, it.spotifyUri) }
+                },
+                getDopamineCapsuleTracks = {
+                    vm.compileDopamineCapsule().tracks.map { Triple(it.title, it.artist, it.spotifyUri) }
+                },
+                getManualFreshTracks = {
+                    vm.manualFreshTracks.value.map { Triple(it.title, it.artist, it.spotifyUri) }
+                },
+                getUnifiedTracks = { vm.unifiedTracks.value },
+                resolvePlayCount = { t, a, u, id -> vm.resolvePlayCount(t, a, u, id) }
             )
         }
         val tuneMindVoiceTools = remember(voiceToolHost) {
@@ -1184,6 +1204,11 @@ open class MainActivity : ComponentActivity() {
             if (granted) {
                 agentVoiceManager.setForegroundActive(false)
                 realtimeVoiceAgent.startSession()
+            } else {
+                com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(
+                    rawError = "RECORD_AUDIO permission denied",
+                    contextHint = "mic"
+                )
             }
         }
         val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -1282,10 +1307,18 @@ open class MainActivity : ComponentActivity() {
                             null
                         }
                     }
-                    androidx.lifecycle.Lifecycle.Event.ON_PAUSE,
+                    androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                        agentVoiceManager.setForegroundActive(false)
+                        vm.setUiForegroundActive(false)
+                    }
                     androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                         agentVoiceManager.setForegroundActive(false)
                         vm.setUiForegroundActive(false)
+                        if (realtimeVoiceAgent.uiState.value.isSessionActive ||
+                            realtimeVoiceAgent.uiState.value.phase == com.tunemind.app.domain.voice.RealtimePhase.CONNECTING
+                        ) {
+                            realtimeVoiceAgent.stopSession()
+                        }
                     }
                     else -> {}
                 }
@@ -1318,19 +1351,27 @@ open class MainActivity : ComponentActivity() {
         val freshTrackCount by remember(combinedRecentTracks) {
             derivedStateOf { combinedRecentTracks.count { it.distinctAppearanceCount <= 3 } }
         }
+        val unifiedTracks by vm.unifiedTracks.collectAsState()
         val currentTrackPlayCount = remember(
             trackTitle,
             artistName,
             nowPlaying?.spotifyUri,
             nowPlaying?.trackId,
-            combinedRecentTracks
+            combinedRecentTracks,
+            unifiedTracks
         ) {
             if (trackTitle != null) {
+                val canonicalId = nowPlaying?.trackId?.takeIf { it.isNotBlank() }
+                    ?: com.tunemind.app.domain.model.TrackIdentityResolver.resolveCanonicalIdentity(
+                        spotifyUri = nowPlaying?.spotifyUri,
+                        title = trackTitle,
+                        artist = artistName
+                    ).trackId
                 vm.resolvePlayCount(
                     title = trackTitle,
                     artist = artistName,
                     spotifyUri = nowPlaying?.spotifyUri,
-                    trackId = nowPlaying?.trackId
+                    trackId = canonicalId
                 )
             } else {
                 0
@@ -1433,10 +1474,15 @@ open class MainActivity : ComponentActivity() {
                 showSearchScreen ||
                 showNowPlayingScreen ||
                 showPlaylistsScreen ||
-                showAgentGuideSheet
+                showAgentGuideSheet ||
+                showWelcomeTour
 
             androidx.activity.compose.BackHandler(enabled = hasOverlayOpen) {
                 when {
+                    showWelcomeTour -> {
+                        playerPrefs.edit().putBoolean("completed_welcome_tour", true).apply()
+                        showWelcomeTour = false
+                    }
                     showAgentGuideSheet -> showAgentGuideSheet = false
                     showLegalScreen -> showLegalScreen = false
                     showSupportScreen -> showSupportScreen = false
@@ -1565,6 +1611,9 @@ open class MainActivity : ComponentActivity() {
                                 },
                                 onRemoveFromFresh = { title, artist, uri, tid ->
                                     vm.removeFromFresh(title, artist, uri, tid)
+                                },
+                                onOpenGuide = {
+                                    openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.VAULT_FRESH)
                                 }
                             )
                         }
@@ -1631,7 +1680,7 @@ open class MainActivity : ComponentActivity() {
                                     showNowPlayingScreen = true
                                 },
                                 onOpenAgentGuide = {
-                                    showAgentGuideSheet = true
+                                    openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.VOICE)
                                 },
                                 profileInitial = if (authSession.isGoogleConnected || authSession.email.isNotBlank()) {
                                     authSession.displayName
@@ -1721,6 +1770,9 @@ open class MainActivity : ComponentActivity() {
                                 },
                                 onToggleTrackFresh = { t, a, pkg, uri, id ->
                                     vm.toggleTrackFreshStatus(t, a, pkg, uri, id)
+                                },
+                                onOpenGuide = {
+                                    openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.LIBRARY_CARDS)
                                 }
                             )
                         }
@@ -1744,214 +1796,92 @@ open class MainActivity : ComponentActivity() {
                     modifier = Modifier.align(Alignment.BottomCenter)
                 )
 
-                val currentFeedback = playbackLaunchFeedback
-                if (!hasOverlayOpen && currentFeedback != null &&
-                    (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed ||
-                        (currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched &&
-                            currentFeedback.providerId == "tunemind_inapp"))
-                ) {
-                    val isFailure = currentFeedback is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed
-                    LaunchedEffect(currentFeedback) {
-                        kotlinx.coroutines.delay(if (isFailure) 9500L else 4500L)
-                        vm.clearPlaybackLaunchFeedback()
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isFailure) Color(0xFF281218) else Color(0xFF102420),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isFailure) Color(0xFFFF5A79).copy(alpha = 0.7f) else adaptiveState.primaryAccent.copy(alpha = 0.65f)
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                            .fillMaxWidth()
+                // Feed realtime voice, playback, billing & library notices into the unified global error/feedback banner
+                LaunchedEffect(realtimeState.phase, realtimeState.errorMessage) {
+                    if (realtimeState.phase == com.tunemind.app.domain.voice.RealtimePhase.ERROR &&
+                        !realtimeState.errorMessage.isNullOrBlank()
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = currentFeedback.message,
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp
-                            )
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                if (isFailure) {
-                                    val ytmAvailable = remember(context) {
-                                        com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)
-                                    }
-                                    val npTrack = homeState.nowPlaying
-                                    if (ytmAvailable &&
-                                        npTrack?.title?.isNotBlank() == true &&
-                                        !selectedTargetPlayer.contains("youtube.music", ignoreCase = true)
-                                    ) {
-                                        Button(
-                                            onClick = {
-                                                vm.clearPlaybackLaunchFeedback()
-                                                agentVoiceManager.playTrackImmediatelyWithVoice(
-                                                    title = npTrack.title.orEmpty(),
-                                                    artist = npTrack.artist.orEmpty(),
-                                                    targetPlayer = com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE,
-                                                    neverOpenExternalApp = true
-                                                )
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                "Use YouTube In-App",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.Black
-                                            )
-                                        }
-                                    }
-                                    Button(
-                                        onClick = {
-                                            vm.clearPlaybackLaunchFeedback()
-                                            showSettingsScreen = true
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = adaptiveState.primaryAccent),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            "Open Settings",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Black
-                                        )
-                                    }
-                                }
-                                TextButton(
-                                    onClick = { vm.clearPlaybackLaunchFeedback() },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("Dismiss", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                        com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(
+                            rawError = realtimeState.errorMessage,
+                            contextHint = "voice",
+                            onRetry = {
+                                val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.RECORD_AUDIO
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (hasMic) {
+                                    realtimeVoiceAgent.startSession()
+                                } else {
+                                    micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                 }
                             }
-                        }
+                        )
                     }
                 }
 
-                val activeStalled = stalledRecoveryAttempt
-                if (!hasOverlayOpen && currentFeedback == null && activeStalled != null) {
-                    LaunchedEffect(activeStalled) {
-                        kotlinx.coroutines.delay(14_000L)
-                        if (stalledRecoveryAttempt === activeStalled) {
-                            stalledRecoveryAttempt = null
-                        }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF20180E),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            Color(0xFFF59E0B).copy(alpha = 0.72f)
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "${activeStalled.playerDisplayName} stayed paused or on Search for '${activeStalled.title}'. Play right inside TuneMind instead?",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp
+                LaunchedEffect(playbackLaunchFeedback) {
+                    val fb = playbackLaunchFeedback ?: return@LaunchedEffect
+                    when (fb) {
+                        is com.tunemind.app.provider.PlaybackLaunchResult.LaunchFailed -> {
+                            com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(
+                                rawError = fb.message,
+                                contextHint = "play"
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    onClick = {
-                                        val recovered = activeStalled
-                                        stalledRecoveryAttempt = null
-                                        val recoverPkg = if (com.tunemind.app.provider.YouTubeMusicProvider().isInstalled(context)) {
-                                            com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE
-                                        } else {
-                                            com.tunemind.app.provider.TuneMindInAppProvider.PROVIDER_ID
-                                        }
-                                        agentVoiceManager.playTrackImmediatelyWithVoice(
-                                            title = recovered.title,
-                                            artist = recovered.artist,
-                                            targetPlayer = recoverPkg,
-                                            customSpokenLine = "Playing ${recovered.title} right here inside TuneMind.",
-                                            neverOpenExternalApp = true
-                                        )
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        "Play Inside TuneMind",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.Black
-                                    )
-                                }
-                                TextButton(
-                                    onClick = { stalledRecoveryAttempt = null },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("Dismiss", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
-                                }
-                            }
+                            vm.clearPlaybackLaunchFeedback()
                         }
+                        is com.tunemind.app.provider.PlaybackLaunchResult.DirectPlaybackLaunched -> {
+                            if (fb.providerId == "tunemind_inapp" || fb.message.contains("Spotify Free", ignoreCase = true)) {
+                                com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showInfo(
+                                    title = "Playing in ${fb.providerDisplayName}",
+                                    message = fb.message,
+                                    autoDismissMs = 4500L
+                                )
+                            }
+                            vm.clearPlaybackLaunchFeedback()
+                        }
+                        else -> vm.clearPlaybackLaunchFeedback()
                     }
                 }
 
-                val currentFeedbackMsg = libraryActionFeedback
-                if (!currentFeedbackMsg.isNullOrBlank()) {
-                    LaunchedEffect(currentFeedbackMsg) {
-                        kotlinx.coroutines.delay(4000L)
-                        vm.clearLibraryActionFeedback()
+                LaunchedEffect(stalledRecoveryAttempt) {
+                    val stalled = stalledRecoveryAttempt ?: return@LaunchedEffect
+                    com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showWarning(
+                        title = "${stalled.playerDisplayName} didn't start automatically",
+                        message = "Tap Use YouTube to play '${stalled.title}' right inside TuneMind instead.",
+                        action = com.tunemind.app.ui.feedback.TuneMindBannerAction.USE_YOUTUBE_IN_APP,
+                        actionLabel = "Use YouTube",
+                        autoDismissMs = 11_000L
+                    )
+                }
+
+                LaunchedEffect(libraryActionFeedback) {
+                    val msg = libraryActionFeedback?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+                    val isErr = msg.contains("fail", true) || msg.contains("error", true) || msg.contains("couldn't", true)
+                    if (isErr) {
+                        com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(msg, contextHint = "sync")
+                    } else {
+                        com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showSuccess("TuneMind", msg)
                     }
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF0E1822),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            Color(0xFF00E5FF).copy(alpha = 0.55f)
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                            .fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = currentFeedbackMsg,
-                                color = Color(0xFFF8FAFC),
-                                fontSize = 12.5.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(
-                                onClick = { vm.clearLibraryActionFeedback() },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("Dismiss", fontSize = 11.5.sp, color = Color(0xFF00E5FF))
-                            }
-                        }
+                    vm.clearLibraryActionFeedback()
+                }
+
+                LaunchedEffect(billingState.statusMessage) {
+                    val bMsg = billingState.statusMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+                    val isErr = bMsg.contains("fail", true) || bMsg.contains("error", true) || bMsg.contains("unavailable", true)
+                    if (isErr) {
+                        com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(bMsg, contextHint = "billing")
+                    } else if (bMsg.contains("activated", true)) {
+                        com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showSuccess("TuneMind Pro", bMsg)
                     }
+                }
+
+                val spotifyStatus by com.tunemind.app.provider.SpotifyPremiumConnectManager.statusFlow.collectAsState()
+                LaunchedEffect(spotifyStatus.lastError) {
+                    val spErr = spotifyStatus.lastError?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+                    com.tunemind.app.ui.feedback.TuneMindFeedbackCenter.showMappedError(
+                        rawError = spErr,
+                        contextHint = "spotify"
+                    )
                 }
 
                 // Network Connectivity Offline Banner
@@ -2100,7 +2030,10 @@ open class MainActivity : ComponentActivity() {
                 if (showHearingScreen) {
                     com.tunemind.app.ui.screens.HearingInsightsScreen(
                         vm = vm,
-                        onBack = { showHearingScreen = false }
+                        onBack = { showHearingScreen = false },
+                        onOpenGuide = {
+                            openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.HEARING_TRIAL)
+                        }
                     )
                 }
 
@@ -2154,6 +2087,13 @@ open class MainActivity : ComponentActivity() {
                             legalInitialTab = tab
                             showLegalScreen = true
                         },
+                        onOpenAppGuide = {
+                            openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.SETUP)
+                        },
+                        onReplayWelcomeTour = {
+                            showSettingsScreen = false
+                            showWelcomeTour = true
+                        },
                         openSpotifySetupInitially = openSpotifySetupInSettings,
                         onSpotifySetupSheetConsumed = { openSpotifySetupInSettings = false }
                     )
@@ -2206,13 +2146,30 @@ open class MainActivity : ComponentActivity() {
                 }
 
                 if (showAgentGuideSheet) {
-                    com.tunemind.app.ui.components.AgentGuideSheet(
+                    com.tunemind.app.ui.components.TuneMindGuideSheet(
+                        initialSection = activeGuideSection,
                         onDismiss = { showAgentGuideSheet = false },
                         onRunPrompt = { prompt ->
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(1)
                                 agentVoiceManager.processFinalTranscriptWithFallback(prompt)
                             }
+                        },
+                        onOpenSettings = { showSettingsScreen = true },
+                        onReplayWelcomeTour = { showWelcomeTour = true }
+                    )
+                }
+
+                if (showWelcomeTour) {
+                    com.tunemind.app.ui.components.TuneMindWelcomeTourDialog(
+                        onFinish = {
+                            playerPrefs.edit().putBoolean("completed_welcome_tour", true).apply()
+                            showWelcomeTour = false
+                        },
+                        onOpenFullGuide = {
+                            playerPrefs.edit().putBoolean("completed_welcome_tour", true).apply()
+                            showWelcomeTour = false
+                            openGuideSection(com.tunemind.app.ui.components.TuneMindGuideSection.SETUP)
                         }
                     )
                 }
@@ -2229,6 +2186,45 @@ open class MainActivity : ComponentActivity() {
                         onManageSubscription = { vm.manageProSubscription(context) }
                     )
                 }
+
+                // Global top floating dark-glass error & recovery banner across every screen
+                com.tunemind.app.ui.feedback.TuneMindGlobalBannerHost(
+                    primaryAccent = adaptiveState.primaryAccent,
+                    onOpenSettings = { showSettingsScreen = true },
+                    onReconnectSpotify = {
+                        openSpotifySetupInSettings = true
+                        showSettingsScreen = true
+                    },
+                    onAllowMicPermission = {
+                        val hasMic = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.RECORD_AUDIO
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (!hasMic) {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            com.tunemind.app.util.PermissionUtils.openAppDetailsSettings(context)
+                        }
+                    },
+                    onAllowNotificationAccess = {
+                        com.tunemind.app.util.PermissionUtils.openNotificationListenerSettings(context)
+                    },
+                    onUseYouTubeInApp = {
+                        val recovered = stalledRecoveryAttempt
+                        stalledRecoveryAttempt = null
+                        val target = recovered?.let { it.title to it.artist }
+                            ?: homeState.nowPlaying?.let { (it.title ?: "") to (it.artist ?: "") }
+                        if (target != null && target.first.isNotBlank()) {
+                            agentVoiceManager.playTrackImmediatelyWithVoice(
+                                title = target.first,
+                                artist = target.second,
+                                targetPlayer = com.tunemind.app.provider.YouTubeMusicProvider.YTM_PACKAGE,
+                                neverOpenExternalApp = true
+                            )
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
             }
         }
     }

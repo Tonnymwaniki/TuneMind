@@ -255,10 +255,11 @@ fun TuneMindProPaywallSheet(
                     )
                 ) {
                     if (billingState.isLoading) {
-                        CircularProgressIndicator(
+                        TuneMindStudioLoader(
                             color = Color(0xFF06101B),
+                            secondaryColor = theme.primaryAccent,
                             strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp)
+                            size = 18.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Connecting to Google Play...", fontSize = 14.sp, fontWeight = FontWeight.Bold)

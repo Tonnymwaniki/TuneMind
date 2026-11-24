@@ -272,7 +272,7 @@ class TuneMindInAppProvider : MusicProvider {
             )
         }
 
-        // 2. Try Open-Catalog Full Stream (Audius) or 30s Preview (Deezer/iTunes) inside TuneMind
+        // 2. Resolve open metadata; never play Audius streams. Built-in YouTube plays ONLY if user chose YouTube Music.
         val resolved = UniversalTrackResolver.resolveTrackBlocking(
             context = context,
             cleanTitle = match.title,
@@ -280,59 +280,39 @@ class TuneMindInAppProvider : MusicProvider {
             fullQuery = match.searchQuery
         )
 
-        val audiusStream = resolved?.audiusStreamUrl?.takeIf { it.startsWith("http") }
-        if (audiusStream != null && TuneMindInAppPlayer.playStreamUrl(
-                context = context,
-                streamUrl = audiusStream,
-                title = match.title,
-                artist = match.artist,
-                album = resolved.albumName,
-                expectedDurationMs = 0L,
-                isPreview = false
-            )
-        ) {
-            return PlaybackLaunchResult.DirectPlaybackLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
-                trackTitle = match.title,
-                destinationUri = audiusStream,
-                message = "Streaming '${match.title}' (full track via Audius) inside TuneMind."
-            )
-        }
-
+        val preferredId = MusicProviderRegistry.getInstance(context).getPreferredProviderId()
+        val ytmChosen = preferredId == YouTubeMusicProvider.PROVIDER_ID
         val ytmVideoId = resolved?.ytmVideoId?.takeIf { it.isNotBlank() }
             ?: match.providerTrackId?.trim()?.takeIf { Regex("^[A-Za-z0-9_-]{11}$").matches(it) }
-        val spotifyInstalled = SpotifyMusicProvider().isInstalled(context)
-        val preferSpotifyOverPreview = spotifyInstalled &&
-            !SpotifyPremiumConnectManager.isConnectedAndPremium(context) &&
-            com.tunemind.app.domain.voice.AgentSettingsStore.isSpotifyFreeOpenInSpotifyEnabled(context)
 
-        val strictNoSwitch = com.tunemind.app.domain.voice.AgentSettingsStore.isStrictNoAppSwitchEnabled(context)
-        val stayInTuneMind = com.tunemind.app.domain.voice.AgentSettingsStore.isStayInTuneMindEnabled(context)
-
-        if (ytmVideoId != null && TuneMindYouTubeEmbedController.startVideo(
+        if (ytmChosen && ytmVideoId != null && TuneMindYouTubeEmbedController.startVideo(
                 context = context,
                 videoId = ytmVideoId,
                 title = match.title,
                 artist = match.artist,
                 album = resolved?.albumName,
                 previewFallback = null,
-                fallbackExternalPkg = if (preferSpotifyOverPreview) SpotifyMusicProvider.SPOTIFY_PACKAGE else YouTubeMusicProvider.YTM_PACKAGE,
-                fallbackExternalName = if (preferSpotifyOverPreview) "Spotify" else "YouTube Music"
+                fallbackExternalPkg = YouTubeMusicProvider.YTM_PACKAGE,
+                fallbackExternalName = "YouTube Music"
             )
         ) {
             return PlaybackLaunchResult.DirectPlaybackLaunched(
-                providerId = providerId,
-                providerDisplayName = displayName,
+                providerId = YouTubeMusicProvider.PROVIDER_ID,
+                providerDisplayName = "YouTube Music",
                 trackTitle = match.title,
                 destinationUri = "https://music.youtube.com/watch?v=$ytmVideoId",
-                message = "Playing full track '${match.title}' inside TuneMind."
+                message = "Playing '${match.title}' inside TuneMind's built-in YouTube player."
             )
         }
 
-        // Spotify Free Smart Mode (only open external Spotify if Stay-in-TuneMind / Never-Leave are OFF):
-        if (preferSpotifyOverPreview && !strictNoSwitch && !stayInTuneMind) {
-            val exactSpotifyUri = MusicPlayerAutoLauncher.extractSpotifyTrackUri(match.deepLinkUri, resolved)
+        // 3. Hand off directly to the user's detected installed music app (Spotify Free, Boomplay, Audiomack, etc.)
+        val preferredProvider = MusicProviderRegistry.getInstance(context)
+            .let { reg -> reg.getInstalledProviders().firstOrNull { it.providerId == reg.getPreferredProviderId() && it.providerId != PROVIDER_ID }
+                ?: reg.getInstalledProviders().firstOrNull { it.providerId != PROVIDER_ID && it.providerId != LocalFilesAudioProvider.PROVIDER_ID } }
+        val fallbackPkg = preferredProvider?.packageName ?: SpotifyMusicProvider.SPOTIFY_PACKAGE
+        val fallbackName = preferredProvider?.displayName ?: "Spotify"
+        val exactSpotifyUri = if (fallbackPkg == SpotifyMusicProvider.SPOTIFY_PACKAGE) {
+            MusicPlayerAutoLauncher.extractSpotifyTrackUri(match.deepLinkUri, resolved)
                 ?: if (SpotifyPremiumConnectManager.isConnected(context)) {
                     SpotifyPremiumConnectManager.searchExactTrackUri(
                         context = context,
@@ -341,52 +321,25 @@ class TuneMindInAppProvider : MusicProvider {
                         query = match.searchQuery
                     )
                 } else null
-            val rec = RecommendedTrack(
-                id = exactSpotifyUri ?: resolved?.trackId ?: match.providerTrackId ?: match.title,
-                title = match.title,
-                artist = match.artist,
-                reason = "Opening full track in Spotify",
-                confidence = match.confidence,
-                spotifyUri = exactSpotifyUri
-            )
-            val spotifyLaunch = MusicPlayerAutoLauncher.launchWithAutoPlay(
-                context = context,
-                providerId = SpotifyMusicProvider.PROVIDER_ID,
-                displayName = "Spotify",
-                packageName = SpotifyMusicProvider.SPOTIFY_PACKAGE,
-                track = rec,
-                query = match.searchQuery,
-                deepLinkUri = exactSpotifyUri ?: match.deepLinkUri,
-                neverOpenExternalApp = false
-            )
-            if (spotifyLaunch.isSuccess) return spotifyLaunch
-        }
-
-        // 30s preview playback removed intentionally: continue silently to warm MediaSession fallback below.
-
-        // 3. Fallback silently via warm active MediaSession (`neverOpenExternalApp = true`)
-        val preferredExternal = MusicProviderRegistry.getInstance(context)
-            .getInstalledProviders()
-            .firstOrNull { it.providerId != PROVIDER_ID && it.providerId != LocalFilesAudioProvider.PROVIDER_ID }
-        val fallbackPkg = preferredExternal?.packageName ?: YouTubeMusicProvider.YTM_PACKAGE
-        val fallbackName = preferredExternal?.displayName ?: "your active player"
+        } else null
 
         val rec = RecommendedTrack(
-            id = resolved?.trackId ?: match.providerTrackId ?: match.title,
+            id = exactSpotifyUri ?: resolved?.trackId ?: match.providerTrackId ?: match.title,
             title = match.title,
             artist = match.artist,
-            reason = "Selected for Stay-in-TuneMind background playback",
-            confidence = match.confidence
+            reason = "Opening track in $fallbackName",
+            confidence = match.confidence,
+            spotifyUri = exactSpotifyUri
         )
         return MusicPlayerAutoLauncher.launchWithAutoPlay(
             context = context,
-            providerId = preferredExternal?.providerId ?: YouTubeMusicProvider.PROVIDER_ID,
+            providerId = preferredProvider?.providerId ?: SpotifyMusicProvider.PROVIDER_ID,
             displayName = fallbackName,
             packageName = fallbackPkg,
             track = rec,
             query = match.searchQuery,
-            deepLinkUri = resolved?.ytmVideoId?.let { "https://music.youtube.com/watch?v=$it" } ?: resolved?.deezerUrl,
-            neverOpenExternalApp = true
+            deepLinkUri = exactSpotifyUri ?: match.deepLinkUri,
+            neverOpenExternalApp = false
         )
     }
 
