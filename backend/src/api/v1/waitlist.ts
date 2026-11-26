@@ -100,45 +100,32 @@ router.post('/', async (req: Request, res: Response) => {
     let alreadyRegistered = false;
 
     if (client) {
-      const { data: existing, error: selectErr } = await client
-        .from('waitlist_signups')
-        .select('id, wants_closed_beta')
-        .eq('email', email)
-        .maybeSingle();
-
-      if (selectErr) {
-        console.error('[Waitlist] Supabase lookup error:', selectErr.message);
-        res.status(500).json({ ok: false, error: 'Could not save your spot right now. Please try again in a moment.' });
-        return;
-      }
-
-      if (existing) {
-        alreadyRegistered = true;
-        // Update preference/beta flag if they came back to opt into beta
-        await client
-          .from('waitlist_signups')
-          .update({
-            preferred_player: preferredPlayer,
-            wants_closed_beta: wantsClosedBeta || Boolean(existing.wants_closed_beta)
-          })
-          .eq('id', existing.id);
-      } else {
-        const { error: insertErr } = await client.from('waitlist_signups').insert({
-          email,
-          preferred_player: preferredPlayer,
-          wants_closed_beta: wantsClosedBeta,
-          referral_source: referralSource,
-          user_agent: userAgent
-        });
-        if (insertErr) {
-          // Handle race-condition unique violation cleanly
-          if (insertErr.code === '23505') {
-            alreadyRegistered = true;
-          } else {
-            console.error('[Waitlist] Supabase insert error:', insertErr.message);
-            res.status(500).json({ ok: false, error: 'Could not save your spot right now. Please try again in a moment.' });
-            return;
+      // Direct insert avoids requiring public SELECT permission when using anon key under RLS
+      const { error: insertErr } = await client.from('waitlist_signups').insert({
+        email,
+        preferred_player: preferredPlayer,
+        wants_closed_beta: wantsClosedBeta,
+        referral_source: referralSource,
+        user_agent: userAgent
+      });
+      if (insertErr) {
+        if (insertErr.code === '23505') {
+          alreadyRegistered = true;
+          // Best-effort update preference/beta flag if admin client is available
+          const adminClient = getSupabaseAdminClient();
+          if (adminClient) {
+            await adminClient
+              .from('waitlist_signups')
+              .update({
+                preferred_player: preferredPlayer,
+                ...(wantsClosedBeta ? { wants_closed_beta: true } : {})
+              })
+              .eq('email', email);
           }
+        } else {
+          console.error('[Waitlist] Supabase insert error:', insertErr.code, insertErr.message);
+          res.status(500).json({ ok: false, error: 'Could not save your spot right now. Please try again in a moment.' });
+          return;
         }
       }
     } else {

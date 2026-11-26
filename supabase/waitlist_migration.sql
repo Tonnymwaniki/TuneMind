@@ -17,5 +17,12 @@ CREATE INDEX IF NOT EXISTS idx_waitlist_signups_created_at
 CREATE INDEX IF NOT EXISTS idx_waitlist_signups_referral_source
   ON public.waitlist_signups (referral_source);
 
--- Keep subscriber emails strictly private: only backend service_role can read/write.
+-- Keep subscriber emails strictly private: public can INSERT only (never SELECT/read emails).
 ALTER TABLE public.waitlist_signups ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "allow_anon_waitlist_insert" ON public.waitlist_signups;
+CREATE POLICY "allow_anon_waitlist_insert"
+  ON public.waitlist_signups
+  FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (true);
